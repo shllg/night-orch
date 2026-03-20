@@ -1,0 +1,22 @@
+[tools]
+node = "24"
+
+[tasks.dev]
+run = "tsx src/cli/index.ts"
+description = "Run CLI in development mode"
+
+[tasks.doctor]
+run = "tsx src/cli/index.ts doctor"
+description = "Run doctor checks"
+
+[tasks.monitoring-up]
+run = "docker compose up -d prometheus grafana"
+description = "Start Prometheus + Grafana monitoring stack"
+
+[tasks.monitoring-down]
+run = "docker compose down"
+description = "Stop monitoring stack"
+
+[tasks.monitoring-logs]
+run = "docker compose logs -f prometheus grafana"
+description = "Tail monitoring stack logs"
