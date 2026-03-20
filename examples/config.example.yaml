@@ -1,0 +1,131 @@
+version: 1
+
+github:
+  tokenEnv: GITHUB_TOKEN
+  apiBaseUrl: https://api.github.com
+  pollIntervalSeconds: 300
+  appMentions:
+    claude:
+      enabled: true
+      commentTemplate: "@claude Please review this PR and apply fixes if needed."
+    codex:
+      enabled: false
+      commentTemplate: "@codex please review and patch any remaining issues."
+
+storage:
+  dbPath: ~/.config/night-orch/state.db
+  worktreeRoot: ~/code/.night-orch/worktrees
+  logsRoot: ~/code/.night-orch/logs
+
+notifications:
+  channels:
+    - type: console
+    # - type: webhook
+    #   urlEnv: NIGHT_ORCH_WEBHOOK_URL
+  events:
+    onRunStarted: false
+    onBlocked: true
+    onPrReady: true
+    onError: true
+    onRetryExhausted: true
+
+loop:
+  maxReviewIterations: 4
+  maxTotalAgentPasses: 10
+  stopOnPlannerFailure: true
+  requireVerificationPass: true
+  reviewApprovalKeyword: APPROVED
+  reviewNeedsChangesKeyword: CHANGES_REQUIRED
+  blockOnAmbiguousReview: true
+
+security:
+  maxChangedFiles: 50
+  maxChangedLines: 5000
+  maxDailyCostUsd: 50
+  maxCostPerRunUsd: 10
+
+workerProfiles:
+  claude-default:
+    type: claude
+    command: claude
+    args:
+      - -p
+    workerTimeoutSeconds: 1800
+    minimalEnv: true
+    env: {}
+  codex-default:
+    type: codex
+    command: codex
+    args:
+      - exec
+      - --json
+    workerTimeoutSeconds: 1800
+    minimalEnv: true
+    env: {}
+
+metrics:
+  enabled: true
+  port: 9090
+  host: 127.0.0.1
+
+repos:
+  - repo: myorg/myrepo
+    forge: github
+    localPath: ~/code/myrepo
+    baseBranch: main
+    branchPrefix: orch
+    labels:
+      ready:
+        - orch:ready
+      running: orch:running
+      blocked:
+        - orch:blocked
+        - orch:needs-human
+      reviewReady: orch:review-ready
+      error: orch:error
+      retry: orch:retry
+    defaults:
+      planner: claude
+      coder: codex
+      reviewer: claude
+      doneMode: pr-ready
+      notifyPriority: normal
+      prMentions:
+        - claude
+    environment:
+      defaultMode: shared
+      # dedicated:
+      #   compose:
+      #     file: docker-compose.dev.yml
+      #     services: [db, redis]
+      #     projectName: "orch-{issue}"
+      #   env:
+      #     copyFrom: .env
+      #     overrides:
+      #       PORT: "{auto:5101-5199}"
+      #       DATABASE_URL: "postgres://localhost:5432/myapp_orch_{issue}"
+      #   healthcheck: "curl -f http://localhost:{port}/health"
+      #   teardownOnComplete: true
+      shared:
+        requireRunning: true
+        healthcheck: "curl -f http://localhost:3000/health"
+      bootstrap:
+        - command: pnpm install --frozen-lockfile
+          when: always
+    verify:
+      - pnpm lint
+      - pnpm typecheck
+      - pnpm test
+    prompts:
+      plannerSystem: .night-orch/prompts/planner-system.md
+      coderSystem: .night-orch/prompts/coder-system.md
+      reviewerSystem: .night-orch/prompts/reviewer-system.md
+    selectors:
+      includeLabelsAny:
+        - orch:ready
+      excludeLabelsAny:
+        - orch:blocked
+        - orch:error
+    agents:
+      claude: claude-default
+      codex: codex-default
