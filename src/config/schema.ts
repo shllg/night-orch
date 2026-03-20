@@ -1,0 +1,199 @@
+import { z } from 'zod'
+
+// --- Notification channel schemas ---
+
+const ConsoleChannelSchema = z.object({
+  type: z.literal('console'),
+})
+
+const WebhookChannelSchema = z.object({
+  type: z.literal('webhook'),
+  urlEnv: z.string(),
+})
+
+const NotificationChannelSchema = z.discriminatedUnion('type', [
+  ConsoleChannelSchema,
+  WebhookChannelSchema,
+])
+
+const NotificationEventsSchema = z.object({
+  onRunStarted: z.boolean().default(false),
+  onBlocked: z.boolean().default(true),
+  onPrReady: z.boolean().default(true),
+  onError: z.boolean().default(true),
+  onRetryExhausted: z.boolean().default(true),
+})
+
+// --- App mention schemas ---
+
+const AppMentionSchema = z.object({
+  enabled: z.boolean().default(false),
+  commentTemplate: z.string(),
+})
+
+// --- Worker profile schema ---
+
+const WorkerProfileSchema = z.object({
+  type: z.enum(['claude', 'codex']),
+  command: z.string(),
+  args: z.array(z.string()).default([]),
+  workerTimeoutSeconds: z.number().positive().default(1800),
+  minimalEnv: z.boolean().default(true),
+  runtimeWrapper: z.string().nullable().default(null),
+  env: z.record(z.string()).default({}),
+})
+
+// --- Environment schemas ---
+
+const BootstrapCommandSchema = z.object({
+  command: z.string(),
+  when: z.enum(['always', 'dedicated', 'shared']).default('always'),
+})
+
+const DedicatedEnvSchema = z.object({
+  compose: z.object({
+    file: z.string(),
+    services: z.array(z.string()).default([]),
+    projectName: z.string().default('orch-{issue}'),
+  }),
+  env: z.object({
+    copyFrom: z.string().default('.env'),
+    overrides: z.record(z.string()).default({}),
+    overrideFiles: z.array(z.string()).default([]),
+  }).default({}),
+  healthcheck: z.string().optional(),
+  teardownOnComplete: z.boolean().default(true),
+})
+
+const SharedEnvSchema = z.object({
+  requireRunning: z.boolean().default(true),
+  healthcheck: z.string().optional(),
+})
+
+const EnvironmentConfigSchema = z.object({
+  defaultMode: z.enum(['shared', 'dedicated']).default('shared'),
+  dedicated: DedicatedEnvSchema.optional(),
+  shared: SharedEnvSchema.optional(),
+  bootstrap: z.array(BootstrapCommandSchema).default([]),
+  cleanup: z.array(BootstrapCommandSchema).default([]),
+})
+
+// --- Repo label schemas ---
+
+const LabelsSchema = z.object({
+  ready: z.union([z.string(), z.array(z.string())]).transform(v =>
+    Array.isArray(v) ? v : [v],
+  ),
+  running: z.string().default('orch:running'),
+  blocked: z.union([z.string(), z.array(z.string())]).transform(v =>
+    Array.isArray(v) ? v : [v],
+  ).default(['orch:blocked', 'orch:needs-human']),
+  reviewReady: z.string().default('orch:review-ready'),
+  error: z.string().default('orch:error'),
+  retry: z.string().default('orch:retry'),
+})
+
+const DefaultsSchema = z.object({
+  planner: z.enum(['claude', 'codex']).default('claude'),
+  coder: z.enum(['claude', 'codex']).default('claude'),
+  reviewer: z.enum(['claude', 'codex']).default('claude'),
+  doneMode: z.enum(['pr-ready', 'manual-only']).default('pr-ready'),
+  notifyPriority: z.enum(['normal', 'high']).default('normal'),
+  prMentions: z.array(z.string()).default([]),
+})
+
+const SelectorsSchema = z.object({
+  includeLabelsAny: z.array(z.string()).default(['orch:ready']),
+  excludeLabelsAny: z.array(z.string()).default(['orch:blocked', 'orch:error']),
+})
+
+const PromptsSchema = z.object({
+  plannerSystem: z.string().optional(),
+  coderSystem: z.string().optional(),
+  reviewerSystem: z.string().optional(),
+})
+
+// --- Repo schema ---
+
+const RepoConfigSchema = z.object({
+  repo: z.string().regex(/^[^/]+\/[^/]+$/, 'Must be in format owner/name'),
+  forge: z.enum(['github', 'forgejo']).default('github'),
+  apiBaseUrl: z.string().url().optional(),
+  localPath: z.string(),
+  baseBranch: z.string().default('main'),
+  branchPrefix: z.string().default('orch'),
+  labels: LabelsSchema.default({ ready: ['orch:ready'] }),
+  defaults: DefaultsSchema.default({}),
+  environment: EnvironmentConfigSchema.optional(),
+  verify: z.array(z.string()).default([]),
+  prompts: PromptsSchema.optional(),
+  selectors: SelectorsSchema.default({}),
+  agents: z.record(z.string()).default({}),
+})
+
+// --- Security schema ---
+
+const SecuritySchema = z.object({
+  maxChangedFiles: z.number().positive().default(50),
+  maxChangedLines: z.number().positive().default(5000),
+  maxDailyCostUsd: z.number().positive().default(50),
+  maxCostPerRunUsd: z.number().positive().default(10),
+})
+
+// --- Metrics schema ---
+
+const MetricsSchema = z.object({
+  enabled: z.boolean().default(true),
+  port: z.number().int().positive().default(9090),
+  host: z.string().default('127.0.0.1'),
+})
+
+// --- Top-level config schema ---
+
+export const ConfigSchema = z.object({
+  version: z.literal(1),
+
+  github: z.object({
+    tokenEnv: z.string().refine(
+      (val) => !val.startsWith('ghp_') && !val.startsWith('ghs_') && !val.startsWith('github_pat_'),
+      { message: 'tokenEnv should be an environment variable name, not a literal token' },
+    ),
+    apiBaseUrl: z.string().url().default('https://api.github.com'),
+    pollIntervalSeconds: z.number().positive().default(300),
+    appMentions: z.record(AppMentionSchema).default({}),
+  }),
+
+  storage: z.object({
+    dbPath: z.string().default('~/.config/night-orch/state.db'),
+    worktreeRoot: z.string().default('~/code/.night-orch/worktrees'),
+    logsRoot: z.string().default('~/code/.night-orch/logs'),
+  }).default({}),
+
+  notifications: z.object({
+    channels: z.array(NotificationChannelSchema).default([{ type: 'console' as const }]),
+    events: NotificationEventsSchema.default({}),
+  }).default({}),
+
+  loop: z.object({
+    maxReviewIterations: z.number().positive().default(4),
+    maxTotalAgentPasses: z.number().positive().default(10),
+    stopOnPlannerFailure: z.boolean().default(true),
+    requireVerificationPass: z.boolean().default(true),
+    reviewApprovalKeyword: z.string().default('APPROVED'),
+    reviewNeedsChangesKeyword: z.string().default('CHANGES_REQUIRED'),
+    blockOnAmbiguousReview: z.boolean().default(true),
+  }).default({}),
+
+  security: SecuritySchema.default({}),
+
+  workerProfiles: z.record(WorkerProfileSchema).default({}),
+
+  metrics: MetricsSchema.default({}),
+
+  repos: z.array(RepoConfigSchema).min(1, 'At least one repository must be configured'),
+})
+
+export type Config = z.infer<typeof ConfigSchema>
+export type RepoConfig = z.infer<typeof RepoConfigSchema>
+export type WorkerProfile = z.infer<typeof WorkerProfileSchema>
+export type EnvironmentConfig = z.infer<typeof EnvironmentConfigSchema>

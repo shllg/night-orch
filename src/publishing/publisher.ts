@@ -1,0 +1,84 @@
+import type Database from 'better-sqlite3'
+import type { ForgeAdapter } from '../forge/types.js'
+import type { RunContext } from '../loop/types.js'
+import { pushBranch } from './push.js'
+import { compilePRTitle, compilePRBody } from './pr-body.js'
+import { logger } from '../utils/logger.js'
+
+export interface PublishResult {
+  prNumber: number
+  prUrl: string
+  created: boolean
+}
+
+/**
+ * Push branch and create/update PR.
+ */
+export async function publishPR(
+  ctx: RunContext,
+  forge: ForgeAdapter,
+  db: Database.Database,
+): Promise<PublishResult> {
+  // 1. Push branch
+  await pushBranch(ctx.worktreePath, ctx.branchName)
+
+  // 2. Look for existing PR — DB first, then API fallback
+  let existingPrNumber = getLinkedPR(db, ctx.repo, ctx.issueNumber)
+  let existingPr = null
+
+  if (existingPrNumber) {
+    logger.debug({ prNumber: existingPrNumber }, 'Found linked PR in DB')
+  } else {
+    existingPr = await forge.findPRByBranch(ctx.repo, ctx.branchName)
+    if (existingPr) {
+      existingPrNumber = existingPr.number
+      logger.debug({ prNumber: existingPrNumber }, 'Found existing PR via API')
+    }
+  }
+
+  const title = compilePRTitle(ctx.issueNumber, ctx.issue.title)
+  const body = compilePRBody({
+    issue: { number: ctx.issueNumber, title: ctx.issue.title, url: ctx.issue.url },
+    plan: ctx.plan,
+    codeResult: ctx.codeResult,
+    verifyResults: ctx.verifyResults,
+    reviewResult: ctx.reviewResult,
+    roles: ctx.roles,
+    iterationCount: ctx.iteration,
+    triageLevel: ctx.triageResult.level,
+  })
+
+  if (existingPrNumber) {
+    // 3. Update existing PR
+    const updated = await forge.updatePR(ctx.repo, existingPrNumber, { title, body })
+    updateLinkedPR(db, ctx.repo, ctx.issueNumber, updated.number, updated.url)
+    logger.info({ prNumber: updated.number }, 'Updated existing PR')
+    return { prNumber: updated.number, prUrl: updated.url, created: false }
+  }
+
+  // 4. Create new PR
+  const pr = await forge.createPR(ctx.repo, {
+    title,
+    body,
+    headBranch: ctx.branchName,
+    baseBranch: ctx.repoConfig.baseBranch,
+    draft: false,
+  })
+
+  updateLinkedPR(db, ctx.repo, ctx.issueNumber, pr.number, pr.url)
+  logger.info({ prNumber: pr.number, prUrl: pr.url }, 'Created new PR')
+  return { prNumber: pr.number, prUrl: pr.url, created: true }
+}
+
+function getLinkedPR(db: Database.Database, repo: string, issueNumber: number): number | null {
+  const row = db
+    .prepare('SELECT pr_number FROM issue_links WHERE repo = ? AND issue_number = ? AND pr_number IS NOT NULL')
+    .get(repo, issueNumber) as { pr_number: number } | undefined
+  return row?.pr_number ?? null
+}
+
+function updateLinkedPR(db: Database.Database, repo: string, issueNumber: number, prNumber: number, prUrl: string): void {
+  db.prepare(
+    'UPDATE issue_links SET pr_number = ?, pr_url = ? WHERE repo = ? AND issue_number = ?',
+  ).run(prNumber, prUrl, repo, issueNumber)
+}

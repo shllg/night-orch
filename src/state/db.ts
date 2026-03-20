@@ -1,0 +1,59 @@
+import Database from 'better-sqlite3'
+import { mkdirSync } from 'node:fs'
+import { dirname } from 'node:path'
+import { logger } from '../utils/logger.js'
+import { up as migration001 } from './migrations/001-initial.js'
+
+const MIGRATIONS = [
+  { version: 1, name: '001-initial', up: migration001 },
+]
+
+export function initDatabase(dbPath: string): Database.Database {
+  mkdirSync(dirname(dbPath), { recursive: true })
+
+  const db = new Database(dbPath)
+
+  // Enable WAL mode for concurrent read access
+  db.pragma('journal_mode = WAL')
+  db.pragma('busy_timeout = 5000')
+  db.pragma('foreign_keys = ON')
+
+  // Create migrations tracking table
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      applied_at TEXT DEFAULT (datetime('now'))
+    )
+  `).run()
+
+  runMigrations(db)
+
+  logger.debug({ dbPath }, 'Database initialized')
+  return db
+}
+
+function runMigrations(db: Database.Database): void {
+  const applied = new Set(
+    db
+      .prepare('SELECT version FROM schema_migrations')
+      .all()
+      .map((row) => (row as { version: number }).version),
+  )
+
+  for (const migration of MIGRATIONS) {
+    if (applied.has(migration.version)) continue
+
+    logger.info({ migration: migration.name }, 'Running migration')
+
+    const runMigration = db.transaction(() => {
+      migration.up(db)
+      db.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(
+        migration.version,
+        migration.name,
+      )
+    })
+
+    runMigration()
+  }
+}

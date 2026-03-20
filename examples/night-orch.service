@@ -1,0 +1,28 @@
+[Unit]
+Description=night-orch — Nightly GitHub issue orchestrator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+EnvironmentFile=%h/.config/night-orch/.env
+ExecStart=%h/.local/bin/night-orch run --config %h/.config/night-orch/config.yaml
+Restart=on-failure
+RestartSec=30
+
+# Prevent sleep during active runs
+ExecStartPre=/usr/bin/systemd-inhibit --what=sleep --who=night-orch --why="Processing issues" --mode=delay sleep 0
+
+# Resource limits
+MemoryMax=2G
+CPUQuota=200%
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.config/night-orch %h/code/.night-orch
+
+[Install]
+WantedBy=default.target
