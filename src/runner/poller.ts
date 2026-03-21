@@ -1,5 +1,6 @@
 import type { Config } from '../config/schema.js'
 import type Database from 'better-sqlite3'
+import type { MetricsService } from '../metrics/service.js'
 import { createForgeAdapter } from '../forge/factory.js'
 import { LeaseManager } from '../state/leases.js'
 import { RunManager } from '../state/runs.js'
@@ -14,6 +15,7 @@ import { publishPR } from '../publishing/publisher.js'
 import { transitionLabels } from '../labels/manager.js'
 import { NotificationDispatcher } from '../notify/dispatcher.js'
 import { createChannels } from '../notify/factory.js'
+import { CostTracker } from '../loop/cost.js'
 import { branchName } from '../utils/ids.js'
 import { logger } from '../utils/logger.js'
 import type { RunContext } from '../loop/types.js'
@@ -32,15 +34,24 @@ export async function pollOnce(
   config: Config,
   db: Database.Database,
   dryRun: boolean,
+  metrics?: MetricsService,
 ): Promise<PollResult> {
   const leaseManager = new LeaseManager(db)
   const runManager = new RunManager(db)
   const channels = createChannels(config.notifications)
   const notifier = new NotificationDispatcher(channels, config.notifications.events)
   const worktreeManager = createWorktreeManager()
+  const costTracker = new CostTracker(db)
 
   let processed = 0
   let errors = 0
+
+  // Update active runs gauge
+  try {
+    const activeRuns = runManager.getActive()
+    metrics?.setActiveRuns(activeRuns.length)
+    metrics?.setDailyCost(costTracker.getDailyCost())
+  } catch { /* best-effort */ }
 
   // Clean expired leases
   leaseManager.cleanExpired()
@@ -48,6 +59,7 @@ export async function pollOnce(
   for (const repoConfig of config.repos) {
     const forge = createForgeAdapter(repoConfig, config)
     const discovered = await discoverEligibleIssues(repoConfig, forge, leaseManager)
+    try { metrics?.setEligibleIssues(repoConfig.repo, discovered.length) } catch { /* best-effort */ }
 
     if (discovered.length === 0) {
       logger.info({ repo: repoConfig.repo }, 'No eligible issues')
@@ -157,15 +169,18 @@ export async function pollOnce(
       }
 
       // Execute loop
+      const loopStart = Date.now()
       const finalCtx = await executeLoop(initialCtx, {
         db,
         config,
         plannerAdapter: createWorkerAdapter(plannerProfile),
         coderAdapter: createWorkerAdapter(coderProfile),
         reviewerAdapter: createWorkerAdapter(reviewerProfile),
+        metrics,
       })
 
       // Handle result
+      const runDurationSec = (Date.now() - loopStart) / 1000
       if (finalCtx.currentPhase === 'publish') {
         // Publish PR
         try {
@@ -176,33 +191,62 @@ export async function pollOnce(
             endedAt: new Date().toISOString(),
           })
           await transitionLabels(forge, repoConfig.repo, first.issue.number, first.issue.labels, 'running', 'review_ready', labelConfig)
-          await notifier.dispatch(makePayload('pr_ready', repoConfig.repo, first.issue, {
+          const notifyResult = await notifier.dispatch(makePayload('pr_ready', repoConfig.repo, first.issue, {
             prUrl: publishResult.prUrl,
             prNumber: publishResult.prNumber,
             summary: `PR ready: ${publishResult.prUrl}`,
           }))
+          try {
+            metrics?.incRunsTotal('completed')
+            metrics?.observeRunDuration(runDurationSec)
+            metrics?.incPROperations(publishResult.created ? 'created' : 'updated')
+            for (const s of notifyResult.sent) {
+              metrics?.incNotifications(s.channel, s.success ? 'sent' : 'failed')
+            }
+          } catch { /* best-effort */ }
         } catch (err) {
           logger.error({ err }, 'Failed to publish PR')
           runManager.update(run.id, { status: 'error', lastError: String(err), endedAt: new Date().toISOString() })
           await transitionLabels(forge, repoConfig.repo, first.issue.number, first.issue.labels, 'running', 'error', labelConfig)
-          await notifier.dispatch(makePayload('error', repoConfig.repo, first.issue, {
+          const notifyResult = await notifier.dispatch(makePayload('error', repoConfig.repo, first.issue, {
             summary: `Failed to publish PR: ${(err as Error).message}`,
           }))
+          try {
+            metrics?.incRunsTotal('error')
+            metrics?.observeRunDuration(runDurationSec)
+            for (const s of notifyResult.sent) {
+              metrics?.incNotifications(s.channel, s.success ? 'sent' : 'failed')
+            }
+          } catch { /* best-effort */ }
         }
         processed++
       } else if (finalCtx.currentPhase === 'decision') {
         runManager.update(run.id, { status: 'blocked', endedAt: new Date().toISOString() })
         await transitionLabels(forge, repoConfig.repo, first.issue.number, first.issue.labels, 'running', 'blocked', labelConfig)
-        await notifier.dispatch(makePayload('blocked', repoConfig.repo, first.issue, {
+        const notifyResult = await notifier.dispatch(makePayload('blocked', repoConfig.repo, first.issue, {
           summary: 'Issue blocked during processing',
         }))
+        try {
+          metrics?.incRunsTotal('blocked')
+          metrics?.observeRunDuration(runDurationSec)
+          for (const s of notifyResult.sent) {
+            metrics?.incNotifications(s.channel, s.success ? 'sent' : 'failed')
+          }
+        } catch { /* best-effort */ }
         processed++
       } else {
         runManager.update(run.id, { status: 'error', lastError: 'Loop ended in unexpected state', endedAt: new Date().toISOString() })
         await transitionLabels(forge, repoConfig.repo, first.issue.number, first.issue.labels, 'running', 'error', labelConfig)
-        await notifier.dispatch(makePayload('error', repoConfig.repo, first.issue, {
+        const notifyResult = await notifier.dispatch(makePayload('error', repoConfig.repo, first.issue, {
           summary: `Error: loop ended in ${finalCtx.currentPhase}`,
         }))
+        try {
+          metrics?.incRunsTotal('error')
+          metrics?.observeRunDuration(runDurationSec)
+          for (const s of notifyResult.sent) {
+            metrics?.incNotifications(s.channel, s.success ? 'sent' : 'failed')
+          }
+        } catch { /* best-effort */ }
         errors++
       }
     } catch (err) {

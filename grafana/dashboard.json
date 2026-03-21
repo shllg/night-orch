@@ -85,6 +85,37 @@
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
       "targets": [{ "expr": "rate(night_orch_errors_total[5m])", "legendFormat": "{{repo}} / {{error_type}}" }]
+    },
+    {
+      "title": "Queued Issues",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "targets": [{ "expr": "night_orch_queued_issues", "legendFormat": "{{repo}}" }]
+    },
+    {
+      "title": "Blocked Issues",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "targets": [{ "expr": "night_orch_blocked_issues", "legendFormat": "{{repo}}" }]
+    },
+    {
+      "title": "Issues Processed Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
+      "targets": [{ "expr": "rate(night_orch_issues_processed_total[5m])", "legendFormat": "{{repo}}" }]
+    },
+    {
+      "title": "Verify Duration (p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
+      "targets": [{ "expr": "histogram_quantile(0.95, rate(night_orch_verify_duration_seconds_bucket[5m]))", "legendFormat": "p95" }]
+    },
+    {
+      "title": "Estimated API Cost Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 44 },
+      "targets": [{ "expr": "rate(night_orch_estimated_cost_dollars[5m])", "legendFormat": "{{repo}} / {{agent}}" }],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" } }
     }
   ],
   "schemaVersion": 39,

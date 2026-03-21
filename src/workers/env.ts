@@ -1,19 +1,20 @@
 import type { WorkerProfileInput } from './types.js'
 import { logger } from '../utils/logger.js'
 
-const ENV_WHITELIST = [
+export const ENV_WHITELIST = [
   'PATH', 'HOME', 'USER', 'SHELL', 'LANG', 'TERM', 'TMPDIR',
   'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'XDG_RUNTIME_DIR',
 ] as const
 
-const ENV_BLACKLIST_EXACT = new Set([
+export const ENV_BLACKLIST_EXACT = new Set([
   'GITHUB_TOKEN', 'GH_TOKEN', 'FORGEJO_TOKEN',
   'NIGHT_ORCH_WEBHOOK_URL',
 ])
 
-const ENV_BLACKLIST_PATTERNS = [
+export const ENV_BLACKLIST_PATTERNS = [
   /.*_SECRET$/,
   /.*_PASSWORD$/,
+  /.*_KEY$/,
 ]
 
 function isBlacklisted(key: string): boolean {

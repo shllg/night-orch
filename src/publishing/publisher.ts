@@ -1,6 +1,8 @@
 import type Database from 'better-sqlite3'
 import type { ForgeAdapter } from '../forge/types.js'
 import type { RunContext } from '../loop/types.js'
+import type { LabelConfig } from '../labels/transitions.js'
+import { transitionLabels } from '../labels/manager.js'
 import { pushBranch } from './push.js'
 import { compilePRTitle, compilePRBody } from './pr-body.js'
 import { logger } from '../utils/logger.js'
@@ -11,8 +13,44 @@ export interface PublishResult {
   created: boolean
 }
 
+export interface PublishErrorResult {
+  error: string
+  phase: 'push' | 'pr'
+}
+
+function buildLabelConfig(ctx: RunContext): LabelConfig {
+  return {
+    ready: ctx.repoConfig.labels.ready,
+    running: ctx.repoConfig.labels.running,
+    blocked: ctx.repoConfig.labels.blocked,
+    reviewReady: ctx.repoConfig.labels.reviewReady,
+    error: ctx.repoConfig.labels.error,
+    retry: ctx.repoConfig.labels.retry,
+  }
+}
+
+async function transitionToError(
+  forge: ForgeAdapter,
+  ctx: RunContext,
+  errorMessage: string,
+): Promise<void> {
+  try {
+    const issue = await forge.getIssue(ctx.repo, ctx.issueNumber)
+    await transitionLabels(forge, ctx.repo, ctx.issueNumber, issue.labels, 'running', 'error', buildLabelConfig(ctx))
+  } catch (labelErr) {
+    logger.warn({ repo: ctx.repo, issue: ctx.issueNumber, err: labelErr }, 'Failed to transition labels to error during publish failure')
+  }
+
+  try {
+    await forge.commentOnIssue(ctx.repo, ctx.issueNumber, `Publishing failed: ${errorMessage}`)
+  } catch (commentErr) {
+    logger.warn({ repo: ctx.repo, issue: ctx.issueNumber, err: commentErr }, 'Failed to comment on issue during publish failure')
+  }
+}
+
 /**
  * Push branch and create/update PR.
+ * On failure, transitions labels to error and notifies via issue comment.
  */
 export async function publishPR(
   ctx: RunContext,
@@ -20,7 +58,14 @@ export async function publishPR(
   db: Database.Database,
 ): Promise<PublishResult> {
   // 1. Push branch
-  await pushBranch(ctx.worktreePath, ctx.branchName)
+  try {
+    await pushBranch(ctx.worktreePath, ctx.branchName)
+  } catch (pushErr) {
+    const message = pushErr instanceof Error ? pushErr.message : String(pushErr)
+    logger.error({ repo: ctx.repo, branch: ctx.branchName, err: pushErr }, 'Push failed')
+    await transitionToError(forge, ctx, `Push failed: ${message}`)
+    throw pushErr
+  }
 
   // 2. Look for existing PR — DB first, then API fallback
   let existingPrNumber = getLinkedPR(db, ctx.repo, ctx.issueNumber)
@@ -48,26 +93,33 @@ export async function publishPR(
     triageLevel: ctx.triageResult.level,
   })
 
-  if (existingPrNumber) {
-    // 3. Update existing PR
-    const updated = await forge.updatePR(ctx.repo, existingPrNumber, { title, body })
-    updateLinkedPR(db, ctx.repo, ctx.issueNumber, updated.number, updated.url)
-    logger.info({ prNumber: updated.number }, 'Updated existing PR')
-    return { prNumber: updated.number, prUrl: updated.url, created: false }
+  try {
+    if (existingPrNumber) {
+      // 3. Update existing PR
+      const updated = await forge.updatePR(ctx.repo, existingPrNumber, { title, body })
+      updateLinkedPR(db, ctx.repo, ctx.issueNumber, updated.number, updated.url)
+      logger.info({ prNumber: updated.number }, 'Updated existing PR')
+      return { prNumber: updated.number, prUrl: updated.url, created: false }
+    }
+
+    // 4. Create new PR
+    const pr = await forge.createPR(ctx.repo, {
+      title,
+      body,
+      headBranch: ctx.branchName,
+      baseBranch: ctx.repoConfig.baseBranch,
+      draft: false,
+    })
+
+    updateLinkedPR(db, ctx.repo, ctx.issueNumber, pr.number, pr.url)
+    logger.info({ prNumber: pr.number, prUrl: pr.url }, 'Created new PR')
+    return { prNumber: pr.number, prUrl: pr.url, created: true }
+  } catch (prErr) {
+    const message = prErr instanceof Error ? prErr.message : String(prErr)
+    logger.error({ repo: ctx.repo, branch: ctx.branchName, err: prErr }, 'PR creation/update failed')
+    await transitionToError(forge, ctx, `PR operation failed: ${message}`)
+    throw prErr
   }
-
-  // 4. Create new PR
-  const pr = await forge.createPR(ctx.repo, {
-    title,
-    body,
-    headBranch: ctx.branchName,
-    baseBranch: ctx.repoConfig.baseBranch,
-    draft: false,
-  })
-
-  updateLinkedPR(db, ctx.repo, ctx.issueNumber, pr.number, pr.url)
-  logger.info({ prNumber: pr.number, prUrl: pr.url }, 'Created new PR')
-  return { prNumber: pr.number, prUrl: pr.url, created: true }
 }
 
 function getLinkedPR(db: Database.Database, repo: string, issueNumber: number): number | null {

@@ -54,9 +54,15 @@ describe('buildWorkerEnv', () => {
   })
 
   it('adds profile env overrides (non-blacklisted)', () => {
+    const profile = { ...baseProfile, env: { CUSTOM_VAR: 'custom-value' } }
+    const env = buildWorkerEnv(profile)
+    expect(env['CUSTOM_VAR']).toBe('custom-value')
+  })
+
+  it('excludes *_KEY vars from profile env overrides', () => {
     const profile = { ...baseProfile, env: { ANTHROPIC_API_KEY: 'sk-ant-xxx' } }
     const env = buildWorkerEnv(profile)
-    expect(env['ANTHROPIC_API_KEY']).toBe('sk-ant-xxx')
+    expect(env['ANTHROPIC_API_KEY']).toBeUndefined()
   })
 
   it('non-minimal mode passes most vars minus blacklist', () => {

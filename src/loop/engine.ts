@@ -1,6 +1,7 @@
 import type { RunContext, LoopPhase } from './types.js'
 import type { Config } from '../config/schema.js'
 import type { WorkerAdapter, PromptContext } from '../workers/types.js'
+import type { MetricsService } from '../metrics/service.js'
 import { updateContext, recordPhase } from './context.js'
 import { decide } from './decision.js'
 import { runVerifyCommands, allVerifyPassed } from './verifier.js'
@@ -18,6 +19,7 @@ export interface LoopDependencies {
   plannerAdapter: WorkerAdapter
   coderAdapter: WorkerAdapter
   reviewerAdapter: WorkerAdapter
+  metrics?: MetricsService
 }
 
 /**
@@ -28,7 +30,7 @@ export async function executeLoop(
   initialCtx: RunContext,
   deps: LoopDependencies,
 ): Promise<RunContext> {
-  const { db, config } = deps
+  const { db, config, metrics } = deps
   const checkpoint = new Checkpoint(db)
   const costTracker = new CostTracker(db)
 
@@ -39,7 +41,9 @@ export async function executeLoop(
   checkpoint.phaseStarted(ctx.runId, 'plan')
 
   if (ctx.triageResult.level !== 'trivial') {
+    const planStart = Date.now()
     ctx = await runPlanStep(ctx, deps)
+    try { metrics?.observePhaseDuration('plan', (Date.now() - planStart) / 1000) } catch { /* best-effort */ }
     checkpoint.phaseCompleted(ctx.runId, 'plan', { plan: ctx.plan })
 
     if (!ctx.plan && config.loop.stopOnPlannerFailure) {
@@ -63,14 +67,22 @@ export async function executeLoop(
     // CODE
     ctx = updateContext(ctx, { currentPhase: 'code' as LoopPhase })
     checkpoint.phaseStarted(ctx.runId, 'code')
+    const codeStart = Date.now()
     ctx = await runCodeStep(ctx, deps)
+    try { metrics?.observePhaseDuration('code', (Date.now() - codeStart) / 1000) } catch { /* best-effort */ }
     checkpoint.phaseCompleted(ctx.runId, 'code', { codeResult: ctx.codeResult })
     ctx = recordPhase(ctx, 'code', ctx.codeResult ? 'success' : 'failure')
 
     // VERIFY
     ctx = updateContext(ctx, { currentPhase: 'verify' as LoopPhase })
     checkpoint.phaseStarted(ctx.runId, 'verify')
+    const verifyStart = Date.now()
     const verifyResults = await runVerifyCommands(ctx.worktreePath, ctx.repoConfig.verify)
+    try {
+      metrics?.observePhaseDuration('verify', (Date.now() - verifyStart) / 1000)
+      metrics?.observeVerifyDuration((Date.now() - verifyStart) / 1000)
+      metrics?.incVerifyRuns(allVerifyPassed(verifyResults) ? 'pass' : 'fail')
+    } catch { /* best-effort */ }
     ctx = updateContext(ctx, { verifyResults })
     checkpoint.phaseCompleted(ctx.runId, 'verify', { verifyResults })
     ctx = recordPhase(ctx, 'verify', allVerifyPassed(verifyResults) ? 'success' : 'failure')
@@ -78,7 +90,9 @@ export async function executeLoop(
     // REVIEW
     ctx = updateContext(ctx, { currentPhase: 'review' as LoopPhase })
     checkpoint.phaseStarted(ctx.runId, 'review')
+    const reviewStart = Date.now()
     ctx = await runReviewStep(ctx, deps)
+    try { metrics?.observePhaseDuration('review', (Date.now() - reviewStart) / 1000) } catch { /* best-effort */ }
     checkpoint.phaseCompleted(ctx.runId, 'review', { reviewResult: ctx.reviewResult })
     ctx = recordPhase(ctx, 'review', ctx.reviewResult ? 'success' : 'failure')
 
@@ -112,6 +126,7 @@ export async function executeLoop(
           reviewResult: null,
           verifyResults: [],
         })
+        try { metrics?.incLoopIterations(ctx.repo) } catch { /* best-effort */ }
         logger.info(
           { runId: ctx.runId, iteration: ctx.iteration },
           'Iterating loop',
@@ -138,6 +153,7 @@ async function runPlanStep(ctx: RunContext, deps: LoopDependencies): Promise<Run
 
   const profile = getWorkerProfile(ctx, 'planner', deps.config)
   const env = buildWorkerEnv(profile)
+  const start = Date.now()
   const result = await deps.plannerAdapter.runTask({
     role: 'planner',
     worktreePath: ctx.worktreePath,
@@ -146,6 +162,11 @@ async function runPlanStep(ctx: RunContext, deps: LoopDependencies): Promise<Run
     timeoutSeconds: ctx.adjustedLimits.workerTimeoutSeconds,
     env,
   })
+  try {
+    const adapter = profile.type === 'codex' ? 'codex' : 'claude'
+    deps.metrics?.incAgentInvocations('planner', adapter)
+    deps.metrics?.observeAgentDuration('planner', adapter, (Date.now() - start) / 1000)
+  } catch { /* best-effort */ }
 
   return updateContext(ctx, {
     plan: result.parsed as RunContext['plan'],
@@ -163,6 +184,7 @@ async function runCodeStep(ctx: RunContext, deps: LoopDependencies): Promise<Run
 
   const profile = getWorkerProfile(ctx, 'coder', deps.config)
   const env = buildWorkerEnv(profile)
+  const start = Date.now()
   const result = await deps.coderAdapter.runTask({
     role: 'coder',
     worktreePath: ctx.worktreePath,
@@ -171,6 +193,11 @@ async function runCodeStep(ctx: RunContext, deps: LoopDependencies): Promise<Run
     timeoutSeconds: ctx.adjustedLimits.workerTimeoutSeconds,
     env,
   })
+  try {
+    const adapter = profile.type === 'codex' ? 'codex' : 'claude'
+    deps.metrics?.incAgentInvocations('coder', adapter)
+    deps.metrics?.observeAgentDuration('coder', adapter, (Date.now() - start) / 1000)
+  } catch { /* best-effort */ }
 
   return updateContext(ctx, {
     codeResult: result.parsed as RunContext['codeResult'],
@@ -188,6 +215,7 @@ async function runReviewStep(ctx: RunContext, deps: LoopDependencies): Promise<R
 
   const profile = getWorkerProfile(ctx, 'reviewer', deps.config)
   const env = buildWorkerEnv(profile)
+  const start = Date.now()
   const result = await deps.reviewerAdapter.runTask({
     role: 'reviewer',
     worktreePath: ctx.worktreePath,
@@ -196,6 +224,11 @@ async function runReviewStep(ctx: RunContext, deps: LoopDependencies): Promise<R
     timeoutSeconds: ctx.adjustedLimits.workerTimeoutSeconds,
     env,
   })
+  try {
+    const adapter = profile.type === 'codex' ? 'codex' : 'claude'
+    deps.metrics?.incAgentInvocations('reviewer', adapter)
+    deps.metrics?.observeAgentDuration('reviewer', adapter, (Date.now() - start) / 1000)
+  } catch { /* best-effort */ }
 
   return updateContext(ctx, {
     reviewResult: result.parsed as RunContext['reviewResult'],

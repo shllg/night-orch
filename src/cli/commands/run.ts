@@ -3,6 +3,7 @@ import { initDatabase } from '../../state/db.js'
 import { pollOnce } from '../../runner/poller.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { ShutdownHandler } from '../../poller/shutdown.js'
+import { createMetricsService, type MetricsService } from '../../metrics/service.js'
 import { logger } from '../../utils/logger.js'
 
 interface GlobalOpts {
@@ -32,6 +33,18 @@ export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
   const db = initDatabase(config.storage.dbPath)
   const intervalMs = config.github.pollIntervalSeconds * 1000
 
+  // Start metrics service
+  let metrics: MetricsService | undefined
+  if (config.metrics) {
+    metrics = createMetricsService(config.metrics)
+    try {
+      await metrics.start()
+    } catch (err) {
+      logger.warn({ err }, 'Failed to start metrics server — continuing without metrics')
+      metrics = undefined
+    }
+  }
+
   // Crash recovery: sync stale runs on startup
   try {
     const syncEngine = new SyncEngine(db, config)
@@ -50,15 +63,18 @@ export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
 
   // Graceful shutdown
   const shutdown = new ShutdownHandler(db)
-  shutdown.register()
+  shutdown.register(async () => {
+    if (metrics) {
+      try { await metrics.stop() } catch { /* ignore */ }
+    }
+  })
 
   // Poll loop
   while (!shutdown.isShuttingDown) {
     try {
-      const runPromise = pollOnce(config, db, dryRun).then(() => {})
+      const runPromise = pollOnce(config, db, dryRun, metrics).then(() => {})
       shutdown.trackRun(runPromise)
-      const result = await pollOnce(config, db, dryRun)
-      logger.info({ processed: result.processed, errors: result.errors }, 'Poll cycle complete')
+      await runPromise
     } catch (err) {
       logger.error({ err }, 'Poll cycle failed')
     }
