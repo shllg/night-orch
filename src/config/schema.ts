@@ -119,6 +119,7 @@ const RepoConfigSchema = z.object({
   repo: z.string().regex(/^[^/]+\/[^/]+$/, 'Must be in format owner/name'),
   forge: z.enum(['github', 'forgejo']).default('github'),
   apiBaseUrl: z.string().url().optional(),
+  tokenEnv: z.string().optional(),
   localPath: z.string(),
   baseBranch: z.string().default('main'),
   branchPrefix: z.string().default('orch'),
@@ -189,6 +190,11 @@ export const ConfigSchema = z.object({
   workerProfiles: z.record(WorkerProfileSchema).default({}),
 
   metrics: MetricsSchema.default({}),
+
+  mcp: z.object({
+    enabled: z.boolean().default(false),
+    transport: z.enum(['stdio']).default('stdio'),
+  }).default({}),
 
   repos: z.array(RepoConfigSchema).min(1, 'At least one repository must be configured'),
 })

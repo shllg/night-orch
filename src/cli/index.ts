@@ -7,6 +7,7 @@ import { syncCommand } from './commands/sync.js'
 import { retryCommand } from './commands/retry.js'
 import { cleanupCommand } from './commands/cleanup.js'
 import { notifyTestCommand } from './commands/notify-test.js'
+import { mcpCommand } from './commands/mcp.js'
 
 const program = new Command()
 
@@ -54,5 +55,10 @@ program
   .command('notify-test')
   .description('Send a test notification through all configured channels')
   .action((_opts, cmd) => notifyTestCommand(cmd.parent?.opts()))
+
+program
+  .command('mcp')
+  .description('Start MCP server (stdio transport) for remote control from Claude Code')
+  .action((_opts, cmd) => mcpCommand(cmd.parent?.opts()))
 
 program.parse()

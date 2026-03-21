@@ -2,7 +2,7 @@ import type { RepoConfig } from '../config/schema.js'
 
 export interface ForgeIssue {
   number: number
-  nodeId: string
+  nodeId: string | null
   title: string
   body: string
   labels: string[]

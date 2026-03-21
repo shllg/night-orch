@@ -62,21 +62,30 @@ export async function doctorCommand(globalOpts?: GlobalOpts): Promise<void> {
     }
   }
 
-  // 3. GitHub auth
-  if (process.env[tokenEnv]) {
-    try {
-      const { Octokit } = await import('@octokit/rest')
-      const octokit = new Octokit({
-        auth: process.env[tokenEnv],
-        baseUrl: config.github.apiBaseUrl,
-      })
-      const { data } = await octokit.rest.users.getAuthenticated()
-      results.push({ name: 'GitHub auth', passed: true, message: `Authenticated as ${data.login}` })
-    } catch (err) {
-      results.push({ name: 'GitHub auth', passed: false, message: (err as Error).message })
+  // 3. Forge auth (per repo)
+  const { createForgeAdapter } = await import('../../forge/factory.js')
+  const checkedTokens = new Set<string>()
+  for (const repo of config.repos) {
+    const repoTokenEnv = repo.tokenEnv ?? config.github.tokenEnv
+    const label = `${repo.forge} auth (${repo.repo})`
+
+    if (!process.env[repoTokenEnv]) {
+      results.push({ name: label, passed: false, message: `Cannot test — ${repoTokenEnv} not set` })
+      continue
     }
-  } else {
-    results.push({ name: 'GitHub auth', passed: false, message: `Cannot test — ${tokenEnv} not set` })
+
+    // Avoid duplicate auth checks for repos sharing the same token + forge
+    const dedupeKey = `${repo.forge}:${repoTokenEnv}:${repo.apiBaseUrl ?? ''}`
+    if (checkedTokens.has(dedupeKey)) continue
+    checkedTokens.add(dedupeKey)
+
+    try {
+      const adapter = createForgeAdapter(repo, config)
+      const auth = await adapter.validateAuth()
+      results.push({ name: label, passed: true, message: `Authenticated as ${auth.user}` })
+    } catch (err) {
+      results.push({ name: label, passed: false, message: (err as Error).message })
+    }
   }
 
   // 4. CLI binaries

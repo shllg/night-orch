@@ -1,0 +1,333 @@
+import type { MCPDependencies } from '../server.js'
+import type { ForgeIssue } from '../../forge/types.js'
+import { RunManager } from '../../state/runs.js'
+import { CostTracker } from '../../loop/cost.js'
+import { SyncEngine } from '../../ops/sync.js'
+import { CleanupEngine } from '../../ops/cleanup.js'
+import { RetryEngine } from '../../ops/retry.js'
+
+interface ToolDefinition {
+  name: string
+  description: string
+  inputSchema: {
+    type: 'object'
+    properties: Record<string, { type: string; description: string; default?: unknown; enum?: string[] }>
+    required?: string[]
+  }
+}
+
+export function registerTools(): ToolDefinition[] {
+  return [
+    {
+      name: 'night-orch-status',
+      description: 'Get current night-orch operational status including active runs, eligible issues, and recent activity.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          repo: { type: 'string', description: 'Optional: filter to a specific repo (owner/name)' },
+        },
+      },
+    },
+    {
+      name: 'night-orch-run-detail',
+      description: 'Get detailed information about a specific run including phase history and artifacts.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          runId: { type: 'string', description: 'Run ID (e.g., run-abc123)' },
+        },
+        required: ['runId'],
+      },
+    },
+    {
+      name: 'night-orch-list-runs',
+      description: 'List runs with optional filters by repo, status, and limit.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          repo: { type: 'string', description: 'Filter by repo (owner/name)' },
+          status: { type: 'string', description: 'Filter by status', enum: ['queued', 'running', 'blocked', 'review_ready', 'error', 'completed'] },
+          limit: { type: 'number', description: 'Max results (default: 20)', default: 20 },
+        },
+      },
+    },
+    {
+      name: 'night-orch-cost-report',
+      description: 'Get cost breakdown for recent days, including daily totals and budget utilization.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          days: { type: 'number', description: 'Number of days to include (default: 7)', default: 7 },
+        },
+      },
+    },
+    {
+      name: 'night-orch-retry',
+      description: 'Force a re-run of a blocked or errored issue. Resets state and re-queues for processing.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          repo: { type: 'string', description: 'Repository (owner/name)' },
+          issueNumber: { type: 'number', description: 'Issue number to retry' },
+          resetPlan: { type: 'boolean', description: 'Re-run planner instead of reusing existing plan', default: false },
+        },
+        required: ['repo', 'issueNumber'],
+      },
+    },
+    {
+      name: 'night-orch-sync',
+      description: 'Reconcile local state with GitHub. Cleans stale runs, fixes label mismatches, detects orphaned worktrees.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          dryRun: { type: 'boolean', description: 'Preview changes without applying', default: false },
+        },
+      },
+    },
+    {
+      name: 'night-orch-cleanup',
+      description: 'Clean stale worktrees, expired leases, and old logs.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          dryRun: { type: 'boolean', description: 'Preview changes without applying', default: false },
+        },
+      },
+    },
+    {
+      name: 'night-orch-list-issues',
+      description: 'List issues from a repo with their orchestrator state (eligible, running, blocked).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          repo: { type: 'string', description: 'Repository (owner/name)' },
+          filter: { type: 'string', description: 'Filter by state', enum: ['eligible', 'running', 'blocked', 'all'], default: 'all' },
+        },
+        required: ['repo'],
+      },
+    },
+  ]
+}
+
+export async function handleToolCall(
+  name: string,
+  args: Record<string, unknown>,
+  deps: MCPDependencies,
+): Promise<unknown> {
+  switch (name) {
+    case 'night-orch-status':
+      return handleStatus(args as { repo?: string }, deps)
+    case 'night-orch-run-detail':
+      return handleRunDetail(args as { runId: string }, deps)
+    case 'night-orch-list-runs':
+      return handleListRuns(args as { repo?: string; status?: string; limit?: number }, deps)
+    case 'night-orch-cost-report':
+      return handleCostReport(args as { days?: number }, deps)
+    case 'night-orch-retry':
+      return handleRetry(args as { repo: string; issueNumber: number; resetPlan?: boolean }, deps)
+    case 'night-orch-sync':
+      return handleSync(args as { dryRun?: boolean }, deps)
+    case 'night-orch-cleanup':
+      return handleCleanup(args as { dryRun?: boolean }, deps)
+    case 'night-orch-list-issues':
+      return handleListIssues(args as { repo: string; filter?: string }, deps)
+    default:
+      throw new Error(`Unknown tool: ${name}`)
+  }
+}
+
+async function handleStatus(args: { repo?: string }, deps: MCPDependencies): Promise<unknown> {
+  const runManager = new RunManager(deps.db)
+  const costTracker = new CostTracker(deps.db)
+
+  const active = runManager.getActive()
+  const filtered = args.repo ? active.filter((r) => r.repo === args.repo) : active
+
+  // Recent completed/error runs
+  const recentSql = args.repo
+    ? "SELECT * FROM runs WHERE status IN ('completed', 'blocked', 'error') AND repo = ? ORDER BY updated_at DESC LIMIT 10"
+    : "SELECT * FROM runs WHERE status IN ('completed', 'blocked', 'error') ORDER BY updated_at DESC LIMIT 10"
+  const recentRows = args.repo
+    ? deps.db.prepare(recentSql).all(args.repo)
+    : deps.db.prepare(recentSql).all()
+
+  return {
+    activeRuns: filtered.length,
+    active: filtered.map((r) => ({
+      runId: r.id,
+      repo: r.repo,
+      issue: r.issueNumber,
+      status: r.status,
+      phase: r.currentPhase,
+      iteration: r.iterationCount,
+    })),
+    recentCompleted: (recentRows as Array<{ id: string; repo: string; issue_number: number; status: string; ended_at: string | null }>).map((r) => ({
+      runId: r.id,
+      repo: r.repo,
+      issue: r.issue_number,
+      status: r.status,
+      endedAt: r.ended_at,
+    })),
+    dailyCostUsd: costTracker.getDailyCost(),
+    configuredRepos: deps.config.repos.map((r) => r.repo),
+  }
+}
+
+async function handleRunDetail(args: { runId: string }, deps: MCPDependencies): Promise<unknown> {
+  const runManager = new RunManager(deps.db)
+  const run = runManager.getById(args.runId)
+  if (!run) throw new Error(`Run not found: ${args.runId}`)
+
+  // Get events for this run
+  const events = deps.db
+    .prepare('SELECT event_type, phase, data, created_at FROM events WHERE run_id = ? ORDER BY created_at DESC LIMIT 50')
+    .all(args.runId) as Array<{ event_type: string; phase: string | null; data: string | null; created_at: string }>
+
+  return {
+    ...run,
+    events: events.map((e) => ({
+      type: e.event_type,
+      phase: e.phase,
+      data: e.data ? JSON.parse(e.data) : null,
+      at: e.created_at,
+    })),
+  }
+}
+
+async function handleListRuns(
+  args: { repo?: string; status?: string; limit?: number },
+  deps: MCPDependencies,
+): Promise<unknown> {
+  const limit = args.limit ?? 20
+  const conditions: string[] = []
+  const params: unknown[] = []
+
+  if (args.repo) {
+    conditions.push('repo = ?')
+    params.push(args.repo)
+  }
+  if (args.status) {
+    conditions.push('status = ?')
+    params.push(args.status)
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+  const sql = `SELECT id, repo, issue_number, status, current_phase, iteration_count, estimated_cost_usd, started_at, ended_at FROM runs ${where} ORDER BY created_at DESC LIMIT ?`
+  params.push(limit)
+
+  const rows = deps.db.prepare(sql).all(...params) as Array<{
+    id: string; repo: string; issue_number: number; status: string
+    current_phase: string | null; iteration_count: number; estimated_cost_usd: number
+    started_at: string | null; ended_at: string | null
+  }>
+
+  return {
+    count: rows.length,
+    runs: rows.map((r) => ({
+      runId: r.id,
+      repo: r.repo,
+      issue: r.issue_number,
+      status: r.status,
+      phase: r.current_phase,
+      iterations: r.iteration_count,
+      costUsd: r.estimated_cost_usd,
+      startedAt: r.started_at,
+      endedAt: r.ended_at,
+    })),
+  }
+}
+
+async function handleCostReport(args: { days?: number }, deps: MCPDependencies): Promise<unknown> {
+  const days = args.days ?? 7
+  const rows = deps.db
+    .prepare('SELECT date, total_cost_usd, run_count FROM daily_costs ORDER BY date DESC LIMIT ?')
+    .all(days) as Array<{ date: string; total_cost_usd: number; run_count: number }>
+
+  const totalCost = rows.reduce((sum, r) => sum + r.total_cost_usd, 0)
+  const totalRuns = rows.reduce((sum, r) => sum + r.run_count, 0)
+
+  return {
+    period: `Last ${days} days`,
+    totalCostUsd: Math.round(totalCost * 100) / 100,
+    totalRuns,
+    dailyBudgetUsd: deps.config.security.maxDailyCostUsd,
+    budgetUtilizationPct: rows.length > 0
+      ? Math.round((rows[0]!.total_cost_usd / deps.config.security.maxDailyCostUsd) * 100)
+      : 0,
+    daily: rows,
+  }
+}
+
+async function handleRetry(
+  args: { repo: string; issueNumber: number; resetPlan?: boolean },
+  deps: MCPDependencies,
+): Promise<unknown> {
+  const engine = new RetryEngine(deps.db, deps.config)
+  await engine.retry(args.repo, args.issueNumber, {
+    resetPlan: args.resetPlan ?? false,
+    dryRun: false,
+    immediate: false,
+  })
+  return { success: true, message: `Retry queued for ${args.repo}#${args.issueNumber}` }
+}
+
+async function handleSync(args: { dryRun?: boolean }, deps: MCPDependencies): Promise<unknown> {
+  const engine = new SyncEngine(deps.db, deps.config)
+  return engine.reconcile(args.dryRun ?? false)
+}
+
+async function handleCleanup(args: { dryRun?: boolean }, deps: MCPDependencies): Promise<unknown> {
+  const engine = new CleanupEngine(deps.db, deps.config)
+  return engine.run({ dryRun: args.dryRun ?? false })
+}
+
+async function handleListIssues(
+  args: { repo: string; filter?: string },
+  deps: MCPDependencies,
+): Promise<unknown> {
+  const adapter = deps.forgeAdapters.get(args.repo)
+  if (!adapter) {
+    throw new Error(`No forge adapter configured for repo: ${args.repo}`)
+  }
+
+  const repoConfig = deps.config.repos.find((r) => r.repo === args.repo)
+  if (!repoConfig) {
+    throw new Error(`Repo not found in config: ${args.repo}`)
+  }
+
+  const issues: ForgeIssue[] = await adapter.listEligibleIssues(repoConfig)
+  const runManager = new RunManager(deps.db)
+  const filter = args.filter ?? 'all'
+
+  const enriched = issues.map((issue) => {
+    const run = runManager.getByRepoAndIssue(args.repo, issue.number)
+    let orchState: 'eligible' | 'running' | 'blocked'
+    if (run && (run.status === 'queued' || run.status === 'running')) {
+      orchState = 'running'
+    } else if (run && (run.status === 'blocked' || run.status === 'error')) {
+      orchState = 'blocked'
+    } else {
+      orchState = 'eligible'
+    }
+
+    return {
+      number: issue.number,
+      title: issue.title,
+      labels: issue.labels,
+      state: orchState,
+      runId: run?.id ?? null,
+      runStatus: run?.status ?? null,
+      url: issue.url,
+    }
+  })
+
+  const filtered = filter === 'all'
+    ? enriched
+    : enriched.filter((i) => i.state === filter)
+
+  return {
+    repo: args.repo,
+    count: filtered.length,
+    issues: filtered,
+  }
+}

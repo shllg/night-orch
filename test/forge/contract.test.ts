@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { ForgeAdapter, ForgeIssue, ForgePR, PRParams } from '../../src/forge/types.js'
 import { GitHubForgeAdapter } from '../../src/forge/github.js'
+import { ForgejoForgeAdapter } from '../../src/forge/forgejo.js'
 import type { RepoConfig } from '../../src/config/schema.js'
 
 // Suppress logger output in tests
@@ -45,6 +46,54 @@ function makeGitHubPRData(number: number) {
     base: { ref: 'main' },
     html_url: `https://github.com/org/repo/pull/${number}`,
   }
+}
+
+// --- Forgejo mock data ---
+
+function makeForgejoIssueData(number: number) {
+  return {
+    number,
+    title: `Issue #${number}`,
+    body: `Body for issue ${number}`,
+    labels: [{ id: 1, name: 'orch:ready' }],
+    assignees: [{ login: 'user1' }],
+    state: 'open',
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-02T00:00:00Z',
+    html_url: `https://forgejo.example.com/org/repo/issues/${number}`,
+  }
+}
+
+function makeForgejoPRData(number: number) {
+  return {
+    number,
+    title: `PR #${number}`,
+    body: `Body for PR ${number}`,
+    state: 'open',
+    merged: false,
+    head: { ref: `feature-${number}` },
+    base: { ref: 'main' },
+    html_url: `https://forgejo.example.com/org/repo/pulls/${number}`,
+  }
+}
+
+const FORGEJO_REPO_LABELS = [
+  { id: 1, name: 'orch:ready' },
+  { id: 2, name: 'new-label' },
+  { id: 3, name: 'old-label' },
+]
+
+const mockFetchFn = vi.fn()
+
+function forgejoJsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: status === 200 ? 'OK' : 'Error',
+    headers: new Headers(headers),
+    json: () => Promise.resolve(body),
+    text: () => Promise.resolve(typeof body === 'string' ? body : JSON.stringify(body)),
+  } as unknown as Response
 }
 
 function makeRepoConfig(): RepoConfig {
@@ -156,8 +205,91 @@ const adapters: AdapterFactory[] = [
       mockPullsGet.mockResolvedValue({ data: '--- a/file\n+++ b/file\n' })
     },
   },
-  // Future: ForgejoAdapter entry goes here
+  {
+    name: 'ForgejoForgeAdapter',
+    create: () => {
+      vi.stubGlobal('fetch', mockFetchFn)
+      return new ForgejoForgeAdapter('https://forgejo.example.com/api/v1', 'fake-token')
+    },
+    setupMocks: () => {
+      mockFetchFn.mockReset()
+      mockFetchFn.mockImplementation((url: string, options?: { method?: string }) => {
+        const method = options?.method ?? 'GET'
+        const urlStr = url.toString()
+
+        // GET /user
+        if (method === 'GET' && urlStr.includes('/user') && !urlStr.includes('/repos/')) {
+          return Promise.resolve(forgejoJsonResponse({ login: 'bot' }))
+        }
+
+        // GET labels (for cache)
+        if (method === 'GET' && urlStr.includes('/labels') && !urlStr.includes('/issues/')) {
+          return Promise.resolve(forgejoJsonResponse(FORGEJO_REPO_LABELS))
+        }
+
+        // GET single issue
+        if (method === 'GET' && /\/issues\/\d+$/.test(urlStr)) {
+          return Promise.resolve(forgejoJsonResponse(makeForgejoIssueData(1)))
+        }
+
+        // GET issues list (for listEligibleIssues)
+        if (method === 'GET' && urlStr.includes('/issues')) {
+          return Promise.resolve(forgejoJsonResponse([
+            makeForgejoIssueData(1),
+            makeForgejoIssueData(2),
+          ]))
+        }
+
+        // POST labels
+        if (method === 'POST' && urlStr.includes('/labels')) {
+          return Promise.resolve(forgejoJsonResponse([]))
+        }
+
+        // DELETE label
+        if (method === 'DELETE' && urlStr.includes('/labels/')) {
+          return Promise.resolve(forgejoJsonResponse(undefined, 204))
+        }
+
+        // POST comment
+        if (method === 'POST' && urlStr.includes('/comments')) {
+          return Promise.resolve(forgejoJsonResponse({ id: 1 }))
+        }
+
+        // POST pulls (create PR)
+        if (method === 'POST' && urlStr.includes('/pulls')) {
+          return Promise.resolve(forgejoJsonResponse(makeForgejoPRData(10)))
+        }
+
+        // PATCH pulls (update PR)
+        if (method === 'PATCH' && urlStr.includes('/pulls/')) {
+          return Promise.resolve(forgejoJsonResponse(makeForgejoPRData(10)))
+        }
+
+        // GET pulls list (findPRByBranch)
+        if (method === 'GET' && urlStr.includes('/pulls') && !urlStr.includes('.diff')) {
+          return Promise.resolve(forgejoJsonResponse([makeForgejoPRData(10)]))
+        }
+
+        // GET PR diff
+        if (method === 'GET' && urlStr.includes('.diff')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            statusText: 'OK',
+            headers: new Headers(),
+            text: () => Promise.resolve('--- a/file\n+++ b/file\n'),
+          } as unknown as Response)
+        }
+
+        return Promise.resolve(forgejoJsonResponse({ message: 'Not mocked' }, 404))
+      })
+    },
+  },
 ]
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 for (const { name, create, setupMocks } of adapters) {
   describe(`ForgeAdapter contract: ${name}`, () => {
@@ -187,7 +319,7 @@ for (const { name, create, setupMocks } of adapters) {
         expect(issue).toHaveProperty('url')
 
         expect(typeof issue.number).toBe('number')
-        expect(typeof issue.nodeId).toBe('string')
+        expect(issue.nodeId === null || typeof issue.nodeId === 'string').toBe(true)
         expect(typeof issue.title).toBe('string')
         expect(typeof issue.body).toBe('string')
         expect(Array.isArray(issue.labels)).toBe(true)

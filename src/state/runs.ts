@@ -7,7 +7,7 @@ export interface RunRecord {
   id: string
   repo: string
   issueNumber: number
-  issueNodeId: string
+  issueNodeId: string | null
   status: RunStatus
   planner: string
   coder: string
@@ -28,7 +28,7 @@ export interface RunRecord {
 export interface CreateRunParams {
   repo: string
   issueNumber: number
-  issueNodeId: string
+  issueNodeId: string | null
   planner: string
   coder: string
   reviewer: string
@@ -142,7 +142,7 @@ export class RunManager {
       id: row.id,
       repo: row.repo,
       issueNumber: row.issue_number,
-      issueNodeId: row.issue_node_id ?? '',
+      issueNodeId: row.issue_node_id ?? null,
       status: row.status as RunStatus,
       planner: row.planner ?? '',
       coder: row.coder ?? '',
