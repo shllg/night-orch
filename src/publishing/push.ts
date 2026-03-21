@@ -3,6 +3,7 @@ import { logger } from '../utils/logger.js'
 
 /**
  * Push a branch to origin. Sets upstream tracking.
+ * On rejection (branch diverged), attempts a single rebase then retries.
  */
 export async function pushBranch(worktreePath: string, branchName: string): Promise<void> {
   logger.info({ branchName }, 'Pushing branch to remote')
@@ -12,7 +13,27 @@ export async function pushBranch(worktreePath: string, branchName: string): Prom
       timeout: 60_000,
     })
   } catch (err: unknown) {
-    const message = (err as { stderr?: string }).stderr ?? String(err)
-    throw new Error(`Push failed for ${branchName}: ${message}`)
+    const stderr = (err as { stderr?: string }).stderr ?? String(err)
+
+    // Detect rejected push (branch diverged)
+    if (stderr.includes('rejected') || stderr.includes('non-fast-forward')) {
+      logger.warn({ branchName }, 'Push rejected — attempting rebase')
+      try {
+        await execa('git', ['pull', '--rebase', 'origin', branchName], {
+          cwd: worktreePath,
+          timeout: 60_000,
+        })
+        await execa('git', ['push', '-u', 'origin', branchName], {
+          cwd: worktreePath,
+          timeout: 60_000,
+        })
+        return
+      } catch (rebaseErr: unknown) {
+        const rebaseStderr = (rebaseErr as { stderr?: string }).stderr ?? String(rebaseErr)
+        throw new Error(`Push failed for ${branchName} after rebase attempt: ${rebaseStderr}`)
+      }
+    }
+
+    throw new Error(`Push failed for ${branchName}: ${stderr}`)
   }
 }
