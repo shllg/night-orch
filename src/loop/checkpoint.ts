@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import type { LoopPhase } from './types.js'
+import type { LoopPhase, RunContext, PlannerOutput, CoderOutput, ReviewerOutput } from './types.js'
 
 export class Checkpoint {
   constructor(private db: Database.Database) {}
@@ -35,6 +35,43 @@ export class Checkpoint {
     return {
       phase: row.current_phase as LoopPhase,
       artifacts: phaseArtifacts,
+    }
+  }
+
+  /**
+   * Reconstruct a partial RunContext from checkpoint data for crash recovery.
+   * Returns null if no checkpoint data exists for this run.
+   */
+  resumeFromCheckpoint(
+    runId: string,
+    baseCtx: RunContext,
+  ): RunContext | null {
+    const row = this.db
+      .prepare('SELECT current_phase, phase_data, iteration_count, estimated_cost_usd FROM runs WHERE id = ?')
+      .get(runId) as {
+        current_phase: string | null
+        phase_data: string | null
+        iteration_count: number | null
+        estimated_cost_usd: number | null
+      } | undefined
+
+    if (!row?.current_phase) return null
+
+    const phaseData = row.phase_data ? JSON.parse(row.phase_data) as Record<string, unknown> : {}
+
+    // Reconstruct context from persisted phase artifacts
+    const planArtifacts = phaseData['plan'] as Record<string, unknown> | undefined
+    const codeArtifacts = phaseData['code'] as Record<string, unknown> | undefined
+    const reviewArtifacts = phaseData['review'] as Record<string, unknown> | undefined
+
+    return {
+      ...baseCtx,
+      currentPhase: row.current_phase as LoopPhase,
+      iteration: row.iteration_count ?? baseCtx.iteration,
+      estimatedCostUsd: row.estimated_cost_usd ?? baseCtx.estimatedCostUsd,
+      plan: (planArtifacts?.plan as PlannerOutput) ?? baseCtx.plan,
+      codeResult: (codeArtifacts?.codeResult as CoderOutput) ?? baseCtx.codeResult,
+      reviewResult: (reviewArtifacts?.reviewResult as ReviewerOutput) ?? baseCtx.reviewResult,
     }
   }
 
