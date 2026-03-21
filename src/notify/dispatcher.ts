@@ -1,46 +1,77 @@
 import type { Config } from '../config/schema.js'
-import type { NotificationChannel, Notification, NotificationEvent } from './types.js'
-import { ConsoleNotifier } from './console.js'
-import { WebhookNotifier } from './webhook.js'
+import type { NotificationChannel, NotificationPayload, NotificationEvent, NotificationReport } from './types.js'
 import { logger } from '../utils/logger.js'
 
+const EVENT_CONFIG_MAP: Record<NotificationEvent, keyof Config['notifications']['events']> = {
+  run_started: 'onRunStarted',
+  blocked: 'onBlocked',
+  pr_ready: 'onPrReady',
+  pr_updated: 'onPrReady',
+  error: 'onError',
+  retry_exhausted: 'onRetryExhausted',
+}
+
 export class NotificationDispatcher {
-  private channels: NotificationChannel[]
-  private enabledEvents: Set<NotificationEvent>
+  constructor(
+    private channels: NotificationChannel[],
+    private eventConfig: Config['notifications']['events'],
+  ) {}
 
-  constructor(config: Config['notifications']) {
-    this.channels = config.channels.map((ch) => {
-      switch (ch.type) {
-        case 'console':
-          return new ConsoleNotifier()
-        case 'webhook': {
-          const url = process.env[ch.urlEnv]
-          if (!url) {
-            logger.warn({ urlEnv: ch.urlEnv }, 'Webhook URL env var not set — skipping channel')
-            return null
-          }
-          return new WebhookNotifier(url)
-        }
-        default:
-          return null
-      }
-    }).filter((ch): ch is NotificationChannel => ch !== null)
+  async dispatch(payload: NotificationPayload): Promise<NotificationReport> {
+    const configKey = EVENT_CONFIG_MAP[payload.event]
+    if (configKey && !this.eventConfig[configKey]) {
+      logger.debug({ event: payload.event }, 'Event not enabled — skipping notification')
+      return { sent: [], totalSent: 0, totalFailed: 0 }
+    }
 
-    this.enabledEvents = new Set<NotificationEvent>()
-    const events = config.events
-    if (events.onRunStarted) this.enabledEvents.add('onRunStarted')
-    if (events.onBlocked) this.enabledEvents.add('onBlocked')
-    if (events.onPrReady) this.enabledEvents.add('onPrReady')
-    if (events.onError) this.enabledEvents.add('onError')
-    if (events.onRetryExhausted) this.enabledEvents.add('onRetryExhausted')
+    return this.sendToAll(payload)
   }
 
-  async notify(notification: Notification): Promise<void> {
-    if (!this.enabledEvents.has(notification.event)) return
+  async sendTest(): Promise<NotificationReport> {
+    const testPayload: NotificationPayload = {
+      event: 'pr_ready',
+      repo: 'test/test-repo',
+      issueNumber: 0,
+      issueTitle: 'Test Notification',
+      state: 'test',
+      prUrl: null,
+      prNumber: null,
+      summary: 'This is a test notification from night-orch.',
+      blockingReason: null,
+      reviewSummary: null,
+      iterationCount: 0,
+      timestamp: new Date().toISOString(),
+    }
 
-    // Best-effort, parallel dispatch
-    await Promise.allSettled(
-      this.channels.map((ch) => ch.send(notification)),
+    return this.sendToAll(testPayload)
+  }
+
+  private async sendToAll(payload: NotificationPayload): Promise<NotificationReport> {
+    const results = await Promise.allSettled(
+      this.channels.map(async (ch) => {
+        const success = await ch.send(payload)
+        return { channel: ch.type, success, error: success ? null : 'Channel returned false' }
+      }),
     )
+
+    const sent: NotificationReport['sent'] = results.map((r, i) => {
+      if (r.status === 'fulfilled') {
+        return r.value
+      }
+      return {
+        channel: this.channels[i]?.type ?? 'unknown',
+        success: false,
+        error: (r.reason as Error).message ?? String(r.reason),
+      }
+    })
+
+    const totalSent = sent.filter((s) => s.success).length
+    const totalFailed = sent.filter((s) => !s.success).length
+
+    if (totalFailed > 0) {
+      logger.warn({ totalFailed, event: payload.event }, 'Some notification channels failed')
+    }
+
+    return { sent, totalSent, totalFailed }
   }
 }

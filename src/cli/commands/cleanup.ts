@@ -1,8 +1,6 @@
 import { loadConfig, resolveConfigPath, ConfigError } from '../../config/loader.js'
 import { initDatabase } from '../../state/db.js'
-import { LeaseManager } from '../../state/leases.js'
-import { createWorktreeManager } from '../../git/worktree.js'
-import { logger } from '../../utils/logger.js'
+import { CleanupEngine } from '../../ops/cleanup.js'
 
 interface GlobalOpts {
   config?: string
@@ -10,7 +8,13 @@ interface GlobalOpts {
   logLevel?: string
 }
 
-export async function cleanupCommand(globalOpts?: GlobalOpts): Promise<void> {
+interface CleanupCommandOpts extends GlobalOpts {
+  errorAgeDays?: number
+  mergedBranches?: boolean
+  logAgeDays?: number
+}
+
+export async function cleanupCommand(globalOpts?: CleanupCommandOpts): Promise<void> {
   const dryRun = globalOpts?.dryRun ?? false
 
   let config
@@ -28,39 +32,44 @@ export async function cleanupCommand(globalOpts?: GlobalOpts): Promise<void> {
   }
 
   const db = initDatabase(config.storage.dbPath)
-  const leaseManager = new LeaseManager(db)
-  const worktreeManager = createWorktreeManager()
 
-  // Clean expired leases
-  const expiredLeases = leaseManager.cleanExpired()
-  console.log(`Cleaned ${expiredLeases} expired lease(s)`)
+  try {
+    const engine = new CleanupEngine(db, config)
+    const result = await engine.run({
+      completedWorktrees: true,
+      errorWorktreeAgeDays: globalOpts?.errorAgeDays ?? 7,
+      mergedBranches: globalOpts?.mergedBranches ?? false,
+      logArchiveAgeDays: globalOpts?.logAgeDays ?? 30,
+      dryRun,
+    })
 
-  // List and optionally remove stale worktrees
-  for (const repoConfig of config.repos) {
-    const worktrees = await worktreeManager.list(repoConfig.localPath, config.storage.worktreeRoot)
-
-    // Find completed/error runs and clean their worktrees
-    for (const wt of worktrees) {
-      const row = db
-        .prepare(
-          "SELECT status FROM runs WHERE worktree_path = ? AND status IN ('completed', 'error') ORDER BY created_at DESC LIMIT 1",
-        )
-        .get(wt.path) as { status: string } | undefined
-
-      if (row) {
-        if (dryRun) {
-          console.log(`[dry-run] Would remove worktree: ${wt.path} (${wt.branchName}, status: ${row.status})`)
-        } else {
-          try {
-            await worktreeManager.remove(wt.path, false)
-            console.log(`Removed worktree: ${wt.path} (${wt.branchName})`)
-          } catch (err) {
-            logger.warn({ path: wt.path, err }, 'Failed to remove worktree')
-          }
-        }
+    if (result.removedWorktrees.length > 0) {
+      console.log('\nRemoved worktrees:')
+      for (const wt of result.removedWorktrees) {
+        console.log(`  ${wt}`)
       }
     }
-  }
 
-  db.close()
+    if (result.removedBranches.length > 0) {
+      console.log('\nRemoved branches:')
+      for (const branch of result.removedBranches) {
+        console.log(`  ${branch}`)
+      }
+    }
+
+    if (result.archivedLogs.length > 0) {
+      console.log('\nArchived logs:')
+      for (const log of result.archivedLogs) {
+        console.log(`  ${log}`)
+      }
+    }
+
+    console.log(`\nCleanup complete: ${result.removedWorktrees.length} worktree(s), ${result.removedBranches.length} branch(es), ${result.expiredLeases} lease(s), ${result.archivedLogs.length} log(s) archived`)
+    if (result.freedDiskMb > 0) {
+      console.log(`Freed ~${result.freedDiskMb.toFixed(1)} MB`)
+    }
+    if (dryRun) console.log('(dry run — no changes applied)')
+  } finally {
+    db.close()
+  }
 }

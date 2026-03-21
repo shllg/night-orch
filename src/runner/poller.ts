@@ -13,9 +13,11 @@ import { executeLoop } from '../loop/engine.js'
 import { publishPR } from '../publishing/publisher.js'
 import { transitionLabels } from '../labels/manager.js'
 import { NotificationDispatcher } from '../notify/dispatcher.js'
+import { createChannels } from '../notify/factory.js'
 import { branchName } from '../utils/ids.js'
 import { logger } from '../utils/logger.js'
 import type { RunContext } from '../loop/types.js'
+import type { NotificationPayload } from '../notify/types.js'
 
 export interface PollResult {
   processed: number
@@ -33,7 +35,8 @@ export async function pollOnce(
 ): Promise<PollResult> {
   const leaseManager = new LeaseManager(db)
   const runManager = new RunManager(db)
-  const notifier = new NotificationDispatcher(config.notifications)
+  const channels = createChannels(config.notifications)
+  const notifier = new NotificationDispatcher(channels, config.notifications.events)
   const worktreeManager = createWorktreeManager()
 
   let processed = 0
@@ -53,7 +56,7 @@ export async function pollOnce(
 
     if (dryRun) {
       for (const d of discovered) {
-        console.log(`[dry-run] #${d.issue.number} [${d.triage.level}] ${d.issue.title}`)
+        logger.info({ issue: d.issue.number, triage: d.triage.level, title: d.issue.title }, '[dry-run] Discovered issue')
       }
       continue
     }
@@ -104,13 +107,7 @@ export async function pollOnce(
       await transitionLabels(forge, repoConfig.repo, first.issue.number, first.issue.labels, 'queued', 'running', labelConfig)
 
       // Notify
-      await notifier.notify({
-        event: 'onRunStarted',
-        repo: repoConfig.repo,
-        issueNumber: first.issue.number,
-        title: first.issue.title,
-        message: `Processing #${first.issue.number}`,
-      })
+      await notifier.dispatch(makePayload('run_started', repoConfig.repo, first.issue))
 
       // Create worktree
       await worktreeManager.ensure({
@@ -169,7 +166,7 @@ export async function pollOnce(
       })
 
       // Handle result
-      if (finalCtx.currentPhase === 'completed') {
+      if (finalCtx.currentPhase === 'publish') {
         // Publish PR
         try {
           const publishResult = await publishPR(finalCtx, forge, db)
@@ -179,41 +176,33 @@ export async function pollOnce(
             endedAt: new Date().toISOString(),
           })
           await transitionLabels(forge, repoConfig.repo, first.issue.number, first.issue.labels, 'running', 'review_ready', labelConfig)
-          await notifier.notify({
-            event: 'onPrReady',
-            repo: repoConfig.repo,
-            issueNumber: first.issue.number,
-            title: first.issue.title,
-            message: `PR ready: ${publishResult.prUrl}`,
-            url: publishResult.prUrl,
-          })
+          await notifier.dispatch(makePayload('pr_ready', repoConfig.repo, first.issue, {
+            prUrl: publishResult.prUrl,
+            prNumber: publishResult.prNumber,
+            summary: `PR ready: ${publishResult.prUrl}`,
+          }))
         } catch (err) {
           logger.error({ err }, 'Failed to publish PR')
           runManager.update(run.id, { status: 'error', lastError: String(err), endedAt: new Date().toISOString() })
           await transitionLabels(forge, repoConfig.repo, first.issue.number, first.issue.labels, 'running', 'error', labelConfig)
+          await notifier.dispatch(makePayload('error', repoConfig.repo, first.issue, {
+            summary: `Failed to publish PR: ${(err as Error).message}`,
+          }))
         }
         processed++
-      } else if (finalCtx.currentPhase === 'blocked') {
+      } else if (finalCtx.currentPhase === 'decision') {
         runManager.update(run.id, { status: 'blocked', endedAt: new Date().toISOString() })
         await transitionLabels(forge, repoConfig.repo, first.issue.number, first.issue.labels, 'running', 'blocked', labelConfig)
-        await notifier.notify({
-          event: 'onBlocked',
-          repo: repoConfig.repo,
-          issueNumber: first.issue.number,
-          title: first.issue.title,
-          message: 'Issue blocked during processing',
-        })
+        await notifier.dispatch(makePayload('blocked', repoConfig.repo, first.issue, {
+          summary: 'Issue blocked during processing',
+        }))
         processed++
       } else {
         runManager.update(run.id, { status: 'error', lastError: 'Loop ended in unexpected state', endedAt: new Date().toISOString() })
         await transitionLabels(forge, repoConfig.repo, first.issue.number, first.issue.labels, 'running', 'error', labelConfig)
-        await notifier.notify({
-          event: 'onError',
-          repo: repoConfig.repo,
-          issueNumber: first.issue.number,
-          title: first.issue.title,
-          message: `Error: loop ended in ${finalCtx.currentPhase}`,
-        })
+        await notifier.dispatch(makePayload('error', repoConfig.repo, first.issue, {
+          summary: `Error: loop ended in ${finalCtx.currentPhase}`,
+        }))
         errors++
       }
     } catch (err) {
@@ -225,4 +214,27 @@ export async function pollOnce(
   }
 
   return { processed, errors }
+}
+
+function makePayload(
+  event: NotificationPayload['event'],
+  repo: string,
+  issue: { number: number; title: string },
+  extra: Partial<NotificationPayload> = {},
+): NotificationPayload {
+  return {
+    event,
+    repo,
+    issueNumber: issue.number,
+    issueTitle: issue.title,
+    state: event,
+    prUrl: null,
+    prNumber: null,
+    summary: `${event}: #${issue.number} ${issue.title}`,
+    blockingReason: null,
+    reviewSummary: null,
+    iterationCount: 0,
+    timestamp: new Date().toISOString(),
+    ...extra,
+  }
 }

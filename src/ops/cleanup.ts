@@ -1,0 +1,189 @@
+import type Database from 'better-sqlite3'
+import type { Config } from '../config/schema.js'
+import { createWorktreeManager } from '../git/worktree.js'
+import { LeaseManager } from '../state/leases.js'
+import { statSync, readdirSync, renameSync, mkdirSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { logger } from '../utils/logger.js'
+
+export interface CleanupOptions {
+  completedWorktrees: boolean
+  errorWorktreeAgeDays: number
+  mergedBranches: boolean
+  logArchiveAgeDays: number
+  dryRun: boolean
+}
+
+export interface CleanupResult {
+  removedWorktrees: string[]
+  removedBranches: string[]
+  expiredLeases: number
+  archivedLogs: string[]
+  freedDiskMb: number
+}
+
+const DEFAULT_OPTIONS: CleanupOptions = {
+  completedWorktrees: true,
+  errorWorktreeAgeDays: 7,
+  mergedBranches: false,
+  logArchiveAgeDays: 30,
+  dryRun: false,
+}
+
+interface WorktreeRunRow {
+  status: string
+  ended_at: string | null
+  branch_name: string | null
+  pr_number: number | null
+}
+
+export class CleanupEngine {
+  private leaseManager: LeaseManager
+
+  constructor(
+    private db: Database.Database,
+    private config: Config,
+  ) {
+    this.leaseManager = new LeaseManager(db)
+  }
+
+  async run(options: Partial<CleanupOptions> = {}): Promise<CleanupResult> {
+    const opts = { ...DEFAULT_OPTIONS, ...options }
+    const result: CleanupResult = {
+      removedWorktrees: [],
+      removedBranches: [],
+      expiredLeases: 0,
+      archivedLogs: [],
+      freedDiskMb: 0,
+    }
+
+    // 1. Clean expired leases
+    if (!opts.dryRun) {
+      result.expiredLeases = this.leaseManager.cleanExpired()
+    } else {
+      const count = this.db
+        .prepare('SELECT COUNT(*) as c FROM leases WHERE leased_until < datetime(?)')
+        .get(new Date().toISOString()) as { c: number }
+      result.expiredLeases = count.c
+    }
+
+    // 2. Remove worktrees for completed/error runs
+    const worktreeManager = createWorktreeManager()
+    for (const repoConfig of this.config.repos) {
+      try {
+        const worktrees = await worktreeManager.list(repoConfig.localPath, this.config.storage.worktreeRoot)
+
+        for (const wt of worktrees) {
+          const row = this.db
+            .prepare("SELECT status, ended_at, branch_name, pr_number FROM runs WHERE worktree_path = ? ORDER BY created_at DESC LIMIT 1")
+            .get(wt.path) as WorktreeRunRow | undefined
+
+          if (!row) continue
+
+          const shouldRemove = this.shouldRemoveWorktree(row, opts)
+          if (!shouldRemove) continue
+
+          const sizeMb = this.estimateDirSizeMb(wt.path)
+
+          if (opts.dryRun) {
+            logger.info({ path: wt.path, status: row.status }, '[dry-run] Would remove worktree')
+          } else {
+            try {
+              await worktreeManager.remove(wt.path, false)
+              result.freedDiskMb += sizeMb
+              logger.info({ path: wt.path, status: row.status }, 'Removed worktree')
+            } catch (err) {
+              logger.warn({ path: wt.path, err }, 'Failed to remove worktree')
+              continue
+            }
+          }
+          result.removedWorktrees.push(wt.path)
+
+          // Branch deletion for merged PRs
+          if (opts.mergedBranches && row.branch_name && row.pr_number && row.status === 'completed') {
+            if (opts.dryRun) {
+              logger.info({ branch: row.branch_name }, '[dry-run] Would delete branch')
+            } else {
+              try {
+                const { execa } = await import('execa')
+                await execa('git', ['branch', '-D', row.branch_name], { cwd: repoConfig.localPath })
+                logger.info({ branch: row.branch_name }, 'Deleted merged branch')
+              } catch (err) {
+                logger.warn({ branch: row.branch_name, err }, 'Failed to delete branch')
+                continue
+              }
+            }
+            result.removedBranches.push(row.branch_name)
+          }
+        }
+      } catch (err) {
+        logger.warn({ repo: repoConfig.repo, err }, 'Failed to list worktrees for cleanup')
+      }
+    }
+
+    // 3. Log archival
+    const archived = this.archiveLogs(opts)
+    result.archivedLogs = archived
+
+    return result
+  }
+
+  private shouldRemoveWorktree(row: WorktreeRunRow, opts: CleanupOptions): boolean {
+    if (row.status === 'completed' && opts.completedWorktrees) {
+      return true
+    }
+
+    if (row.status === 'error' && row.ended_at) {
+      const endedAt = new Date(row.ended_at)
+      const ageDays = (Date.now() - endedAt.getTime()) / (1000 * 60 * 60 * 24)
+      return ageDays >= opts.errorWorktreeAgeDays
+    }
+
+    return false
+  }
+
+  private estimateDirSizeMb(dirPath: string): number {
+    try {
+      const stat = statSync(dirPath)
+      // Rough estimate — real size would need recursive walk
+      return Math.round((stat.size || 0) / (1024 * 1024) * 100) / 100
+    } catch {
+      return 0
+    }
+  }
+
+  private archiveLogs(opts: CleanupOptions): string[] {
+    const archived: string[] = []
+    const logsRoot = this.config.storage.logsRoot
+    const archiveDir = join(dirname(logsRoot), 'logs-archive')
+
+    try {
+      const entries = readdirSync(logsRoot)
+      const cutoff = Date.now() - opts.logArchiveAgeDays * 24 * 60 * 60 * 1000
+
+      for (const entry of entries) {
+        const fullPath = join(logsRoot, entry)
+        try {
+          const stat = statSync(fullPath)
+          if (stat.mtimeMs < cutoff) {
+            if (opts.dryRun) {
+              logger.info({ path: fullPath }, '[dry-run] Would archive log')
+            } else {
+              mkdirSync(archiveDir, { recursive: true })
+              renameSync(fullPath, join(archiveDir, entry))
+              logger.info({ path: fullPath }, 'Archived log')
+            }
+            archived.push(fullPath)
+          }
+        } catch {
+          // Skip individual file errors
+        }
+      }
+    } catch {
+      // Logs dir may not exist yet
+      logger.debug({ logsRoot }, 'Logs directory not found for archival')
+    }
+
+    return archived
+  }
+}

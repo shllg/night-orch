@@ -1,5 +1,7 @@
 import { loadConfig, resolveConfigPath, ConfigError } from '../../config/loader.js'
 import { NotificationDispatcher } from '../../notify/dispatcher.js'
+import { createChannels } from '../../notify/factory.js'
+import { logger } from '../../utils/logger.js'
 
 interface GlobalOpts {
   config?: string
@@ -14,36 +16,35 @@ export async function notifyTestCommand(globalOpts?: GlobalOpts): Promise<void> 
     config = loadConfig(configPath)
   } catch (err) {
     if (err instanceof ConfigError) {
-      console.error(`Config error: ${err.message}`)
+      logger.error({ error: err.message }, 'Config error')
     } else {
-      console.error((err as Error).message)
+      logger.error({ error: (err as Error).message }, 'Failed to load config')
     }
     process.exitCode = 1
     return
   }
 
   // Override all events to enabled for test
-  const testConfig = {
-    ...config.notifications,
-    events: {
-      onRunStarted: true,
-      onBlocked: true,
-      onPrReady: true,
-      onError: true,
-      onRetryExhausted: true,
-    },
+  const testEvents = {
+    onRunStarted: true,
+    onBlocked: true,
+    onPrReady: true,
+    onError: true,
+    onRetryExhausted: true,
   }
 
-  const dispatcher = new NotificationDispatcher(testConfig)
+  const channels = createChannels(config.notifications)
+  const dispatcher = new NotificationDispatcher(channels, testEvents)
 
-  console.log('Sending test notification to all configured channels...')
-  await dispatcher.notify({
-    event: 'onPrReady',
-    repo: 'test/test-repo',
-    issueNumber: 0,
-    title: 'Test Notification',
-    message: 'This is a test notification from night-orch notify-test.',
-  })
+  logger.info('Sending test notification to all configured channels...')
+  const report = await dispatcher.sendTest()
 
-  console.log('Done.')
+  logger.info(
+    { totalSent: report.totalSent, totalFailed: report.totalFailed, channels: report.sent },
+    'Test notification complete',
+  )
+
+  if (report.totalFailed > 0) {
+    process.exitCode = 1
+  }
 }

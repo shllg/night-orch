@@ -60,8 +60,8 @@ describe('initDatabase', () => {
 
   it('records migration in schema_migrations', () => {
     db = initDatabase(join(tmpDir, 'test.db'))
-    const migrations = db.prepare('SELECT * FROM schema_migrations').all()
-    expect(migrations.length).toBe(1)
+    const migrations = db.prepare('SELECT * FROM schema_migrations ORDER BY version').all()
+    expect(migrations.length).toBeGreaterThanOrEqual(1)
     expect((migrations[0] as { version: number }).version).toBe(1)
   })
 

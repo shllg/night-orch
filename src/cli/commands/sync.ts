@@ -1,7 +1,6 @@
 import { loadConfig, resolveConfigPath, ConfigError } from '../../config/loader.js'
 import { initDatabase } from '../../state/db.js'
-import { LeaseManager } from '../../state/leases.js'
-import { logger } from '../../utils/logger.js'
+import { SyncEngine } from '../../ops/sync.js'
 
 interface GlobalOpts {
   config?: string
@@ -27,28 +26,38 @@ export async function syncCommand(globalOpts?: GlobalOpts): Promise<void> {
   }
 
   const db = initDatabase(config.storage.dbPath)
-  const leaseManager = new LeaseManager(db)
 
-  // Clean stale running runs (crash recovery)
-  const staleRuns = db
-    .prepare("SELECT id, repo, issue_number FROM runs WHERE status = 'running'")
-    .all() as Array<{ id: string; repo: string; issue_number: number }>
+  try {
+    const engine = new SyncEngine(db, config)
+    const result = await engine.reconcile(dryRun)
 
-  for (const run of staleRuns) {
-    if (dryRun) {
-      console.log(`[dry-run] Would mark stale run ${run.id} (#${run.issue_number}) as error`)
-    } else {
-      db.prepare(
-        "UPDATE runs SET status = 'error', last_error = 'Stale run detected during sync', ended_at = datetime('now') WHERE id = ?",
-      ).run(run.id)
-      leaseManager.release(run.repo, run.issue_number)
-      logger.info({ runId: run.id, issue: run.issue_number }, 'Marked stale run as error')
+    // Print structured results
+    if (result.reconciledRuns.length > 0) {
+      console.log('\nReconciled runs:')
+      for (const action of result.reconciledRuns) {
+        console.log(`  ${action.repo}#${action.issueNumber}: ${action.action} — ${action.reason}`)
+      }
     }
+
+    if (result.labelCorrections.length > 0) {
+      console.log('\nLabel corrections:')
+      for (const correction of result.labelCorrections) {
+        console.log(`  ${correction.repo}#${correction.issueNumber}: ${correction.reason}`)
+        if (correction.added.length > 0) console.log(`    +${correction.added.join(', ')}`)
+        if (correction.removed.length > 0) console.log(`    -${correction.removed.join(', ')}`)
+      }
+    }
+
+    if (result.orphanedWorktrees.length > 0) {
+      console.log('\nOrphaned worktrees:')
+      for (const wt of result.orphanedWorktrees) {
+        console.log(`  ${wt}`)
+      }
+    }
+
+    console.log(`\nSync complete: ${result.reconciledRuns.length} reconciled, ${result.expiredLeases} expired lease(s), ${result.orphanedWorktrees.length} orphaned worktree(s)`)
+    if (dryRun) console.log('(dry run — no changes applied)')
+  } finally {
+    db.close()
   }
-
-  // Clean expired leases
-  const expired = leaseManager.cleanExpired()
-
-  console.log(`Sync complete: ${staleRuns.length} stale run(s), ${expired} expired lease(s)`)
-  db.close()
 }
