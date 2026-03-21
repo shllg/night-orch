@@ -1,0 +1,36 @@
+model = "gpt-5.3-codex"
+model_reasoning_effort = "xhigh"
+model_reasoning_summary = "detailed"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+web_search = "live"
+
+[notice]
+hide_full_access_warning = true
+hide_gpt5_1_migration_prompt = true
+"hide_gpt-5.1-codex-max_migration_prompt" = true
+
+[sandbox_workspace_write]
+network_access = true
+
+[features]
+steer = true
+unified_exec = true
+
+[mcp_servers.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp", "--api-key", "${CONTEXT7_API_KEY}"]
+
+[mcp_servers.github]
+url = "https://api.githubcopilot.com/mcp"
+bearer_token_env_var = "GITHUB_PAT_NIGHT_ORCH"
+
+[mcp_servers.claude-code]
+command = "mcp-agents"
+args = ["--provider", "claude"]
+tool_timeout_sec = 300
+
+[mcp_servers.gemini]
+command = "mcp-agents"
+args = ["--provider", "gemini"]
+tool_timeout_sec = 300

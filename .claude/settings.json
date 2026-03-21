@@ -1,0 +1,99 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bat:*)",
+      "Bash(cat:*)",
+      "Bash(curl:*)",
+      "Bash(echo:*)",
+      "Bash(eza:*)",
+      "Bash(fd:*)",
+      "Bash(find:*)",
+      "Bash(gh:*)",
+      "Bash(git branch:*)",
+      "Bash(git diff:*)",
+      "Bash(git fetch:*)",
+      "Bash(git grep:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git stash list:*)",
+      "Bash(git status:*)",
+      "Bash(git tag:*)",
+      "Bash(grep:*)",
+      "Bash(head:*)",
+      "Bash(jq:*)",
+      "Bash(ls:*)",
+      "Bash(mise:*)",
+      "Bash(nl:*)",
+      "Bash(node:*)",
+      "Bash(pnpm:*)",
+      "Bash(printf:*)",
+      "Bash(rg:*)",
+      "Bash(sort:*)",
+      "Bash(sqlite3:*)",
+      "Bash(tree:*)",
+      "Bash(tsx:*)",
+      "Bash(wc:*)",
+      "Bash(xargs:*)",
+      "mcp__codex__*",
+      "mcp__context7__*",
+      "mcp__gemini__*",
+      "mcp__github__*",
+      "WebFetch(domain:*)",
+      "WebSearch"
+    ],
+    "deny": [
+      "Bash(git push:*)",
+      "Bash(sudo:*)",
+      "Bash(docker:*)",
+      "Bash(rm -rf:*)"
+    ],
+    "ask": [
+      "Bash(git stash:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git checkout -- :*)"
+    ],
+    "defaultMode": "plan"
+  },
+  "enableAllProjectMcpServers": true,
+  "env": {
+    "DISABLE_TELEMETRY": "1",
+    "MAX_MCP_OUTPUT_TOKENS": "120000",
+    "MCP_TIMEOUT": "300000"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/skill-reminder.sh\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/review-gate.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__codex__codex|Skill|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/review-marker.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

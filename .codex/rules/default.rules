@@ -1,0 +1,47 @@
+# Night-Orch Codex Default Rules
+# Mirror of .claude/settings.json allow/deny list as prefix rules
+
+# Package manager and build tools
+prefix_rule allow pnpm *
+prefix_rule allow tsx *
+prefix_rule allow node *
+prefix_rule allow mise *
+prefix_rule allow sqlite3 *
+
+# Git read operations
+prefix_rule allow git diff *
+prefix_rule allow git log *
+prefix_rule allow git show *
+prefix_rule allow git status *
+prefix_rule allow git fetch *
+prefix_rule allow git grep *
+prefix_rule allow git branch *
+prefix_rule allow git tag *
+prefix_rule allow git stash list *
+
+# Common utilities
+prefix_rule allow cat *
+prefix_rule allow echo *
+prefix_rule allow head *
+prefix_rule allow ls *
+prefix_rule allow find *
+prefix_rule allow grep *
+prefix_rule allow rg *
+prefix_rule allow fd *
+prefix_rule allow jq *
+prefix_rule allow tree *
+prefix_rule allow wc *
+prefix_rule allow sort *
+prefix_rule allow curl *
+prefix_rule allow gh *
+prefix_rule allow bat *
+prefix_rule allow eza *
+prefix_rule allow printf *
+prefix_rule allow xargs *
+prefix_rule allow nl *
+
+# Denied operations
+prefix_rule deny git push *
+prefix_rule deny sudo *
+prefix_rule deny docker *
+prefix_rule deny rm -rf *
