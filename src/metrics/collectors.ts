@@ -26,22 +26,29 @@ export function createMetricsRegistry() {
 
   const agentInvocations = new Counter({
     name: 'night_orch_agent_invocations_total',
-    help: 'Agent calls by type and role',
-    labelNames: ['agent', 'role'] as const,
+    help: 'Agent calls by role and adapter',
+    labelNames: ['role', 'adapter'] as const,
     registers: [registry],
   })
 
-  const prCreated = new Counter({
-    name: 'night_orch_pr_created_total',
-    help: 'PRs created',
-    labelNames: ['repo'] as const,
+  const prOperations = new Counter({
+    name: 'night_orch_pr_operations_total',
+    help: 'PR operations by type',
+    labelNames: ['type'] as const,
     registers: [registry],
   })
 
-  const prUpdated = new Counter({
-    name: 'night_orch_pr_updated_total',
-    help: 'PRs updated',
-    labelNames: ['repo'] as const,
+  const verifyRunsTotal = new Counter({
+    name: 'night_orch_verify_runs_total',
+    help: 'Verification runs by result',
+    labelNames: ['result'] as const,
+    registers: [registry],
+  })
+
+  const notificationsTotal = new Counter({
+    name: 'night_orch_notifications_total',
+    help: 'Notifications sent by channel and result',
+    labelNames: ['channel', 'result'] as const,
     registers: [registry],
   })
 
@@ -73,6 +80,19 @@ export function createMetricsRegistry() {
     registers: [registry],
   })
 
+  const dailyCostUsd = new Gauge({
+    name: 'night_orch_daily_cost_usd',
+    help: 'Estimated daily API cost in USD',
+    registers: [registry],
+  })
+
+  const eligibleIssues = new Gauge({
+    name: 'night_orch_eligible_issues',
+    help: 'Eligible issues by repo',
+    labelNames: ['repo'] as const,
+    registers: [registry],
+  })
+
   const runDuration = new Histogram({
     name: 'night_orch_run_duration_seconds',
     help: 'Time per run',
@@ -81,11 +101,26 @@ export function createMetricsRegistry() {
     registers: [registry],
   })
 
+  const phaseDuration = new Histogram({
+    name: 'night_orch_phase_duration_seconds',
+    help: 'Time per loop phase',
+    labelNames: ['phase'] as const,
+    buckets: [10, 30, 60, 120, 300, 600, 1800],
+    registers: [registry],
+  })
+
   const agentDuration = new Histogram({
     name: 'night_orch_agent_duration_seconds',
     help: 'Time per agent call',
-    labelNames: ['agent', 'role'] as const,
+    labelNames: ['role', 'adapter'] as const,
     buckets: [30, 60, 120, 300, 600, 1200, 1800],
+    registers: [registry],
+  })
+
+  const verifyDuration = new Histogram({
+    name: 'night_orch_verify_duration_seconds',
+    help: 'Time per verification run',
+    buckets: [5, 15, 30, 60, 120, 300],
     registers: [registry],
   })
 
@@ -102,14 +137,19 @@ export function createMetricsRegistry() {
     issuesProcessed,
     loopIterations,
     agentInvocations,
-    prCreated,
-    prUpdated,
+    prOperations,
+    verifyRunsTotal,
+    notificationsTotal,
     errorsTotal,
     activeRuns,
     queuedIssues,
     blockedIssues,
+    dailyCostUsd,
+    eligibleIssues,
     runDuration,
+    phaseDuration,
     agentDuration,
+    verifyDuration,
     estimatedCost,
   }
 }

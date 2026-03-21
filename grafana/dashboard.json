@@ -1,0 +1,99 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "Active Runs",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "targets": [{ "expr": "night_orch_active_runs", "legendFormat": "{{repo}}" }],
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 3 }, { "color": "red", "value": 5 }] } } }
+    },
+    {
+      "title": "Eligible Issues",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "targets": [{ "expr": "night_orch_eligible_issues", "legendFormat": "{{repo}}" }]
+    },
+    {
+      "title": "Daily Cost (USD)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "targets": [{ "expr": "night_orch_daily_cost_usd" }],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 25 }, { "color": "red", "value": 50 }] } } }
+    },
+    {
+      "title": "Runs Total",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [{ "expr": "rate(night_orch_runs_total[5m])", "legendFormat": "{{status}}" }]
+    },
+    {
+      "title": "Run Duration",
+      "type": "histogram",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [{ "expr": "night_orch_run_duration_seconds_bucket", "legendFormat": "{{le}}", "format": "heatmap" }]
+    },
+    {
+      "title": "Loop Iterations Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [{ "expr": "rate(night_orch_loop_iterations_total[5m])", "legendFormat": "{{repo}}" }]
+    },
+    {
+      "title": "Agent Invocations Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [{ "expr": "rate(night_orch_agent_invocations_total[5m])", "legendFormat": "{{role}} / {{adapter}}" }]
+    },
+    {
+      "title": "Agent Duration (p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [{ "expr": "histogram_quantile(0.95, rate(night_orch_agent_duration_seconds_bucket[5m]))", "legendFormat": "{{role}} / {{adapter}}" }]
+    },
+    {
+      "title": "Phase Duration (p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "targets": [{ "expr": "histogram_quantile(0.95, rate(night_orch_phase_duration_seconds_bucket[5m]))", "legendFormat": "{{phase}}" }]
+    },
+    {
+      "title": "PR Operations Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 20 },
+      "targets": [{ "expr": "rate(night_orch_pr_operations_total[5m])", "legendFormat": "{{type}}" }]
+    },
+    {
+      "title": "Verification Runs",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 20 },
+      "targets": [{ "expr": "rate(night_orch_verify_runs_total[5m])", "legendFormat": "{{result}}" }]
+    },
+    {
+      "title": "Notifications",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "targets": [{ "expr": "rate(night_orch_notifications_total[5m])", "legendFormat": "{{channel}} / {{result}}" }]
+    },
+    {
+      "title": "Errors Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "targets": [{ "expr": "rate(night_orch_errors_total[5m])", "legendFormat": "{{repo}} / {{error_type}}" }]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["night-orch", "orchestrator"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Night-Orch Dashboard",
+  "uid": "night-orch",
+  "version": 1
+}
