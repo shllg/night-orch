@@ -1,0 +1,96 @@
+version: 1
+
+github:
+  tokenEnv: GITHUB_TOKEN
+  pollIntervalSeconds: 300
+
+storage:
+  dbPath: ~/.night-orch/state.db
+  worktreeRoot: ~/.night-orch/worktrees
+  logsRoot: ~/.night-orch/logs
+
+notifications:
+  channels:
+    - type: console
+  events:
+    onRunStarted: true
+    onBlocked: true
+    onPrReady: true
+    onError: true
+    onRetryExhausted: true
+
+loop:
+  maxReviewIterations: 3
+  maxTotalAgentPasses: 8
+  stopOnPlannerFailure: true
+  requireVerificationPass: true
+  blockOnAmbiguousReview: true
+
+security:
+  maxChangedFiles: 50
+  maxChangedLines: 5000
+  maxDailyCostUsd: 25
+  maxCostPerRunUsd: 8
+
+workerProfiles:
+  claude:
+    type: claude
+    command: claude
+    args:
+      - -p
+    workerTimeoutSeconds: 1800
+    minimalEnv: true
+    env: {}
+  codex:
+    type: codex
+    command: codex
+    args:
+      - exec
+      - --json
+    workerTimeoutSeconds: 1800
+    minimalEnv: true
+    env: {}
+
+metrics:
+  enabled: true
+
+repos:
+  - repo: shllg/night-orch
+    forge: github
+    localPath: ~/src/tools/ai-project-runner
+    baseBranch: master
+    branchPrefix: orch
+    labels:
+      ready:
+        - orch:ready
+      running: orch:running
+      blocked:
+        - orch:blocked
+        - orch:needs-human
+      reviewReady: orch:review-ready
+      error: orch:error
+      retry: orch:retry
+    defaults:
+      planner: claude
+      coder: codex
+      reviewer: claude
+      doneMode: pr-ready
+    selectors:
+      includeLabelsAny:
+        - orch:ready
+      excludeLabelsAny:
+        - orch:blocked
+        - orch:error
+        - orch:needs-human
+    environment:
+      defaultMode: shared
+      bootstrap:
+        - command: pnpm install --frozen-lockfile
+          when: always
+    verify:
+      - pnpm typecheck
+      - pnpm lint
+      - pnpm test
+    agents:
+      claude: claude
+      codex: codex
