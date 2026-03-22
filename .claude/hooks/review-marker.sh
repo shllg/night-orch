@@ -18,7 +18,7 @@ case "$TOOL_NAME" in
     touch "$REVIEWED"
     ;;
   Skill)
-    if [[ "$SKILL" == *codex* || "$SKILL" == *gemini* ]]; then
+    if [[ "$SKILL" == *codex* || "$SKILL" == *gemini* || "$SKILL" == s-* || "$SKILL" == orch-* ]]; then
       touch "$REVIEWED"
     fi
     ;;

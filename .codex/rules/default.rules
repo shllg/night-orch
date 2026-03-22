@@ -2,46 +2,46 @@
 # Mirror of .claude/settings.json allow/deny list as prefix rules
 
 # Package manager and build tools
-prefix_rule allow pnpm *
-prefix_rule allow tsx *
-prefix_rule allow node *
-prefix_rule allow mise *
-prefix_rule allow sqlite3 *
+prefix_rule(pattern=["pnpm"], decision="allow", justification="Allow pnpm.")
+prefix_rule(pattern=["tsx"], decision="allow", justification="Allow tsx.")
+prefix_rule(pattern=["node"], decision="allow", justification="Allow node.")
+prefix_rule(pattern=["mise"], decision="allow", justification="Allow mise.")
+prefix_rule(pattern=["sqlite3"], decision="allow", justification="Allow sqlite3.")
 
 # Git read operations
-prefix_rule allow git diff *
-prefix_rule allow git log *
-prefix_rule allow git show *
-prefix_rule allow git status *
-prefix_rule allow git fetch *
-prefix_rule allow git grep *
-prefix_rule allow git branch *
-prefix_rule allow git tag *
-prefix_rule allow git stash list *
+prefix_rule(pattern=["git", "diff"], decision="allow", justification="Allow git diff.")
+prefix_rule(pattern=["git", "log"], decision="allow", justification="Allow git log.")
+prefix_rule(pattern=["git", "show"], decision="allow", justification="Allow git show.")
+prefix_rule(pattern=["git", "status"], decision="allow", justification="Allow git status.")
+prefix_rule(pattern=["git", "fetch"], decision="allow", justification="Allow git fetch.")
+prefix_rule(pattern=["git", "grep"], decision="allow", justification="Allow git grep.")
+prefix_rule(pattern=["git", "branch"], decision="allow", justification="Allow git branch.")
+prefix_rule(pattern=["git", "tag"], decision="allow", justification="Allow git tag.")
+prefix_rule(pattern=["git", "stash", "list"], decision="allow", justification="Allow git stash list.")
 
 # Common utilities
-prefix_rule allow cat *
-prefix_rule allow echo *
-prefix_rule allow head *
-prefix_rule allow ls *
-prefix_rule allow find *
-prefix_rule allow grep *
-prefix_rule allow rg *
-prefix_rule allow fd *
-prefix_rule allow jq *
-prefix_rule allow tree *
-prefix_rule allow wc *
-prefix_rule allow sort *
-prefix_rule allow curl *
-prefix_rule allow gh *
-prefix_rule allow bat *
-prefix_rule allow eza *
-prefix_rule allow printf *
-prefix_rule allow xargs *
-prefix_rule allow nl *
+prefix_rule(pattern=["cat"], decision="allow", justification="Allow cat.")
+prefix_rule(pattern=["echo"], decision="allow", justification="Allow echo.")
+prefix_rule(pattern=["head"], decision="allow", justification="Allow head.")
+prefix_rule(pattern=["ls"], decision="allow", justification="Allow ls.")
+prefix_rule(pattern=["find"], decision="allow", justification="Allow find.")
+prefix_rule(pattern=["grep"], decision="allow", justification="Allow grep.")
+prefix_rule(pattern=["rg"], decision="allow", justification="Allow rg.")
+prefix_rule(pattern=["fd"], decision="allow", justification="Allow fd.")
+prefix_rule(pattern=["jq"], decision="allow", justification="Allow jq.")
+prefix_rule(pattern=["tree"], decision="allow", justification="Allow tree.")
+prefix_rule(pattern=["wc"], decision="allow", justification="Allow wc.")
+prefix_rule(pattern=["sort"], decision="allow", justification="Allow sort.")
+prefix_rule(pattern=["curl"], decision="allow", justification="Allow curl.")
+prefix_rule(pattern=["gh"], decision="allow", justification="Allow gh.")
+prefix_rule(pattern=["bat"], decision="allow", justification="Allow bat.")
+prefix_rule(pattern=["eza"], decision="allow", justification="Allow eza.")
+prefix_rule(pattern=["printf"], decision="allow", justification="Allow printf.")
+prefix_rule(pattern=["xargs"], decision="allow", justification="Allow xargs.")
+prefix_rule(pattern=["nl"], decision="allow", justification="Allow nl.")
 
-# Denied operations
-prefix_rule deny git push *
-prefix_rule deny sudo *
-prefix_rule deny docker *
-prefix_rule deny rm -rf *
+# Operations requiring approval
+prefix_rule(pattern=["git", "push"], decision="prompt", justification="Prompt before git push.")
+prefix_rule(pattern=["sudo"], decision="prompt", justification="Prompt before sudo.")
+prefix_rule(pattern=["docker"], decision="prompt", justification="Prompt before docker.")
+prefix_rule(pattern=["rm", "-rf"], decision="prompt", justification="Prompt before rm -rf.")
