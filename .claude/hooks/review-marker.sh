@@ -14,7 +14,7 @@ mkdir -p "$HOOK_STATE"
 REVIEWED="$HOOK_STATE/.codex-reviewed-${SID}"
 
 case "$TOOL_NAME" in
-  mcp__codex__codex|mcp__gemini__gemini)
+  mcp__codex__*|mcp__gemini__*)
     touch "$REVIEWED"
     ;;
   Skill)

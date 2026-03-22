@@ -45,9 +45,7 @@ item.name; // OK
 
 ## Documentation
 
-When creating or modifying exported functions, interfaces, or classes — use the `tsdoc` skill for TSDoc conventions.
-
-Comments must be:
-- **Short and precise** — no filler words, no restating the signature
-- **Clear enough for a junior developer** — explain the _why_, non-obvious constraints, and gotchas a newcomer would miss
-- **Absent when unnecessary** — if the name and types tell the full story, don't add a comment
+- TSDoc on exported functions, interfaces, and classes
+- Comments must be short and precise — no filler words, no restating the signature
+- Explain the _why_, non-obvious constraints, and gotchas a newcomer would miss
+- If the name and types tell the full story, don't add a comment

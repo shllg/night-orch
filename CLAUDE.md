@@ -2,7 +2,7 @@
 
 ## Project
 
-Node.js 24+ / TypeScript CLI tool. ESM modules (`"type": "module"`). Strict TypeScript with `noUncheckedIndexedAccess`.
+Node.js 24+ / TypeScript CLI tool. ESM modules (`"type": "module"`). Strict TypeScript with `noUncheckedIndexedAccess`. Runtime managed by mise (`mise.toml`).
 
 ## Stack
 
@@ -13,7 +13,9 @@ Node.js 24+ / TypeScript CLI tool. ESM modules (`"type": "module"`). Strict Type
 - **Git**: execa (direct git CLI, not simple-git)
 - **DB**: better-sqlite3 (WAL mode)
 - **Logging**: pino (with token redaction)
-- **Testing**: vitest
+- **MCP**: @modelcontextprotocol/sdk
+- **Metrics**: prom-client
+- **Testing**: vitest (explicit imports, not globals)
 - **Linting**: eslint
 
 ## Commands
@@ -25,21 +27,17 @@ pnpm lint             # eslint
 pnpm typecheck        # tsc --noEmit
 ```
 
-## Code Patterns
+## Critical Conventions
 
-- **RunContext**: Immutable context object threaded through loop steps. Each step returns a new context. Never mutate.
-- **ForgeAdapter**: Interface for GitHub/Forgejo. All forge operations go through this — never call Octokit directly outside `forge/github.ts`.
-- **Loop coordinators** (`loop/planner.ts`, `loop/coder.ts`, `loop/reviewer.ts`): Thin wrappers that compile prompts and call worker adapters. Keep prompt logic in `workers/prompt/`, parsing in `workers/parsers/`.
-- **Label mutations**: Always idempotent. Use `computeLabelMutation()` (pure function) then apply via `LabelManager`.
-- **Phase checkpointing**: Every loop phase writes start/complete to DB for crash recovery.
-- **Metrics**: Always best-effort. `metrics.inc*()` / `metrics.observe*()` calls must never block or throw.
+- **ESM imports**: Always `.js` extension even for `.ts` files: `import { x } from './y.js'`
+- **Node builtins**: Always `node:` prefix: `import { x } from 'node:fs/promises'`
+- **No `any`**: Use `unknown` and narrow with type guards
 
-## Security Rules
+## Commit Messages
 
-- **Never pass `GITHUB_TOKEN`** (or any forge token) to worker processes. Workers get a minimal env whitelist.
-- **Never pass full `process.env`** to workers. Use `buildWorkerEnv()`.
-- **Sanitize issue content** before prompt compilation — it's attacker-controlled.
-- **pino redaction** configured for `['*.token', '*.apiKey', '*.secret']`.
+Format: `[CATEGORY] Short imperative summary`
+
+Categories: `[FIX]`, `[FEATURE]`, `[REFACTOR]`, `[INTERNAL]`, `[TEST]`, `[DOCS]`
 
 ## File Organization
 
@@ -59,17 +57,16 @@ src/mentions/        — PR mention manager
 src/metrics/         — Prometheus metrics via prom-client
 src/mcp/             — MCP server, tools, resources
 src/ops/             — Sync, cleanup, retry engines
+src/poller/          — Graceful shutdown handler
+src/runner/          — Polling orchestrator
 src/state/           — SQLite DB, migrations, leases, runs
 src/utils/           — Logger, IDs, time helpers
 ```
 
 ## Specs
 
-Implementation specs are in `docs/specs-active/`. Each phase has a detailed spec with interfaces, files to create, tests, and acceptance criteria. Consult the relevant phase spec before implementing.
+Implementation specs in `docs/specs-active/`. Consult the relevant phase spec before implementing.
 
-## Testing
+## Extended Rules
 
-- Use vitest. Tests live in `test/` mirroring `src/` structure.
-- Mock external dependencies (GitHub API, git CLI, worker processes).
-- Forge contract tests (`test/forge/contract.test.ts`) are parameterized — both GitHub and Forgejo adapters must pass the same suite.
-- `decide()` and `computeLabelMutation()` are pure functions — test exhaustively.
+Domain-specific rules are in `.claude/rules/` — architecture, security, TypeScript, loop engine, testing, specs, and operational patterns. These are loaded automatically when relevant.

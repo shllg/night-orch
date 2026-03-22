@@ -1,7 +1,5 @@
 # Loop Engine Rules
 
-Applies to: `src/loop/**`, `src/workers/**`
-
 ## RunContext Lifecycle
 
 1. `RunContext` created at loop start with issue data, config, branch info

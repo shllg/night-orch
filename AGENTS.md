@@ -2,7 +2,7 @@
 
 ## Project
 
-Node.js 24+ / TypeScript CLI tool. ESM modules. Strict TypeScript.
+Node.js 24+ / TypeScript CLI tool. ESM modules. Strict TypeScript. Runtime managed by mise (`mise.toml`, Node.js 24).
 
 ## Commands
 
@@ -23,6 +23,7 @@ pnpm typecheck        # tsc --noEmit
 6. **Phase checkpointing**: Write phase start/complete to SQLite before/after each loop step for crash recovery.
 7. **Metrics are best-effort**: `metrics.inc*()` calls must never block or throw.
 8. **Sanitize issue content**: Issue bodies are attacker-controlled. Sanitize before prompt compilation.
+9. **ESM imports**: Always use `.js` extension even for `.ts` files. Always use `node:` prefix for builtins.
 
 ## File Organization
 
@@ -32,11 +33,18 @@ src/config/          — Zod schema, YAML loader
 src/forge/           — ForgeAdapter + GitHub/Forgejo implementations
 src/discovery/       — Issue selection, role resolution, triage
 src/git/             — Branch, worktree, slug operations
+src/environment/     — Shared/dedicated env setup, port allocation
 src/workers/         — Agent adapters, prompt compilation, output parsing
 src/loop/            — Engine, RunContext, verifier, decision, checkpointing
 src/publishing/      — PR creation/update
 src/labels/          — Label transitions
 src/notify/          — Notification channels
+src/mentions/        — PR mention manager
+src/metrics/         — Prometheus metrics via prom-client
+src/mcp/             — MCP server, tools, resources
+src/ops/             — Sync, cleanup, retry engines
+src/poller/          — Graceful shutdown handler
+src/runner/          — Polling orchestrator
 src/state/           — SQLite DB, migrations
 ```
 
