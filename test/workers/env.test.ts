@@ -73,9 +73,11 @@ describe('buildWorkerEnv', () => {
     expect(env['ANTHROPIC_API_KEY']).toBeUndefined()
   })
 
-  it('non-minimal mode passes most vars minus blacklist', () => {
+  it('non-minimal mode is deprecated and still enforces whitelist-only env', () => {
     const env = buildWorkerEnv({ ...baseProfile, minimalEnv: false })
     expect(env['PATH']).toBeDefined()
+    expect(env['MY_SECRET']).toBeUndefined()
+    expect(env['DOCKER_AUTH_CONFIG']).toBeUndefined()
     expect(env['GITHUB_TOKEN']).toBeUndefined()
     expect(env['GH_TOKEN']).toBeUndefined()
   })

@@ -1,5 +1,7 @@
 import type Database from 'better-sqlite3'
 import type { Config } from '../config/schema.js'
+import type { ForgeAdapter } from '../forge/types.js'
+import { createForgeAdapter } from '../forge/factory.js'
 import { createWorktreeManager } from '../git/worktree.js'
 import { LeaseManager } from '../state/leases.js'
 import { statSync, readdirSync, renameSync, mkdirSync } from 'node:fs'
@@ -43,6 +45,11 @@ export class CleanupEngine {
   constructor(
     private db: Database.Database,
     private config: Config,
+    private forgeFactory: (repo: string) => ForgeAdapter = (repo) => {
+      const repoConfig = config.repos.find((r) => r.repo === repo)
+      if (!repoConfig) throw new Error(`No config for repo ${repo}`)
+      return createForgeAdapter(repoConfig, config)
+    },
   ) {
     this.leaseManager = new LeaseManager(db)
   }
@@ -101,6 +108,15 @@ export class CleanupEngine {
 
           // Branch deletion for merged PRs
           if (opts.mergedBranches && row.branch_name && row.pr_number && row.status === 'completed') {
+            const isMerged = await this.isPrMerged(repoConfig.repo, row.pr_number)
+            if (!isMerged) {
+              logger.info(
+                { repo: repoConfig.repo, prNumber: row.pr_number, branch: row.branch_name },
+                'Skipping branch deletion: PR is not merged on forge',
+              )
+              continue
+            }
+
             if (opts.dryRun) {
               logger.info({ branch: row.branch_name }, '[dry-run] Would delete branch')
             } else {
@@ -185,5 +201,28 @@ export class CleanupEngine {
     }
 
     return archived
+  }
+
+  private async isPrMerged(repo: string, prNumber: number): Promise<boolean> {
+    let forge: ForgeAdapter
+    try {
+      forge = this.forgeFactory(repo)
+    } catch (err) {
+      logger.warn({ repo, prNumber, err }, 'Cannot create forge adapter for merged-branch cleanup check')
+      return false
+    }
+
+    if (typeof forge.getPR !== 'function') {
+      logger.warn({ repo, prNumber }, 'Forge adapter does not support PR state lookup; skipping branch cleanup')
+      return false
+    }
+
+    try {
+      const pr = await forge.getPR(repo, prNumber)
+      return pr.state === 'merged'
+    } catch (err) {
+      logger.warn({ repo, prNumber, err }, 'Failed to verify PR merge status; skipping branch cleanup')
+      return false
+    }
   }
 }

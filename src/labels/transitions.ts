@@ -49,7 +49,8 @@ export function computeLabelMutation(
       remove = [config.running, config.reviewReady]
       break
     case 'queued':
-      // No label changes for queued
+      add = [...config.ready]
+      remove = [config.running, ...config.blocked, config.error, config.reviewReady, config.retry]
       break
   }
 

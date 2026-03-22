@@ -243,7 +243,7 @@ describe('executeLoop', () => {
     expect(lastPhase.result).toBe('failure')
   })
 
-  it('planner failure + stopOnPlannerFailure → error', async () => {
+  it('hard-fails when worker exits non-zero', async () => {
     const failedPlannerResult: WorkerTaskResult = {
       rawOutput: 'error',
       exitCode: 1,
@@ -261,13 +261,28 @@ describe('executeLoop', () => {
       reviewerAdapter: makeMockAdapter([makeReviewerResult()]),
     }
 
-    const result = await executeLoop(makeCtx(), deps)
+    await expect(executeLoop(makeCtx(), deps)).rejects.toThrow('planner worker exited with code 1')
+  })
 
-    // recordPhase sets currentPhase to 'plan' (the phase name for planner failure)
-    expect(result.currentPhase).toBe('plan')
-    expect(result.terminalStatus).toBe('error')
-    const lastPhase = result.phaseHistory[result.phaseHistory.length - 1]!
-    expect(lastPhase.result).toBe('failure')
+  it('hard-fails when worker times out', async () => {
+    const timedOutPlannerResult: WorkerTaskResult = {
+      rawOutput: '',
+      exitCode: 0,
+      timedOut: true,
+      durationMs: 1000,
+      parsed: null,
+      parseError: 'timeout',
+    }
+
+    const deps: LoopDependencies = {
+      db,
+      config: makeConfig(),
+      plannerAdapter: makeMockAdapter([timedOutPlannerResult]),
+      coderAdapter: makeMockAdapter([makeCoderResult()]),
+      reviewerAdapter: makeMockAdapter([makeReviewerResult()]),
+    }
+
+    await expect(executeLoop(makeCtx(), deps)).rejects.toThrow('planner worker timed out')
   })
 
   it('trivial issue skips planning', async () => {

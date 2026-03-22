@@ -1,7 +1,15 @@
 import type { ReviewerOutput, ReviewVerdict, ReviewFinding } from '../types.js'
 import { parseJsonFromOutput } from './extract.js'
+import { z } from 'zod'
 
 const VALID_VERDICTS = new Set<ReviewVerdict>(['APPROVED', 'CHANGES_REQUIRED', 'BLOCKED'])
+
+const ReviewerOutputSchema = z.object({
+  verdict: z.enum(['APPROVED', 'CHANGES_REQUIRED', 'BLOCKED']),
+  summary: z.string().optional().default(''),
+  findings: z.unknown().optional().transform(parseFindings),
+  definitionOfDoneCheck: z.unknown().optional().transform(parseDodCheck),
+}).passthrough()
 
 export function parseReviewerOutput(raw: string): { result: ReviewerOutput | null; error: string | null } {
   const parsed = parseJsonFromOutput(raw)
@@ -16,13 +24,15 @@ export function parseReviewerOutput(raw: string): { result: ReviewerOutput | nul
     return { result: null, error: `Invalid or missing verdict: "${verdict}". Expected: ${[...VALID_VERDICTS].join(', ')}` }
   }
 
+  const validation = ReviewerOutputSchema.safeParse(parsed)
+  if (!validation.success) {
+    const firstIssue = validation.error.issues[0]
+    const path = firstIssue?.path.join('.') || 'root'
+    return { result: null, error: `Reviewer output failed validation at ${path}` }
+  }
+
   return {
-    result: {
-      verdict: verdict as ReviewVerdict,
-      summary: (obj['summary'] as string) ?? '',
-      findings: parseFindings(obj['findings']),
-      definitionOfDoneCheck: parseDodCheck(obj['definitionOfDoneCheck']),
-    },
+    result: validation.data,
     error: null,
   }
 }

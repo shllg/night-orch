@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { ShutdownHandler } from '../../src/poller/shutdown.js'
 import { initDatabase } from '../../src/state/db.js'
+import { LeaseManager } from '../../src/state/leases.js'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -117,6 +118,19 @@ describe('ShutdownHandler', () => {
       count = undefined
     }
     expect(count === undefined || count.c === 0).toBe(true)
+    cleanup()
+  })
+
+  it('releases only poller-owned leases on shutdown', async () => {
+    const releaseSpy = vi.spyOn(LeaseManager.prototype, 'releaseAll')
+    const handler = new ShutdownHandler(db, 100)
+    const cleanup = handler.register()
+
+    process.emit('SIGINT')
+    await new Promise<void>((resolve) => setTimeout(resolve, 50))
+
+    expect(releaseSpy).toHaveBeenCalledWith('poller')
+    releaseSpy.mockRestore()
     cleanup()
   })
 

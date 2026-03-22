@@ -172,6 +172,16 @@ export class GitHubForgeAdapter implements ForgeAdapter {
     return this.mapPR(data[0]!)
   }
 
+  async getPR(repo: string, prNumber: number): Promise<ForgePR> {
+    const { owner, repo: repoName } = splitRepo(repo)
+    const { data } = await this.octokit.rest.pulls.get({
+      owner,
+      repo: repoName,
+      pull_number: prNumber,
+    })
+    return this.mapPR(data)
+  }
+
   async getPRDiff(repo: string, prNumber: number): Promise<string> {
     const { owner, repo: repoName } = splitRepo(repo)
     const { data } = await this.octokit.rest.pulls.get({

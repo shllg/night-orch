@@ -2,10 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { CleanupEngine } from '../../src/ops/cleanup.js'
 import { initDatabase } from '../../src/state/db.js'
 import type { Config } from '../../src/config/schema.js'
+import type { ForgeAdapter } from '../../src/forge/types.js'
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type Database from 'better-sqlite3'
+import { execa } from 'execa'
 
 vi.mock('../../src/utils/logger.js', () => ({
   logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -21,6 +23,34 @@ vi.mock('../../src/git/worktree.js', () => ({
     remove: mockRemove,
   }),
 }))
+
+vi.mock('execa', () => ({
+  execa: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+}))
+
+function makeMockForge(prState: 'open' | 'closed' | 'merged'): ForgeAdapter {
+  return {
+    listEligibleIssues: vi.fn(),
+    getIssue: vi.fn(),
+    addLabels: vi.fn(),
+    removeLabels: vi.fn(),
+    commentOnIssue: vi.fn(),
+    validateAuth: vi.fn(),
+    createPR: vi.fn(),
+    updatePR: vi.fn(),
+    findPRByBranch: vi.fn(),
+    getPR: vi.fn().mockResolvedValue({
+      number: 11,
+      title: 'PR',
+      body: '',
+      state: prState,
+      headBranch: 'orch/1-fix',
+      baseBranch: 'main',
+      url: 'https://example.test/pr/11',
+    }),
+    getPRDiff: vi.fn(),
+  }
+}
 
 function makeConfig(tmpDir: string): Config {
   const logsRoot = join(tmpDir, 'logs')
@@ -187,5 +217,31 @@ describe('CleanupEngine', () => {
     const result = await engine.run({ logArchiveAgeDays: 30 })
 
     expect(result.archivedLogs).toContain(oldLog)
+  })
+
+  it('deletes branch only when forge confirms merged PR', async () => {
+    const wtPath = join(tmpDir, 'wt', 'org-repo-merge')
+    insertRun(db, { worktree_path: wtPath, branch_name: 'orch/1-fix', pr_number: 11, status: 'completed' })
+    mockList.mockResolvedValue([{ path: wtPath, branchName: 'orch/1-fix', exists: true, isClean: true }])
+
+    const config = makeConfig(tmpDir)
+    const engine = new CleanupEngine(db, config, () => makeMockForge('merged'))
+    const result = await engine.run({ mergedBranches: true })
+
+    expect(result.removedBranches).toContain('orch/1-fix')
+    expect(execa).toHaveBeenCalledWith('git', ['branch', '-D', 'orch/1-fix'], { cwd: '/tmp/repo' })
+  })
+
+  it('skips branch deletion when PR is closed but not merged', async () => {
+    const wtPath = join(tmpDir, 'wt', 'org-repo-closed')
+    insertRun(db, { worktree_path: wtPath, branch_name: 'orch/1-fix', pr_number: 11, status: 'completed' })
+    mockList.mockResolvedValue([{ path: wtPath, branchName: 'orch/1-fix', exists: true, isClean: true }])
+
+    const config = makeConfig(tmpDir)
+    const engine = new CleanupEngine(db, config, () => makeMockForge('closed'))
+    const result = await engine.run({ mergedBranches: true })
+
+    expect(result.removedBranches).not.toContain('orch/1-fix')
+    expect(execa).not.toHaveBeenCalled()
   })
 })

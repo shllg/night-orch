@@ -293,6 +293,13 @@ async function runWorkerStep(
     deps.metrics?.observeAgentDuration(role, adapterType, (Date.now() - start) / 1000)
   } catch { /* best-effort */ }
 
+  if (result.timedOut) {
+    throw new Error(`${role} worker timed out after ${ctx.adjustedLimits.workerTimeoutSeconds}s`)
+  }
+  if (result.exitCode !== 0) {
+    throw new Error(`${role} worker exited with code ${result.exitCode}`)
+  }
+
   return result
 }
 

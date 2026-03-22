@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { RetryEngine } from '../../src/ops/retry.js'
+import { transitionLabels } from '../../src/labels/manager.js'
 import { initDatabase } from '../../src/state/db.js'
 import type { ForgeAdapter } from '../../src/forge/types.js'
 import type { Config } from '../../src/config/schema.js'
@@ -112,8 +113,15 @@ describe('RetryEngine', () => {
     expect(row.status).toBe('queued')
     expect(row.last_error).toBeNull()
     expect(row.ended_at).toBeNull()
-    expect(forge.removeLabels).toHaveBeenCalled()
-    expect(forge.addLabels).toHaveBeenCalled()
+    expect(transitionLabels).toHaveBeenCalledWith(
+      forge,
+      'org/repo',
+      1,
+      ['orch:blocked'],
+      'blocked',
+      'queued',
+      expect.any(Object),
+    )
   })
 
   it('error run → reset to queued, labels updated', async () => {
@@ -125,7 +133,15 @@ describe('RetryEngine', () => {
 
     const row = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as { status: string }
     expect(row.status).toBe('queued')
-    expect(forge.removeLabels).toHaveBeenCalled()
+    expect(transitionLabels).toHaveBeenCalledWith(
+      forge,
+      'org/repo',
+      1,
+      ['orch:error'],
+      'error',
+      'queued',
+      expect.any(Object),
+    )
   })
 
   it('review_ready run → reset to queued (for another pass)', async () => {
@@ -162,7 +178,13 @@ describe('RetryEngine', () => {
     const engine = new RetryEngine(db, makeConfig(), () => forge)
     await engine.retry('org/repo', 1, { immediate: true })
 
-    expect(pollOnce).toHaveBeenCalled()
+    expect(pollOnce).toHaveBeenCalledWith(
+      expect.any(Object),
+      db,
+      false,
+      undefined,
+      { repo: 'org/repo', issueNumber: 1 },
+    )
   })
 
   it('non-existent run → clear error message', async () => {

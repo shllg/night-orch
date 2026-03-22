@@ -5,23 +5,31 @@ export class CostTracker {
   constructor(private db: Database.Database) {}
 
   recordCost(runId: string, costUsd: number): void {
+    if (costUsd <= 0) return
+
     const today = new Date().toISOString().split('T')[0]!
+    const tx = this.db.transaction((id: string, date: string, amountUsd: number) => {
+      const row = this.db
+        .prepare('SELECT estimated_cost_usd FROM runs WHERE id = ?')
+        .get(id) as { estimated_cost_usd: number } | undefined
+      const firstCostForRun = (row?.estimated_cost_usd ?? 0) <= 0
 
-    // Update daily cost
-    this.db
-      .prepare(
-        `INSERT INTO daily_costs (date, total_cost_usd, run_count)
-         VALUES (?, ?, 1)
-         ON CONFLICT(date) DO UPDATE SET
-           total_cost_usd = total_cost_usd + ?,
-           run_count = run_count + 1`,
-      )
-      .run(today, costUsd, costUsd)
+      this.db
+        .prepare(
+          `INSERT INTO daily_costs (date, total_cost_usd, run_count)
+           VALUES (?, ?, ?)
+           ON CONFLICT(date) DO UPDATE SET
+             total_cost_usd = total_cost_usd + excluded.total_cost_usd,
+             run_count = run_count + excluded.run_count`,
+        )
+        .run(date, amountUsd, firstCostForRun ? 1 : 0)
 
-    // Update run cost
-    this.db
-      .prepare('UPDATE runs SET estimated_cost_usd = estimated_cost_usd + ? WHERE id = ?')
-      .run(costUsd, runId)
+      this.db
+        .prepare('UPDATE runs SET estimated_cost_usd = estimated_cost_usd + ? WHERE id = ?')
+        .run(amountUsd, id)
+    })
+
+    tx(runId, today, costUsd)
   }
 
   getDailyCost(): number {

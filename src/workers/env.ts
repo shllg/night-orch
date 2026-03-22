@@ -31,7 +31,7 @@ function isBlacklisted(key: string): boolean {
 
 /**
  * Build the env vars to pass to a worker process.
- * NEVER passes full process.env when minimalEnv is true.
+ * Always uses whitelist mode for process env vars.
  * NEVER passes GITHUB_TOKEN or any forge token regardless.
  */
 export function buildWorkerEnv(
@@ -40,19 +40,14 @@ export function buildWorkerEnv(
 ): Record<string, string> {
   const result: Record<string, string> = {}
 
-  if (profile.minimalEnv) {
-    // Whitelist mode: only safe vars
-    for (const key of ENV_WHITELIST) {
-      const val = process.env[key]
-      if (val !== undefined) result[key] = val
-    }
-  } else {
-    // Pass everything minus blacklist (NOT recommended)
-    for (const [key, val] of Object.entries(process.env)) {
-      if (val !== undefined && !isBlacklisted(key)) {
-        result[key] = val
-      }
-    }
+  // Whitelist mode: only safe vars
+  for (const key of ENV_WHITELIST) {
+    const val = process.env[key]
+    if (val !== undefined) result[key] = val
+  }
+
+  if (!profile.minimalEnv) {
+    logger.warn('workerProfile.minimalEnv=false is deprecated and ignored; using whitelist-only env mode')
   }
 
   // Add profile-specific env overrides (but check blacklist)

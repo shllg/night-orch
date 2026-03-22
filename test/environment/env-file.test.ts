@@ -102,4 +102,32 @@ describe('setupEnvFile', () => {
     // Only one set of markers
     expect(content.split('night-orch overrides').length - 1).toBe(2) // start + end
   })
+
+  it('tracks allocated ports in usedPorts for same-pass uniqueness', () => {
+    writeFileSync(join(repoPath, '.env'), '')
+    const usedPorts: number[] = []
+    const secondWorktreePath = join(tmpDir, 'worktree-2')
+    mkdirSync(secondWorktreePath, { recursive: true })
+
+    const first = setupEnvFile({
+      worktreePath,
+      repoLocalPath: repoPath,
+      copyFrom: '.env',
+      overrides: { PORT: '{auto:5101-5103}' },
+      overrideFiles: [],
+      usedPorts,
+    })
+    const second = setupEnvFile({
+      worktreePath: secondWorktreePath,
+      repoLocalPath: repoPath,
+      copyFrom: '.env',
+      overrides: { PORT: '{auto:5101-5103}' },
+      overrideFiles: [],
+      usedPorts,
+    })
+
+    expect(first.allocatedPort).toBe(5101)
+    expect(second.allocatedPort).toBe(5102)
+    expect(usedPorts).toEqual([5101, 5102])
+  })
 })

@@ -67,6 +67,9 @@ export interface ForgeAdapter {
   /** Find an open PR by head branch. */
   findPRByBranch(repo: string, branch: string): Promise<ForgePR | null>
 
+  /** Get a PR by number. */
+  getPR?(repo: string, prNumber: number): Promise<ForgePR>
+
   /** Get PR diff. */
   getPRDiff(repo: string, prNumber: number): Promise<string>
 }

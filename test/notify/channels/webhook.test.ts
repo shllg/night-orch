@@ -53,6 +53,7 @@ describe('WebhookChannel', () => {
       'https://hooks.example.com/notify',
       expect.objectContaining({
         method: 'POST',
+        redirect: 'error',
         headers: { 'Content-Type': 'application/json' },
       }),
     )

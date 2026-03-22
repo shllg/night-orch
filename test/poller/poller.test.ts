@@ -6,6 +6,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type Database from 'better-sqlite3'
+import { RunManager } from '../../src/state/runs.js'
 
 vi.mock('../../src/utils/logger.js', () => ({
   logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -187,5 +188,80 @@ describe('pollOnce', () => {
 
     const row = db.prepare('SELECT status FROM runs ORDER BY created_at DESC LIMIT 1').get() as { status: string }
     expect(row.status).toBe('blocked')
+  })
+
+  it('reuses existing queued run instead of creating a new run', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([{
+      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      triage: { level: 'standard', reason: '' },
+    }])
+    mockExecuteLoop.mockResolvedValue({
+      currentPhase: 'publish',
+      terminalStatus: 'blocked',
+    })
+
+    const runManager = new RunManager(db)
+    const existing = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 1,
+      issueNodeId: '',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    await pollOnce(config, db, false)
+
+    const rows = db.prepare('SELECT id FROM runs WHERE repo = ? AND issue_number = ?').all('org/repo', 1) as Array<{ id: string }>
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.id).toBe(existing.id)
+  })
+
+  it('returns error when publish fails', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([{
+      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      triage: { level: 'standard', reason: '' },
+    }])
+    mockExecuteLoop.mockResolvedValue({
+      currentPhase: 'completed',
+      terminalStatus: 'publish',
+    })
+    mockPublishPR.mockRejectedValueOnce(new Error('publish failed'))
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    const result = await pollOnce(config, db, false)
+
+    expect(result.processed).toBe(0)
+    expect(result.errors).toBe(1)
+    const row = db.prepare('SELECT status FROM runs ORDER BY created_at DESC LIMIT 1').get() as { status: string }
+    expect(row.status).toBe('error')
+  })
+
+  it('processes only the targeted issue when targetIssue is provided', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([
+      {
+        issue: { number: 1, nodeId: '', title: 'First', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        triage: { level: 'standard', reason: '' },
+      },
+      {
+        issue: { number: 2, nodeId: '', title: 'Second', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        triage: { level: 'standard', reason: '' },
+      },
+    ])
+    mockExecuteLoop.mockResolvedValue({
+      currentPhase: 'publish',
+      terminalStatus: 'blocked',
+    })
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    const result = await pollOnce(config, db, false, undefined, { repo: 'org/repo', issueNumber: 2 })
+
+    expect(result.processed).toBe(1)
+    expect(result.errors).toBe(0)
+    const run = db
+      .prepare('SELECT issue_number FROM runs ORDER BY created_at DESC LIMIT 1')
+      .get() as { issue_number: number }
+    expect(run.issue_number).toBe(2)
   })
 })

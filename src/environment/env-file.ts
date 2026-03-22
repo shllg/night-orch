@@ -45,6 +45,7 @@ export function setupEnvFile(params: {
     const portRange = parsePortRange(value)
     if (portRange) {
       allocatedPort = allocatePort(portRange, usedPorts)
+      usedPorts.push(allocatedPort)
       resolvedOverrides[key] = String(allocatedPort)
     } else {
       resolvedOverrides[key] = value

@@ -159,7 +159,11 @@ describe('MCP Tools', () => {
     })
 
     it('returns issues with orchestrator state', async () => {
-      const issues = [makeIssue(1, 'First'), makeIssue(2, 'Second'), makeIssue(3, 'Third')]
+      const issues = [
+        makeIssue(1, 'First', ['orch:ready']),
+        makeIssue(2, 'Second', ['orch:ready']),
+        makeIssue(3, 'Third', ['orch:ready']),
+      ]
       deps.forgeAdapters.set('org/repo', makeMockAdapter(issues))
 
       // Create a running run for issue 1
@@ -190,7 +194,7 @@ describe('MCP Tools', () => {
     })
 
     it('filters by state', async () => {
-      const issues = [makeIssue(1, 'First'), makeIssue(2, 'Second')]
+      const issues = [makeIssue(1, 'First', ['orch:ready']), makeIssue(2, 'Second', ['orch:ready'])]
       deps.forgeAdapters.set('org/repo', makeMockAdapter(issues))
 
       const runManager = new RunManager(db)
@@ -203,6 +207,28 @@ describe('MCP Tools', () => {
 
       expect(result.count).toBe(1)
       expect(result.issues[0]?.number).toBe(2)
+    })
+
+    it('applies local selector filters before returning issues', async () => {
+      deps.config.repos[0]!.selectors = {
+        includeLabelsAny: ['orch:ready'],
+        excludeLabelsAny: ['skip-me'],
+      }
+
+      const issues = [
+        makeIssue(1, 'Eligible', ['orch:ready']),
+        makeIssue(2, 'Excluded', ['orch:ready', 'skip-me']),
+        makeIssue(3, 'Missing include', ['bug']),
+      ]
+      deps.forgeAdapters.set('org/repo', makeMockAdapter(issues))
+
+      const result = await handleToolCall('night-orch-list-issues', { repo: 'org/repo' }, deps) as {
+        count: number
+        issues: Array<{ number: number }>
+      }
+
+      expect(result.count).toBe(1)
+      expect(result.issues[0]?.number).toBe(1)
     })
   })
 })

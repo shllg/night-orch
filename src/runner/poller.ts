@@ -5,7 +5,7 @@ import { createForgeAdapter } from '../forge/factory.js'
 import { LeaseManager } from '../state/leases.js'
 import { RunManager } from '../state/runs.js'
 import { discoverEligibleIssues } from '../discovery/discover.js'
-import { resolveRoles } from '../discovery/roles.js'
+import { resolveRoles, type ResolvedRoles } from '../discovery/roles.js'
 import { adjustLimitsForTriage } from '../discovery/triage.js'
 import { getOrPinSlug, buildWorktreePath } from '../git/slug.js'
 import { createWorktreeManager } from '../git/worktree.js'
@@ -33,6 +33,11 @@ export interface PollResult {
   errors: number
 }
 
+export interface PollTargetIssue {
+  repo: string
+  issueNumber: number
+}
+
 /**
  * Process one poll cycle: discover eligible issues, claim and process.
  * Serial processing — one issue at a time.
@@ -42,6 +47,7 @@ export async function pollOnce(
   db: Database.Database,
   dryRun: boolean,
   metrics?: MetricsService,
+  targetIssue?: PollTargetIssue,
 ): Promise<PollResult> {
   const leaseManager = new LeaseManager(db)
   const runManager = new RunManager(db)
@@ -62,10 +68,18 @@ export async function pollOnce(
   leaseManager.cleanExpired()
 
   for (const repoConfig of config.repos) {
+    if (targetIssue && repoConfig.repo !== targetIssue.repo) {
+      continue
+    }
+
     const forge = createForgeAdapter(repoConfig, config)
     const channels = createChannels(config.notifications, forge)
     const notifier = new NotificationDispatcher(channels, config.notifications.events)
-    const discovered = await discoverEligibleIssues(repoConfig, forge, leaseManager)
+    const usedPortsInPass: number[] = []
+    const discoveredAll = await discoverEligibleIssues(repoConfig, forge, leaseManager)
+    const discovered = targetIssue
+      ? discoveredAll.filter((d) => d.issue.number === targetIssue.issueNumber)
+      : discoveredAll
     try { metrics?.setEligibleIssues(repoConfig.repo, discovered.length) } catch { /* best-effort */ }
 
     if (discovered.length === 0) {
@@ -103,14 +117,21 @@ export async function pollOnce(
     const labelConfig = buildLabelConfig(repoConfig)
 
     try {
-      const roles = resolveRoles(first.issue.labels, repoConfig.defaults)
+      const resolvedRoles = resolveRoles(first.issue.labels, repoConfig.defaults)
+      const queuedRun = runManager.getLatestQueuedByIssue(repoConfig.repo, first.issue.number)
+      const roles = queuedRun
+        ? {
+            planner: coerceAgentName(queuedRun.planner, resolvedRoles.planner),
+            coder: coerceAgentName(queuedRun.coder, resolvedRoles.coder),
+            reviewer: coerceAgentName(queuedRun.reviewer, resolvedRoles.reviewer),
+          }
+        : resolvedRoles
       const slug = getOrPinSlug(db, repoConfig.repo, first.issue.number, first.issue.title)
       const branch = branchName(repoConfig.branchPrefix, first.issue.number, slug)
       const worktreePath = buildWorktreePath(config.storage.worktreeRoot, repoConfig.repo, first.issue.number)
       activeWorktreePath = worktreePath
 
-      // Create run
-      const run = runManager.create({
+      const run = queuedRun ?? runManager.create({
         repo: repoConfig.repo,
         issueNumber: first.issue.number,
         issueNodeId: first.issue.nodeId,
@@ -119,7 +140,14 @@ export async function pollOnce(
         reviewer: roles.reviewer,
       })
       runId = run.id
-      runManager.update(run.id, { status: 'running', branchName: branch, branchSlug: slug, worktreePath })
+      runManager.update(run.id, {
+        status: 'running',
+        branchName: branch,
+        branchSlug: slug,
+        worktreePath,
+        endedAt: null,
+        lastError: null,
+      })
 
       // Label transition
       await transitionLabels(forge, repoConfig.repo, first.issue.number, first.issue.labels, 'queued', 'running', labelConfig)
@@ -142,7 +170,7 @@ export async function pollOnce(
           issueNumber: first.issue.number,
           repoConfig,
           mode,
-          usedPorts: [],
+          usedPorts: usedPortsInPass,
         })
       }
 
@@ -357,7 +385,7 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
           metrics?.incNotifications(s.channel, s.success ? 'sent' : 'failed')
         }
       } catch { /* best-effort */ }
-      return 'processed'
+      return 'error'
     }
   }
 
@@ -408,6 +436,16 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
     }
   } catch { /* best-effort */ }
   return 'error'
+}
+
+function coerceAgentName(
+  value: string,
+  fallback: ResolvedRoles['planner'],
+): ResolvedRoles['planner'] {
+  if (value === 'claude' || value === 'codex') {
+    return value
+  }
+  return fallback
 }
 
 function makePayload(

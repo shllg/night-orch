@@ -62,6 +62,18 @@ describe('Checkpoint', () => {
       const row = db.prepare('SELECT current_phase FROM runs WHERE id = ?').get('run-test-1') as { current_phase: string }
       expect(row.current_phase).toBe('plan')
     })
+
+    it('records a phase_started event', () => {
+      checkpoint.phaseStarted('run-test-1', 'plan')
+
+      const event = db
+        .prepare('SELECT event_type, phase, data FROM events WHERE run_id = ? ORDER BY id DESC LIMIT 1')
+        .get('run-test-1') as { event_type: string; phase: string; data: string | null } | undefined
+
+      expect(event?.event_type).toBe('phase_started')
+      expect(event?.phase).toBe('plan')
+      expect(event?.data).toBeNull()
+    })
   })
 
   describe('phaseCompleted', () => {
@@ -72,6 +84,18 @@ describe('Checkpoint', () => {
       const row = db.prepare('SELECT phase_data FROM runs WHERE id = ?').get('run-test-1') as { phase_data: string }
       const data = JSON.parse(row.phase_data)
       expect(data.plan.plan.objective).toBe('Fix login')
+    })
+
+    it('records a phase_completed event with artifacts', () => {
+      checkpoint.phaseCompleted('run-test-1', 'plan', { plan: { objective: 'Fix login' } })
+
+      const event = db
+        .prepare('SELECT event_type, phase, data FROM events WHERE run_id = ? ORDER BY id DESC LIMIT 1')
+        .get('run-test-1') as { event_type: string; phase: string; data: string | null } | undefined
+
+      expect(event?.event_type).toBe('phase_completed')
+      expect(event?.phase).toBe('plan')
+      expect(JSON.parse(event?.data ?? '{}')).toEqual({ plan: { objective: 'Fix login' } })
     })
 
     it('merges artifacts from multiple phases', () => {

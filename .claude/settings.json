@@ -85,7 +85,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "mcp__codex__codex|Skill|Task",
+        "matcher": "mcp__codex__consult_codex|mcp__codex__consult_codex_batch|mcp__codex__consult_codex_with_stdin|Skill|Task",
         "hooks": [
           {
             "type": "command",

@@ -5,6 +5,7 @@ import { CostTracker } from '../../loop/cost.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { CleanupEngine } from '../../ops/cleanup.js'
 import { RetryEngine } from '../../ops/retry.js'
+import { filterEligible } from '../../discovery/selector.js'
 
 interface ToolDefinition {
   name: string
@@ -301,7 +302,10 @@ async function handleListIssues(
     throw new Error(`Repo not found in config: ${args.repo}`)
   }
 
-  const issues: ForgeIssue[] = await adapter.listEligibleIssues(repoConfig)
+  const issues: ForgeIssue[] = filterEligible(
+    await adapter.listEligibleIssues(repoConfig),
+    repoConfig.selectors,
+  )
   const runManager = new RunManager(deps.db)
   const filter = args.filter ?? 'all'
 

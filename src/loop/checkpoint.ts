@@ -8,6 +8,7 @@ export class Checkpoint {
     this.db
       .prepare("UPDATE runs SET current_phase = ?, updated_at = datetime('now') WHERE id = ?")
       .run(phase, runId)
+    this.recordEvent(runId, 'phase_started', phase, null)
   }
 
   phaseCompleted(runId: string, phase: LoopPhase, artifacts: Record<string, unknown>): void {
@@ -20,6 +21,7 @@ export class Checkpoint {
         "UPDATE runs SET current_phase = ?, phase_data = ?, updated_at = datetime('now') WHERE id = ?",
       )
       .run(phase, JSON.stringify(merged), runId)
+    this.recordEvent(runId, 'phase_completed', phase, artifacts)
   }
 
   getLastCompleted(runId: string): { phase: LoopPhase; artifacts: Record<string, unknown> } | null {
@@ -83,5 +85,31 @@ export class Checkpoint {
 
     if (!row?.phase_data) return {}
     return JSON.parse(row.phase_data) as Record<string, unknown>
+  }
+
+  private recordEvent(
+    runId: string,
+    eventType: string,
+    phase: LoopPhase,
+    data: Record<string, unknown> | null,
+  ): void {
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO events (run_id, repo, issue_number, event_type, phase, data, created_at)
+           SELECT ?, repo, issue_number, ?, ?, ?, datetime('now')
+           FROM runs
+           WHERE id = ?`,
+        )
+        .run(
+          runId,
+          eventType,
+          phase,
+          data ? JSON.stringify(data) : null,
+          runId,
+        )
+    } catch {
+      // Best-effort event recording: checkpoint persistence must still succeed.
+    }
   }
 }

@@ -130,6 +130,13 @@ export class RunManager {
     return row ? this.mapRow(row) : null
   }
 
+  getLatestQueuedByIssue(repo: string, issueNumber: number): RunRecord | null {
+    const row = this.db
+      .prepare("SELECT * FROM runs WHERE repo = ? AND issue_number = ? AND status = 'queued' ORDER BY created_at DESC LIMIT 1")
+      .get(repo, issueNumber) as RawRunRow | undefined
+    return row ? this.mapRow(row) : null
+  }
+
   getActive(): RunRecord[] {
     const rows = this.db
       .prepare("SELECT * FROM runs WHERE status IN ('queued', 'running') ORDER BY created_at")

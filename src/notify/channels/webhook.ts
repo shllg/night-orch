@@ -22,6 +22,7 @@ export class WebhookChannel implements NotificationChannel {
       return fetch(normalized.url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        redirect: 'error',
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(this.timeoutMs),
       })

@@ -1,6 +1,6 @@
 #!/bin/bash
 # .claude/hooks/review-marker.sh
-# PostToolUse hook for mcp__codex__codex, Skill, and Task.
+# PostToolUse hook for mcp__codex__consult_codex*, Skill, and Task.
 # Detects codex/gemini review calls and marks the review as completed
 # so the ExitPlanMode gate (review-gate.sh) can allow plan exit.
 

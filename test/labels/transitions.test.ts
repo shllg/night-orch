@@ -54,4 +54,18 @@ describe('computeLabelMutation', () => {
     expect(m.add).toEqual([])
     expect(m.remove).toEqual([])
   })
+
+  it('error → queued: add ready, remove terminal labels', () => {
+    const m = computeLabelMutation(
+      'error',
+      'queued',
+      ['orch:error', 'orch:running', 'orch:retry', 'orch:blocked'],
+      config,
+    )
+    expect(m.add).toEqual(['orch:ready'])
+    expect(m.remove).toContain('orch:error')
+    expect(m.remove).toContain('orch:running')
+    expect(m.remove).toContain('orch:blocked')
+    expect(m.remove).toContain('orch:retry')
+  })
 })

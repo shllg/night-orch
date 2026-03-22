@@ -3,7 +3,9 @@ import type { Config } from '../config/schema.js'
 import type { ForgeAdapter } from '../forge/types.js'
 import { createForgeAdapter } from '../forge/factory.js'
 import { buildLabelConfig } from '../labels/config.js'
+import { transitionLabels } from '../labels/manager.js'
 import { LeaseManager } from '../state/leases.js'
+import type { RunStatus } from '../state/runs.js'
 import { pollOnce } from '../runner/poller.js'
 import { logger } from '../utils/logger.js'
 
@@ -15,12 +17,12 @@ export interface RetryOptions {
 
 interface RunRow {
   id: string
-  status: string
+  status: RunStatus
   repo: string
   issue_number: number
 }
 
-const RETRYABLE_STATUSES = ['blocked', 'error', 'review_ready']
+const RETRYABLE_STATUSES: RunStatus[] = ['blocked', 'error', 'review_ready']
 
 export class RetryEngine {
   private leaseManager: LeaseManager
@@ -93,18 +95,18 @@ export class RetryEngine {
     this.leaseManager.release(repo, issueNumber)
 
     // Apply label mutations
-    await this.updateLabels(repo, issueNumber)
+    await this.updateLabels(repo, issueNumber, run.status)
 
     logger.info({ runId: run.id, repo, issue: issueNumber }, 'Run reset to queued for retry')
 
-    // If --immediate, start processing right away
+      // If --immediate, start processing right away
     if (opts.immediate) {
       logger.info({ runId: run.id }, 'Starting immediate retry')
-      await pollOnce(this.config, this.db, false)
+      await pollOnce(this.config, this.db, false, undefined, { repo, issueNumber })
     }
   }
 
-  private async updateLabels(repo: string, issueNumber: number): Promise<void> {
+  private async updateLabels(repo: string, issueNumber: number, fromStatus: RunStatus): Promise<void> {
     const repoConfig = this.config.repos.find((r) => r.repo === repo)
     if (!repoConfig) return
 
@@ -119,20 +121,7 @@ export class RetryEngine {
     try {
       const issue = await forge.getIssue(repo, issueNumber)
       const labelConfig = buildLabelConfig(repoConfig)
-
-      // Remove error/blocked labels, add ready label
-      const labelsToRemove = [labelConfig.error, ...labelConfig.blocked, labelConfig.reviewReady, labelConfig.running]
-      const currentLabels = issue.labels
-      const actualRemove = labelsToRemove.filter((l) => currentLabels.includes(l))
-      const readyLabel = labelConfig.ready[0]
-      const actualAdd = readyLabel && !currentLabels.includes(readyLabel) ? [readyLabel] : []
-
-      if (actualRemove.length > 0) {
-        await forge.removeLabels(repo, issueNumber, actualRemove)
-      }
-      if (actualAdd.length > 0) {
-        await forge.addLabels(repo, issueNumber, actualAdd)
-      }
+      await transitionLabels(forge, repo, issueNumber, issue.labels, fromStatus, 'queued', labelConfig)
     } catch (err) {
       logger.warn({ repo, issue: issueNumber, err }, 'Failed to update labels during retry')
     }

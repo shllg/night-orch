@@ -78,17 +78,30 @@ export async function setupEnvironment(params: {
   )
 
   // Start Docker Compose
-  await startDedicatedStack({
-    worktreePath,
-    composeFile: dedicated.compose.file,
-    services: dedicated.compose.services,
-    projectName,
-    healthcheck,
-  })
+  let stackStarted = false
+  try {
+    await startDedicatedStack({
+      worktreePath,
+      composeFile: dedicated.compose.file,
+      services: dedicated.compose.services,
+      projectName,
+      healthcheck,
+    })
+    stackStarted = true
 
-  // Run bootstrap commands
-  if (envConfig?.bootstrap) {
-    await runBootstrapCommands(worktreePath, envConfig.bootstrap, 'dedicated')
+    // Run bootstrap commands
+    if (envConfig?.bootstrap) {
+      await runBootstrapCommands(worktreePath, envConfig.bootstrap, 'dedicated')
+    }
+  } catch (err) {
+    if (stackStarted) {
+      try {
+        await stopDedicatedStack(worktreePath, dedicated.compose.file, projectName)
+      } catch (teardownErr) {
+        logger.warn({ projectName, err: teardownErr }, 'Failed to roll back dedicated environment after setup error')
+      }
+    }
+    throw err
   }
 
   return { mode: 'dedicated', allocatedPort, composeProjectName: projectName, envOverrides }

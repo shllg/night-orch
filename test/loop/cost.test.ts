@@ -51,6 +51,18 @@ describe('CostTracker', () => {
     expect(costTracker.getDailyCost()).toBe(2.0)
   })
 
+  it('increments daily run_count once per run', () => {
+    costTracker.recordCost(runId, 1.0)
+    costTracker.recordCost(runId, 0.5)
+
+    const today = new Date().toISOString().split('T')[0]
+    const row = db
+      .prepare('SELECT run_count FROM daily_costs WHERE date = ?')
+      .get(today) as { run_count: number } | undefined
+
+    expect(row?.run_count).toBe(1)
+  })
+
   it('detects per-run budget exceeded', () => {
     costTracker.recordCost(runId, 11.0)
     expect(costTracker.isOverBudget(runId, {

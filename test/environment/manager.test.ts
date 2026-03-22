@@ -249,6 +249,44 @@ describe('setupEnvironment', () => {
       expect.objectContaining({ projectName: 'night-7' }),
     )
   })
+
+  it('rolls back dedicated stack when bootstrap fails after startup', async () => {
+    const config = makeRepoConfig({
+      environment: {
+        defaultMode: 'dedicated',
+        dedicated: {
+          compose: {
+            file: 'docker-compose.yml',
+            services: ['db'],
+            projectName: 'orch-{issue}',
+          },
+          env: {
+            copyFrom: '.env',
+            overrides: {},
+            overrideFiles: [],
+          },
+          teardownOnComplete: true,
+        },
+        bootstrap: [{ command: 'pnpm install', when: 'dedicated' as const }],
+        cleanup: [],
+      },
+    })
+
+    vi.mocked(runBootstrapCommands).mockRejectedValueOnce(new Error('bootstrap failed'))
+
+    await expect(
+      setupEnvironment({
+        worktreePath: '/tmp/wt',
+        issueNumber: 42,
+        repoConfig: config,
+        mode: 'dedicated',
+        usedPorts: [],
+      }),
+    ).rejects.toThrow('bootstrap failed')
+
+    expect(startDedicatedStack).toHaveBeenCalled()
+    expect(stopDedicatedStack).toHaveBeenCalledWith('/tmp/wt', 'docker-compose.yml', 'orch-42')
+  })
 })
 
 describe('teardownEnvironment', () => {

@@ -75,7 +75,7 @@ export class ShutdownHandler {
     // Release all leases
     try {
       const leaseManager = new LeaseManager(this.db)
-      const cleared = leaseManager.releaseAll()
+      const cleared = leaseManager.releaseAll('poller')
       logger.debug({ cleared }, 'Released leases on shutdown')
     } catch {
       // DB may already be closed

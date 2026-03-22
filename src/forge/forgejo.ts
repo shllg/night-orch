@@ -185,6 +185,14 @@ export class ForgejoForgeAdapter implements ForgeAdapter {
     return match ? this.mapPR(match) : null
   }
 
+  async getPR(repo: string, prNumber: number): Promise<ForgePR> {
+    const { owner, repo: repoName } = splitRepo(repo)
+    const pr = await this.client.get<ForgejoPRData>(
+      `/repos/${owner}/${repoName}/pulls/${prNumber}`,
+    )
+    return this.mapPR(pr)
+  }
+
   async getPRDiff(repo: string, prNumber: number): Promise<string> {
     const { owner, repo: repoName } = splitRepo(repo)
     const url = `/repos/${owner}/${repoName}/pulls/${prNumber}.diff`
