@@ -3,10 +3,12 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { logger } from '../utils/logger.js'
 import { up as migration001 } from './migrations/001-initial.js'
+import { up as migration002 } from './migrations/002-placeholder.js'
 import { up as migration003 } from './migrations/003-mention-tracking.js'
 
 const MIGRATIONS = [
   { version: 1, name: '001-initial', up: migration001 },
+  { version: 2, name: '002-placeholder', up: migration002 },
   { version: 3, name: '003-mention-tracking', up: migration003 },
 ]
 

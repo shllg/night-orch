@@ -1,9 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { WebhookChannel } from '../../../src/notify/channels/webhook.js'
 import type { NotificationPayload } from '../../../src/notify/types.js'
+import { lookup } from 'node:dns/promises'
 
 vi.mock('../../../src/utils/logger.js', () => ({
   logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}))
+
+vi.mock('node:dns/promises', () => ({
+  lookup: vi.fn(),
 }))
 
 function makePayload(): NotificationPayload {
@@ -25,9 +30,11 @@ function makePayload(): NotificationPayload {
 
 describe('WebhookChannel', () => {
   const originalFetch = globalThis.fetch
+  const mockLookup = vi.mocked(lookup)
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mockLookup.mockResolvedValue([{ address: '198.51.100.10', family: 4 }] as never)
   })
 
   afterEach(() => {
@@ -117,5 +124,18 @@ describe('WebhookChannel', () => {
     const channel = new WebhookChannel('https://hooks.example.com')
     const result = await channel.validate()
     expect(result.valid).toBe(true)
+  })
+
+  it('validate rejects non-https URLs', async () => {
+    const channel = new WebhookChannel('http://hooks.example.com')
+    const result = await channel.validate()
+    expect(result.valid).toBe(false)
+  })
+
+  it('validate rejects URLs resolving to private IPs', async () => {
+    mockLookup.mockResolvedValueOnce([{ address: '10.0.0.5', family: 4 }] as never)
+    const channel = new WebhookChannel('https://hooks.example.com')
+    const result = await channel.validate()
+    expect(result.valid).toBe(false)
   })
 })

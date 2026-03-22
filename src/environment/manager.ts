@@ -4,6 +4,7 @@ import { startDedicatedStack, stopDedicatedStack } from './dedicated.js'
 import { setupEnvFile } from './env-file.js'
 import { runBootstrapCommands } from './bootstrap.js'
 import { logger } from '../utils/logger.js'
+import type { CommandSpec } from '../utils/command.js'
 
 export type EnvironmentMode = 'shared' | 'dedicated'
 
@@ -70,7 +71,11 @@ export async function setupEnvironment(params: {
   })
 
   // Resolve healthcheck port
-  const healthcheck = dedicated.healthcheck?.replace('{port}', String(allocatedPort ?? ''))
+  const healthcheck = substituteCommandToken(
+    dedicated.healthcheck,
+    '{port}',
+    String(allocatedPort ?? ''),
+  )
 
   // Start Docker Compose
   await startDedicatedStack({
@@ -125,4 +130,12 @@ function substituteIssue(overrides: Record<string, string>, issueNumber: number)
     result[key] = value.replace('{issue}', String(issueNumber))
   }
   return result
+}
+
+function substituteCommandToken(command: CommandSpec | undefined, token: string, value: string): CommandSpec | undefined {
+  if (!command) return undefined
+  if (Array.isArray(command)) {
+    return command.map((part) => part.replaceAll(token, value))
+  }
+  return command.replaceAll(token, value)
 }

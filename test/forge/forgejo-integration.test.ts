@@ -100,6 +100,8 @@ describe('Forgejo Integration', () => {
         .mockResolvedValueOnce(jsonResponse(REPO_LABELS))
         // addLabels POST (claim issue 1 with orch:running)
         .mockResolvedValueOnce(jsonResponse([]))
+        // removeLabels refreshes label cache after mutation
+        .mockResolvedValueOnce(jsonResponse(REPO_LABELS))
         // removeLabels DELETE (remove orch:ready from issue 1) — id 1
         .mockResolvedValueOnce(jsonResponse(undefined, 204))
         // createPR POST

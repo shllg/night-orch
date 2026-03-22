@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { buildWorkerEnv } from '../../src/workers/env.js'
+import { buildWorkerEnv, buildVerifierEnv } from '../../src/workers/env.js'
 import type { WorkerProfileInput } from '../../src/workers/types.js'
 
 const baseProfile: WorkerProfileInput = {
@@ -23,6 +23,10 @@ describe('buildWorkerEnv', () => {
     process.env['MY_SECRET'] = 'shhh'
     process.env['MY_PASSWORD'] = 'pass123'
     process.env['ANTHROPIC_API_KEY'] = 'sk-ant-xxx'
+    process.env['NPM_TOKEN'] = 'npm-secret'
+    process.env['DOCKER_AUTH_CONFIG'] = '{"auths":{}}'
+    process.env['GH_ENTERPRISE_TOKEN'] = 'gh-enterprise'
+    process.env['AWS_SECRET_ACCESS_KEY'] = 'aws-secret'
   })
 
   afterEach(() => {
@@ -51,6 +55,10 @@ describe('buildWorkerEnv', () => {
     const env = buildWorkerEnv({ ...baseProfile, minimalEnv: false })
     expect(env['MY_SECRET']).toBeUndefined()
     expect(env['MY_PASSWORD']).toBeUndefined()
+    expect(env['NPM_TOKEN']).toBeUndefined()
+    expect(env['DOCKER_AUTH_CONFIG']).toBeUndefined()
+    expect(env['GH_ENTERPRISE_TOKEN']).toBeUndefined()
+    expect(env['AWS_SECRET_ACCESS_KEY']).toBeUndefined()
   })
 
   it('adds profile env overrides (non-blacklisted)', () => {
@@ -70,5 +78,14 @@ describe('buildWorkerEnv', () => {
     expect(env['PATH']).toBeDefined()
     expect(env['GITHUB_TOKEN']).toBeUndefined()
     expect(env['GH_TOKEN']).toBeUndefined()
+  })
+
+  it('buildVerifierEnv returns strict whitelist without secrets', () => {
+    const env = buildVerifierEnv()
+    expect(env['PATH']).toBe('/usr/bin')
+    expect(env['HOME']).toBe('/home/test')
+    expect(env['GITHUB_TOKEN']).toBeUndefined()
+    expect(env['NPM_TOKEN']).toBeUndefined()
+    expect(env['DOCKER_AUTH_CONFIG']).toBeUndefined()
   })
 })

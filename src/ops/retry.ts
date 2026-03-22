@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3'
 import type { Config } from '../config/schema.js'
 import type { ForgeAdapter } from '../forge/types.js'
 import { createForgeAdapter } from '../forge/factory.js'
+import { buildLabelConfig } from '../labels/config.js'
 import { LeaseManager } from '../state/leases.js'
 import { pollOnce } from '../runner/poller.js'
 import { logger } from '../utils/logger.js'
@@ -117,14 +118,7 @@ export class RetryEngine {
 
     try {
       const issue = await forge.getIssue(repo, issueNumber)
-      const labelConfig = {
-        ready: repoConfig.labels.ready,
-        running: repoConfig.labels.running,
-        blocked: repoConfig.labels.blocked,
-        reviewReady: repoConfig.labels.reviewReady,
-        error: repoConfig.labels.error,
-        retry: repoConfig.labels.retry,
-      }
+      const labelConfig = buildLabelConfig(repoConfig)
 
       // Remove error/blocked labels, add ready label
       const labelsToRemove = [labelConfig.error, ...labelConfig.blocked, labelConfig.reviewReady, labelConfig.running]

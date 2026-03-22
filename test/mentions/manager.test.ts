@@ -83,6 +83,7 @@ function makeCtx(labels: string[] = [], prMentions: string[] = []): RunContext {
     totalAgentPasses: 0,
     estimatedCostUsd: 0,
     currentPhase: 'publish',
+    terminalStatus: 'publish',
     phaseHistory: [],
     dryRun: false,
   }

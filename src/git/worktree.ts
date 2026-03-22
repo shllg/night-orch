@@ -168,10 +168,14 @@ async function mergeBase(worktreePath: string, baseBranch: string): Promise<void
   try {
     await execa('git', ['merge', `origin/${baseBranch}`, '--no-edit'], { cwd: worktreePath })
     logger.debug({ worktreePath, baseBranch }, 'Merged base branch changes')
-  } catch (err) {
+  } catch {
     // If merge conflict, abort and let caller handle
     logger.warn({ worktreePath, baseBranch }, 'Merge conflict with base branch')
-    await execa('git', ['merge', '--abort'], { cwd: worktreePath }).catch(() => {})
+    try {
+      await execa('git', ['merge', '--abort'], { cwd: worktreePath })
+    } catch (abortErr) {
+      logger.debug({ worktreePath, err: abortErr }, 'Failed to abort merge after conflict')
+    }
     throw new Error(`Merge conflict: worktree at ${worktreePath} conflicts with origin/${baseBranch}`)
   }
 }

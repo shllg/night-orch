@@ -3,6 +3,7 @@ import type { ForgeAdapter } from '../forge/types.js'
 import type { NotificationChannel } from './types.js'
 import { ConsoleChannel } from './channels/console.js'
 import { WebhookChannel } from './channels/webhook.js'
+import { SmtpChannel } from './channels/smtp.js'
 import { GitHubCommentChannel } from './channels/github-comment.js'
 import { logger } from '../utils/logger.js'
 
@@ -26,6 +27,16 @@ export function createChannels(
         channels.push(new WebhookChannel(url))
         break
       }
+      case 'smtp':
+        channels.push(new SmtpChannel(
+          ch.host,
+          ch.port,
+          ch.from,
+          ch.to,
+          ch.userEnv,
+          ch.passEnv,
+        ))
+        break
       default:
         // Exhaustive check — all known types handled above
         break

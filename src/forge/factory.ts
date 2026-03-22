@@ -17,7 +17,7 @@ export function createForgeAdapter(repoConfig: RepoConfig, globalConfig: Config)
       return new GitHubForgeAdapter(token, apiBaseUrl)
     }
     case 'forgejo': {
-      const tokenEnv = repoConfig.tokenEnv ?? globalConfig.github.tokenEnv
+      const tokenEnv = repoConfig.tokenEnv ?? 'FORGEJO_TOKEN'
       const token = process.env[tokenEnv]
       if (!token) {
         throw new Error(`Environment variable ${tokenEnv} is not set (required for Forgejo adapter)`)

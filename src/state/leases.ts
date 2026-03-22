@@ -48,4 +48,18 @@ export class LeaseManager {
       .run(new Date().toISOString())
     return result.changes
   }
+
+  /** Release all leases (or those owned by a specific owner). Returns count removed. */
+  releaseAll(owner?: string): number {
+    if (owner) {
+      const result = this.db
+        .prepare('DELETE FROM leases WHERE lease_owner = ?')
+        .run(owner)
+      return result.changes
+    }
+    const result = this.db
+      .prepare('DELETE FROM leases')
+      .run()
+    return result.changes
+  }
 }

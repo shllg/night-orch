@@ -3,18 +3,30 @@ import { initDatabase } from '../../state/db.js'
 import { startMCPStdio } from '../../mcp/server.js'
 import { createForgeAdapter } from '../../forge/factory.js'
 import { createMetricsService } from '../../metrics/service.js'
-import { logger } from '../../utils/logger.js'
+import { createLogger, logger } from '../../utils/logger.js'
+import type { ForgeAdapter } from '../../forge/types.js'
 
 interface GlobalOpts {
   config?: string
+  trustWorkspace?: boolean
   dryRun?: boolean
   logLevel?: string
 }
 
+const mcpLogger = createLogger(process.env['LOG_LEVEL'] ?? 'info', {
+  destination: 'stderr',
+  pretty: false,
+})
+
 export async function mcpCommand(globalOpts?: GlobalOpts): Promise<void> {
+  // In stdio mode stdout is reserved for JSON-RPC frames.
+  logger.level = 'silent'
+
   let config
   try {
-    const configPath = resolveConfigPath(globalOpts?.config)
+    const configPath = resolveConfigPath(globalOpts?.config, {
+      trustWorkspace: globalOpts?.trustWorkspace ?? false,
+    })
     config = loadConfig(configPath)
   } catch (err) {
     if (err instanceof ConfigError) {
@@ -34,17 +46,17 @@ export async function mcpCommand(globalOpts?: GlobalOpts): Promise<void> {
     await metrics.start()
   }
 
-  const forgeAdapters = new Map<string, import('../../forge/types.js').ForgeAdapter>()
+  const forgeAdapters = new Map<string, ForgeAdapter>()
   for (const repo of config.repos) {
     try {
       forgeAdapters.set(repo.repo, createForgeAdapter(repo, config))
     } catch (err) {
-      logger.warn({ repo: repo.repo, err }, 'Failed to create forge adapter — list-issues will be unavailable for this repo')
+      mcpLogger.warn({ repo: repo.repo, err }, 'Failed to create forge adapter — list-issues will be unavailable for this repo')
     }
   }
 
   // All logging goes to stderr when in MCP stdio mode
-  logger.info('Starting MCP server')
+  mcpLogger.info('Starting MCP server')
 
   await startMCPStdio({ db, config, forgeAdapters, poller: null, metrics })
 }

@@ -6,11 +6,13 @@ import { loadConfig, resolveConfigPath, ConfigError } from '../../config/loader.
 import { initDatabase } from '../../state/db.js'
 import { logger } from '../../utils/logger.js'
 import type { Config } from '../../config/schema.js'
+import { parseCommandSpec } from '../../utils/command.js'
 
 const execFileAsync = promisify(execFile)
 
 interface GlobalOpts {
   config?: string
+  trustWorkspace?: boolean
   dryRun?: boolean
   logLevel?: string
 }
@@ -28,7 +30,9 @@ export async function doctorCommand(globalOpts?: GlobalOpts): Promise<void> {
   // 1. Config
   let config: Config | null = null
   try {
-    const configPath = resolveConfigPath(globalOpts?.config)
+    const configPath = resolveConfigPath(globalOpts?.config, {
+      trustWorkspace: globalOpts?.trustWorkspace ?? false,
+    })
     config = loadConfig(configPath)
     results.push({ name: 'Config', passed: true, message: `Loaded from ${configPath}` })
   } catch (err) {
@@ -66,7 +70,7 @@ export async function doctorCommand(globalOpts?: GlobalOpts): Promise<void> {
   const { createForgeAdapter } = await import('../../forge/factory.js')
   const checkedTokens = new Set<string>()
   for (const repo of config.repos) {
-    const repoTokenEnv = repo.tokenEnv ?? config.github.tokenEnv
+    const repoTokenEnv = repo.tokenEnv ?? (repo.forge === 'forgejo' ? 'FORGEJO_TOKEN' : config.github.tokenEnv)
     const label = `${repo.forge} auth (${repo.repo})`
 
     if (!process.env[repoTokenEnv]) {
@@ -154,14 +158,20 @@ export async function doctorCommand(globalOpts?: GlobalOpts): Promise<void> {
   // 8. Verify commands
   for (const repo of config.repos) {
     for (const verifyCmd of repo.verify) {
-      const binary = verifyCmd.split(/\s+/)[0]
-      if (binary) {
+      try {
+        const { binary } = parseCommandSpec(verifyCmd)
         const found = await checkBinary(binary)
         if (found) {
           results.push({ name: `Verify: ${binary}`, passed: true, message: 'Found' })
         } else {
           results.push({ name: `Verify: ${binary}`, passed: false, message: 'Not found on PATH' })
         }
+      } catch (err) {
+        results.push({
+          name: 'Verify command',
+          passed: false,
+          message: `Invalid command: ${(err as Error).message}`,
+        })
       }
     }
   }

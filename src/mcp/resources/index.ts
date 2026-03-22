@@ -95,7 +95,7 @@ async function readLogsResource(runId: string, deps: MCPDependencies): Promise<u
       id: e.id,
       type: e.event_type,
       phase: e.phase,
-      data: e.data ? JSON.parse(e.data) : null,
+      data: parseEventData(e.data),
       at: e.created_at,
     })),
   }
@@ -138,4 +138,13 @@ async function readMetricsResource(deps: MCPDependencies): Promise<unknown> {
   const registry = deps.metrics.getRegistry()
   const metricsJson = await registry.getMetricsAsJSON()
   return { enabled: true, metrics: metricsJson }
+}
+
+function parseEventData(data: string | null): unknown {
+  if (!data) return null
+  try {
+    return JSON.parse(data)
+  } catch {
+    return { raw: data, parseError: 'Invalid JSON in stored event payload' }
+  }
 }

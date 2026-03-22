@@ -16,7 +16,7 @@ export function parsePlannerOutput(raw: string): { result: PlannerOutput | null;
 
   return {
     result: {
-      objective: obj['objective'] as string,
+      objective: obj['objective'],
       assumptions: asStringArray(obj['assumptions']),
       filesToChange: asStringArray(obj['filesToChange']),
       steps: asSteps(obj['steps']),

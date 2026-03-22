@@ -3,26 +3,28 @@ import { execWithTimeout } from './timeout.js'
 import { parsePlannerOutput } from './parsers/planner.js'
 import { parseCoderOutput } from './parsers/coder.js'
 import { parseReviewerOutput } from './parsers/reviewer.js'
+import { buildWorkerCommand } from './command.js'
 import { logger } from '../utils/logger.js'
 
 export class ClaudeWorkerAdapter implements WorkerAdapter {
   async runTask(input: WorkerTaskInput): Promise<WorkerTaskResult> {
-    const args = [
+    const taskArgs = [
       ...input.profile.args,
-      input.prompt,
       '--output-format', 'json',
       '--max-turns', '50',
     ]
+    const { command, args } = buildWorkerCommand(input.profile, taskArgs)
 
     logger.info(
       { role: input.role, cwd: input.worktreePath, timeout: input.timeoutSeconds },
       'Running Claude worker',
     )
 
-    const result = await execWithTimeout(input.profile.command, args, {
+    const result = await execWithTimeout(command, args, {
       cwd: input.worktreePath,
       env: input.env,
       timeoutMs: input.timeoutSeconds * 1000,
+      stdin: input.prompt,
     })
 
     if (result.timedOut) {

@@ -67,6 +67,7 @@ export class Checkpoint {
     return {
       ...baseCtx,
       currentPhase: row.current_phase as LoopPhase,
+      terminalStatus: 'running',
       iteration: row.iteration_count ?? baseCtx.iteration,
       estimatedCostUsd: row.estimated_cost_usd ?? baseCtx.estimatedCostUsd,
       plan: (planArtifacts?.plan as PlannerOutput) ?? baseCtx.plan,

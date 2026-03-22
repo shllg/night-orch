@@ -5,6 +5,7 @@ import { logger } from '../../utils/logger.js'
 
 interface GlobalOpts {
   config?: string
+  trustWorkspace?: boolean
   dryRun?: boolean
   logLevel?: string
 }
@@ -14,7 +15,9 @@ export async function runOnceCommand(globalOpts?: GlobalOpts): Promise<void> {
 
   let config
   try {
-    const configPath = resolveConfigPath(globalOpts?.config)
+    const configPath = resolveConfigPath(globalOpts?.config, {
+      trustWorkspace: globalOpts?.trustWorkspace ?? false,
+    })
     config = loadConfig(configPath)
   } catch (err) {
     if (err instanceof ConfigError) {

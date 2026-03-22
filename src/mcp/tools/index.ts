@@ -70,6 +70,7 @@ export function registerTools(): ToolDefinition[] {
           repo: { type: 'string', description: 'Repository (owner/name)' },
           issueNumber: { type: 'number', description: 'Issue number to retry' },
           resetPlan: { type: 'boolean', description: 'Re-run planner instead of reusing existing plan', default: false },
+          authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
         },
         required: ['repo', 'issueNumber'],
       },
@@ -81,6 +82,7 @@ export function registerTools(): ToolDefinition[] {
         type: 'object',
         properties: {
           dryRun: { type: 'boolean', description: 'Preview changes without applying', default: false },
+          authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
         },
       },
     },
@@ -91,6 +93,7 @@ export function registerTools(): ToolDefinition[] {
         type: 'object',
         properties: {
           dryRun: { type: 'boolean', description: 'Preview changes without applying', default: false },
+          authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
         },
       },
     },
@@ -124,11 +127,11 @@ export async function handleToolCall(
     case 'night-orch-cost-report':
       return handleCostReport(args as { days?: number }, deps)
     case 'night-orch-retry':
-      return handleRetry(args as { repo: string; issueNumber: number; resetPlan?: boolean }, deps)
+      return handleRetry(args as { repo: string; issueNumber: number; resetPlan?: boolean; authToken?: string }, deps)
     case 'night-orch-sync':
-      return handleSync(args as { dryRun?: boolean }, deps)
+      return handleSync(args as { dryRun?: boolean; authToken?: string }, deps)
     case 'night-orch-cleanup':
-      return handleCleanup(args as { dryRun?: boolean }, deps)
+      return handleCleanup(args as { dryRun?: boolean; authToken?: string }, deps)
     case 'night-orch-list-issues':
       return handleListIssues(args as { repo: string; filter?: string }, deps)
     default:
@@ -188,7 +191,7 @@ async function handleRunDetail(args: { runId: string }, deps: MCPDependencies): 
     events: events.map((e) => ({
       type: e.event_type,
       phase: e.phase,
-      data: e.data ? JSON.parse(e.data) : null,
+      data: parseEventData(e.data),
       at: e.created_at,
     })),
   }
@@ -259,9 +262,10 @@ async function handleCostReport(args: { days?: number }, deps: MCPDependencies):
 }
 
 async function handleRetry(
-  args: { repo: string; issueNumber: number; resetPlan?: boolean },
+  args: { repo: string; issueNumber: number; resetPlan?: boolean; authToken?: string },
   deps: MCPDependencies,
 ): Promise<unknown> {
+  assertMcpMutationAuth(args.authToken, deps)
   const engine = new RetryEngine(deps.db, deps.config)
   await engine.retry(args.repo, args.issueNumber, {
     resetPlan: args.resetPlan ?? false,
@@ -271,12 +275,14 @@ async function handleRetry(
   return { success: true, message: `Retry queued for ${args.repo}#${args.issueNumber}` }
 }
 
-async function handleSync(args: { dryRun?: boolean }, deps: MCPDependencies): Promise<unknown> {
+async function handleSync(args: { dryRun?: boolean; authToken?: string }, deps: MCPDependencies): Promise<unknown> {
+  assertMcpMutationAuth(args.authToken, deps)
   const engine = new SyncEngine(deps.db, deps.config)
   return engine.reconcile(args.dryRun ?? false)
 }
 
-async function handleCleanup(args: { dryRun?: boolean }, deps: MCPDependencies): Promise<unknown> {
+async function handleCleanup(args: { dryRun?: boolean; authToken?: string }, deps: MCPDependencies): Promise<unknown> {
+  assertMcpMutationAuth(args.authToken, deps)
   const engine = new CleanupEngine(deps.db, deps.config)
   return engine.run({ dryRun: args.dryRun ?? false })
 }
@@ -329,5 +335,26 @@ async function handleListIssues(
     repo: args.repo,
     count: filtered.length,
     issues: filtered,
+  }
+}
+
+function parseEventData(data: string | null): unknown {
+  if (!data) return null
+  try {
+    return JSON.parse(data)
+  } catch {
+    return { raw: data, parseError: 'Invalid JSON in stored event payload' }
+  }
+}
+
+function assertMcpMutationAuth(providedToken: string | undefined, deps: MCPDependencies): void {
+  const tokenEnv = deps.config.mcp.authTokenEnv
+  if (!tokenEnv) return
+  const expectedToken = process.env[tokenEnv]
+  if (!expectedToken) {
+    throw new Error(`MCP auth token env var ${tokenEnv} is configured but not set`)
+  }
+  if (!providedToken || providedToken !== expectedToken) {
+    throw new Error('Unauthorized: missing or invalid MCP auth token')
   }
 }

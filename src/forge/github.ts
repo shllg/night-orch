@@ -28,6 +28,26 @@ export class GitHubForgeAdapter implements ForgeAdapter {
     const seenNumbers = new Set<number>()
     const allIssues: ForgeIssue[] = []
 
+    if (includeLabels.length === 0) {
+      const issues = await this.octokit.paginate(
+        this.octokit.rest.issues.listForRepo,
+        {
+          owner,
+          repo,
+          state: 'open',
+          per_page: 100,
+        },
+      )
+      for (const issue of issues) {
+        if (issue.pull_request) continue
+        if (seenNumbers.has(issue.number)) continue
+        seenNumbers.add(issue.number)
+        allIssues.push(this.mapIssue(issue, repoConfig.repo))
+      }
+      await this.checkRateLimit()
+      return allIssues
+    }
+
     for (const label of includeLabels) {
       const issues = await this.octokit.paginate(
         this.octokit.rest.issues.listForRepo,
@@ -50,7 +70,7 @@ export class GitHubForgeAdapter implements ForgeAdapter {
       }
 
       // Check rate limit
-      this.checkRateLimit()
+      await this.checkRateLimit()
     }
 
     return allIssues

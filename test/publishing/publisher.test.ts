@@ -86,6 +86,7 @@ function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
     totalAgentPasses: 3,
     estimatedCostUsd: 0,
     currentPhase: 'publish',
+    terminalStatus: 'publish',
     phaseHistory: [],
     dryRun: false,
     ...overrides,

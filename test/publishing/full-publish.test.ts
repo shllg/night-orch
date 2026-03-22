@@ -91,6 +91,7 @@ function makeCtx(): RunContext {
     totalAgentPasses: 3,
     estimatedCostUsd: 0.5,
     currentPhase: 'publish',
+    terminalStatus: 'publish',
     phaseHistory: [],
     dryRun: false,
   }

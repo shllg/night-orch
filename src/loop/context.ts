@@ -16,11 +16,13 @@ export function recordPhase(
   phase: LoopPhase,
   result: 'success' | 'failure' | 'skipped',
   artifacts: Record<string, unknown> = {},
+  startedAt?: string,
 ): RunContext {
+  const completedAt = new Date().toISOString()
   const record: PhaseRecord = {
     phase,
-    startedAt: new Date().toISOString(),
-    completedAt: new Date().toISOString(),
+    startedAt: startedAt ?? completedAt,
+    completedAt,
     result,
     artifacts,
   }

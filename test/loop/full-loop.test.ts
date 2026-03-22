@@ -26,6 +26,7 @@ vi.mock('../../src/utils/logger.js', () => ({
 
 vi.mock('../../src/workers/env.js', () => ({
   buildWorkerEnv: vi.fn().mockReturnValue({ PATH: '/usr/bin' }),
+  buildVerifierEnv: vi.fn().mockReturnValue({ PATH: '/usr/bin' }),
 }))
 
 function makeConfig(): Config {
@@ -66,7 +67,7 @@ function makeCtx(): RunContext {
       branchPrefix: 'orch',
       labels: { ready: ['orch:ready'], running: 'orch:running', blocked: ['orch:blocked'], reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry' },
       defaults: { planner: 'claude', coder: 'claude', reviewer: 'claude', doneMode: 'pr-ready', notifyPriority: 'normal', prMentions: [] },
-      verify: [],
+      verify: ['pnpm test'],
       selectors: { includeLabelsAny: [], excludeLabelsAny: [] },
       agents: { claude: 'claude' },
     } as RunContext['repoConfig'],
@@ -84,6 +85,7 @@ function makeCtx(): RunContext {
     totalAgentPasses: 0,
     estimatedCostUsd: 0,
     currentPhase: 'plan',
+    terminalStatus: 'running',
     phaseHistory: [],
     dryRun: false,
   }
@@ -153,6 +155,7 @@ describe('Full loop integration', () => {
 
     // recordPhase sets currentPhase to 'publish' (the phase name)
     expect(result.currentPhase).toBe('publish')
+    expect(result.terminalStatus).toBe('publish')
     expect(result.plan).not.toBeNull()
     expect(result.codeResult).not.toBeNull()
     expect(result.reviewResult).not.toBeNull()

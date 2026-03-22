@@ -8,6 +8,7 @@ import { logger } from '../../utils/logger.js'
 
 interface GlobalOpts {
   config?: string
+  trustWorkspace?: boolean
   dryRun?: boolean
   logLevel?: string
 }
@@ -17,14 +18,16 @@ export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
 
   let config
   try {
-    const configPath = resolveConfigPath(globalOpts?.config)
+    const configPath = resolveConfigPath(globalOpts?.config, {
+      trustWorkspace: globalOpts?.trustWorkspace ?? false,
+    })
     config = loadConfig(configPath)
   } catch (err) {
     if (err instanceof ConfigError) {
-      console.error(`Config error: ${err.message}`)
-      if (err.details) err.details.forEach((d) => console.error(d))
+      process.stderr.write(`Config error: ${err.message}\n`)
+      if (err.details) err.details.forEach((d) => process.stderr.write(`${d}\n`))
     } else {
-      console.error((err as Error).message)
+      process.stderr.write(`${(err as Error).message}\n`)
     }
     process.exitCode = 1
     return

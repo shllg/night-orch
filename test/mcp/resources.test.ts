@@ -18,7 +18,7 @@ function makeMinimalConfig() {
     security: { maxChangedFiles: 50, maxChangedLines: 5000, maxDailyCostUsd: 50, maxCostPerRunUsd: 10 },
     workerProfiles: {},
     metrics: { enabled: false, port: 9090, host: '127.0.0.1' },
-    mcp: { enabled: true, transport: 'stdio' as const },
+    mcp: { enabled: true, transport: 'stdio' as const, authTokenEnv: null },
     repos: [{ repo: 'org/repo', forge: 'github' as const, localPath: '/tmp/repo', baseBranch: 'main', branchPrefix: 'orch', labels: { ready: ['orch:ready'], running: 'orch:running', blocked: ['orch:blocked', 'orch:needs-human'], reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry' }, defaults: { planner: 'claude' as const, coder: 'claude' as const, reviewer: 'claude' as const, doneMode: 'pr-ready' as const, notifyPriority: 'normal' as const, prMentions: [] }, verify: [], selectors: { includeLabelsAny: ['orch:ready'], excludeLabelsAny: [] }, agents: {} }],
   }
 }
@@ -90,6 +90,19 @@ describe('MCP Resources', () => {
     const result = await handleResourceRead('night-orch://logs/run-test', deps) as { runId: string; events: unknown[] }
     expect(result.runId).toBe('run-test')
     expect(result.events).toEqual([])
+  })
+
+  it('logs resource tolerates malformed event JSON', async () => {
+    db.prepare(
+      "INSERT INTO events (run_id, event_type, data, created_at) VALUES ('run-test', 'step', '{bad json', datetime('now'))",
+    ).run()
+    const result = await handleResourceRead('night-orch://logs/run-test', deps) as {
+      events: Array<{ data: unknown }>
+    }
+    expect(result.events).toHaveLength(1)
+    const payload = result.events[0]!.data as { parseError?: string; raw?: string }
+    expect(payload.parseError).toContain('Invalid JSON')
+    expect(payload.raw).toContain('{bad json')
   })
 
   it('unknown resource throws', async () => {

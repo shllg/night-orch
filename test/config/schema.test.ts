@@ -132,4 +132,14 @@ describe('ConfigSchema', () => {
       expect(result.data.security.maxCostPerRunUsd).toBe(10)
     }
   })
+
+  it('excludes orch:needs-human by default', () => {
+    const minimal = {
+      version: 1,
+      github: { tokenEnv: 'GITHUB_TOKEN' },
+      repos: [{ repo: 'org/repo', localPath: '/tmp/repo' }],
+    }
+    const result = ConfigSchema.parse(minimal)
+    expect(result.repos[0]!.selectors.excludeLabelsAny).toContain('orch:needs-human')
+  })
 })

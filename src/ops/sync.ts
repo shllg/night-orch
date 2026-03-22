@@ -3,7 +3,10 @@ import type { Config } from '../config/schema.js'
 import type { ForgeAdapter } from '../forge/types.js'
 import { createForgeAdapter } from '../forge/factory.js'
 import { LeaseManager } from '../state/leases.js'
+import type { RunStatus } from '../state/runs.js'
 import { transitionLabels } from '../labels/manager.js'
+import { buildLabelConfig } from '../labels/config.js'
+import { computeLabelMutation } from '../labels/transitions.js'
 import { createWorktreeManager } from '../git/worktree.js'
 import { logger } from '../utils/logger.js'
 
@@ -145,7 +148,9 @@ export class SyncEngine {
     if (!dryRun) {
       this.db.prepare("UPDATE runs SET status = 'completed', ended_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(run.id)
       this.leaseManager.release(run.repo, run.issue_number)
-      this.updateLabels(forge, run, 'completed').catch(() => {})
+      this.updateLabels(forge, run, 'completed').catch((err) => {
+        logger.debug({ repo: run.repo, issue: run.issue_number, err }, 'Label update failed while marking run completed')
+      })
     }
     logger.info({ runId: run.id, repo: run.repo, issue: run.issue_number }, reason)
     return { repo: run.repo, issueNumber: run.issue_number, action: 'completed', reason, prNumber: run.pr_number }
@@ -155,7 +160,9 @@ export class SyncEngine {
     if (!dryRun) {
       this.db.prepare("UPDATE runs SET status = 'completed', ended_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(run.id)
       this.leaseManager.release(run.repo, run.issue_number)
-      this.updateLabels(forge, run, 'completed').catch(() => {})
+      this.updateLabels(forge, run, 'completed').catch((err) => {
+        logger.debug({ repo: run.repo, issue: run.issue_number, err }, 'Label update failed while marking run closed')
+      })
     }
     logger.info({ runId: run.id, repo: run.repo, issue: run.issue_number }, reason)
     return { repo: run.repo, issueNumber: run.issue_number, action: 'closed', reason, prNumber: run.pr_number }
@@ -165,10 +172,12 @@ export class SyncEngine {
     if (!dryRun) {
       this.db.prepare("UPDATE runs SET status = 'review_ready', updated_at = datetime('now') WHERE id = ?").run(run.id)
       this.leaseManager.release(run.repo, run.issue_number)
-      this.updateLabels(forge, run, 'review_ready').catch(() => {})
+      this.updateLabels(forge, run, 'review_ready').catch((err) => {
+        logger.debug({ repo: run.repo, issue: run.issue_number, err }, 'Label update failed while marking run review_ready')
+      })
     }
     logger.info({ runId: run.id, repo: run.repo, issue: run.issue_number }, reason)
-    return { repo: run.repo, issueNumber: run.issue_number, action: 'completed', reason, prNumber: run.pr_number }
+    return { repo: run.repo, issueNumber: run.issue_number, action: 'label_corrected', reason, prNumber: run.pr_number }
   }
 
   private markStale(run: RunningRunRow, dryRun: boolean, reason: string): SyncAction {
@@ -186,14 +195,7 @@ export class SyncEngine {
 
     try {
       const issue = await forge.getIssue(run.repo, run.issue_number)
-      const labelConfig = {
-        ready: repoConfig.labels.ready,
-        running: repoConfig.labels.running,
-        blocked: repoConfig.labels.blocked,
-        reviewReady: repoConfig.labels.reviewReady,
-        error: repoConfig.labels.error,
-        retry: repoConfig.labels.retry,
-      }
+      const labelConfig = buildLabelConfig(repoConfig)
       await transitionLabels(forge, run.repo, run.issue_number, issue.labels, 'running', targetStatus, labelConfig)
     } catch (err) {
       logger.warn({ repo: run.repo, issue: run.issue_number, err }, 'Failed to update labels during sync')
@@ -221,27 +223,26 @@ export class SyncEngine {
 
       try {
         const issue = await forge.getIssue(run.repo, run.issue_number)
-        const labelConfig = {
-          ready: repoConfig.labels.ready,
-          running: repoConfig.labels.running,
-          blocked: repoConfig.labels.blocked,
-          reviewReady: repoConfig.labels.reviewReady,
-          error: repoConfig.labels.error,
-          retry: repoConfig.labels.retry,
-        }
+        const labelConfig = buildLabelConfig(repoConfig)
 
-        // Check if the expected label for current status is present
-        const expectedLabel = this.getExpectedLabel(run.status, labelConfig)
-        if (expectedLabel && !issue.labels.includes(expectedLabel)) {
+        const targetStatus = this.toRunStatus(run.status)
+        if (!targetStatus) continue
+        const mutation = computeLabelMutation(targetStatus, targetStatus, issue.labels, labelConfig)
+        if (mutation.add.length > 0 || mutation.remove.length > 0) {
           const correction: LabelCorrection = {
             repo: run.repo,
             issueNumber: run.issue_number,
-            added: [expectedLabel],
-            removed: [],
-            reason: `DB status is ${run.status} but label ${expectedLabel} missing`,
+            added: mutation.add,
+            removed: mutation.remove,
+            reason: `DB status is ${run.status} but labels are out of sync`,
           }
           if (!dryRun) {
-            await forge.addLabels(run.repo, run.issue_number, [expectedLabel])
+            if (mutation.remove.length > 0) {
+              await forge.removeLabels(run.repo, run.issue_number, mutation.remove)
+            }
+            if (mutation.add.length > 0) {
+              await forge.addLabels(run.repo, run.issue_number, mutation.add)
+            }
           }
           corrections.push(correction)
         }
@@ -253,17 +254,11 @@ export class SyncEngine {
     return corrections
   }
 
-  private getExpectedLabel(status: string, labelConfig: { running: string; blocked: string[]; error: string; reviewReady: string }): string | null {
-    switch (status) {
-      case 'running':
-        return labelConfig.running
-      case 'error':
-        return labelConfig.error
-      case 'review_ready':
-        return labelConfig.reviewReady
-      default:
-        return null
+  private toRunStatus(status: string): RunStatus | null {
+    if (status === 'running' || status === 'blocked' || status === 'review_ready' || status === 'error') {
+      return status
     }
+    return null
   }
 
   private async detectOrphanedWorktrees(): Promise<string[]> {

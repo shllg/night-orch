@@ -28,6 +28,7 @@ function makeBaseCtx(): RunContext {
     totalAgentPasses: 0,
     estimatedCostUsd: 0,
     currentPhase: 'plan',
+    terminalStatus: 'running',
     phaseHistory: [],
     dryRun: false,
   }

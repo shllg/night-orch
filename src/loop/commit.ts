@@ -21,9 +21,13 @@ export async function commitChanges(
     return { committed: false, reason: 'No changes to commit' }
   }
 
-  // Diff-size guard
-  const diffCheck = await checkDiffSize(worktreePath, securityConfig)
+  // Stage before diff-size guard so new files are included in checks.
+  await execa('git', ['add', '-A'], { cwd: worktreePath })
+
+  // Diff-size guard on staged changes.
+  const diffCheck = await checkDiffSize(worktreePath, securityConfig, { staged: true })
   if (!diffCheck.ok) {
+    await execa('git', ['reset', 'HEAD', '--', '.'], { cwd: worktreePath, reject: false })
     logger.warn(
       { stats: diffCheck.stats, reason: diffCheck.reason },
       'Diff-size guard triggered — skipping commit',
@@ -31,9 +35,7 @@ export async function commitChanges(
     return { committed: false, reason: `Diff-size guard: ${diffCheck.reason}` }
   }
 
-  // Stage and commit
-  await execa('git', ['add', '-A'], { cwd: worktreePath })
-  const message = `night-orch: implement #${issueNumber} ${issueTitle}`
+  const message = `night-orch: implement #${issueNumber} ${sanitizeCommitTitle(issueTitle)}`
   await execa('git', ['commit', '-m', message], { cwd: worktreePath })
 
   logger.info(
@@ -42,4 +44,12 @@ export async function commitChanges(
   )
 
   return { committed: true, reason: null }
+}
+
+function sanitizeCommitTitle(title: string): string {
+  return title
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/[^\w\s.,:;!?()[\]{}\-/#]/g, '')
+    .trim()
 }

@@ -1,12 +1,13 @@
 import { execa } from 'execa'
 import { logger } from '../utils/logger.js'
+import { parseCommandSpec, type CommandSpec } from '../utils/command.js'
 
 export interface DedicatedStackParams {
   worktreePath: string
   composeFile: string
   services: string[]
   projectName: string
-  healthcheck?: string
+  healthcheck?: CommandSpec
 }
 
 /**
@@ -28,21 +29,22 @@ export async function startDedicatedStack(params: DedicatedStackParams): Promise
 
   // Run healthcheck if configured
   if (healthcheck) {
-    logger.debug({ healthcheck }, 'Running dedicated stack healthcheck')
+    const commandLabel = Array.isArray(healthcheck) ? healthcheck.join(' ') : healthcheck
+    logger.debug({ healthcheck: commandLabel }, 'Running dedicated stack healthcheck')
     // Retry healthcheck a few times with backoff
     let lastError: Error | null = null
     for (let attempt = 0; attempt < 10; attempt++) {
       try {
-        const parts = healthcheck.split(/\s+/)
-        await execa(parts[0]!, parts.slice(1), { timeout: 5_000 })
-        logger.info({ healthcheck }, 'Dedicated stack healthcheck passed')
+        const parsed = parseCommandSpec(healthcheck)
+        await execa(parsed.binary, parsed.args, { timeout: 5_000 })
+        logger.info({ healthcheck: commandLabel }, 'Dedicated stack healthcheck passed')
         return
       } catch (err) {
         lastError = err as Error
         await new Promise((r) => setTimeout(r, 2000))
       }
     }
-    throw new Error(`Dedicated stack healthcheck failed after retries: ${healthcheck}\n${lastError?.message}`)
+    throw new Error(`Dedicated stack healthcheck failed after retries: ${commandLabel}\n${lastError?.message}`)
   }
 }
 

@@ -13,8 +13,10 @@ export interface PRBodyContext {
   triageLevel: TriageLevel
 }
 
+const MAX_PR_BODY_CHARS = 60_000
+
 export function compilePRTitle(issueNumber: number, issueTitle: string): string {
-  const base = `[night-orch] #${issueNumber} ${issueTitle}`
+  const base = `[night-orch] #${issueNumber} ${sanitizeTitle(issueTitle)}`
   return base.length > 256 ? base.slice(0, 253) + '...' : base
 }
 
@@ -78,5 +80,14 @@ export function compilePRBody(ctx: PRBodyContext): string {
   sections.push('')
   sections.push(`**Triage:** ${ctx.triageLevel} | **Iterations:** ${ctx.iterationCount} | **Roles:** plan=${ctx.roles.planner} code=${ctx.roles.coder} review=${ctx.roles.reviewer}`)
 
-  return sections.join('\n')
+  const body = sections.join('\n')
+  if (body.length <= MAX_PR_BODY_CHARS) return body
+  return `${body.slice(0, MAX_PR_BODY_CHARS)}\n\n[... truncated by night-orch due to size ...]`
+}
+
+function sanitizeTitle(title: string): string {
+  return title
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim()
 }

@@ -36,7 +36,12 @@ export function decide(
   }
 
   const review = ctx.reviewResult
-  const allVerifyPassed = ctx.verifyResults.length === 0 || ctx.verifyResults.every((r) => r.passed)
+  const verifyCommandsConfigured = (ctx.repoConfig.verify?.length ?? 0) > 0
+  const verifyResultsAvailable = ctx.verifyResults.length > 0
+  const allVerifyPassed = verifyResultsAvailable && ctx.verifyResults.every((r) => r.passed)
+  const verificationSatisfied = loopConfig.requireVerificationPass
+    ? verifyCommandsConfigured && verifyResultsAvailable && allVerifyPassed
+    : ctx.verifyResults.length === 0 || allVerifyPassed
 
   // No review result = parse failure
   if (!review) {
@@ -53,7 +58,13 @@ export function decide(
   switch (review.verdict) {
     case 'APPROVED':
       // Rules 3, 4
-      if (allVerifyPassed) {
+      if (loopConfig.requireVerificationPass && !verifyCommandsConfigured) {
+        return { action: 'block', reason: 'Verification required but no verify commands are configured' }
+      }
+      if (loopConfig.requireVerificationPass && !verifyResultsAvailable) {
+        return { action: 'block', reason: 'Verification required but no verify results are available' }
+      }
+      if (verificationSatisfied) {
         return { action: 'publish', reason: 'Review approved, all verification passed' }
       }
       return {

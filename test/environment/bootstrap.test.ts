@@ -115,6 +115,19 @@ describe('runBootstrapCommands', () => {
     expect(mockExeca).not.toHaveBeenCalled()
   })
 
+  it('supports command arrays without shell splitting', async () => {
+    mockExeca.mockResolvedValue({ exitCode: 0, stderr: '' } as never)
+    const commands: BootstrapCommand[] = [
+      { command: ['node', '-e', 'console.log("ok")'], when: 'always' },
+    ]
+    await runBootstrapCommands('/tmp/wt', commands, 'shared')
+    expect(mockExeca).toHaveBeenCalledWith(
+      'node',
+      ['-e', 'console.log("ok")'],
+      expect.any(Object),
+    )
+  })
+
   it('includes exit code and stderr in error message', async () => {
     mockExeca.mockResolvedValue({ exitCode: 127, stderr: 'command not found' } as never)
 

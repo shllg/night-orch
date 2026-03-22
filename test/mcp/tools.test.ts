@@ -19,7 +19,7 @@ function makeMinimalConfig() {
     security: { maxChangedFiles: 50, maxChangedLines: 5000, maxDailyCostUsd: 50, maxCostPerRunUsd: 10 },
     workerProfiles: {},
     metrics: { enabled: false, port: 9090, host: '127.0.0.1' },
-    mcp: { enabled: true, transport: 'stdio' as const },
+    mcp: { enabled: true, transport: 'stdio' as const, authTokenEnv: null },
     repos: [{ repo: 'org/repo', forge: 'github' as const, localPath: '/tmp/repo', baseBranch: 'main', branchPrefix: 'orch', labels: { ready: ['orch:ready'], running: 'orch:running', blocked: ['orch:blocked', 'orch:needs-human'], reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry' }, defaults: { planner: 'claude' as const, coder: 'claude' as const, reviewer: 'claude' as const, doneMode: 'pr-ready' as const, notifyPriority: 'normal' as const, prMentions: [] }, verify: [], selectors: { includeLabelsAny: ['orch:ready'], excludeLabelsAny: [] }, agents: {} }],
   }
 }
@@ -101,6 +101,24 @@ describe('MCP Tools', () => {
 
   it('unknown tool throws', async () => {
     await expect(handleToolCall('unknown-tool', {}, deps)).rejects.toThrow('Unknown tool')
+  })
+
+  it('requires auth token for mutating tools when configured', async () => {
+    process.env['MCP_TOKEN'] = 'secret'
+    deps.config.mcp.authTokenEnv = 'MCP_TOKEN'
+    await expect(
+      handleToolCall('night-orch-sync', { dryRun: true }, deps),
+    ).rejects.toThrow('Unauthorized')
+    delete process.env['MCP_TOKEN']
+  })
+
+  it('accepts valid auth token for mutating tools', async () => {
+    process.env['MCP_TOKEN'] = 'secret'
+    deps.config.mcp.authTokenEnv = 'MCP_TOKEN'
+    await expect(
+      handleToolCall('night-orch-sync', { dryRun: true, authToken: 'secret' }, deps),
+    ).resolves.toBeTruthy()
+    delete process.env['MCP_TOKEN']
   })
 
   describe('list-issues', () => {

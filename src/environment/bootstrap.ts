@@ -1,10 +1,11 @@
 import { execa } from 'execa'
 import { logger } from '../utils/logger.js'
+import { parseCommandSpec, type CommandSpec } from '../utils/command.js'
 
 export type BootstrapWhen = 'always' | 'dedicated' | 'shared'
 
 export interface BootstrapCommand {
-  command: string
+  command: CommandSpec
   when: BootstrapWhen
 }
 
@@ -19,15 +20,13 @@ export async function runBootstrapCommands(
 ): Promise<void> {
   for (const cmd of commands) {
     if (cmd.when !== 'always' && cmd.when !== mode) {
-      logger.debug({ command: cmd.command, when: cmd.when, mode }, 'Skipping bootstrap command')
+      logger.debug({ command: formatCommand(cmd.command), when: cmd.when, mode }, 'Skipping bootstrap command')
       continue
     }
 
-    logger.info({ command: cmd.command, worktreePath }, 'Running bootstrap command')
-
-    const parts = cmd.command.split(/\s+/)
-    const binary = parts[0]!
-    const args = parts.slice(1)
+    const commandLabel = formatCommand(cmd.command)
+    logger.info({ command: commandLabel, worktreePath }, 'Running bootstrap command')
+    const { binary, args } = parseCommandSpec(cmd.command)
 
     const result = await execa(binary, args, {
       cwd: worktreePath,
@@ -37,14 +36,18 @@ export async function runBootstrapCommands(
 
     if (result.exitCode !== 0) {
       logger.error(
-        { command: cmd.command, exitCode: result.exitCode, stderr: result.stderr },
+        { command: commandLabel, exitCode: result.exitCode, stderr: result.stderr },
         'Bootstrap command failed',
       )
       throw new Error(
-        `Bootstrap command failed: ${cmd.command}\nExit code: ${result.exitCode}\n${result.stderr}`,
+        `Bootstrap command failed: ${commandLabel}\nExit code: ${result.exitCode}\n${result.stderr}`,
       )
     }
 
-    logger.debug({ command: cmd.command }, 'Bootstrap command succeeded')
+    logger.debug({ command: commandLabel }, 'Bootstrap command succeeded')
   }
+}
+
+function formatCommand(command: CommandSpec): string {
+  return Array.isArray(command) ? command.join(' ') : command
 }

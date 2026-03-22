@@ -231,6 +231,29 @@ describe('GitHubForgeAdapter', () => {
       expect(issues).toHaveLength(1)
       expect(issues[0]!.number).toBe(1)
     })
+
+    it('fetches open issues when includeLabelsAny is empty', async () => {
+      mockPaginate.mockResolvedValueOnce([makeGitHubIssue({ number: 1 })])
+
+      const config = makeRepoConfig({
+        selectors: {
+          includeLabelsAny: [],
+          excludeLabelsAny: [],
+        },
+      })
+      const issues = await adapter.listEligibleIssues(config)
+
+      expect(issues).toHaveLength(1)
+      expect(mockPaginate).toHaveBeenCalledWith(
+        mockIssuesListForRepo,
+        expect.objectContaining({
+          owner: 'org',
+          repo: 'repo',
+          state: 'open',
+          per_page: 100,
+        }),
+      )
+    })
   })
 
   describe('addLabels', () => {

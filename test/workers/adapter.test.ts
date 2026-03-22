@@ -66,11 +66,12 @@ describe('ClaudeWorkerAdapter', () => {
 
     expect(mockExecWithTimeout).toHaveBeenCalledWith(
       'claude',
-      ['-p', 'Plan the fix', '--output-format', 'json', '--max-turns', '50'],
+      ['-p', '--output-format', 'json', '--max-turns', '50'],
       {
         cwd: '/tmp/worktree',
         env: { PATH: '/usr/bin' },
         timeoutMs: 1_800_000,
+        stdin: 'Plan the fix',
       },
     )
   })
@@ -212,7 +213,7 @@ describe('CodexWorkerAdapter', () => {
     adapter = new CodexWorkerAdapter()
   })
 
-  it('passes prompt directly as arg (no --output-format)', async () => {
+  it('passes prompt via stdin (no --output-format)', async () => {
     mockExecWithTimeout.mockResolvedValue({
       stdout: '```json\n{"objective": "Fix it"}\n```',
       stderr: '',
@@ -226,8 +227,32 @@ describe('CodexWorkerAdapter', () => {
 
     expect(mockExecWithTimeout).toHaveBeenCalledWith(
       'codex',
-      ['-p', 'Plan the fix'],
-      expect.any(Object),
+      ['-p'],
+      expect.objectContaining({ stdin: 'Plan the fix' }),
+    )
+  })
+
+  it('applies runtime wrapper when configured', async () => {
+    mockExecWithTimeout.mockResolvedValue({
+      stdout: '```json\n{"objective":"wrapped"}\n```',
+      stderr: '',
+      exitCode: 0,
+      timedOut: false,
+      durationMs: 1000,
+    })
+
+    const wrappedProfile = {
+      ...baseProfile,
+      type: 'codex' as const,
+      command: 'codex',
+      runtimeWrapper: 'firejail --quiet',
+    }
+    await adapter.runTask(makeTaskInput({ profile: wrappedProfile }))
+
+    expect(mockExecWithTimeout).toHaveBeenCalledWith(
+      'firejail',
+      ['--quiet', 'codex', '-p'],
+      expect.objectContaining({ stdin: 'Plan the fix' }),
     )
   })
 

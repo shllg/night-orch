@@ -67,7 +67,7 @@ export function adjustLimitsForTriage(
       return {
         maxReviewIterations: Math.max(1, Math.floor(baseLimits.maxReviewIterations / 2)),
         maxTotalAgentPasses: Math.max(2, Math.floor(baseLimits.maxTotalAgentPasses / 2)),
-        workerTimeoutSeconds: Math.floor(baseTimeout * 0.6),
+        workerTimeoutSeconds: Math.max(1, Math.floor(baseTimeout * 0.6)),
       }
     case 'architectural':
       return {
@@ -80,7 +80,7 @@ export function adjustLimitsForTriage(
           absoluteMax.iterations,
         ),
         workerTimeoutSeconds: Math.min(
-          Math.ceil(baseTimeout * 1.5),
+          Math.max(1, Math.ceil(baseTimeout * 1.5)),
           absoluteMax.timeout,
         ),
       }
@@ -89,7 +89,7 @@ export function adjustLimitsForTriage(
       return {
         maxReviewIterations: baseLimits.maxReviewIterations,
         maxTotalAgentPasses: baseLimits.maxTotalAgentPasses,
-        workerTimeoutSeconds: baseTimeout,
+        workerTimeoutSeconds: Math.max(1, baseTimeout),
       }
   }
 }

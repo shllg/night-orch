@@ -181,6 +181,22 @@ describe('ForgejoForgeAdapter', () => {
       expect(issues).toHaveLength(1)
       expect(issues[0]!.number).toBe(1)
     })
+
+    it('fetches open issues when includeLabelsAny is empty', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse([makeForgejoIssue({ number: 1 })]))
+
+      const config = makeRepoConfig({
+        selectors: {
+          includeLabelsAny: [],
+          excludeLabelsAny: [],
+        },
+      })
+
+      const issues = await adapter.listEligibleIssues(config)
+      expect(issues).toHaveLength(1)
+      const calledUrl = mockFetch.mock.calls[0]![0] as string
+      expect(calledUrl).toContain('/repos/org/repo/issues')
+    })
   })
 
   describe('addLabels', () => {

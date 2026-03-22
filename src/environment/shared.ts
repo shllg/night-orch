@@ -1,28 +1,28 @@
 import { execa } from 'execa'
 import { logger } from '../utils/logger.js'
+import { parseCommandSpec, type CommandSpec } from '../utils/command.js'
 
 /**
  * Validate that the shared dev environment is running by executing a healthcheck command.
  */
-export async function validateSharedEnvironment(healthcheck?: string, requireRunning = true): Promise<void> {
+export async function validateSharedEnvironment(healthcheck?: CommandSpec, requireRunning = true): Promise<void> {
   if (!healthcheck) {
     logger.debug('No shared healthcheck configured, skipping')
     return
   }
 
-  const parts = healthcheck.split(/\s+/)
-  const binary = parts[0]!
-  const args = parts.slice(1)
+  const commandLabel = Array.isArray(healthcheck) ? healthcheck.join(' ') : healthcheck
+  const { binary, args } = parseCommandSpec(healthcheck)
 
   try {
     await execa(binary, args, { timeout: 10_000 })
-    logger.info({ healthcheck }, 'Shared environment healthcheck passed')
-  } catch (err) {
+    logger.info({ healthcheck: commandLabel }, 'Shared environment healthcheck passed')
+  } catch {
     if (requireRunning) {
       throw new Error(
-        `Shared environment healthcheck failed: ${healthcheck}\nMake sure the dev stack is running.`,
+        `Shared environment healthcheck failed: ${commandLabel}\nMake sure the dev stack is running.`,
       )
     }
-    logger.warn({ healthcheck }, 'Shared environment healthcheck failed (not required)')
+    logger.warn({ healthcheck: commandLabel }, 'Shared environment healthcheck failed (not required)')
   }
 }

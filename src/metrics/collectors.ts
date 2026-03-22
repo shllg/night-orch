@@ -6,7 +6,7 @@ export function createMetricsRegistry() {
   const runsTotal = new Counter({
     name: 'night_orch_runs_total',
     help: 'Total runs by outcome',
-    labelNames: ['repo', 'status'] as const,
+    labelNames: ['status'] as const,
     registers: [registry],
   })
 
@@ -62,21 +62,18 @@ export function createMetricsRegistry() {
   const activeRuns = new Gauge({
     name: 'night_orch_active_runs',
     help: 'Currently running',
-    labelNames: ['repo'] as const,
     registers: [registry],
   })
 
   const queuedIssues = new Gauge({
     name: 'night_orch_queued_issues',
     help: 'Eligible issues waiting',
-    labelNames: ['repo'] as const,
     registers: [registry],
   })
 
   const blockedIssues = new Gauge({
     name: 'night_orch_blocked_issues',
     help: 'Blocked issues',
-    labelNames: ['repo'] as const,
     registers: [registry],
   })
 
@@ -96,7 +93,6 @@ export function createMetricsRegistry() {
   const runDuration = new Histogram({
     name: 'night_orch_run_duration_seconds',
     help: 'Time per run',
-    labelNames: ['repo', 'status'] as const,
     buckets: [60, 300, 600, 1200, 1800, 3600, 7200],
     registers: [registry],
   })

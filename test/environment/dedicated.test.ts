@@ -142,6 +142,26 @@ describe('startDedicatedStack', () => {
     // Only compose up, no healthcheck
     expect(mockExeca).toHaveBeenCalledTimes(1)
   })
+
+  it('supports array-form healthcheck commands', async () => {
+    mockExeca
+      .mockResolvedValueOnce({ exitCode: 0 } as never)
+      .mockResolvedValueOnce({ exitCode: 0 } as never)
+
+    await startDedicatedStack({
+      worktreePath: '/tmp/wt',
+      composeFile: 'compose.yaml',
+      services: [],
+      projectName: 'orch-1',
+      healthcheck: ['curl', 'http://localhost:5103/health'],
+    })
+
+    expect(mockExeca).toHaveBeenLastCalledWith(
+      'curl',
+      ['http://localhost:5103/health'],
+      { timeout: 5_000 },
+    )
+  })
 })
 
 describe('stopDedicatedStack', () => {

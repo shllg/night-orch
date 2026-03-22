@@ -3,6 +3,8 @@ import type { PromptContext } from '../types.js'
 import { logger } from '../../utils/logger.js'
 
 const MAX_ISSUE_BODY_LENGTH = 4000
+const MAX_ISSUE_TITLE_LENGTH = 300
+const MAX_VERIFY_STDERR_LENGTH = 500
 
 /**
  * Compile a prompt from template file + runtime context.
@@ -33,7 +35,7 @@ function buildVarMap(ctx: PromptContext): Record<string, string> {
   return {
     'role': ctx.role,
     'issue.number': String(ctx.issue.number),
-    'issue.title': ctx.issue.title,
+    'issue.title': sanitizeIssueTitle(ctx.issue.title),
     'issue.body': sanitizeIssueBody(ctx.issue.body),
     'issue.labels': ctx.issue.labels.join(', '),
     'repo.name': ctx.repo.name,
@@ -56,8 +58,9 @@ function substitute(template: string, vars: Record<string, string>): string {
 
 function buildUserPrompt(ctx: PromptContext): string {
   const parts: string[] = []
+  const safeTitle = sanitizeIssueTitle(ctx.issue.title)
 
-  parts.push(`## Issue #${ctx.issue.number}: ${ctx.issue.title}`)
+  parts.push(`## Issue #${ctx.issue.number}: ${safeTitle}`)
   parts.push('')
   parts.push(sanitizeIssueBody(ctx.issue.body))
 
@@ -83,7 +86,7 @@ function buildUserPrompt(ctx: PromptContext): string {
       const icon = r.passed ? '✓' : '✗'
       parts.push(`${icon} ${r.command} (exit ${r.exitCode})`)
       if (!r.passed && r.stderr) {
-        parts.push(`  stderr: ${r.stderr.slice(0, 500)}`)
+        parts.push(`  stderr: ${sanitizeVerifyStderr(r.stderr).slice(0, MAX_VERIFY_STDERR_LENGTH)}`)
       }
     }
   }
@@ -102,15 +105,32 @@ function buildUserPrompt(ctx: PromptContext): string {
  * Strips HTML tags, truncates to max length.
  */
 function sanitizeIssueBody(body: string): string {
-  let sanitized = body
-    .replace(/<[^>]*>/g, '') // Strip HTML tags
-    .replace(/<!--[\s\S]*?-->/g, '') // Strip HTML comments
+  const sanitized = sanitizeUntrustedText(body)
+  if (sanitized.length <= MAX_ISSUE_BODY_LENGTH) return sanitized
+  return sanitized.slice(0, MAX_ISSUE_BODY_LENGTH) + '\n\n[... truncated ...]'
+}
 
-  if (sanitized.length > MAX_ISSUE_BODY_LENGTH) {
-    sanitized = sanitized.slice(0, MAX_ISSUE_BODY_LENGTH) + '\n\n[... truncated ...]'
-  }
+function sanitizeIssueTitle(title: string): string {
+  const sanitized = sanitizeUntrustedText(title)
+  if (sanitized.length <= MAX_ISSUE_TITLE_LENGTH) return sanitized
+  return sanitized.slice(0, MAX_ISSUE_TITLE_LENGTH)
+}
 
-  return sanitized
+function sanitizeUntrustedText(value: string): string {
+  return value
+    .replace(/<[^>]*>/g, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/```[\s\S]*?```/g, '[code-block removed]')
+    .replace(/`[^`]+`/g, '[inline-code removed]')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function sanitizeVerifyStderr(stderr: string): string {
+  return sanitizeUntrustedText(stderr)
+    .replace(/(?:gh[pso]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})/g, '[REDACTED_TOKEN]')
+    .replace(/\b[A-Za-z0-9+/]{24,}={0,2}\b/g, '[REDACTED_SECRET]')
 }
 
 function formatReviewFindings(ctx: PromptContext): string {

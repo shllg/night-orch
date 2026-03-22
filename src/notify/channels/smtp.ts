@@ -24,8 +24,8 @@ export class SmtpChannel implements NotificationChannel {
 
     try {
       // Dynamic import — graceful degradation if nodemailer not installed
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const mod = await import('nodemailer' as string) as { createTransport: (opts: { host: string; port: number; auth: { user: string; pass: string } }) => { sendMail: (opts: { from: string; to: string; subject: string; text: string }) => Promise<void> } }
+      const moduleName = 'nodemailer'
+      const mod = await import(moduleName) as { createTransport: (opts: { host: string; port: number; auth: { user: string; pass: string } }) => { sendMail: (opts: { from: string; to: string; subject: string; text: string }) => Promise<void> } }
       const { createTransport } = mod
 
       const transport = createTransport({

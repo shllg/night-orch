@@ -92,15 +92,20 @@ function validateWorkerProfileRefs(config: Config): void {
 /**
  * Resolve the config file path from CLI flag or default locations.
  */
-export function resolveConfigPath(cliPath?: string): string {
+export function resolveConfigPath(
+  cliPath?: string,
+  opts: { trustWorkspace?: boolean } = {},
+): string {
   if (cliPath) return cliPath
 
   const defaults = [
-    '.night-orch.yaml',
-    '.night-orch.yml',
     '~/.config/night-orch/config.yaml',
     '~/.config/night-orch/config.yml',
   ]
+  if (opts.trustWorkspace) {
+    defaults.unshift('.night-orch.yml')
+    defaults.unshift('.night-orch.yaml')
+  }
 
   for (const candidate of defaults) {
     try {
@@ -112,6 +117,8 @@ export function resolveConfigPath(cliPath?: string): string {
   }
 
   throw new ConfigError(
-    'No config file found. Provide --config or create one at ~/.config/night-orch/config.yaml',
+    opts.trustWorkspace
+      ? 'No config file found. Provide --config or create one at ~/.config/night-orch/config.yaml'
+      : 'No config file found. Provide --config, use ~/.config/night-orch/config.yaml, or pass --trust-workspace to allow .night-orch.yaml from the current directory',
   )
 }

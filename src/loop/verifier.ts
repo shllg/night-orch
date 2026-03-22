@@ -1,6 +1,7 @@
 import { execa } from 'execa'
 import type { VerifyResult } from './types.js'
 import { logger } from '../utils/logger.js'
+import { parseCommandSpec, type CommandSpec } from '../utils/command.js'
 
 const VERIFY_TIMEOUT_MS = 60_000
 
@@ -10,27 +11,27 @@ const VERIFY_TIMEOUT_MS = 60_000
  */
 export async function runVerifyCommands(
   worktreePath: string,
-  commands: string[],
+  commands: CommandSpec[],
+  env?: Record<string, string>,
 ): Promise<VerifyResult[]> {
   const results: VerifyResult[] = []
 
   for (const cmd of commands) {
-    const parts = cmd.split(/\s+/)
-    const binary = parts[0]!
-    const args = parts.slice(1)
-
+    const commandLabel = Array.isArray(cmd) ? cmd.join(' ') : cmd
     const start = Date.now()
-    logger.info({ command: cmd, worktreePath }, 'Running verify command')
+    logger.info({ command: commandLabel, worktreePath }, 'Running verify command')
 
     try {
+      const { binary, args } = parseCommandSpec(cmd)
       const result = await execa(binary, args, {
         cwd: worktreePath,
+        env,
         timeout: VERIFY_TIMEOUT_MS,
         reject: false,
       })
 
       results.push({
-        command: cmd,
+        command: commandLabel,
         exitCode: result.exitCode ?? 0,
         stdout: result.stdout,
         stderr: result.stderr,
@@ -39,7 +40,7 @@ export async function runVerifyCommands(
       })
     } catch (err) {
       results.push({
-        command: cmd,
+        command: commandLabel,
         exitCode: 1,
         stdout: '',
         stderr: String(err),

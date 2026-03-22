@@ -54,6 +54,8 @@ export class ShutdownHandler {
       if (this.currentRunPromise === promise) {
         this.currentRunPromise = null
       }
+    }).catch(() => {
+      // Intentionally ignored: caller handles run errors.
     })
   }
 
@@ -73,8 +75,8 @@ export class ShutdownHandler {
     // Release all leases
     try {
       const leaseManager = new LeaseManager(this.db)
-      const cleared = leaseManager.cleanExpired()
-      logger.debug({ cleared }, 'Cleaned leases on shutdown')
+      const cleared = leaseManager.releaseAll()
+      logger.debug({ cleared }, 'Released leases on shutdown')
     } catch {
       // DB may already be closed
     }

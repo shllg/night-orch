@@ -1,13 +1,13 @@
 import type { RunContext, LoopPhase } from './types.js'
 import type { Config } from '../config/schema.js'
-import type { WorkerAdapter, PromptContext } from '../workers/types.js'
+import type { WorkerAdapter, PromptContext, WorkerTaskResult } from '../workers/types.js'
 import type { MetricsService } from '../metrics/service.js'
 import { updateContext, recordPhase } from './context.js'
 import { decide } from './decision.js'
 import { runVerifyCommands, allVerifyPassed } from './verifier.js'
 import { commitChanges } from './commit.js'
 import { compilePrompt } from '../workers/prompt/compiler.js'
-import { buildWorkerEnv } from '../workers/env.js'
+import { buildWorkerEnv, buildVerifierEnv } from '../workers/env.js'
 import { Checkpoint } from './checkpoint.js'
 import { CostTracker } from './cost.js'
 import { logger } from '../utils/logger.js'
@@ -19,6 +19,7 @@ export interface LoopDependencies {
   plannerAdapter: WorkerAdapter
   coderAdapter: WorkerAdapter
   reviewerAdapter: WorkerAdapter
+  envOverrides?: Record<string, string>
   metrics?: MetricsService
 }
 
@@ -34,7 +35,7 @@ export async function executeLoop(
   const checkpoint = new Checkpoint(db)
   const costTracker = new CostTracker(db)
 
-  let ctx = initialCtx
+  let ctx = checkpoint.resumeFromCheckpoint(initialCtx.runId, initialCtx) ?? initialCtx
 
   // PLAN
   ctx = updateContext(ctx, { currentPhase: 'plan' as LoopPhase })
@@ -42,13 +43,22 @@ export async function executeLoop(
 
   if (ctx.triageResult.level !== 'trivial') {
     const planStart = Date.now()
+    const planStartedAt = new Date(planStart).toISOString()
     ctx = await runPlanStep(ctx, deps)
-    try { metrics?.observePhaseDuration('plan', (Date.now() - planStart) / 1000) } catch { /* best-effort */ }
+    const planDurationMs = Date.now() - planStart
+    ctx = applyEstimatedWorkerCost(ctx, costTracker, 'planner', planDurationMs)
+    try { metrics?.observePhaseDuration('plan', planDurationMs / 1000) } catch { /* best-effort */ }
     checkpoint.phaseCompleted(ctx.runId, 'plan', { plan: ctx.plan })
 
     if (!ctx.plan && config.loop.stopOnPlannerFailure) {
       logger.error({ runId: ctx.runId }, 'Planner failed and stopOnPlannerFailure is true')
-      return recordPhase(updateContext(ctx, { currentPhase: 'error' }), 'plan', 'failure')
+      return recordPhase(
+        updateContext(ctx, { currentPhase: 'error', terminalStatus: 'error' }),
+        'plan',
+        'failure',
+        {},
+        planStartedAt,
+      )
     }
   } else {
     checkpoint.phaseCompleted(ctx.runId, 'plan', {})
@@ -61,40 +71,62 @@ export async function executeLoop(
     // Cost check
     if (costTracker.isOverBudget(ctx.runId, config.security)) {
       logger.warn({ runId: ctx.runId }, 'Cost limit exceeded')
-      return recordPhase(updateContext(ctx, { currentPhase: 'blocked' }), 'code', 'failure')
+      return recordPhase(
+        updateContext(ctx, { currentPhase: 'blocked', terminalStatus: 'blocked' }),
+        'code',
+        'failure',
+      )
     }
 
     // CODE
+    const codeStart = Date.now()
+    const codeStartedAt = new Date(codeStart).toISOString()
     ctx = updateContext(ctx, { currentPhase: 'code' as LoopPhase })
     checkpoint.phaseStarted(ctx.runId, 'code')
-    const codeStart = Date.now()
     ctx = await runCodeStep(ctx, deps)
-    try { metrics?.observePhaseDuration('code', (Date.now() - codeStart) / 1000) } catch { /* best-effort */ }
+    const codeDurationMs = Date.now() - codeStart
+    ctx = applyEstimatedWorkerCost(ctx, costTracker, 'coder', codeDurationMs)
+    try { metrics?.observePhaseDuration('code', codeDurationMs / 1000) } catch { /* best-effort */ }
     checkpoint.phaseCompleted(ctx.runId, 'code', { codeResult: ctx.codeResult })
-    ctx = recordPhase(ctx, 'code', ctx.codeResult ? 'success' : 'failure')
+    ctx = recordPhase(ctx, 'code', ctx.codeResult ? 'success' : 'failure', {}, codeStartedAt)
 
     // VERIFY
+    const verifyStart = Date.now()
+    const verifyStartedAt = new Date(verifyStart).toISOString()
     ctx = updateContext(ctx, { currentPhase: 'verify' as LoopPhase })
     checkpoint.phaseStarted(ctx.runId, 'verify')
-    const verifyStart = Date.now()
-    const verifyResults = await runVerifyCommands(ctx.worktreePath, ctx.repoConfig.verify)
+    const verifyResults = await runVerifyCommands(
+      ctx.worktreePath,
+      ctx.repoConfig.verify,
+      buildVerifierEnv(deps.envOverrides),
+    )
+    const verifyDurationMs = Date.now() - verifyStart
     try {
-      metrics?.observePhaseDuration('verify', (Date.now() - verifyStart) / 1000)
-      metrics?.observeVerifyDuration((Date.now() - verifyStart) / 1000)
+      metrics?.observePhaseDuration('verify', verifyDurationMs / 1000)
+      metrics?.observeVerifyDuration(verifyDurationMs / 1000)
       metrics?.incVerifyRuns(allVerifyPassed(verifyResults) ? 'pass' : 'fail')
     } catch { /* best-effort */ }
     ctx = updateContext(ctx, { verifyResults })
     checkpoint.phaseCompleted(ctx.runId, 'verify', { verifyResults })
-    ctx = recordPhase(ctx, 'verify', allVerifyPassed(verifyResults) ? 'success' : 'failure')
+    ctx = recordPhase(
+      ctx,
+      'verify',
+      allVerifyPassed(verifyResults) ? 'success' : 'failure',
+      {},
+      verifyStartedAt,
+    )
 
     // REVIEW
+    const reviewStart = Date.now()
+    const reviewStartedAt = new Date(reviewStart).toISOString()
     ctx = updateContext(ctx, { currentPhase: 'review' as LoopPhase })
     checkpoint.phaseStarted(ctx.runId, 'review')
-    const reviewStart = Date.now()
     ctx = await runReviewStep(ctx, deps)
-    try { metrics?.observePhaseDuration('review', (Date.now() - reviewStart) / 1000) } catch { /* best-effort */ }
+    const reviewDurationMs = Date.now() - reviewStart
+    ctx = applyEstimatedWorkerCost(ctx, costTracker, 'reviewer', reviewDurationMs)
+    try { metrics?.observePhaseDuration('review', reviewDurationMs / 1000) } catch { /* best-effort */ }
     checkpoint.phaseCompleted(ctx.runId, 'review', { reviewResult: ctx.reviewResult })
-    ctx = recordPhase(ctx, 'review', ctx.reviewResult ? 'success' : 'failure')
+    ctx = recordPhase(ctx, 'review', ctx.reviewResult ? 'success' : 'failure', {}, reviewStartedAt)
 
     // DECISION
     const decision = decide(ctx, config.loop, config.security)
@@ -112,10 +144,18 @@ export async function executeLoop(
         if (!commitResult.committed) {
           logger.warn({ reason: commitResult.reason }, 'Commit skipped')
           if (commitResult.reason?.startsWith('Diff-size guard')) {
-            return recordPhase(updateContext(ctx, { currentPhase: 'blocked' }), 'publish', 'failure')
+            return recordPhase(
+              updateContext(ctx, { currentPhase: 'blocked', terminalStatus: 'blocked' }),
+              'publish',
+              'failure',
+            )
           }
         }
-        return recordPhase(updateContext(ctx, { currentPhase: 'completed' }), 'publish', 'success')
+        return recordPhase(
+          updateContext(ctx, { currentPhase: 'completed', terminalStatus: 'publish' }),
+          'publish',
+          'success',
+        )
       }
 
       case 'iterate': {
@@ -135,38 +175,52 @@ export async function executeLoop(
       }
 
       case 'block':
-        return recordPhase(updateContext(ctx, { currentPhase: 'blocked' }), 'decision', 'failure')
+        return recordPhase(
+          updateContext(ctx, { currentPhase: 'blocked', terminalStatus: 'blocked' }),
+          'decision',
+          'failure',
+        )
 
       case 'error':
-        return recordPhase(updateContext(ctx, { currentPhase: 'error' }), 'decision', 'failure')
+        return recordPhase(
+          updateContext(ctx, { currentPhase: 'error', terminalStatus: 'error' }),
+          'decision',
+          'failure',
+        )
     }
   }
 }
 
-async function runPlanStep(ctx: RunContext, deps: LoopDependencies): Promise<RunContext> {
-  const promptCtx = buildPromptContext(ctx, 'planner')
-  const { systemPrompt, userPrompt } = compilePrompt(
-    ctx.repoConfig.prompts?.plannerSystem ?? null,
-    DEFAULT_PLANNER_TEMPLATE,
-    promptCtx,
-  )
+const ESTIMATED_USD_PER_MINUTE: Record<'planner' | 'coder' | 'reviewer', number> = {
+  planner: 0.004,
+  coder: 0.008,
+  reviewer: 0.004,
+}
 
-  const profile = getWorkerProfile(ctx, 'planner', deps.config)
-  const env = buildWorkerEnv(profile)
-  const start = Date.now()
-  const result = await deps.plannerAdapter.runTask({
-    role: 'planner',
-    worktreePath: ctx.worktreePath,
-    prompt: `${systemPrompt}\n\n${userPrompt}`,
-    profile,
-    timeoutSeconds: ctx.adjustedLimits.workerTimeoutSeconds,
-    env,
+function applyEstimatedWorkerCost(
+  ctx: RunContext,
+  costTracker: CostTracker,
+  role: 'planner' | 'coder' | 'reviewer',
+  durationMs: number,
+): RunContext {
+  const rate = ESTIMATED_USD_PER_MINUTE[role]
+  const estimatedCost = Math.max(0, Number(((durationMs / 60_000) * rate).toFixed(6)))
+  if (estimatedCost <= 0) return ctx
+  costTracker.recordCost(ctx.runId, estimatedCost)
+  return updateContext(ctx, {
+    estimatedCostUsd: Number((ctx.estimatedCostUsd + estimatedCost).toFixed(6)),
   })
-  try {
-    const adapter = profile.type === 'codex' ? 'codex' : 'claude'
-    deps.metrics?.incAgentInvocations('planner', adapter)
-    deps.metrics?.observeAgentDuration('planner', adapter, (Date.now() - start) / 1000)
-  } catch { /* best-effort */ }
+}
+
+async function runPlanStep(ctx: RunContext, deps: LoopDependencies): Promise<RunContext> {
+  const result = await runWorkerStep(
+    ctx,
+    deps,
+    'planner',
+    deps.plannerAdapter,
+    ctx.repoConfig.prompts?.plannerSystem,
+    DEFAULT_PLANNER_TEMPLATE,
+  )
 
   return updateContext(ctx, {
     plan: result.parsed as RunContext['plan'],
@@ -175,29 +229,14 @@ async function runPlanStep(ctx: RunContext, deps: LoopDependencies): Promise<Run
 }
 
 async function runCodeStep(ctx: RunContext, deps: LoopDependencies): Promise<RunContext> {
-  const promptCtx = buildPromptContext(ctx, 'coder')
-  const { systemPrompt, userPrompt } = compilePrompt(
-    ctx.repoConfig.prompts?.coderSystem ?? null,
+  const result = await runWorkerStep(
+    ctx,
+    deps,
+    'coder',
+    deps.coderAdapter,
+    ctx.repoConfig.prompts?.coderSystem,
     DEFAULT_CODER_TEMPLATE,
-    promptCtx,
   )
-
-  const profile = getWorkerProfile(ctx, 'coder', deps.config)
-  const env = buildWorkerEnv(profile)
-  const start = Date.now()
-  const result = await deps.coderAdapter.runTask({
-    role: 'coder',
-    worktreePath: ctx.worktreePath,
-    prompt: `${systemPrompt}\n\n${userPrompt}`,
-    profile,
-    timeoutSeconds: ctx.adjustedLimits.workerTimeoutSeconds,
-    env,
-  })
-  try {
-    const adapter = profile.type === 'codex' ? 'codex' : 'claude'
-    deps.metrics?.incAgentInvocations('coder', adapter)
-    deps.metrics?.observeAgentDuration('coder', adapter, (Date.now() - start) / 1000)
-  } catch { /* best-effort */ }
 
   return updateContext(ctx, {
     codeResult: result.parsed as RunContext['codeResult'],
@@ -206,34 +245,55 @@ async function runCodeStep(ctx: RunContext, deps: LoopDependencies): Promise<Run
 }
 
 async function runReviewStep(ctx: RunContext, deps: LoopDependencies): Promise<RunContext> {
-  const promptCtx = buildPromptContext(ctx, 'reviewer')
-  const { systemPrompt, userPrompt } = compilePrompt(
-    ctx.repoConfig.prompts?.reviewerSystem ?? null,
+  const result = await runWorkerStep(
+    ctx,
+    deps,
+    'reviewer',
+    deps.reviewerAdapter,
+    ctx.repoConfig.prompts?.reviewerSystem,
     DEFAULT_REVIEWER_TEMPLATE,
+  )
+
+  return updateContext(ctx, {
+    reviewResult: result.parsed as RunContext['reviewResult'],
+    totalAgentPasses: ctx.totalAgentPasses + 1,
+  })
+}
+
+async function runWorkerStep(
+  ctx: RunContext,
+  deps: LoopDependencies,
+  role: 'planner' | 'coder' | 'reviewer',
+  adapter: WorkerAdapter,
+  customTemplate: string | undefined,
+  defaultTemplate: string,
+): Promise<WorkerTaskResult> {
+  const promptCtx = buildPromptContext(ctx, role)
+  const { systemPrompt, userPrompt } = compilePrompt(
+    customTemplate ?? null,
+    defaultTemplate,
     promptCtx,
   )
 
-  const profile = getWorkerProfile(ctx, 'reviewer', deps.config)
-  const env = buildWorkerEnv(profile)
+  const profile = getWorkerProfile(ctx, role, deps.config)
+  const env = buildWorkerEnv(profile, deps.envOverrides)
   const start = Date.now()
-  const result = await deps.reviewerAdapter.runTask({
-    role: 'reviewer',
+  const result = await adapter.runTask({
+    role,
     worktreePath: ctx.worktreePath,
     prompt: `${systemPrompt}\n\n${userPrompt}`,
     profile,
     timeoutSeconds: ctx.adjustedLimits.workerTimeoutSeconds,
     env,
   })
+
   try {
-    const adapter = profile.type === 'codex' ? 'codex' : 'claude'
-    deps.metrics?.incAgentInvocations('reviewer', adapter)
-    deps.metrics?.observeAgentDuration('reviewer', adapter, (Date.now() - start) / 1000)
+    const adapterType = profile.type === 'codex' ? 'codex' : 'claude'
+    deps.metrics?.incAgentInvocations(role, adapterType)
+    deps.metrics?.observeAgentDuration(role, adapterType, (Date.now() - start) / 1000)
   } catch { /* best-effort */ }
 
-  return updateContext(ctx, {
-    reviewResult: result.parsed as RunContext['reviewResult'],
-    totalAgentPasses: ctx.totalAgentPasses + 1,
-  })
+  return result
 }
 
 function buildPromptContext(ctx: RunContext, role: 'planner' | 'coder' | 'reviewer'): PromptContext {

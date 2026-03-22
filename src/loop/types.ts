@@ -47,6 +47,7 @@ export interface RunContext {
   readonly estimatedCostUsd: number
 
   readonly currentPhase: LoopPhase
+  readonly terminalStatus: TerminalStatus
   readonly phaseHistory: PhaseRecord[]
 
   readonly dryRun: boolean
@@ -57,5 +58,7 @@ export type LoopDecision =
   | { action: 'iterate'; reason: string; findings: ReviewFinding[] }
   | { action: 'block'; reason: string }
   | { action: 'error'; reason: string }
+
+export type TerminalStatus = 'running' | 'publish' | 'blocked' | 'error'
 
 export type { PlannerOutput, CoderOutput, ReviewerOutput, ReviewFinding, VerifyResult }

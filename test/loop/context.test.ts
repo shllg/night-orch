@@ -23,6 +23,7 @@ function makeCtx(): RunContext {
     totalAgentPasses: 0,
     estimatedCostUsd: 0,
     currentPhase: 'plan',
+    terminalStatus: 'running',
     phaseHistory: [],
     dryRun: false,
   }
@@ -59,5 +60,13 @@ describe('recordPhase', () => {
     ctx = recordPhase(ctx, 'plan', 'success')
     ctx = recordPhase(ctx, 'code', 'success')
     expect(ctx.phaseHistory).toHaveLength(2)
+  })
+
+  it('uses provided phase start timestamp', () => {
+    const ctx = makeCtx()
+    const startedAt = '2026-01-01T00:00:00.000Z'
+    const updated = recordPhase(ctx, 'plan', 'success', {}, startedAt)
+    expect(updated.phaseHistory[0]!.startedAt).toBe(startedAt)
+    expect(updated.phaseHistory[0]!.completedAt).not.toBe(startedAt)
   })
 })

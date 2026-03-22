@@ -12,13 +12,20 @@ export const ENV_BLACKLIST_EXACT = new Set([
 ])
 
 export const ENV_BLACKLIST_PATTERNS = [
-  /.*_SECRET$/,
-  /.*_PASSWORD$/,
-  /.*_KEY$/,
+  /TOKEN/i,
+  /SECRET/i,
+  /PASSWORD/i,
+  /AUTH/i,
+  /CREDENTIAL/i,
+  /KEY/i,
+  /^GITHUB_/i,
+  /^FORGEJO_/i,
+  /^GH_/i,
 ]
 
 function isBlacklisted(key: string): boolean {
-  if (ENV_BLACKLIST_EXACT.has(key)) return true
+  const upper = key.toUpperCase()
+  if (ENV_BLACKLIST_EXACT.has(upper)) return true
   return ENV_BLACKLIST_PATTERNS.some((p) => p.test(key))
 }
 
@@ -27,7 +34,10 @@ function isBlacklisted(key: string): boolean {
  * NEVER passes full process.env when minimalEnv is true.
  * NEVER passes GITHUB_TOKEN or any forge token regardless.
  */
-export function buildWorkerEnv(profile: WorkerProfileInput): Record<string, string> {
+export function buildWorkerEnv(
+  profile: WorkerProfileInput,
+  overrides: Record<string, string> = {},
+): Record<string, string> {
   const result: Record<string, string> = {}
 
   if (profile.minimalEnv) {
@@ -54,5 +64,45 @@ export function buildWorkerEnv(profile: WorkerProfileInput): Record<string, stri
     result[key] = val
   }
 
+  // Add runtime environment overrides (for dedicated env setup, etc.)
+  for (const [key, val] of Object.entries(overrides)) {
+    if (isBlacklisted(key)) {
+      logger.warn({ key }, 'Worker runtime env override contains blacklisted variable — skipped')
+      continue
+    }
+    result[key] = val
+  }
+
+  return result
+}
+
+const VERIFIER_ENV_WHITELIST = [
+  ...ENV_WHITELIST,
+  'CI',
+  'NODE_ENV',
+  'PNPM_HOME',
+  'npm_config_cache',
+  'npm_config_userconfig',
+] as const
+
+/**
+ * Build env vars for verifier commands.
+ * Uses strict whitelist mode to avoid leaking forge and API secrets.
+ */
+export function buildVerifierEnv(overrides: Record<string, string> = {}): Record<string, string> {
+  const result: Record<string, string> = {}
+  for (const key of VERIFIER_ENV_WHITELIST) {
+    const val = process.env[key]
+    if (val !== undefined && !isBlacklisted(key)) {
+      result[key] = val
+    }
+  }
+  for (const [key, val] of Object.entries(overrides)) {
+    if (isBlacklisted(key)) {
+      logger.warn({ key }, 'Verifier runtime env override contains blacklisted variable — skipped')
+      continue
+    }
+    result[key] = val
+  }
   return result
 }

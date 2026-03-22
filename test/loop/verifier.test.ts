@@ -95,6 +95,22 @@ describe('runVerifyCommands', () => {
     expect(mockExeca).toHaveBeenCalledWith('pnpm', ['test', '--run'], expect.any(Object))
   })
 
+  it('supports quoted command arguments', async () => {
+    mockExeca.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' } as never)
+
+    await runVerifyCommands('/tmp/wt', ['echo "hello world"'])
+
+    expect(mockExeca).toHaveBeenCalledWith('echo', ['hello world'], expect.any(Object))
+  })
+
+  it('supports array-form commands', async () => {
+    mockExeca.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' } as never)
+
+    await runVerifyCommands('/tmp/wt', [['pnpm', 'lint']])
+
+    expect(mockExeca).toHaveBeenCalledWith('pnpm', ['lint'], expect.any(Object))
+  })
+
   it('records duration', async () => {
     mockExeca.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' } as never)
 

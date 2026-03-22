@@ -12,7 +12,7 @@ import type { ForgeAdapter } from '../forge/types.js'
 import type { MetricsService } from '../metrics/service.js'
 import { registerTools, handleToolCall } from './tools/index.js'
 import { registerResources, handleResourceRead } from './resources/index.js'
-import { logger } from '../utils/logger.js'
+import { createLogger } from '../utils/logger.js'
 
 export interface MCPDependencies {
   db: Database.Database
@@ -21,6 +21,11 @@ export interface MCPDependencies {
   poller: unknown | null
   metrics: MetricsService | null
 }
+
+const mcpLogger = createLogger(process.env['LOG_LEVEL'] ?? 'info', {
+  destination: 'stderr',
+  pretty: false,
+})
 
 export function createMCPServer(deps: MCPDependencies): Server {
   const server = new Server(
@@ -70,7 +75,7 @@ export async function startMCPStdio(deps: MCPDependencies): Promise<void> {
   const transport = new StdioServerTransport()
 
   // When using stdio, all logging must go to stderr
-  logger.info('Starting MCP server with stdio transport')
+  mcpLogger.info('Starting MCP server with stdio transport')
 
   await server.connect(transport)
 }

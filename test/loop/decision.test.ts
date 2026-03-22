@@ -26,7 +26,7 @@ function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
     repo: 'org/repo',
     issueNumber: 1,
     issue: { number: 1, nodeId: '', title: '', body: '', labels: [], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
-    repoConfig: {} as RunContext['repoConfig'],
+    repoConfig: { verify: ['pnpm test'] } as RunContext['repoConfig'],
     roles: { planner: 'claude', coder: 'claude', reviewer: 'claude' },
     triageResult: { level: 'standard', reason: '' },
     adjustedLimits: { maxReviewIterations: 4, maxTotalAgentPasses: 10, workerTimeoutSeconds: 1800 },
@@ -41,6 +41,7 @@ function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
     totalAgentPasses: 3,
     estimatedCostUsd: 0,
     currentPhase: 'decision',
+    terminalStatus: 'running',
     phaseHistory: [],
     dryRun: false,
     ...overrides,
@@ -166,7 +167,7 @@ describe('decide', () => {
     }
   })
 
-  it('APPROVED with empty verify → publish', () => {
+  it('APPROVED with empty verify results + requireVerificationPass → block', () => {
     const ctx = makeCtx({
       verifyResults: [],
       reviewResult: {
@@ -177,6 +178,21 @@ describe('decide', () => {
       },
     })
     const d = decide(ctx, loopConfig, securityConfig)
+    expect(d.action).toBe('block')
+  })
+
+  it('APPROVED with no verify commands + requireVerificationPass=false → publish', () => {
+    const ctx = makeCtx({
+      repoConfig: { verify: [] } as RunContext['repoConfig'],
+      verifyResults: [],
+      reviewResult: {
+        verdict: 'APPROVED',
+        summary: 'Good',
+        findings: [],
+        definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+      },
+    })
+    const d = decide(ctx, { ...loopConfig, requireVerificationPass: false }, securityConfig)
     expect(d.action).toBe('publish')
   })
 })

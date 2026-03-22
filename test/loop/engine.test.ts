@@ -25,6 +25,7 @@ vi.mock('../../src/utils/logger.js', () => ({
 
 vi.mock('../../src/workers/env.js', () => ({
   buildWorkerEnv: vi.fn().mockReturnValue({ PATH: '/usr/bin' }),
+  buildVerifierEnv: vi.fn().mockReturnValue({ PATH: '/usr/bin' }),
 }))
 
 function makePlannerResult(objective = 'Fix it'): WorkerTaskResult {
@@ -133,7 +134,7 @@ function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
       branchPrefix: 'orch',
       labels: { ready: ['orch:ready'], running: 'orch:running', blocked: ['orch:blocked'], reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry' },
       defaults: { planner: 'claude', coder: 'claude', reviewer: 'claude', doneMode: 'pr-ready', notifyPriority: 'normal', prMentions: [] },
-      verify: [],
+      verify: ['pnpm test'],
       selectors: { includeLabelsAny: [], excludeLabelsAny: [] },
       agents: { claude: 'claude' },
     } as RunContext['repoConfig'],
@@ -151,6 +152,7 @@ function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
     totalAgentPasses: 0,
     estimatedCostUsd: 0,
     currentPhase: 'plan',
+    terminalStatus: 'running',
     phaseHistory: [],
     dryRun: false,
     ...overrides,
@@ -190,6 +192,7 @@ describe('executeLoop', () => {
 
     // recordPhase sets currentPhase to 'publish' (the phase name)
     expect(result.currentPhase).toBe('publish')
+    expect(result.terminalStatus).toBe('publish')
     expect(result.plan).not.toBeNull()
     expect(result.plan!.objective).toBe('Fix it')
     // Last phase record should be success
@@ -209,6 +212,7 @@ describe('executeLoop', () => {
     const result = await executeLoop(makeCtx(), deps)
 
     expect(result.currentPhase).toBe('publish')
+    expect(result.terminalStatus).toBe('publish')
     expect(result.iteration).toBe(2) // bounced once
   })
 
@@ -234,6 +238,7 @@ describe('executeLoop', () => {
 
     // recordPhase sets currentPhase to 'decision' (the phase name for block)
     expect(result.currentPhase).toBe('decision')
+    expect(result.terminalStatus).toBe('blocked')
     const lastPhase = result.phaseHistory[result.phaseHistory.length - 1]!
     expect(lastPhase.result).toBe('failure')
   })
@@ -260,6 +265,7 @@ describe('executeLoop', () => {
 
     // recordPhase sets currentPhase to 'plan' (the phase name for planner failure)
     expect(result.currentPhase).toBe('plan')
+    expect(result.terminalStatus).toBe('error')
     const lastPhase = result.phaseHistory[result.phaseHistory.length - 1]!
     expect(lastPhase.result).toBe('failure')
   })
@@ -282,6 +288,7 @@ describe('executeLoop', () => {
     const result = await executeLoop(ctx, deps)
 
     expect(result.currentPhase).toBe('publish')
+    expect(result.terminalStatus).toBe('publish')
     // Planner should NOT have been called
     expect(plannerAdapter.runTask).not.toHaveBeenCalled()
   })
@@ -298,6 +305,7 @@ describe('executeLoop', () => {
     const result = await executeLoop(makeCtx(), deps)
 
     expect(result.currentPhase).toBe('decision')
+    expect(result.terminalStatus).toBe('blocked')
     const lastPhase = result.phaseHistory[result.phaseHistory.length - 1]!
     expect(lastPhase.result).toBe('failure')
   })

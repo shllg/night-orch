@@ -75,4 +75,16 @@ describe('validateSharedEnvironment', () => {
 
     await expect(validateSharedEnvironment('check-it')).rejects.toThrow()
   })
+
+  it('supports array-form healthcheck commands', async () => {
+    mockExeca.mockResolvedValue({ exitCode: 0 } as never)
+
+    await validateSharedEnvironment(['docker', 'compose', 'ps', '--services'])
+
+    expect(mockExeca).toHaveBeenCalledWith(
+      'docker',
+      ['compose', 'ps', '--services'],
+      { timeout: 10_000 },
+    )
+  })
 })

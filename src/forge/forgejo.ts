@@ -56,6 +56,20 @@ export class ForgejoForgeAdapter implements ForgeAdapter {
     const seenNumbers = new Set<number>()
     const allIssues: ForgeIssue[] = []
 
+    if (includeLabels.length === 0) {
+      const issues = await this.client.getPaginated<ForgejoIssueData>(
+        `/repos/${owner}/${repo}/issues`,
+        { state: 'open', type: 'issues' },
+      )
+      for (const issue of issues) {
+        if (issue.pull_request) continue
+        if (seenNumbers.has(issue.number)) continue
+        seenNumbers.add(issue.number)
+        allIssues.push(this.mapIssue(issue, repoConfig.repo))
+      }
+      return allIssues
+    }
+
     for (const label of includeLabels) {
       const issues = await this.client.getPaginated<ForgejoIssueData>(
         `/repos/${owner}/${repo}/issues`,
@@ -84,6 +98,7 @@ export class ForgejoForgeAdapter implements ForgeAdapter {
   async addLabels(repo: string, issueNumber: number, labels: string[]): Promise<void> {
     if (labels.length === 0) return
     const { owner, repo: repoName } = splitRepo(repo)
+    this.labelCache.invalidate(repo)
 
     const ids: number[] = []
     for (const name of labels) {
@@ -101,6 +116,7 @@ export class ForgejoForgeAdapter implements ForgeAdapter {
 
   async removeLabels(repo: string, issueNumber: number, labels: string[]): Promise<void> {
     const { owner, repo: repoName } = splitRepo(repo)
+    this.labelCache.invalidate(repo)
 
     for (const name of labels) {
       const id = await this.labelCache.getIdByName(repo, name)

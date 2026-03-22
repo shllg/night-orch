@@ -14,9 +14,18 @@ export interface DiffStats {
 export async function checkDiffSize(
   worktreePath: string,
   limits: { maxChangedFiles: number; maxChangedLines: number },
+  opts: { staged?: boolean } = {},
 ): Promise<{ ok: boolean; stats: DiffStats; reason: string | null }> {
-  const { stdout } = await execa('git', ['diff', '--stat', '--stat-width=300', 'HEAD'], {
+  const args = opts.staged
+    ? ['diff', '--cached', '--stat', '--stat-width=300']
+    : ['diff', '--stat', '--stat-width=300', 'HEAD']
+
+  const { stdout } = await execa('git', args, {
     cwd: worktreePath,
+    env: {
+      ...process.env,
+      LC_ALL: 'C',
+    },
     reject: false,
   })
 

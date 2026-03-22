@@ -86,4 +86,22 @@ describe('LeaseManager', () => {
     const result = leaseManager.acquire('org/repo-b', 1, 'runner-1', 3600)
     expect(result).toBe(true)
   })
+
+  it('releaseAll clears all active leases', () => {
+    leaseManager.acquire('org/repo-a', 1, 'runner-1', 3600)
+    leaseManager.acquire('org/repo-b', 2, 'runner-2', 3600)
+    const removed = leaseManager.releaseAll()
+    expect(removed).toBe(2)
+    expect(leaseManager.isLeased('org/repo-a', 1)).toBe(false)
+    expect(leaseManager.isLeased('org/repo-b', 2)).toBe(false)
+  })
+
+  it('releaseAll(owner) clears only matching owner leases', () => {
+    leaseManager.acquire('org/repo-a', 1, 'runner-1', 3600)
+    leaseManager.acquire('org/repo-b', 2, 'runner-2', 3600)
+    const removed = leaseManager.releaseAll('runner-1')
+    expect(removed).toBe(1)
+    expect(leaseManager.isLeased('org/repo-a', 1)).toBe(false)
+    expect(leaseManager.isLeased('org/repo-b', 2)).toBe(true)
+  })
 })

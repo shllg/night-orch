@@ -101,4 +101,20 @@ describe('checkDiffSize', () => {
     expect(result.ok).toBe(false)
     expect(result.reason).toContain('files')
   })
+
+  it('supports staged diff checks and forces C locale', async () => {
+    mockExeca.mockResolvedValue({ stdout: ' 1 file changed, 1 insertion(+)\n' } as never)
+
+    const result = await checkDiffSize('/tmp/wt', defaultLimits, { staged: true })
+
+    expect(result.ok).toBe(true)
+    expect(mockExeca).toHaveBeenCalledWith(
+      'git',
+      ['diff', '--cached', '--stat', '--stat-width=300'],
+      expect.objectContaining({
+        cwd: '/tmp/wt',
+        env: expect.objectContaining({ LC_ALL: 'C' }),
+      }),
+    )
+  })
 })

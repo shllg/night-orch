@@ -11,9 +11,20 @@ const WebhookChannelSchema = z.object({
   urlEnv: z.string(),
 })
 
+const SmtpChannelSchema = z.object({
+  type: z.literal('smtp'),
+  host: z.string(),
+  port: z.number().int().positive().default(587),
+  from: z.string(),
+  to: z.string(),
+  userEnv: z.string(),
+  passEnv: z.string(),
+})
+
 const NotificationChannelSchema = z.discriminatedUnion('type', [
   ConsoleChannelSchema,
   WebhookChannelSchema,
+  SmtpChannelSchema,
 ])
 
 const NotificationEventsSchema = z.object({
@@ -43,10 +54,15 @@ const WorkerProfileSchema = z.object({
   env: z.record(z.string()).default({}),
 })
 
+const CommandSpecSchema = z.union([
+  z.string(),
+  z.array(z.string()).min(1),
+])
+
 // --- Environment schemas ---
 
 const BootstrapCommandSchema = z.object({
-  command: z.string(),
+  command: CommandSpecSchema,
   when: z.enum(['always', 'dedicated', 'shared']).default('always'),
 })
 
@@ -61,13 +77,13 @@ const DedicatedEnvSchema = z.object({
     overrides: z.record(z.string()).default({}),
     overrideFiles: z.array(z.string()).default([]),
   }).default({}),
-  healthcheck: z.string().optional(),
+  healthcheck: CommandSpecSchema.optional(),
   teardownOnComplete: z.boolean().default(true),
 })
 
 const SharedEnvSchema = z.object({
   requireRunning: z.boolean().default(true),
-  healthcheck: z.string().optional(),
+  healthcheck: CommandSpecSchema.optional(),
 })
 
 const EnvironmentConfigSchema = z.object({
@@ -104,7 +120,7 @@ const DefaultsSchema = z.object({
 
 const SelectorsSchema = z.object({
   includeLabelsAny: z.array(z.string()).default(['orch:ready']),
-  excludeLabelsAny: z.array(z.string()).default(['orch:blocked', 'orch:error']),
+  excludeLabelsAny: z.array(z.string()).default(['orch:blocked', 'orch:error', 'orch:needs-human']),
 })
 
 const PromptsSchema = z.object({
@@ -126,7 +142,7 @@ const RepoConfigSchema = z.object({
   labels: LabelsSchema.default({ ready: ['orch:ready'] }),
   defaults: DefaultsSchema.default({}),
   environment: EnvironmentConfigSchema.optional(),
-  verify: z.array(z.string()).default([]),
+  verify: z.array(CommandSpecSchema).default([]),
   prompts: PromptsSchema.optional(),
   selectors: SelectorsSchema.default({}),
   agents: z.record(z.string()).default({}),
@@ -194,6 +210,7 @@ export const ConfigSchema = z.object({
   mcp: z.object({
     enabled: z.boolean().default(false),
     transport: z.enum(['stdio']).default('stdio'),
+    authTokenEnv: z.string().nullable().default(null),
   }).default({}),
 
   repos: z.array(RepoConfigSchema).min(1, 'At least one repository must be configured'),

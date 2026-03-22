@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
 import type { ForgeAdapter } from '../forge/types.js'
 import type { RunContext } from '../loop/types.js'
-import type { LabelConfig } from '../labels/transitions.js'
+import { buildLabelConfig } from '../labels/config.js'
 import { transitionLabels } from '../labels/manager.js'
 import { pushBranch } from './push.js'
 import { compilePRTitle, compilePRBody } from './pr-body.js'
@@ -18,17 +18,6 @@ export interface PublishErrorResult {
   phase: 'push' | 'pr'
 }
 
-function buildLabelConfig(ctx: RunContext): LabelConfig {
-  return {
-    ready: ctx.repoConfig.labels.ready,
-    running: ctx.repoConfig.labels.running,
-    blocked: ctx.repoConfig.labels.blocked,
-    reviewReady: ctx.repoConfig.labels.reviewReady,
-    error: ctx.repoConfig.labels.error,
-    retry: ctx.repoConfig.labels.retry,
-  }
-}
-
 async function transitionToError(
   forge: ForgeAdapter,
   ctx: RunContext,
@@ -36,7 +25,15 @@ async function transitionToError(
 ): Promise<void> {
   try {
     const issue = await forge.getIssue(ctx.repo, ctx.issueNumber)
-    await transitionLabels(forge, ctx.repo, ctx.issueNumber, issue.labels, 'running', 'error', buildLabelConfig(ctx))
+    await transitionLabels(
+      forge,
+      ctx.repo,
+      ctx.issueNumber,
+      issue.labels,
+      'running',
+      'error',
+      buildLabelConfig(ctx.repoConfig),
+    )
   } catch (labelErr) {
     logger.warn({ repo: ctx.repo, issue: ctx.issueNumber, err: labelErr }, 'Failed to transition labels to error during publish failure')
   }
