@@ -27,6 +27,7 @@ import { branchName } from '../utils/ids.js'
 import { logger } from '../utils/logger.js'
 import type { RunContext } from '../loop/types.js'
 import type { NotificationPayload } from '../notify/types.js'
+import { postPlanSummaryComment } from '../loop/plan-summary-comment.js'
 
 export interface PollResult {
   processed: number
@@ -225,6 +226,9 @@ export async function pollOnce(
         reviewerAdapter: createWorkerAdapter(reviewerProfile),
         envOverrides: envSetup?.envOverrides ?? {},
         metrics,
+        onPlanReady: async (ctx) => {
+          await postPlanSummaryComment(forge, ctx.repo, ctx.issueNumber, ctx.plan)
+        },
       })
 
       const runDurationSec = (Date.now() - loopStart) / 1000

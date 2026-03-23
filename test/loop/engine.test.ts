@@ -28,6 +28,8 @@ vi.mock('../../src/workers/env.js', () => ({
   buildVerifierEnv: vi.fn().mockReturnValue({ PATH: '/usr/bin' }),
 }))
 
+import { logger } from '../../src/utils/logger.js'
+
 function makePlannerResult(objective = 'Fix it'): WorkerTaskResult {
   return {
     rawOutput: '',
@@ -201,6 +203,67 @@ describe('executeLoop', () => {
     expect(lastPhase.result).toBe('success')
   })
 
+  it('calls onPlanReady after plan and before code', async () => {
+    const callOrder: string[] = []
+    const onPlanReady = vi.fn().mockImplementation(async () => {
+      callOrder.push('onPlanReady')
+    })
+    const plannerAdapter: WorkerAdapter = {
+      runTask: vi.fn().mockImplementation(async () => {
+        callOrder.push('planner')
+        return makePlannerResult()
+      }),
+      checkAvailability: vi.fn().mockResolvedValue({ available: true, version: '1.0' }),
+    }
+    const coderAdapter: WorkerAdapter = {
+      runTask: vi.fn().mockImplementation(async () => {
+        callOrder.push('coder')
+        return makeCoderResult()
+      }),
+      checkAvailability: vi.fn().mockResolvedValue({ available: true, version: '1.0' }),
+    }
+    const reviewerAdapter: WorkerAdapter = {
+      runTask: vi.fn().mockImplementation(async () => {
+        callOrder.push('reviewer')
+        return makeReviewerResult('APPROVED')
+      }),
+      checkAvailability: vi.fn().mockResolvedValue({ available: true, version: '1.0' }),
+    }
+
+    const deps: LoopDependencies = {
+      db,
+      config: makeConfig(),
+      plannerAdapter,
+      coderAdapter,
+      reviewerAdapter,
+      onPlanReady,
+    }
+
+    await executeLoop(makeCtx(), deps)
+
+    expect(onPlanReady).toHaveBeenCalledTimes(1)
+    expect(callOrder).toEqual(['planner', 'onPlanReady', 'coder', 'reviewer'])
+  })
+
+  it('continues when onPlanReady fails', async () => {
+    const deps: LoopDependencies = {
+      db,
+      config: makeConfig(),
+      plannerAdapter: makeMockAdapter([makePlannerResult()]),
+      coderAdapter: makeMockAdapter([makeCoderResult()]),
+      reviewerAdapter: makeMockAdapter([makeReviewerResult('APPROVED')]),
+      onPlanReady: vi.fn().mockRejectedValue(new Error('comment failed')),
+    }
+
+    const result = await executeLoop(makeCtx(), deps)
+
+    expect(result.terminalStatus).toBe('publish')
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: 'run-test-1', repo: 'org/repo', issueNumber: 1 }),
+      'Failed to post plan summary',
+    )
+  })
+
   it('review bounce: CHANGES_REQUIRED → iterate → APPROVED → completed', async () => {
     const deps: LoopDependencies = {
       db,
@@ -293,12 +356,15 @@ describe('executeLoop', () => {
 
     const plannerAdapter = makeMockAdapter([makePlannerResult()])
 
+    const onPlanReady = vi.fn()
+
     const deps: LoopDependencies = {
       db,
       config: makeConfig(),
       plannerAdapter,
       coderAdapter: makeMockAdapter([makeCoderResult()]),
       reviewerAdapter: makeMockAdapter([makeReviewerResult('APPROVED')]),
+      onPlanReady,
     }
 
     const result = await executeLoop(ctx, deps)
@@ -307,6 +373,7 @@ describe('executeLoop', () => {
     expect(result.terminalStatus).toBe('publish')
     // Planner should NOT have been called
     expect(plannerAdapter.runTask).not.toHaveBeenCalled()
+    expect(onPlanReady).not.toHaveBeenCalled()
   })
 
   it('BLOCKED verdict → blocked', async () => {

@@ -22,6 +22,7 @@ export interface LoopDependencies {
   reviewerAdapter: WorkerAdapter
   envOverrides?: Record<string, string>
   metrics?: MetricsService
+  onPlanReady?: (ctx: RunContext) => Promise<void>
 }
 
 /**
@@ -65,6 +66,14 @@ export async function executeLoop(
     checkpoint.phaseCompleted(ctx.runId, 'plan', {})
     ctx = recordPhase(ctx, 'plan', 'skipped')
     logger.info({ runId: ctx.runId }, 'Trivial issue — skipping planning')
+  }
+
+  if (ctx.plan && deps.onPlanReady) {
+    try {
+      await deps.onPlanReady(ctx)
+    } catch (err) {
+      logger.warn({ runId: ctx.runId, repo: ctx.repo, issueNumber: ctx.issueNumber, err }, 'Failed to post plan summary')
+    }
   }
 
   // ITERATION LOOP
