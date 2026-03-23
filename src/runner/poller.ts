@@ -202,6 +202,7 @@ export async function pollOnce(
         worktreePath,
         plan: null,
         codeResult: null,
+        diff: null,
         verifyResults: [],
         reviewResult: null,
         reviewFindings: [],
@@ -240,6 +241,7 @@ export async function pollOnce(
         runManager,
         notifier,
         metrics,
+        config,
       })
 
       if (outcome === 'processed') processed++
@@ -312,6 +314,7 @@ interface FinalizeRunOutcomeParams {
   runManager: RunManager
   notifier: NotificationDispatcher
   metrics?: MetricsService
+  config: Config
 }
 
 async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'processed' | 'error'> {
@@ -390,7 +393,8 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
   }
 
   if (finalCtx.terminalStatus === 'blocked') {
-    runManager.update(runId, { status: 'blocked', endedAt: new Date().toISOString() })
+    const blockReason = buildBlockReason(finalCtx)
+    runManager.update(runId, { status: 'blocked', lastError: blockReason, endedAt: new Date().toISOString() })
     const latestIssue = await forge.getIssue(repo, issueNumber)
     await transitionLabels(
       forge,
@@ -401,8 +405,18 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
       'blocked',
       labelConfig,
     )
+
+    // Post block reason as a comment so the user knows why
+    try {
+      await forge.commentOnIssue(repo, issueNumber, formatBlockComment(blockReason, finalCtx))
+    } catch (commentErr) {
+      logger.warn({ repo, issueNumber, err: commentErr }, 'Failed to post block reason comment')
+    }
+
     const notifyResult = await notifier.dispatch(makePayload('blocked', repo, issue, {
-      summary: 'Issue blocked during processing',
+      summary: blockReason,
+      blockingReason: blockReason,
+      reviewSummary: finalCtx.reviewResult?.summary ?? null,
     }))
     try {
       metrics?.incRunsTotal('blocked')
@@ -414,7 +428,8 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
     return 'processed'
   }
 
-  runManager.update(runId, { status: 'error', lastError: 'Loop ended in unexpected state', endedAt: new Date().toISOString() })
+  const unexpectedError = `Loop ended in unexpected state: ${finalCtx.terminalStatus}/${finalCtx.currentPhase}`
+  runManager.update(runId, { status: 'error', lastError: unexpectedError, endedAt: new Date().toISOString() })
   const latestIssue = await forge.getIssue(repo, issueNumber)
   await transitionLabels(
     forge,
@@ -446,6 +461,32 @@ function coerceAgentName(
     return value
   }
   return fallback
+}
+
+function buildBlockReason(ctx: RunContext): string {
+  if (ctx.reviewResult) {
+    const findings = ctx.reviewResult.findings
+      .filter((f) => f.severity === 'critical' || f.severity === 'major')
+      .map((f) => `[${f.severity}] ${f.message}`)
+      .join('; ')
+    return findings
+      ? `${ctx.reviewResult.summary} — ${findings}`
+      : ctx.reviewResult.summary
+  }
+  return `Blocked in phase ${ctx.currentPhase} (no review result available)`
+}
+
+function formatBlockComment(reason: string, ctx: RunContext): string {
+  const parts = [`⛔ **night-orch**: Run blocked.\n\n**Reason:** ${reason}`]
+  if (ctx.reviewResult?.findings && ctx.reviewResult.findings.length > 0) {
+    parts.push('\n**Findings:**')
+    for (const f of ctx.reviewResult.findings) {
+      const fix = f.suggestedFix ? ` → ${f.suggestedFix}` : ''
+      parts.push(`- **${f.severity}**: ${f.message}${fix}`)
+    }
+  }
+  parts.push(`\n*Iteration ${ctx.iteration}, cost: $${ctx.estimatedCostUsd.toFixed(4)}*`)
+  return parts.join('\n')
 }
 
 function makePayload(

@@ -21,6 +21,7 @@ function makeBaseCtx(): RunContext {
     worktreePath: '/tmp/wt',
     plan: null,
     codeResult: null,
+    diff: null,
     verifyResults: [],
     reviewResult: null,
     reviewFindings: [],

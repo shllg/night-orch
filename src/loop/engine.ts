@@ -10,6 +10,7 @@ import { compilePrompt } from '../workers/prompt/compiler.js'
 import { buildWorkerEnv, buildVerifierEnv } from '../workers/env.js'
 import { Checkpoint } from './checkpoint.js'
 import { CostTracker } from './cost.js'
+import { getDiffAgainstBranch, getChangedFilesAgainstBranch } from '../git/repo.js'
 import { logger } from '../utils/logger.js'
 import type Database from 'better-sqlite3'
 
@@ -115,6 +116,10 @@ export async function executeLoop(
       {},
       verifyStartedAt,
     )
+
+    // Fetch diff against target branch for the reviewer
+    const diff = await getDiffAgainstBranch(ctx.worktreePath, ctx.repoConfig.baseBranch)
+    ctx = updateContext(ctx, { diff })
 
     // REVIEW
     const reviewStart = Date.now()
@@ -238,8 +243,26 @@ async function runCodeStep(ctx: RunContext, deps: LoopDependencies): Promise<Run
     DEFAULT_CODER_TEMPLATE,
   )
 
+  let codeResult = result.parsed as RunContext['codeResult']
+
+  // Fallback: if parse failed but coder exited successfully, build a synthetic
+  // codeResult from git. The coder wrote files to disk — we just couldn't parse
+  // its structured output.
+  if (!codeResult && result.exitCode === 0) {
+    logger.info({ runId: ctx.runId }, 'Coder parse failed — falling back to git diff for changed files')
+    const changedFiles = await getChangedFilesAgainstBranch(ctx.worktreePath, ctx.repoConfig.baseBranch)
+    if (changedFiles.length > 0) {
+      codeResult = {
+        summary: 'Coder output could not be parsed. Changed files detected via git diff.',
+        changedFiles,
+        remainingUncertainty: 'Coder structured output was not parseable — review carefully.',
+        blockers: null,
+      }
+    }
+  }
+
   return updateContext(ctx, {
-    codeResult: result.parsed as RunContext['codeResult'],
+    codeResult,
     totalAgentPasses: ctx.totalAgentPasses + 1,
   })
 }
@@ -321,6 +344,7 @@ function buildPromptContext(ctx: RunContext, role: 'planner' | 'coder' | 'review
       baseBranch: ctx.repoConfig.baseBranch,
     },
     plan: ctx.plan?.objective ?? null,
+    diff: ctx.diff ?? null,
     reviewFindings: ctx.reviewFindings.length > 0 ? ctx.reviewFindings : null,
     verifyResults: ctx.verifyResults.length > 0 ? ctx.verifyResults : null,
     iteration: {

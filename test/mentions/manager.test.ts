@@ -76,6 +76,7 @@ function makeCtx(labels: string[] = [], prMentions: string[] = []): RunContext {
     worktreePath: '/tmp/wt',
     plan: null,
     codeResult: null,
+    diff: null,
     verifyResults: [],
     reviewResult: null,
     reviewFindings: [],

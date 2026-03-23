@@ -41,6 +41,7 @@ function buildVarMap(ctx: PromptContext): Record<string, string> {
     'repo.name': ctx.repo.name,
     'repo.baseBranch': ctx.repo.baseBranch,
     'plan': ctx.plan ?? '(no plan available)',
+    'diff': ctx.diff ?? '(no diff available)',
     'iteration.current': String(ctx.iteration.current),
     'iteration.max': String(ctx.iteration.max),
     'iteration.isRetry': String(ctx.iteration.isRetry),
@@ -68,6 +69,14 @@ function buildUserPrompt(ctx: PromptContext): string {
     parts.push('')
     parts.push('## Implementation Plan')
     parts.push(ctx.plan)
+  }
+
+  if (ctx.diff) {
+    parts.push('')
+    parts.push('## Code Changes (diff)')
+    parts.push('```diff')
+    parts.push(ctx.diff)
+    parts.push('```')
   }
 
   if (ctx.reviewFindings && ctx.reviewFindings.length > 0) {

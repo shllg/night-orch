@@ -29,6 +29,7 @@ function makeContext(overrides: Partial<PromptContext> = {}): PromptContext {
       baseBranch: 'main',
     },
     plan: null,
+    diff: null,
     reviewFindings: null,
     verifyResults: null,
     iteration: {

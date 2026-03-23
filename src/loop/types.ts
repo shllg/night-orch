@@ -38,6 +38,7 @@ export interface RunContext {
 
   readonly plan: PlannerOutput | null
   readonly codeResult: CoderOutput | null
+  readonly diff: string | null
   readonly verifyResults: VerifyResult[]
   readonly reviewResult: ReviewerOutput | null
   readonly reviewFindings: ReviewFinding[]

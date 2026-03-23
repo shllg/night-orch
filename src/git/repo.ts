@@ -64,3 +64,47 @@ export async function isGitRepo(path: string): Promise<boolean> {
     return false
   }
 }
+
+const MAX_DIFF_LENGTH = 50_000
+
+/**
+ * Get the diff of the current branch against the target branch.
+ * Truncates output beyond MAX_DIFF_LENGTH to avoid blowing up prompts.
+ */
+export async function getDiffAgainstBranch(
+  worktreePath: string,
+  baseBranch: string,
+): Promise<string> {
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['diff', `origin/${baseBranch}...HEAD`],
+      { cwd: worktreePath },
+    )
+    if (stdout.length <= MAX_DIFF_LENGTH) return stdout
+    return stdout.slice(0, MAX_DIFF_LENGTH) + '\n\n[... diff truncated at 50KB ...]'
+  } catch (err) {
+    logger.warn({ worktreePath, baseBranch, err }, 'Failed to get diff against base branch')
+    return ''
+  }
+}
+
+/**
+ * Get the list of changed files relative to the target branch.
+ */
+export async function getChangedFilesAgainstBranch(
+  worktreePath: string,
+  baseBranch: string,
+): Promise<string[]> {
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['diff', '--name-only', `origin/${baseBranch}...HEAD`],
+      { cwd: worktreePath },
+    )
+    return stdout.trim().split('\n').filter(Boolean)
+  } catch (err) {
+    logger.warn({ worktreePath, baseBranch, err }, 'Failed to get changed files against base branch')
+    return []
+  }
+}

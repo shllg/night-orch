@@ -92,6 +92,7 @@ export interface PromptContext {
     baseBranch: string
   }
   plan: string | null
+  diff: string | null
   reviewFindings: ReviewFinding[] | null
   verifyResults: VerifyResult[] | null
   iteration: {
