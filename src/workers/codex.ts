@@ -27,8 +27,15 @@ export class CodexWorkerAdapter implements WorkerAdapter {
       logger.warn({ role: input.role, durationMs: result.durationMs }, 'Codex worker timed out')
     }
 
+    // Extract text from Codex streaming event format
+    const assistantText = extractCodexOutput(result.stdout)
+    const extracted = assistantText !== result.stdout
+    if (extracted) {
+      logger.info({ role: input.role, rawLength: result.stdout.length, extractedLength: assistantText.length }, 'Codex output extraction')
+    }
+
     // Parse output based on role
-    const { parsed, parseError } = parseOutput(input.role, result.stdout)
+    const { parsed, parseError } = parseOutput(input.role, assistantText)
 
     return {
       rawOutput: result.stdout,
@@ -55,6 +62,37 @@ export class CodexWorkerAdapter implements WorkerAdapter {
       return { available: false, version: null }
     }
   }
+}
+
+/**
+ * Codex CLI outputs newline-delimited JSON streaming events.
+ * Agent text is in item.completed events with item.type === "agent_message".
+ * Extract and concatenate all agent message text.
+ */
+function extractCodexOutput(raw: string): string {
+  const textParts: string[] = []
+
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue
+    try {
+      const event = JSON.parse(line) as Record<string, unknown>
+      if (
+        event.type === 'item.completed' &&
+        typeof event.item === 'object' &&
+        event.item !== null
+      ) {
+        const item = event.item as Record<string, unknown>
+        if (item.type === 'agent_message' && typeof item.text === 'string') {
+          textParts.push(item.text)
+        }
+      }
+    } catch {
+      // Not JSON — skip
+    }
+  }
+
+  if (textParts.length > 0) return textParts.join('\n')
+  return raw
 }
 
 function parseOutput(role: string, raw: string): { parsed: WorkerTaskResult['parsed']; parseError: string | null } {
