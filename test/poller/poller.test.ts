@@ -285,6 +285,43 @@ describe('pollOnce', () => {
     expect(callOrder).toEqual(['executeLoop', 'comment', 'afterOnPlanReady'])
   })
 
+  it('processes the next eligible issue in the same poll cycle', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([
+      {
+        issue: { number: 1, nodeId: '', title: 'First', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        triage: { level: 'standard', reason: '' },
+      },
+      {
+        issue: { number: 2, nodeId: '', title: 'Second', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        triage: { level: 'standard', reason: '' },
+      },
+    ])
+    mockExecuteLoop.mockResolvedValue({
+      currentPhase: 'publish',
+      terminalStatus: 'blocked',
+    })
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    const result = await pollOnce(config, db, false)
+
+    expect(result.processed).toBe(2)
+    expect(result.errors).toBe(0)
+    expect(mockExecuteLoop).toHaveBeenCalledTimes(2)
+
+    const firstCallCtx = mockExecuteLoop.mock.calls[0]?.[0] as { issueNumber: number }
+    const secondCallCtx = mockExecuteLoop.mock.calls[1]?.[0] as { issueNumber: number }
+    expect(firstCallCtx.issueNumber).toBe(1)
+    expect(secondCallCtx.issueNumber).toBe(2)
+
+    const runs = db
+      .prepare('SELECT issue_number, status FROM runs ORDER BY created_at')
+      .all() as Array<{ issue_number: number; status: string }>
+    expect(runs).toEqual([
+      { issue_number: 1, status: 'blocked' },
+      { issue_number: 2, status: 'blocked' },
+    ])
+  })
+
   it('processes only the targeted issue when targetIssue is provided', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([
       {
