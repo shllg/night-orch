@@ -111,6 +111,33 @@ describe('ConfigSchema', () => {
     }
   })
 
+  it('applies planning defaults for repos', () => {
+    const minimal = {
+      version: 1,
+      github: { tokenEnv: 'GITHUB_TOKEN' },
+      repos: [{ repo: 'org/repo', localPath: '/tmp/repo' }],
+    }
+    const result = ConfigSchema.safeParse(minimal)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.repos[0]?.planning.label).toBe('orch:planning')
+      expect(result.data.repos[0]?.planning.outputDir).toBe('docs/prd')
+    }
+  })
+
+  it('accepts planning prompt override', () => {
+    const raw = loadExampleConfig()
+    raw.repos[0].prompts = {
+      ...(raw.repos[0].prompts ?? {}),
+      planningSystem: '.night-orch/prompts/planning-system.md',
+    }
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.repos[0]?.prompts?.planningSystem).toBe('.night-orch/prompts/planning-system.md')
+    }
+  })
+
   it('validates worker profile schema', () => {
     const raw = loadExampleConfig()
     raw.workerProfiles['claude-default'].workerTimeoutSeconds = -1

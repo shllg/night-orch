@@ -191,6 +191,7 @@ workerProfiles:
 | `environment` | object | no | none | Shared/dedicated env setup. |
 | `verify` | `CommandSpec[]` | no | `[]` | Verify commands run in worktree. |
 | `prompts` | object | no | none | Optional custom system prompt template paths. |
+| `planning` | object | no | object with defaults | Planning-only mode label and PRD output location. |
 | `selectors` | object | no | object with defaults | Issue label inclusion/exclusion filters. |
 | `agents` | record | no | `{}` | Maps agent names to worker profile names. |
 
@@ -287,9 +288,24 @@ Array of commands executed sequentially in worktree. Failures are collected per 
 | --- | --- | --- | --- |
 | `plannerSystem` | string path | no | If file exists, used instead of default planner system prompt. |
 | `coderSystem` | string path | no | If file exists, used instead of default coder system prompt. |
+| `planningSystem` | string path | no | If file exists, used instead of default planning-mode coder prompt. |
 | `reviewerSystem` | string path | no | If file exists, used instead of default reviewer system prompt. |
 
 If a configured template file is missing, a warning is logged and built-in defaults are used.
+
+### `repos[].planning`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `label` | string | `orch:planning` | If this label is present on an issue, night-orch runs in planning-only mode. |
+| `outputDir` | string | `docs/prd` | Planning mode requires exactly one changed markdown file under this directory. |
+
+Planning mode behavior:
+
+- Runs planner + coder steps only.
+- Skips verify/review iteration.
+- Blocks publication unless exactly one `*.md` file changed under `outputDir`.
+- Intended output is a PRD markdown file (no code changes).
 
 ### `repos[].selectors`
 

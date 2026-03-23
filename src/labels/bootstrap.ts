@@ -6,7 +6,7 @@ export interface LabelBootstrapDefinition {
   description: string
 }
 
-type LabelRole = 'ready' | 'running' | 'blocked' | 'reviewReady' | 'error' | 'retry'
+type LabelRole = 'ready' | 'running' | 'blocked' | 'reviewReady' | 'error' | 'retry' | 'planning'
 
 const DEFAULT_LABEL_PRESENTATION: Record<LabelRole, { color: string; description: string }> = {
   ready: {
@@ -33,6 +33,10 @@ const DEFAULT_LABEL_PRESENTATION: Record<LabelRole, { color: string; description
     color: '5319E7',
     description: 'Queued for retry',
   },
+  planning: {
+    color: '0052CC',
+    description: 'Planning-only mode: produce a PRD markdown file',
+  },
 }
 
 /**
@@ -40,7 +44,7 @@ const DEFAULT_LABEL_PRESENTATION: Record<LabelRole, { color: string; description
  * optional per-label overrides from repo.labelConfig.
  */
 export function buildLabelBootstrapDefinitions(
-  repoConfig: Pick<RepoConfig, 'labels' | 'labelConfig'>,
+  repoConfig: Pick<RepoConfig, 'labels' | 'labelConfig'> & Partial<Pick<RepoConfig, 'planning'>>,
 ): LabelBootstrapDefinition[] {
   const definitions: LabelBootstrapDefinition[] = []
   const seen = new Set<string>()
@@ -65,6 +69,9 @@ export function buildLabelBootstrapDefinitions(
   add(repoConfig.labels.reviewReady, 'reviewReady')
   add(repoConfig.labels.error, 'error')
   add(repoConfig.labels.retry, 'retry')
+  if (repoConfig.planning?.label) {
+    add(repoConfig.planning.label, 'planning')
+  }
 
   return definitions
 }

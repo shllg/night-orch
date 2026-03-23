@@ -127,7 +127,11 @@ repos:
     prompts:
       plannerSystem: .night-orch/prompts/planner-system.md
       coderSystem: .night-orch/prompts/coder-system.md
+      planningSystem: .night-orch/prompts/planning-system.md
       reviewerSystem: .night-orch/prompts/reviewer-system.md
+    planning:
+      label: orch:planning
+      outputDir: docs/prd
     selectors:
       includeLabelsAny:
         - orch:ready

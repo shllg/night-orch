@@ -325,4 +325,37 @@ describe('executeLoop', () => {
     const lastPhase = result.phaseHistory[result.phaseHistory.length - 1]!
     expect(lastPhase.result).toBe('failure')
   })
+
+  it('planning mode runs planner+coder only and skips review loop', async () => {
+    const plannerAdapter = makeMockAdapter([makePlannerResult('Create PRD')])
+    const coderAdapter = makeMockAdapter([makeCoderResult()])
+    const reviewerAdapter = makeMockAdapter([makeReviewerResult('APPROVED')])
+    const baseCtx = makeCtx()
+    const ctx = makeCtx({
+      issue: { ...baseCtx.issue, labels: ['orch:planning'] },
+      repoConfig: {
+        ...baseCtx.repoConfig,
+        planning: {
+          label: 'orch:planning',
+          outputDir: 'docs/prd',
+        },
+      } as RunContext['repoConfig'],
+    })
+
+    const deps: LoopDependencies = {
+      db,
+      config: makeConfig(),
+      plannerAdapter,
+      coderAdapter,
+      reviewerAdapter,
+    }
+
+    const result = await executeLoop(ctx, deps)
+
+    expect(plannerAdapter.runTask).toHaveBeenCalledTimes(1)
+    expect(coderAdapter.runTask).toHaveBeenCalledTimes(1)
+    expect(reviewerAdapter.runTask).not.toHaveBeenCalled()
+    expect(result.terminalStatus).toBe('blocked')
+    expect(result.currentPhase).toBe('publish')
+  })
 })

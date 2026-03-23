@@ -133,7 +133,13 @@ const SelectorsSchema = z.object({
 const PromptsSchema = z.object({
   plannerSystem: z.string().optional(),
   coderSystem: z.string().optional(),
+  planningSystem: z.string().optional(),
   reviewerSystem: z.string().optional(),
+})
+
+const PlanningConfigSchema = z.object({
+  label: z.string().min(1).default('orch:planning'),
+  outputDir: z.string().min(1).default('docs/prd'),
 })
 
 // --- Repo schema ---
@@ -152,6 +158,7 @@ const RepoConfigSchema = z.object({
   environment: EnvironmentConfigSchema.optional(),
   verify: z.array(CommandSpecSchema).default([]),
   prompts: PromptsSchema.optional(),
+  planning: PlanningConfigSchema.default({}),
   selectors: SelectorsSchema.default({}),
   agents: z.record(z.string()).default({}),
 })

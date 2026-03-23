@@ -11,6 +11,7 @@ import { buildWorkerEnv, buildVerifierEnv } from '../workers/env.js'
 import { Checkpoint } from './checkpoint.js'
 import { CostTracker } from './cost.js'
 import { getDiffAgainstBranch, getChangedFilesAgainstBranch } from '../git/repo.js'
+import { resolveExecutionMode, type ExecutionMode } from '../discovery/mode.js'
 import { logger } from '../utils/logger.js'
 import type Database from 'better-sqlite3'
 
@@ -37,12 +38,13 @@ export async function executeLoop(
   const costTracker = new CostTracker(db)
 
   let ctx = checkpoint.resumeFromCheckpoint(initialCtx.runId, initialCtx) ?? initialCtx
+  const executionMode = resolveExecutionMode(ctx.issue.labels, ctx.repoConfig)
 
   // PLAN
   ctx = updateContext(ctx, { currentPhase: 'plan' as LoopPhase })
   checkpoint.phaseStarted(ctx.runId, 'plan')
 
-  if (ctx.triageResult.level !== 'trivial') {
+  if (ctx.triageResult.level !== 'trivial' || executionMode === 'planning') {
     const planStart = Date.now()
     const planStartedAt = new Date(planStart).toISOString()
     ctx = await runPlanStep(ctx, deps)
@@ -67,6 +69,10 @@ export async function executeLoop(
     logger.info({ runId: ctx.runId }, 'Trivial issue — skipping planning')
   }
 
+  if (executionMode === 'planning') {
+    return executePlanningMode(ctx, deps, checkpoint, costTracker)
+  }
+
   // ITERATION LOOP
   while (true) {
     // Cost check
@@ -84,7 +90,7 @@ export async function executeLoop(
     const codeStartedAt = new Date(codeStart).toISOString()
     ctx = updateContext(ctx, { currentPhase: 'code' as LoopPhase })
     checkpoint.phaseStarted(ctx.runId, 'code')
-    ctx = await runCodeStep(ctx, deps)
+    ctx = await runCodeStep(ctx, deps, 'implementation')
     const codeDurationMs = Date.now() - codeStart
     ctx = applyEstimatedWorkerCost(ctx, costTracker, 'coder', codeDurationMs)
     try { metrics?.observePhaseDuration('code', codeDurationMs / 1000) } catch { /* best-effort */ }
@@ -217,6 +223,59 @@ function applyEstimatedWorkerCost(
   })
 }
 
+async function executePlanningMode(
+  initialCtx: RunContext,
+  deps: LoopDependencies,
+  checkpoint: Checkpoint,
+  costTracker: CostTracker,
+): Promise<RunContext> {
+  const { config, metrics } = deps
+  let ctx = initialCtx
+
+  if (costTracker.isOverBudget(ctx.runId, config.security)) {
+    logger.warn({ runId: ctx.runId }, 'Cost limit exceeded')
+    return recordPhase(
+      updateContext(ctx, { currentPhase: 'blocked', terminalStatus: 'blocked' }),
+      'code',
+      'failure',
+    )
+  }
+
+  const codeStart = Date.now()
+  const codeStartedAt = new Date(codeStart).toISOString()
+  ctx = updateContext(ctx, { currentPhase: 'code' as LoopPhase })
+  checkpoint.phaseStarted(ctx.runId, 'code')
+  ctx = await runCodeStep(ctx, deps, 'planning')
+  const codeDurationMs = Date.now() - codeStart
+  ctx = applyEstimatedWorkerCost(ctx, costTracker, 'coder', codeDurationMs)
+  try { metrics?.observePhaseDuration('code', codeDurationMs / 1000) } catch { /* best-effort */ }
+  checkpoint.phaseCompleted(ctx.runId, 'code', { codeResult: ctx.codeResult })
+  ctx = recordPhase(ctx, 'code', ctx.codeResult ? 'success' : 'failure', {}, codeStartedAt)
+
+  const commitResult = await commitChanges(
+    ctx.worktreePath,
+    ctx.issueNumber,
+    ctx.issue.title,
+    config.security,
+    { planningOutputDir: ctx.repoConfig.planning?.outputDir ?? 'docs/prd' },
+  )
+  if (!commitResult.committed) {
+    logger.warn({ runId: ctx.runId, reason: commitResult.reason }, 'Planning mode commit blocked')
+    return recordPhase(
+      updateContext(ctx, { currentPhase: 'blocked', terminalStatus: 'blocked' }),
+      'publish',
+      'failure',
+      { reason: commitResult.reason ?? 'Planning mode requires exactly one PRD markdown file.' },
+    )
+  }
+
+  return recordPhase(
+    updateContext(ctx, { currentPhase: 'completed', terminalStatus: 'publish' }),
+    'publish',
+    'success',
+  )
+}
+
 async function runPlanStep(ctx: RunContext, deps: LoopDependencies): Promise<RunContext> {
   const result = await runWorkerStep(
     ctx,
@@ -233,14 +292,25 @@ async function runPlanStep(ctx: RunContext, deps: LoopDependencies): Promise<Run
   })
 }
 
-async function runCodeStep(ctx: RunContext, deps: LoopDependencies): Promise<RunContext> {
+async function runCodeStep(
+  ctx: RunContext,
+  deps: LoopDependencies,
+  executionMode: ExecutionMode,
+): Promise<RunContext> {
+  const customTemplate = executionMode === 'planning'
+    ? (ctx.repoConfig.prompts?.planningSystem ?? ctx.repoConfig.prompts?.coderSystem)
+    : ctx.repoConfig.prompts?.coderSystem
+  const defaultTemplate = executionMode === 'planning'
+    ? buildPlanningCoderTemplate(ctx.repoConfig.planning?.outputDir ?? 'docs/prd')
+    : DEFAULT_CODER_TEMPLATE
+
   const result = await runWorkerStep(
     ctx,
     deps,
     'coder',
     deps.coderAdapter,
-    ctx.repoConfig.prompts?.coderSystem,
-    DEFAULT_CODER_TEMPLATE,
+    customTemplate,
+    defaultTemplate,
   )
 
   let codeResult = result.parsed as RunContext['codeResult']
@@ -396,6 +466,33 @@ After making changes, output a summary as JSON:
   "blockers": null
 }
 \`\`\``
+
+function buildPlanningCoderTemplate(outputDir: string): string {
+  return `You are a software implementation assistant. This run is in planning-only mode.
+
+Create exactly one PRD markdown file under \`${outputDir}/\` and do not modify any other files.
+
+PRD requirements:
+- Capture the problem statement and goals.
+- Define implementation phases.
+- Include actionable checklists for each phase.
+- Include risks and open questions.
+
+Strict constraints:
+- Only one changed file in total.
+- That file must be a \`.md\` file under \`${outputDir}/\`.
+- Do not edit source code, tests, configs, or lockfiles.
+
+After making changes, output a summary as JSON:
+\`\`\`json
+{
+  "summary": "...",
+  "changedFiles": ["..."],
+  "remainingUncertainty": null,
+  "blockers": null
+}
+\`\`\``
+}
 
 const DEFAULT_REVIEWER_TEMPLATE = `You are a code reviewer. Review the changes made for the issue.
 

@@ -88,6 +88,9 @@ repos:
         - orch:blocked
         - orch:error
         - orch:needs-human
+    planning:
+      label: orch:planning
+      outputDir: docs/prd
     environment:
       defaultMode: shared
       bootstrap:

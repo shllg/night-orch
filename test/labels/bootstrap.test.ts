@@ -75,4 +75,24 @@ describe('buildLabelBootstrapDefinitions', () => {
     expect(result).toHaveLength(1)
     expect(result[0]?.name).toBe('orch:shared')
   })
+
+  it('includes planning label when configured', () => {
+    const result = buildLabelBootstrapDefinitions({
+      labels: {
+        ready: ['orch:ready'],
+        running: 'orch:running',
+        blocked: ['orch:blocked'],
+        reviewReady: 'orch:review-ready',
+        error: 'orch:error',
+        retry: 'orch:retry',
+      },
+      labelConfig: {},
+      planning: {
+        label: 'orch:planning',
+        outputDir: 'docs/prd',
+      },
+    })
+
+    expect(result.map((l) => l.name)).toContain('orch:planning')
+  })
 })
