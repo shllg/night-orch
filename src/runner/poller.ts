@@ -253,6 +253,7 @@ export async function pollOnce(
           runManager,
           notifier,
           metrics,
+          maxAutoRetries: config.loop.maxAutoRetries,
         })
 
         if (outcome === 'processed') processed++
@@ -260,31 +261,52 @@ export async function pollOnce(
       } catch (err) {
         logger.error({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err }, 'Failed to process issue')
         if (runId) {
+          const recentErrors = runManager.countRecentErrors(repoConfig.repo, discoveredIssue.issue.number)
+          const maxRetries = config.loop.maxAutoRetries
+          const canAutoRetry = recentErrors < maxRetries
+
           runManager.update(runId, {
             status: 'error',
             lastError: String(err),
             endedAt: new Date().toISOString(),
           })
-          try {
-            const latestIssue = await forge.getIssue(repoConfig.repo, discoveredIssue.issue.number)
-            await transitionLabels(
-              forge,
-              repoConfig.repo,
-              discoveredIssue.issue.number,
-              latestIssue.labels,
-              'running',
-              'error',
-              labelConfig,
+
+          if (canAutoRetry) {
+            // Auto-retry: transition back to queued so the next poll picks it up
+            logger.info(
+              { repo: repoConfig.repo, issue: discoveredIssue.issue.number, recentErrors, maxRetries },
+              'Infra error — auto-retrying (transitioning back to ready)',
             )
-          } catch (labelErr) {
-            logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: labelErr }, 'Failed to transition labels after poller error')
-          }
-          try {
-            await notifier.dispatch(makePayload('error', repoConfig.repo, discoveredIssue.issue, {
-              summary: `Failed to process issue: ${(err as Error).message}`,
-            }))
-          } catch (notifyErr) {
-            logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: notifyErr }, 'Failed to send error notification after poller error')
+            try {
+              const latestIssue = await forge.getIssue(repoConfig.repo, discoveredIssue.issue.number)
+              await transitionLabels(forge, repoConfig.repo, discoveredIssue.issue.number, latestIssue.labels, 'running', 'queued', labelConfig)
+            } catch (labelErr) {
+              logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: labelErr }, 'Failed to transition labels for auto-retry')
+            }
+          } else {
+            // Retries exhausted: mark as error, require human
+            logger.warn(
+              { repo: repoConfig.repo, issue: discoveredIssue.issue.number, recentErrors, maxRetries },
+              'Auto-retry limit reached — marking as error',
+            )
+            try {
+              const latestIssue = await forge.getIssue(repoConfig.repo, discoveredIssue.issue.number)
+              await transitionLabels(forge, repoConfig.repo, discoveredIssue.issue.number, latestIssue.labels, 'running', 'error', labelConfig)
+              await forge.commentOnIssue(
+                repoConfig.repo,
+                discoveredIssue.issue.number,
+                `⚠️ **night-orch**: Failed after ${recentErrors + 1} attempts. Last error: ${(err as Error).message}\n\nRemove \`orch:error\` and add \`orch:ready\` to retry.`,
+              )
+            } catch (labelErr) {
+              logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: labelErr }, 'Failed to transition labels after retry exhaustion')
+            }
+            try {
+              await notifier.dispatch(makePayload('retry_exhausted', repoConfig.repo, discoveredIssue.issue, {
+                summary: `Failed after ${recentErrors + 1} attempts: ${(err as Error).message}`,
+              }))
+            } catch (notifyErr) {
+              logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: notifyErr }, 'Failed to send retry exhaustion notification')
+            }
           }
         }
         errors++
@@ -326,6 +348,7 @@ interface FinalizeRunOutcomeParams {
   runManager: RunManager
   notifier: NotificationDispatcher
   metrics?: MetricsService
+  maxAutoRetries: number
 }
 
 async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'processed' | 'error'> {
@@ -342,6 +365,7 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
     runManager,
     notifier,
     metrics,
+    maxAutoRetries,
   } = params
 
   if (finalCtx.terminalStatus === 'publish') {
@@ -379,25 +403,17 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
     } catch (err) {
       logger.error({ err }, 'Failed to publish PR')
       runManager.update(runId, { status: 'error', lastError: String(err), endedAt: new Date().toISOString() })
+      const recentErrors = new RunManager(db).countRecentErrors(repo, issueNumber)
       const latestIssue = await forge.getIssue(repo, issueNumber)
-      await transitionLabels(
-        forge,
-        repo,
-        issueNumber,
-        latestIssue.labels,
-        'running',
-        'error',
-        labelConfig,
-      )
-      const notifyResult = await notifier.dispatch(makePayload('error', repo, issue, {
-        summary: `Failed to publish PR: ${(err as Error).message}`,
-      }))
+      if (recentErrors < maxAutoRetries) {
+        await transitionLabels(forge, repo, issueNumber, latestIssue.labels, 'running', 'queued', labelConfig)
+        logger.info({ repo, issueNumber, recentErrors }, 'Publish failed — auto-retrying')
+      } else {
+        await transitionLabels(forge, repo, issueNumber, latestIssue.labels, 'running', 'error', labelConfig)
+      }
       try {
         metrics?.incRunsTotal('error')
         metrics?.observeRunDuration(runDurationSec)
-        for (const s of notifyResult.sent) {
-          metrics?.incNotifications(s.channel, s.success ? 'sent' : 'failed')
-        }
       } catch { /* best-effort */ }
       return 'error'
     }
@@ -441,25 +457,20 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
 
   const unexpectedError = `Loop ended in unexpected state: ${finalCtx.terminalStatus}/${finalCtx.currentPhase}`
   runManager.update(runId, { status: 'error', lastError: unexpectedError, endedAt: new Date().toISOString() })
+  const recentErrors = new RunManager(db).countRecentErrors(repo, issueNumber)
   const latestIssue = await forge.getIssue(repo, issueNumber)
-  await transitionLabels(
-    forge,
-    repo,
-    issueNumber,
-    latestIssue.labels,
-    'running',
-    'error',
-    labelConfig,
-  )
-  const notifyResult = await notifier.dispatch(makePayload('error', repo, issue, {
-    summary: `Error: loop ended in ${finalCtx.terminalStatus}/${finalCtx.currentPhase}`,
-  }))
+  if (recentErrors < maxAutoRetries) {
+    await transitionLabels(forge, repo, issueNumber, latestIssue.labels, 'running', 'queued', labelConfig)
+    logger.info({ repo, issueNumber, recentErrors }, 'Unexpected state — auto-retrying')
+  } else {
+    await transitionLabels(forge, repo, issueNumber, latestIssue.labels, 'running', 'error', labelConfig)
+    try {
+      await forge.commentOnIssue(repo, issueNumber, `⚠️ **night-orch**: Failed after ${recentErrors + 1} attempts. Last error: ${unexpectedError}`)
+    } catch { /* best-effort */ }
+  }
   try {
     metrics?.incRunsTotal('error')
     metrics?.observeRunDuration(runDurationSec)
-    for (const s of notifyResult.sent) {
-      metrics?.incNotifications(s.channel, s.success ? 'sent' : 'failed')
-    }
   } catch { /* best-effort */ }
   return 'error'
 }

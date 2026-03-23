@@ -207,6 +207,7 @@ export const ConfigSchema = z.object({
     reviewApprovalKeyword: z.string().default('APPROVED'),
     reviewNeedsChangesKeyword: z.string().default('CHANGES_REQUIRED'),
     blockOnAmbiguousReview: z.boolean().default(true),
+    maxAutoRetries: z.number().int().min(0).default(3),
   }).default({}),
 
   security: SecuritySchema.default({}),

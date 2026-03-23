@@ -68,42 +68,70 @@ export async function isGitRepo(path: string): Promise<boolean> {
 const MAX_DIFF_LENGTH = 50_000
 
 /**
- * Get the diff of the current branch against the target branch.
- * Truncates output beyond MAX_DIFF_LENGTH to avoid blowing up prompts.
+ * Get the full diff of all changes (committed + uncommitted + untracked)
+ * relative to origin/<baseBranch>.
+ *
+ * The coder writes files to disk but doesn't commit. To capture everything
+ * (including new untracked files), we temporarily stage all changes, diff
+ * the staged tree against the base, then unstage. The later commit step
+ * does its own `git add -A` so unstaging here is safe.
  */
 export async function getDiffAgainstBranch(
   worktreePath: string,
   baseBranch: string,
 ): Promise<string> {
   try {
+    // Stage everything so untracked files appear in the diff
+    await execa('git', ['add', '-A'], { cwd: worktreePath })
+
     const { stdout } = await execa(
       'git',
-      ['diff', `origin/${baseBranch}...HEAD`],
+      ['diff', '--staged', `origin/${baseBranch}`],
       { cwd: worktreePath },
     )
+
+    // Unstage — the commit step will re-stage later
+    await execa('git', ['reset', 'HEAD', '--', '.'], { cwd: worktreePath, reject: false })
+
+    if (!stdout || stdout.trim() === '') {
+      logger.warn({ worktreePath, baseBranch }, 'Diff against base branch is empty')
+      return ''
+    }
+
     if (stdout.length <= MAX_DIFF_LENGTH) return stdout
     return stdout.slice(0, MAX_DIFF_LENGTH) + '\n\n[... diff truncated at 50KB ...]'
   } catch (err) {
+    // Always unstage on error
+    await execa('git', ['reset', 'HEAD', '--', '.'], { cwd: worktreePath, reject: false })
     logger.warn({ worktreePath, baseBranch, err }, 'Failed to get diff against base branch')
     return ''
   }
 }
 
 /**
- * Get the list of changed files relative to the target branch.
+ * Get the list of changed files (committed + uncommitted + untracked)
+ * relative to origin/<baseBranch>.
  */
 export async function getChangedFilesAgainstBranch(
   worktreePath: string,
   baseBranch: string,
 ): Promise<string[]> {
   try {
+    // Stage everything to capture untracked files
+    await execa('git', ['add', '-A'], { cwd: worktreePath })
+
     const { stdout } = await execa(
       'git',
-      ['diff', '--name-only', `origin/${baseBranch}...HEAD`],
+      ['diff', '--staged', '--name-only', `origin/${baseBranch}`],
       { cwd: worktreePath },
     )
+
+    // Unstage
+    await execa('git', ['reset', 'HEAD', '--', '.'], { cwd: worktreePath, reject: false })
+
     return stdout.trim().split('\n').filter(Boolean)
   } catch (err) {
+    await execa('git', ['reset', 'HEAD', '--', '.'], { cwd: worktreePath, reject: false })
     logger.warn({ worktreePath, baseBranch, err }, 'Failed to get changed files against base branch')
     return []
   }

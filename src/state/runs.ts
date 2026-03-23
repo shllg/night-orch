@@ -137,6 +137,21 @@ export class RunManager {
     return row ? this.mapRow(row) : null
   }
 
+  /**
+   * Count consecutive recent errors for an issue (within the last hour).
+   * Used to decide whether to auto-retry or give up.
+   */
+  countRecentErrors(repo: string, issueNumber: number, windowMinutes = 60): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) as cnt FROM runs
+         WHERE repo = ? AND issue_number = ? AND status = 'error'
+         AND ended_at > datetime('now', '-' || ? || ' minutes')`,
+      )
+      .get(repo, issueNumber, windowMinutes) as { cnt: number } | undefined
+    return row?.cnt ?? 0
+  }
+
   getActive(): RunRecord[] {
     const rows = this.db
       .prepare("SELECT * FROM runs WHERE status IN ('queued', 'running') ORDER BY created_at")

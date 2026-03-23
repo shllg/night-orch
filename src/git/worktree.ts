@@ -136,6 +136,9 @@ async function createFreshWorktree(
   branchName: string,
   worktreePath: string,
 ): Promise<WorktreeInfo> {
+  // Prune stale worktree registrations (directory deleted but still tracked by git)
+  await execa('git', ['worktree', 'prune'], { cwd: repoLocalPath, reject: false })
+
   await mkdir(dirname(worktreePath), { recursive: true })
 
   logger.info({ worktreePath, branchName }, 'Creating worktree')
