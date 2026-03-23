@@ -12,6 +12,10 @@ IFS=$'\t' read -r TOOL_NAME FILE_PATH <<< \
 SKILL=""
 SECONDARY=""
 case "$FILE_PATH" in
+*/config/*|*/forge/factory.ts|*/environment/manager.ts|*/runner/poller.ts|*/mentions/manager.ts|*/mentions/resolver.ts|*/mcp/tools/index.ts)
+  SKILL="config-doc-sync"
+  SECONDARY="typescript-patterns"
+  ;;
 */workers/env.ts)
   SKILL="security-review"
   SECONDARY="worker-adapter"
@@ -34,9 +38,6 @@ case "$FILE_PATH" in
 */forge/*)
   SKILL="forge-adapter"
   SECONDARY="code-review"
-  ;;
-*/config/*)
-  SKILL="typescript-patterns"
   ;;
 */labels/*)
   SKILL="loop-engine"

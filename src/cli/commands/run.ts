@@ -6,6 +6,7 @@ import { ShutdownHandler } from '../../poller/shutdown.js'
 import { createMetricsService, type MetricsService } from '../../metrics/service.js'
 import { createForgeAdapter } from '../../forge/factory.js'
 import { startMCPHttpServer } from '../../mcp/http.js'
+import type { Server } from 'node:http'
 import type { ForgeAdapter } from '../../forge/types.js'
 import { logger } from '../../utils/logger.js'
 
@@ -66,7 +67,7 @@ export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
   }
 
   // Start embedded MCP HTTP/SSE server
-  let mcpServer: import('node:http').Server | undefined
+  let mcpServer: Server | undefined
   if (config.mcp.enabled) {
     const forgeAdapters = new Map<string, ForgeAdapter>()
     for (const repo of config.repos) {
@@ -93,7 +94,8 @@ export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
   const shutdown = new ShutdownHandler(db)
   shutdown.register(async () => {
     if (mcpServer) {
-      await new Promise<void>((resolve) => mcpServer!.close(() => resolve()))
+      const serverToClose = mcpServer
+      await new Promise<void>((resolve) => serverToClose.close(() => resolve()))
     }
     if (metrics) {
       try { await metrics.stop() } catch { /* ignore */ }

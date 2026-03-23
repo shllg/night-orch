@@ -52,6 +52,11 @@ src/state/           — SQLite DB, migrations
 
 Detailed implementation specs in `docs/specs-active/`. Consult the relevant phase spec before making changes.
 
+## Config Documentation
+
+Configuration authoring reference lives in `docs/CONFIGURATION.md`.
+When changing config schema, config loading behavior, or config-dependent runtime behavior, update `docs/CONFIGURATION.md` in the same change.
+
 ## Commit Messages
 
 Format: `[CATEGORY] Short imperative summary`
