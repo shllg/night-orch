@@ -52,8 +52,16 @@ export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
     }
   }
 
-  // Crash recovery: sync stale runs on startup
+  // Crash recovery: release all leases (no process is running at startup)
+  // then sync stale runs back to queued state with correct labels
   try {
+    const { LeaseManager } = await import('../../state/leases.js')
+    const leaseManager = new LeaseManager(db)
+    const releasedLeases = leaseManager.releaseAll()
+    if (releasedLeases > 0) {
+      logger.info({ releasedLeases }, 'Released orphaned leases from previous run')
+    }
+
     const syncEngine = new SyncEngine(db, config)
     const syncResult = await syncEngine.reconcile(dryRun)
     if (syncResult.reconciledRuns.length > 0 || syncResult.expiredLeases > 0) {

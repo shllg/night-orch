@@ -111,7 +111,7 @@ export class SyncEngine {
       forge = this.forgeFactory(run.repo)
     } catch {
       logger.warn({ repo: run.repo }, 'Cannot create forge adapter for reconciliation')
-      return this.markStale(run, dryRun, 'Cannot check GitHub state')
+      return await this.markStale(run, dryRun, 'Cannot check GitHub state')
     }
 
     // Check if PR exists and its state
@@ -141,7 +141,7 @@ export class SyncEngine {
     }
 
     // Issue still open, no PR — mark as queued for retry
-    return this.markStale(run, dryRun, 'Lease expired, no PR found — requeueing')
+    return await this.markStale(run, dryRun, 'Lease expired, no PR found — requeueing')
   }
 
   private markCompleted(run: RunningRunRow, dryRun: boolean, reason: string, forge: ForgeAdapter): SyncAction {
@@ -180,10 +180,23 @@ export class SyncEngine {
     return { repo: run.repo, issueNumber: run.issue_number, action: 'label_corrected', reason, prNumber: run.pr_number }
   }
 
-  private markStale(run: RunningRunRow, dryRun: boolean, reason: string): SyncAction {
+  private async markStale(run: RunningRunRow, dryRun: boolean, reason: string): Promise<SyncAction> {
     if (!dryRun) {
       this.db.prepare("UPDATE runs SET status = 'queued', current_phase = NULL, last_error = ?, updated_at = datetime('now') WHERE id = ?").run(reason, run.id)
       this.leaseManager.release(run.repo, run.issue_number)
+
+      // Transition labels back to queued (ready) so the poller picks it up
+      const repoConfig = this.config.repos.find((r) => r.repo === run.repo)
+      if (repoConfig) {
+        try {
+          const forge = this.forgeFactory(run.repo)
+          const issue = await forge.getIssue(run.repo, run.issue_number)
+          const labelConfig = buildLabelConfig(repoConfig)
+          await transitionLabels(forge, run.repo, run.issue_number, issue.labels, 'running', 'queued', labelConfig)
+        } catch (err) {
+          logger.warn({ repo: run.repo, issue: run.issue_number, err }, 'Failed to transition labels during stale run recovery')
+        }
+      }
     }
     logger.info({ runId: run.id, repo: run.repo, issue: run.issue_number }, reason)
     return { repo: run.repo, issueNumber: run.issue_number, action: 'stale_cleared', reason, prNumber: null }
