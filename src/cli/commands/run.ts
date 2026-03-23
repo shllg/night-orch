@@ -4,6 +4,9 @@ import { pollOnce } from '../../runner/poller.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { ShutdownHandler } from '../../poller/shutdown.js'
 import { createMetricsService, type MetricsService } from '../../metrics/service.js'
+import { createForgeAdapter } from '../../forge/factory.js'
+import { startMCPHttpServer } from '../../mcp/http.js'
+import type { ForgeAdapter } from '../../forge/types.js'
 import { logger } from '../../utils/logger.js'
 
 interface GlobalOpts {
@@ -62,11 +65,36 @@ export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
     logger.warn({ err }, 'Startup sync failed — continuing')
   }
 
+  // Start embedded MCP HTTP/SSE server
+  let mcpServer: import('node:http').Server | undefined
+  if (config.mcp.enabled) {
+    const forgeAdapters = new Map<string, ForgeAdapter>()
+    for (const repo of config.repos) {
+      try {
+        forgeAdapters.set(repo.repo, createForgeAdapter(repo, config))
+      } catch (err) {
+        logger.warn({ repo: repo.repo, err }, 'Failed to create forge adapter for MCP')
+      }
+    }
+    try {
+      mcpServer = await startMCPHttpServer(
+        { db, config, forgeAdapters, poller: null, metrics: metrics ?? null },
+        config.mcp.httpHost,
+        config.mcp.httpPort,
+      )
+    } catch (err) {
+      logger.warn({ err }, 'Failed to start MCP HTTP server — continuing without MCP')
+    }
+  }
+
   logger.info({ intervalMs, dryRun, repos: config.repos.length }, 'Starting poller')
 
   // Graceful shutdown
   const shutdown = new ShutdownHandler(db)
   shutdown.register(async () => {
+    if (mcpServer) {
+      await new Promise<void>((resolve) => mcpServer!.close(() => resolve()))
+    }
     if (metrics) {
       try { await metrics.stop() } catch { /* ignore */ }
     }

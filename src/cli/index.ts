@@ -8,6 +8,8 @@ import { retryCommand } from './commands/retry.js'
 import { cleanupCommand } from './commands/cleanup.js'
 import { notifyTestCommand } from './commands/notify-test.js'
 import { mcpCommand } from './commands/mcp.js'
+import { labelsInitCommand } from './commands/labels-init.js'
+import { statusCommand } from './commands/status.js'
 
 const program = new Command()
 
@@ -61,5 +63,16 @@ program
   .command('mcp')
   .description('Start MCP server (stdio transport) for remote control from Claude Code')
   .action((_opts, cmd) => mcpCommand(cmd.parent?.opts()))
+
+program
+  .command('status')
+  .description('Show active runs, recent history, costs, and leases')
+  .action((_opts, cmd) => statusCommand(cmd.parent?.opts()))
+
+program
+  .command('labels-init')
+  .argument('[repo]', 'Repository (owner/name) from config; defaults to all configured repos')
+  .description('Create or update issue labels from per-repo label configuration via gh CLI')
+  .action((repo, _opts, cmd) => labelsInitCommand(repo, cmd.parent?.opts()))
 
 program.parse()

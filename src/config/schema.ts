@@ -109,6 +109,13 @@ const LabelsSchema = z.object({
   retry: z.string().default('orch:retry'),
 })
 
+const LabelPresentationSchema = z.object({
+  color: z.string().regex(/^[0-9A-Fa-f]{6}$/, 'Color must be a 6-character hex value').optional(),
+  description: z.string().max(100, 'Description must be 100 characters or fewer').optional(),
+}).refine((value) => value.color !== undefined || value.description !== undefined, {
+  message: 'At least one of color or description must be provided',
+})
+
 const DefaultsSchema = z.object({
   planner: z.enum(['claude', 'codex']).default('claude'),
   coder: z.enum(['claude', 'codex']).default('claude'),
@@ -140,6 +147,7 @@ const RepoConfigSchema = z.object({
   baseBranch: z.string().default('main'),
   branchPrefix: z.string().default('orch'),
   labels: LabelsSchema.default({ ready: ['orch:ready'] }),
+  labelConfig: z.record(LabelPresentationSchema).default({}),
   defaults: DefaultsSchema.default({}),
   environment: EnvironmentConfigSchema.optional(),
   verify: z.array(CommandSpecSchema).default([]),
@@ -211,6 +219,8 @@ export const ConfigSchema = z.object({
     enabled: z.boolean().default(false),
     transport: z.enum(['stdio']).default('stdio'),
     authTokenEnv: z.string().nullable().default(null),
+    httpPort: z.number().int().positive().default(3100),
+    httpHost: z.string().default('127.0.0.1'),
   }).default({}),
 
   repos: z.array(RepoConfigSchema).min(1, 'At least one repository must be configured'),

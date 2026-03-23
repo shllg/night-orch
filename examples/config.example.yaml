@@ -84,6 +84,14 @@ repos:
       reviewReady: orch:review-ready
       error: orch:error
       retry: orch:retry
+    # Optional per-label metadata overrides used by `night-orch labels-init`
+    labelConfig:
+      orch:ready:
+        color: 0E8A16
+        description: Queued for night-orch processing
+      orch:running:
+        color: FBCA04
+        description: Currently being processed by night-orch
     defaults:
       planner: claude
       coder: codex

@@ -2,21 +2,59 @@
 node = "24"
 
 [tasks.dev]
-run = "tsx src/cli/index.ts"
-description = "Run CLI in development mode"
+dir = "{{config_root}}"
+run = """
+trap 'docker compose down; kill 0' EXIT
+docker compose up -d
+echo "Grafana:    http://localhost:3001 (admin/nightorch)"
+echo "Prometheus: http://localhost:9091"
+echo "MCP SSE:    http://localhost:3100/sse"
+set -a && . ./.env && set +a
+pnpm exec tsx src/cli/index.ts run --config ${NIGHT_ORCH_CONFIG:-config.yaml}
+"""
+description = "Run night-orch + monitoring stack (Prometheus + Grafana)"
+
+[tasks.dev-solo]
+dir = "{{config_root}}"
+run = "set -a && . ./.env && set +a && pnpm exec tsx src/cli/index.ts run --config ${NIGHT_ORCH_CONFIG:-config.yaml}"
+description = "Run night-orch without monitoring stack"
+
+[tasks.run-once]
+dir = "{{config_root}}"
+run = "set -a && . ./.env && set +a && pnpm exec tsx src/cli/index.ts run-once --config ${NIGHT_ORCH_CONFIG:-config.yaml}"
+description = "Single poll cycle"
 
 [tasks.doctor]
-run = "tsx src/cli/index.ts doctor"
+dir = "{{config_root}}"
+run = "set -a && . ./.env && set +a && pnpm exec tsx src/cli/index.ts doctor --config ${NIGHT_ORCH_CONFIG:-config.yaml}"
 description = "Run doctor checks"
 
+[tasks.labels-init]
+dir = "{{config_root}}"
+run = "set -a && . ./.env && set +a && pnpm exec tsx src/cli/index.ts labels-init --config ${NIGHT_ORCH_CONFIG:-config.yaml}"
+description = "Create/update orchestration labels in GitHub"
+
+[tasks.poll]
+dir = "{{config_root}}"
+run = "set -a && . ./.env && set +a && pnpm exec tsx src/cli/index.ts run-once --config ${NIGHT_ORCH_CONFIG:-config.yaml}"
+description = "Manually trigger a single poll cycle"
+
+[tasks.status]
+dir = "{{config_root}}"
+run = "set -a && . ./.env && set +a && pnpm exec tsx src/cli/index.ts status --config ${NIGHT_ORCH_CONFIG:-config.yaml}"
+description = "Show active runs, recent history, costs"
+
 [tasks.monitoring-up]
-run = "docker compose up -d prometheus grafana"
-description = "Start Prometheus + Grafana monitoring stack"
+dir = "{{config_root}}"
+run = "docker compose up -d"
+description = "Start monitoring stack"
 
 [tasks.monitoring-down]
+dir = "{{config_root}}"
 run = "docker compose down"
 description = "Stop monitoring stack"
 
 [tasks.monitoring-logs]
-run = "docker compose logs -f prometheus grafana"
+dir = "{{config_root}}"
+run = "docker compose logs -f"
 description = "Tail monitoring stack logs"

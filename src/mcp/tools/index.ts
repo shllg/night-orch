@@ -6,6 +6,7 @@ import { SyncEngine } from '../../ops/sync.js'
 import { CleanupEngine } from '../../ops/cleanup.js'
 import { RetryEngine } from '../../ops/retry.js'
 import { filterEligible } from '../../discovery/selector.js'
+import { pollOnce } from '../../runner/poller.js'
 
 interface ToolDefinition {
   name: string
@@ -99,6 +100,17 @@ export function registerTools(): ToolDefinition[] {
       },
     },
     {
+      name: 'night-orch-poll',
+      description: 'Manually trigger a single poll cycle — discovers eligible issues and processes them immediately.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          dryRun: { type: 'boolean', description: 'Preview what would be processed without doing it', default: false },
+          authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
+        },
+      },
+    },
+    {
       name: 'night-orch-list-issues',
       description: 'List issues from a repo with their orchestrator state (eligible, running, blocked).',
       inputSchema: {
@@ -133,6 +145,8 @@ export async function handleToolCall(
       return handleSync(args as { dryRun?: boolean; authToken?: string }, deps)
     case 'night-orch-cleanup':
       return handleCleanup(args as { dryRun?: boolean; authToken?: string }, deps)
+    case 'night-orch-poll':
+      return handlePoll(args as { dryRun?: boolean; authToken?: string }, deps)
     case 'night-orch-list-issues':
       return handleListIssues(args as { repo: string; filter?: string }, deps)
     default:
@@ -286,6 +300,22 @@ async function handleCleanup(args: { dryRun?: boolean; authToken?: string }, dep
   assertMcpMutationAuth(args.authToken, deps)
   const engine = new CleanupEngine(deps.db, deps.config)
   return engine.run({ dryRun: args.dryRun ?? false })
+}
+
+async function handlePoll(
+  args: { dryRun?: boolean; authToken?: string },
+  deps: MCPDependencies,
+): Promise<unknown> {
+  assertMcpMutationAuth(args.authToken, deps)
+  const result = await pollOnce(deps.config, deps.db, args.dryRun ?? false)
+  return {
+    success: true,
+    processed: result.processed,
+    errors: result.errors,
+    message: result.processed === 0
+      ? 'No eligible issues found'
+      : `Processed ${result.processed} issue(s), ${result.errors} error(s)`,
+  }
 }
 
 async function handleListIssues(

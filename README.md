@@ -21,12 +21,21 @@ night-orch run-once         # single poll + process cycle
 night-orch doctor           # validate config, auth, binaries, repos
 night-orch sync             # reconcile local state with GitHub
 night-orch retry <repo> <#> # force re-run of one issue
+night-orch labels-init [repo] # create/update orchestration labels via gh CLI
 night-orch cleanup          # remove stale worktrees, leases, logs
 night-orch notify-test      # send test notification
 night-orch mcp              # start MCP server (stdio)
 ```
 
 All mutating commands support `--dry-run`.
+
+To initialize labels from config defaults/overrides:
+
+```bash
+mise run labels-init -- myorg/myrepo
+# or all configured repos
+mise run labels-init
+```
 
 ## How It Works
 

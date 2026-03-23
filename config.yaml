@@ -51,8 +51,14 @@ workerProfiles:
     minimalEnv: true
     env: {}
 
+mcp:
+  enabled: true
+  httpPort: 3100
+
 metrics:
   enabled: true
+  port: 9100
+  host: 0.0.0.0
 
 repos:
   - repo: shllg/night-orch

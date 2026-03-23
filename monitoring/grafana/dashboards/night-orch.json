@@ -1,0 +1,140 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "title": "Active Runs",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "targets": [{ "expr": "night_orch_active_runs", "refId": "A" }],
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 2 }, { "color": "red", "value": 5 }] } } }
+    },
+    {
+      "title": "Eligible Issues",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "targets": [{ "expr": "sum(night_orch_eligible_issues)", "refId": "A" }],
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{ "color": "blue", "value": null }] } } }
+    },
+    {
+      "title": "Daily Cost (USD)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "targets": [{ "expr": "night_orch_daily_cost_usd", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 15 }, { "color": "red", "value": 25 }] } } }
+    },
+    {
+      "title": "Runs Total",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "targets": [{ "expr": "sum(night_orch_runs_total)", "refId": "A" }],
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{ "color": "purple", "value": null }] } } }
+    },
+    {
+      "title": "Verify Pass Rate",
+      "type": "gauge",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "targets": [{ "expr": "night_orch_verify_runs_total{result=\"pass\"} / (night_orch_verify_runs_total{result=\"pass\"} + night_orch_verify_runs_total{result=\"fail\"})", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 0.5 }, { "color": "green", "value": 0.8 }] } } }
+    },
+    {
+      "title": "PRs Created / Updated",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "targets": [
+        { "expr": "night_orch_pr_operations_total{type=\"created\"}", "legendFormat": "Created", "refId": "A" },
+        { "expr": "night_orch_pr_operations_total{type=\"updated\"}", "legendFormat": "Updated", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{ "color": "green", "value": null }] } } }
+    },
+    {
+      "title": "Runs by Status",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        { "expr": "increase(night_orch_runs_total[1h])", "legendFormat": "{{status}}", "refId": "A" }
+      ]
+    },
+    {
+      "title": "Agent Invocations",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        { "expr": "increase(night_orch_agent_invocations_total[1h])", "legendFormat": "{{role}} ({{adapter}})", "refId": "A" }
+      ]
+    },
+    {
+      "title": "Run Duration",
+      "type": "histogram",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        { "expr": "night_orch_run_duration_seconds_bucket", "legendFormat": "{{le}}", "refId": "A", "format": "heatmap" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "title": "Phase Duration (p50 / p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        { "expr": "histogram_quantile(0.5, rate(night_orch_phase_duration_seconds_bucket[5m]))", "legendFormat": "p50 {{phase}}", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, rate(night_orch_phase_duration_seconds_bucket[5m]))", "legendFormat": "p95 {{phase}}", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "title": "Agent Duration (p50 / p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 20 },
+      "targets": [
+        { "expr": "histogram_quantile(0.5, rate(night_orch_agent_duration_seconds_bucket[5m]))", "legendFormat": "p50 {{role}}/{{adapter}}", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, rate(night_orch_agent_duration_seconds_bucket[5m]))", "legendFormat": "p95 {{role}}/{{adapter}}", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "title": "Verify Duration",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 20 },
+      "targets": [
+        { "expr": "histogram_quantile(0.5, rate(night_orch_verify_duration_seconds_bucket[5m]))", "legendFormat": "p50", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, rate(night_orch_verify_duration_seconds_bucket[5m]))", "legendFormat": "p95", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "title": "Estimated Cost by Agent",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 20 },
+      "targets": [
+        { "expr": "increase(night_orch_estimated_cost_dollars[1h])", "legendFormat": "{{repo}} / {{agent}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" } }
+    },
+    {
+      "title": "Loop Iterations",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "targets": [
+        { "expr": "increase(night_orch_loop_iterations_total[1h])", "legendFormat": "{{repo}}", "refId": "A" }
+      ]
+    },
+    {
+      "title": "Notifications",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "targets": [
+        { "expr": "increase(night_orch_notifications_total[1h])", "legendFormat": "{{channel}} ({{result}})", "refId": "A" }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["night-orch"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "title": "Night-Orch",
+  "uid": "night-orch-overview"
+}

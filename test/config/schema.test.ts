@@ -142,4 +142,32 @@ describe('ConfigSchema', () => {
     const result = ConfigSchema.parse(minimal)
     expect(result.repos[0]!.selectors.excludeLabelsAny).toContain('orch:needs-human')
   })
+
+  it('accepts per-repo labelConfig overrides', () => {
+    const raw = loadExampleConfig()
+    raw.repos[0].labelConfig = {
+      'orch:ready': {
+        color: '0E8A16',
+        description: 'Queued for processing',
+      },
+    }
+
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.repos[0]?.labelConfig['orch:ready']?.color).toBe('0E8A16')
+    }
+  })
+
+  it('rejects invalid labelConfig colors', () => {
+    const raw = loadExampleConfig()
+    raw.repos[0].labelConfig = {
+      'orch:ready': {
+        color: 'XYZ',
+      },
+    }
+
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(false)
+  })
 })

@@ -297,7 +297,11 @@ async function runWorkerStep(
     throw new Error(`${role} worker timed out after ${ctx.adjustedLimits.workerTimeoutSeconds}s`)
   }
   if (result.exitCode !== 0) {
+    logger.error({ role, exitCode: result.exitCode, rawLength: result.rawOutput.length, rawTail: result.rawOutput.slice(-500) }, `${role} worker exited with non-zero code`)
     throw new Error(`${role} worker exited with code ${result.exitCode}`)
+  }
+  if (result.parseError) {
+    logger.warn({ role, parseError: result.parseError, rawLength: result.rawOutput.length, rawHead: result.rawOutput.slice(0, 500), rawTail: result.rawOutput.slice(-500) }, `${role} worker output parse failed`)
   }
 
   return result
@@ -342,15 +346,18 @@ function getWorkerProfile(ctx: RunContext, role: 'planner' | 'coder' | 'reviewer
 
 const DEFAULT_PLANNER_TEMPLATE = `You are a software planning assistant. Analyze the issue and create a detailed implementation plan.
 
-Output your plan as a JSON block:
+IMPORTANT: Do NOT use any tools. Do NOT explore the codebase. Respond immediately with your plan based on the issue description provided. You have one turn only.
+
+Your ENTIRE response must be a single JSON block — nothing else:
+
 \`\`\`json
 {
-  "objective": "...",
-  "assumptions": ["..."],
-  "filesToChange": ["..."],
-  "steps": [{"order": 1, "description": "...", "files": ["..."]}],
-  "risks": ["..."],
-  "testStrategy": "..."
+  "objective": "One sentence describing the goal",
+  "assumptions": ["List assumptions about the codebase"],
+  "filesToChange": ["src/path/to/file.ts"],
+  "steps": [{"order": 1, "description": "What to do", "files": ["src/path/to/file.ts"]}],
+  "risks": ["Potential issues"],
+  "testStrategy": "How to verify the changes work"
 }
 \`\`\``
 
@@ -368,12 +375,15 @@ After making changes, output a summary as JSON:
 
 const DEFAULT_REVIEWER_TEMPLATE = `You are a code reviewer. Review the changes made for the issue.
 
-Output your review as JSON:
+IMPORTANT: Do NOT use any tools. Respond immediately with your review based on the diff provided. You have one turn only.
+
+Your ENTIRE response must be a single JSON block — nothing else:
+
 \`\`\`json
 {
-  "verdict": "APPROVED" | "CHANGES_REQUIRED" | "BLOCKED",
-  "summary": "...",
-  "findings": [{"severity": "critical|major|minor", "message": "...", "suggestedFix": "..."}],
-  "definitionOfDoneCheck": {"issueAddressed": true/false, "testsPassing": true/false, "noBlockingFindings": true/false}
+  "verdict": "APPROVED or CHANGES_REQUIRED or BLOCKED",
+  "summary": "Brief review summary",
+  "findings": [{"severity": "critical or major or minor", "message": "What's wrong", "suggestedFix": "How to fix it"}],
+  "definitionOfDoneCheck": {"issueAddressed": true, "testsPassing": true, "noBlockingFindings": true}
 }
 \`\`\``

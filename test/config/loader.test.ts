@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { resolveConfigPath } from '../../src/config/loader.js'
@@ -25,6 +25,22 @@ describe('resolveConfigPath', () => {
   it('does not trust workspace config by default', () => {
     writeFileSync(join(tmpDir, '.night-orch.yaml'), 'version: 1\nrepos: []\n')
     expect(() => resolveConfigPath()).toThrow('trust-workspace')
+  })
+
+  it('loads local config.yaml by default', () => {
+    const expected = join(tmpDir, 'config.yaml')
+    writeFileSync(expected, 'version: 1\nrepos: []\n')
+    expect(resolveConfigPath()).toBe(expected)
+  })
+
+  it('prefers local config.yaml over home config', () => {
+    const local = join(tmpDir, 'config.yaml')
+    const homeDir = join(tmpDir, 'fake-home', '.config', 'night-orch')
+    const home = join(homeDir, 'config.yaml')
+    writeFileSync(local, 'version: 1\nrepos: []\n')
+    mkdirSync(homeDir, { recursive: true })
+    writeFileSync(home, 'version: 1\nrepos: []\n', { flag: 'w' })
+    expect(resolveConfigPath()).toBe(local)
   })
 
   it('loads workspace config when explicitly trusted', () => {

@@ -21,7 +21,13 @@ Node.js 24+ / TypeScript CLI tool. ESM modules (`"type": "module"`). Strict Type
 ## Commands
 
 ```bash
-pnpm dev <command>    # run via tsx
+mise run dev          # night-orch + monitoring stack (Prometheus + Grafana)
+mise run dev-solo     # night-orch only, no monitoring
+mise run run-once     # single poll cycle
+mise run doctor       # validate config, auth, CLIs, repos, DB
+mise run status       # show active runs, recent history, costs
+mise run labels-init  # create/update GitHub labels from config
+
 pnpm test             # vitest run
 pnpm lint             # eslint
 pnpm typecheck        # tsc --noEmit

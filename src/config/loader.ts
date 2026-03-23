@@ -99,9 +99,12 @@ export function resolveConfigPath(
   if (cliPath) return cliPath
 
   const defaults = [
+    'config.yaml',
+    'config.yml',
     '~/.config/night-orch/config.yaml',
     '~/.config/night-orch/config.yml',
   ]
+
   if (opts.trustWorkspace) {
     defaults.unshift('.night-orch.yml')
     defaults.unshift('.night-orch.yaml')
@@ -118,7 +121,7 @@ export function resolveConfigPath(
 
   throw new ConfigError(
     opts.trustWorkspace
-      ? 'No config file found. Provide --config or create one at ~/.config/night-orch/config.yaml'
-      : 'No config file found. Provide --config, use ~/.config/night-orch/config.yaml, or pass --trust-workspace to allow .night-orch.yaml from the current directory',
+      ? 'No config file found. Provide --config, create config.yaml in the current directory, or create ~/.config/night-orch/config.yaml'
+      : 'No config file found. Provide --config, use config.yaml in the current directory, use ~/.config/night-orch/config.yaml, or pass --trust-workspace to allow .night-orch.yaml from the current directory',
   )
 }
