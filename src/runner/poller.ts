@@ -241,7 +241,6 @@ export async function pollOnce(
         runManager,
         notifier,
         metrics,
-        config,
       })
 
       if (outcome === 'processed') processed++
@@ -314,7 +313,6 @@ interface FinalizeRunOutcomeParams {
   runManager: RunManager
   notifier: NotificationDispatcher
   metrics?: MetricsService
-  config: Config
 }
 
 async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'processed' | 'error'> {

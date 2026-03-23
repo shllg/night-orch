@@ -55,12 +55,18 @@ export function createWorktreeManager(): WorktreeManager {
 
       // 3. Ensure worktree exists
       if (existsSync(worktreePath)) {
-        // Validate existing worktree
         const valid = await validateWorktree(worktreePath, branchName)
         if (valid) {
           logger.info({ worktreePath, branchName }, 'Reusing existing worktree')
-          // Merge base branch changes
-          await mergeBase(worktreePath, baseBranch)
+          // Clean any leftover state from prior runs before reusing
+          await resetWorktree(worktreePath)
+          // Rebase onto latest base branch; on failure, nuke and recreate
+          const rebased = await rebaseOnto(worktreePath, baseBranch)
+          if (!rebased) {
+            logger.warn({ worktreePath, baseBranch }, 'Rebase failed — recreating worktree from clean base')
+            await removeWorktree(repoLocalPath, worktreePath)
+            return await createFreshWorktree(repoLocalPath, baseBranch, branchName, worktreePath)
+          }
           const isClean = await isWorktreeClean(worktreePath)
           return { path: worktreePath, branchName, exists: true, isClean }
         }
@@ -70,20 +76,7 @@ export function createWorktreeManager(): WorktreeManager {
         await removeWorktree(repoLocalPath, worktreePath)
       }
 
-      // Create parent dirs
-      await mkdir(dirname(worktreePath), { recursive: true })
-
-      // Create worktree
-      logger.info({ worktreePath, branchName }, 'Creating worktree')
-      await execa('git', ['worktree', 'add', worktreePath, branchName], {
-        cwd: repoLocalPath,
-      })
-
-      // Merge base branch changes
-      await mergeBase(worktreePath, baseBranch)
-
-      const isClean = await isWorktreeClean(worktreePath)
-      return { path: worktreePath, branchName, exists: true, isClean }
+      return await createFreshWorktree(repoLocalPath, baseBranch, branchName, worktreePath)
     },
 
     async remove(worktreePath: string, deleteBranch = false): Promise<void> {
@@ -137,6 +130,31 @@ export function createWorktreeManager(): WorktreeManager {
   }
 }
 
+async function createFreshWorktree(
+  repoLocalPath: string,
+  baseBranch: string,
+  branchName: string,
+  worktreePath: string,
+): Promise<WorktreeInfo> {
+  await mkdir(dirname(worktreePath), { recursive: true })
+
+  logger.info({ worktreePath, branchName }, 'Creating worktree')
+  await execa('git', ['worktree', 'add', worktreePath, branchName], {
+    cwd: repoLocalPath,
+  })
+
+  // Rebase onto latest base; if this fails on a brand-new worktree, it's
+  // likely a branch that diverged badly — reset hard to the base branch
+  const rebased = await rebaseOnto(worktreePath, baseBranch)
+  if (!rebased) {
+    logger.warn({ worktreePath, baseBranch }, 'Rebase failed on fresh worktree — resetting to base branch')
+    await execa('git', ['reset', '--hard', `origin/${baseBranch}`], { cwd: worktreePath })
+  }
+
+  const isClean = await isWorktreeClean(worktreePath)
+  return { path: worktreePath, branchName, exists: true, isClean }
+}
+
 async function validateWorktree(worktreePath: string, expectedBranch: string): Promise<boolean> {
   try {
     const currentBranch = await getCurrentBranch(worktreePath)
@@ -164,19 +182,37 @@ async function isWorktreeClean(worktreePath: string): Promise<boolean> {
   return stdout.trim() === ''
 }
 
-async function mergeBase(worktreePath: string, baseBranch: string): Promise<void> {
+/**
+ * Discard all uncommitted changes (tracked and untracked) so the worktree
+ * starts each run in a pristine state.
+ */
+async function resetWorktree(worktreePath: string): Promise<void> {
   try {
-    await execa('git', ['merge', `origin/${baseBranch}`, '--no-edit'], { cwd: worktreePath })
-    logger.debug({ worktreePath, baseBranch }, 'Merged base branch changes')
+    await execa('git', ['checkout', '.'], { cwd: worktreePath })
+    await execa('git', ['clean', '-fd'], { cwd: worktreePath })
+    logger.debug({ worktreePath }, 'Reset worktree to clean state')
+  } catch (err) {
+    logger.warn({ worktreePath, err }, 'Failed to reset worktree — continuing anyway')
+  }
+}
+
+/**
+ * Rebase the current branch onto the latest base branch.
+ * Returns true on success, false on conflict (after aborting the rebase).
+ */
+async function rebaseOnto(worktreePath: string, baseBranch: string): Promise<boolean> {
+  try {
+    await execa('git', ['rebase', `origin/${baseBranch}`], { cwd: worktreePath })
+    logger.debug({ worktreePath, baseBranch }, 'Rebased onto base branch')
+    return true
   } catch {
-    // If merge conflict, abort and let caller handle
-    logger.warn({ worktreePath, baseBranch }, 'Merge conflict with base branch')
+    logger.warn({ worktreePath, baseBranch }, 'Rebase conflict with base branch')
     try {
-      await execa('git', ['merge', '--abort'], { cwd: worktreePath })
+      await execa('git', ['rebase', '--abort'], { cwd: worktreePath })
     } catch (abortErr) {
-      logger.debug({ worktreePath, err: abortErr }, 'Failed to abort merge after conflict')
+      logger.debug({ worktreePath, err: abortErr }, 'Failed to abort rebase')
     }
-    throw new Error(`Merge conflict: worktree at ${worktreePath} conflicts with origin/${baseBranch}`)
+    return false
   }
 }
 
