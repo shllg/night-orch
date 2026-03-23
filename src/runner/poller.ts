@@ -95,206 +95,215 @@ export async function pollOnce(
       continue
     }
 
-    // Process first eligible (serial)
-    const first = discovered[0]!
-
-    if (first.triage.level === 'architectural') {
-      await forge.addLabels(repoConfig.repo, first.issue.number, ['orch:needs-human'])
-      await forge.commentOnIssue(
-        repoConfig.repo,
-        first.issue.number,
-        '🏗️ **night-orch**: This issue is classified as architectural and requires human guidance.',
-      )
-      continue
-    }
-
-    if (!leaseManager.acquire(repoConfig.repo, first.issue.number, 'poller', 7200)) {
-      continue
-    }
-
-    let runId: string | null = null
-    let envSetup: EnvSetupResult | null = null
-    let activeWorktreePath: string | null = null
     const labelConfig = buildLabelConfig(repoConfig)
 
-    try {
-      const resolvedRoles = resolveRoles(first.issue.labels, repoConfig.defaults)
-      const queuedRun = runManager.getLatestQueuedByIssue(repoConfig.repo, first.issue.number)
-      const roles = queuedRun
-        ? {
-            planner: coerceAgentName(queuedRun.planner, resolvedRoles.planner),
-            coder: coerceAgentName(queuedRun.coder, resolvedRoles.coder),
-            reviewer: coerceAgentName(queuedRun.reviewer, resolvedRoles.reviewer),
-          }
-        : resolvedRoles
-      const slug = getOrPinSlug(db, repoConfig.repo, first.issue.number, first.issue.title)
-      const branch = branchName(repoConfig.branchPrefix, first.issue.number, slug)
-      const worktreePath = buildWorktreePath(config.storage.worktreeRoot, repoConfig.repo, first.issue.number)
-      activeWorktreePath = worktreePath
+    // Process all currently eligible issues serially for this repo.
+    for (const discoveredIssue of discovered) {
+      if (discoveredIssue.triage.level === 'architectural') {
+        await forge.addLabels(repoConfig.repo, discoveredIssue.issue.number, ['orch:needs-human'])
+        await forge.commentOnIssue(
+          repoConfig.repo,
+          discoveredIssue.issue.number,
+          '🏗️ **night-orch**: This issue is classified as architectural and requires human guidance.',
+        )
+        continue
+      }
 
-      const run = queuedRun ?? runManager.create({
-        repo: repoConfig.repo,
-        issueNumber: first.issue.number,
-        issueNodeId: first.issue.nodeId,
-        planner: roles.planner,
-        coder: roles.coder,
-        reviewer: roles.reviewer,
-      })
-      runId = run.id
-      runManager.update(run.id, {
-        status: 'running',
-        branchName: branch,
-        branchSlug: slug,
-        worktreePath,
-        endedAt: null,
-        lastError: null,
-      })
+      if (!leaseManager.acquire(repoConfig.repo, discoveredIssue.issue.number, 'poller', 7200)) {
+        continue
+      }
 
-      // Label transition
-      await transitionLabels(forge, repoConfig.repo, first.issue.number, first.issue.labels, 'queued', 'running', labelConfig)
+      let runId: string | null = null
+      let envSetup: EnvSetupResult | null = null
+      let activeWorktreePath: string | null = null
 
-      // Notify
-      await notifier.dispatch(makePayload('run_started', repoConfig.repo, first.issue))
+      try {
+        const resolvedRoles = resolveRoles(discoveredIssue.issue.labels, repoConfig.defaults)
+        const queuedRun = runManager.getLatestQueuedByIssue(repoConfig.repo, discoveredIssue.issue.number)
+        const roles = queuedRun
+          ? {
+              planner: coerceAgentName(queuedRun.planner, resolvedRoles.planner),
+              coder: coerceAgentName(queuedRun.coder, resolvedRoles.coder),
+              reviewer: coerceAgentName(queuedRun.reviewer, resolvedRoles.reviewer),
+            }
+          : resolvedRoles
+        const slug = getOrPinSlug(db, repoConfig.repo, discoveredIssue.issue.number, discoveredIssue.issue.title)
+        const branch = branchName(repoConfig.branchPrefix, discoveredIssue.issue.number, slug)
+        const worktreePath = buildWorktreePath(config.storage.worktreeRoot, repoConfig.repo, discoveredIssue.issue.number)
+        activeWorktreePath = worktreePath
 
-      // Create worktree
-      await worktreeManager.ensure({
-        repoLocalPath: repoConfig.localPath,
-        baseBranch: repoConfig.baseBranch,
-        branchName: branch,
-        worktreePath,
-      })
-
-      if (repoConfig.environment) {
-        const mode = resolveEnvironmentMode(first.issue.labels, repoConfig)
-        envSetup = await setupEnvironment({
+        const run = queuedRun ?? runManager.create({
+          repo: repoConfig.repo,
+          issueNumber: discoveredIssue.issue.number,
+          issueNodeId: discoveredIssue.issue.nodeId,
+          planner: roles.planner,
+          coder: roles.coder,
+          reviewer: roles.reviewer,
+        })
+        runId = run.id
+        runManager.update(run.id, {
+          status: 'running',
+          branchName: branch,
+          branchSlug: slug,
           worktreePath,
-          issueNumber: first.issue.number,
-          repoConfig,
-          mode,
-          usedPorts: usedPortsInPass,
+          endedAt: null,
+          lastError: null,
         })
-      }
 
-      // Get worker adapters
-      const adjustedLimits = adjustLimitsForTriage(
-        config.loop,
-        config.workerProfiles[repoConfig.agents[roles.planner] ?? '']?.workerTimeoutSeconds ?? 1800,
-        first.triage,
-      )
+        // Label transition
+        await transitionLabels(
+          forge,
+          repoConfig.repo,
+          discoveredIssue.issue.number,
+          discoveredIssue.issue.labels,
+          'queued',
+          'running',
+          labelConfig,
+        )
 
-      const plannerProfile = config.workerProfiles[repoConfig.agents[roles.planner] ?? '']
-      const coderProfile = config.workerProfiles[repoConfig.agents[roles.coder] ?? '']
-      const reviewerProfile = config.workerProfiles[repoConfig.agents[roles.reviewer] ?? '']
+        // Notify
+        await notifier.dispatch(makePayload('run_started', repoConfig.repo, discoveredIssue.issue))
 
-      if (!plannerProfile || !coderProfile || !reviewerProfile) {
-        throw new Error('Missing worker profiles for resolved roles')
-      }
-
-      const initialCtx: RunContext = {
-        runId: run.id,
-        repo: repoConfig.repo,
-        issueNumber: first.issue.number,
-        issue: first.issue,
-        repoConfig,
-        roles,
-        triageResult: first.triage,
-        adjustedLimits,
-        branchName: branch,
-        worktreePath,
-        plan: null,
-        codeResult: null,
-        diff: null,
-        verifyResults: [],
-        reviewResult: null,
-        reviewFindings: [],
-        iteration: 1,
-        totalAgentPasses: 0,
-        estimatedCostUsd: 0,
-        currentPhase: 'plan',
-        terminalStatus: 'running',
-        phaseHistory: [],
-        dryRun: false,
-      }
-
-      // Execute loop
-      const loopStart = Date.now()
-      const finalCtx = await executeLoop(initialCtx, {
-        db,
-        config,
-        plannerAdapter: createWorkerAdapter(plannerProfile),
-        coderAdapter: createWorkerAdapter(coderProfile),
-        reviewerAdapter: createWorkerAdapter(reviewerProfile),
-        envOverrides: envSetup?.envOverrides ?? {},
-        metrics,
-        onPlanReady: async (ctx) => {
-          await postPlanSummaryComment(forge, ctx.repo, ctx.issueNumber, ctx.plan)
-        },
-      })
-
-      const runDurationSec = (Date.now() - loopStart) / 1000
-      const outcome = await finalizeRunOutcome({
-        finalCtx,
-        runId: run.id,
-        issue: first.issue,
-        runDurationSec,
-        repo: repoConfig.repo,
-        issueNumber: first.issue.number,
-        labelConfig,
-        db,
-        forge,
-        runManager,
-        notifier,
-        metrics,
-      })
-
-      if (outcome === 'processed') processed++
-      else errors++
-    } catch (err) {
-      logger.error({ repo: repoConfig.repo, issue: first.issue.number, err }, 'Failed to process issue')
-      if (runId) {
-        runManager.update(runId, {
-          status: 'error',
-          lastError: String(err),
-          endedAt: new Date().toISOString(),
+        // Create worktree
+        await worktreeManager.ensure({
+          repoLocalPath: repoConfig.localPath,
+          baseBranch: repoConfig.baseBranch,
+          branchName: branch,
+          worktreePath,
         })
-        try {
-          const latestIssue = await forge.getIssue(repoConfig.repo, first.issue.number)
-          await transitionLabels(
-            forge,
-            repoConfig.repo,
-            first.issue.number,
-            latestIssue.labels,
-            'running',
-            'error',
-            labelConfig,
-          )
-        } catch (labelErr) {
-          logger.warn({ repo: repoConfig.repo, issue: first.issue.number, err: labelErr }, 'Failed to transition labels after poller error')
-        }
-        try {
-          await notifier.dispatch(makePayload('error', repoConfig.repo, first.issue, {
-            summary: `Failed to process issue: ${(err as Error).message}`,
-          }))
-        } catch (notifyErr) {
-          logger.warn({ repo: repoConfig.repo, issue: first.issue.number, err: notifyErr }, 'Failed to send error notification after poller error')
-        }
-      }
-      errors++
-    } finally {
-      if (envSetup && activeWorktreePath) {
-        try {
-          await teardownEnvironment({
-            worktreePath: activeWorktreePath,
-            issueNumber: first.issue.number,
+
+        if (repoConfig.environment) {
+          const mode = resolveEnvironmentMode(discoveredIssue.issue.labels, repoConfig)
+          envSetup = await setupEnvironment({
+            worktreePath,
+            issueNumber: discoveredIssue.issue.number,
             repoConfig,
-            mode: envSetup.mode,
-            composeProjectName: envSetup.composeProjectName,
+            mode,
+            usedPorts: usedPortsInPass,
           })
-        } catch (envErr) {
-          logger.warn({ repo: repoConfig.repo, issue: first.issue.number, err: envErr }, 'Failed to tear down environment')
         }
+
+        // Get worker adapters
+        const adjustedLimits = adjustLimitsForTriage(
+          config.loop,
+          config.workerProfiles[repoConfig.agents[roles.planner] ?? '']?.workerTimeoutSeconds ?? 1800,
+          discoveredIssue.triage,
+        )
+
+        const plannerProfile = config.workerProfiles[repoConfig.agents[roles.planner] ?? '']
+        const coderProfile = config.workerProfiles[repoConfig.agents[roles.coder] ?? '']
+        const reviewerProfile = config.workerProfiles[repoConfig.agents[roles.reviewer] ?? '']
+
+        if (!plannerProfile || !coderProfile || !reviewerProfile) {
+          throw new Error('Missing worker profiles for resolved roles')
+        }
+
+        const initialCtx: RunContext = {
+          runId: run.id,
+          repo: repoConfig.repo,
+          issueNumber: discoveredIssue.issue.number,
+          issue: discoveredIssue.issue,
+          repoConfig,
+          roles,
+          triageResult: discoveredIssue.triage,
+          adjustedLimits,
+          branchName: branch,
+          worktreePath,
+          plan: null,
+          codeResult: null,
+          diff: null,
+          verifyResults: [],
+          reviewResult: null,
+          reviewFindings: [],
+          iteration: 1,
+          totalAgentPasses: 0,
+          estimatedCostUsd: 0,
+          currentPhase: 'plan',
+          terminalStatus: 'running',
+          phaseHistory: [],
+          dryRun: false,
+        }
+
+        // Execute loop
+        const loopStart = Date.now()
+        const finalCtx = await executeLoop(initialCtx, {
+          db,
+          config,
+          plannerAdapter: createWorkerAdapter(plannerProfile),
+          coderAdapter: createWorkerAdapter(coderProfile),
+          reviewerAdapter: createWorkerAdapter(reviewerProfile),
+          envOverrides: envSetup?.envOverrides ?? {},
+          metrics,
+          onPlanReady: async (ctx) => {
+            await postPlanSummaryComment(forge, ctx.repo, ctx.issueNumber, ctx.plan)
+          },
+        })
+
+        const runDurationSec = (Date.now() - loopStart) / 1000
+        const outcome = await finalizeRunOutcome({
+          finalCtx,
+          runId: run.id,
+          issue: discoveredIssue.issue,
+          runDurationSec,
+          repo: repoConfig.repo,
+          issueNumber: discoveredIssue.issue.number,
+          labelConfig,
+          db,
+          forge,
+          runManager,
+          notifier,
+          metrics,
+        })
+
+        if (outcome === 'processed') processed++
+        else errors++
+      } catch (err) {
+        logger.error({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err }, 'Failed to process issue')
+        if (runId) {
+          runManager.update(runId, {
+            status: 'error',
+            lastError: String(err),
+            endedAt: new Date().toISOString(),
+          })
+          try {
+            const latestIssue = await forge.getIssue(repoConfig.repo, discoveredIssue.issue.number)
+            await transitionLabels(
+              forge,
+              repoConfig.repo,
+              discoveredIssue.issue.number,
+              latestIssue.labels,
+              'running',
+              'error',
+              labelConfig,
+            )
+          } catch (labelErr) {
+            logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: labelErr }, 'Failed to transition labels after poller error')
+          }
+          try {
+            await notifier.dispatch(makePayload('error', repoConfig.repo, discoveredIssue.issue, {
+              summary: `Failed to process issue: ${(err as Error).message}`,
+            }))
+          } catch (notifyErr) {
+            logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: notifyErr }, 'Failed to send error notification after poller error')
+          }
+        }
+        errors++
+      } finally {
+        if (envSetup && activeWorktreePath) {
+          try {
+            await teardownEnvironment({
+              worktreePath: activeWorktreePath,
+              issueNumber: discoveredIssue.issue.number,
+              repoConfig,
+              mode: envSetup.mode,
+              composeProjectName: envSetup.composeProjectName,
+            })
+          } catch (envErr) {
+            logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: envErr }, 'Failed to tear down environment')
+          }
+        }
+        leaseManager.release(repoConfig.repo, discoveredIssue.issue.number)
       }
-      leaseManager.release(repoConfig.repo, first.issue.number)
     }
   }
 
