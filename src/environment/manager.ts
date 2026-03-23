@@ -15,6 +15,8 @@ export interface EnvSetupResult {
   envOverrides: Record<string, string>
 }
 
+export type WithPortAllocationLock = <T>(task: () => T | Promise<T>) => Promise<T>
+
 /**
  * Resolve the environment mode for an issue from labels and repo config.
  */
@@ -36,8 +38,9 @@ export async function setupEnvironment(params: {
   repoConfig: RepoConfig
   mode: EnvironmentMode
   usedPorts: number[]
+  withPortAllocationLock?: WithPortAllocationLock
 }): Promise<EnvSetupResult> {
-  const { worktreePath, issueNumber, repoConfig, mode, usedPorts } = params
+  const { worktreePath, issueNumber, repoConfig, mode, usedPorts, withPortAllocationLock } = params
   const envConfig = repoConfig.environment
 
   if (mode === 'shared') {
@@ -61,7 +64,7 @@ export async function setupEnvironment(params: {
 
   // Set up .env file with overrides
   const projectName = dedicated.compose.projectName.replace('{issue}', String(issueNumber))
-  const { envOverrides, allocatedPort } = setupEnvFile({
+  const runSetupEnvFile = () => setupEnvFile({
     worktreePath,
     repoLocalPath: repoConfig.localPath,
     copyFrom: dedicated.env.copyFrom,
@@ -69,6 +72,9 @@ export async function setupEnvironment(params: {
     overrideFiles: dedicated.env.overrideFiles,
     usedPorts,
   })
+  const { envOverrides, allocatedPort } = withPortAllocationLock
+    ? await withPortAllocationLock(runSetupEnvFile)
+    : runSetupEnvFile()
 
   // Resolve healthcheck port
   const healthcheck = substituteCommandToken(

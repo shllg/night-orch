@@ -185,6 +185,7 @@ workerProfiles:
 | `localPath` | string path | yes | none | Local repo checkout path. |
 | `baseBranch` | string | no | `main` | PR target branch. |
 | `branchPrefix` | string | no | `orch` | Work branch prefix. |
+| `maxConcurrentRuns` | positive int | no | `1` | Max issues to process in parallel for this repo per poll cycle. |
 | `labels` | object | no | object with defaults | Orchestration label names. |
 | `labelConfig` | record | no | `{}` | Label metadata overrides for `labels-init`. |
 | `defaults` | object | no | object with defaults | Default roles + mention settings. |
@@ -193,6 +194,8 @@ workerProfiles:
 | `prompts` | object | no | none | Optional custom system prompt template paths. |
 | `selectors` | object | no | object with defaults | Issue label inclusion/exclusion filters. |
 | `agents` | record | no | `{}` | Maps agent names to worker profile names. |
+
+`maxConcurrentRuns` controls per-repo parallelism inside one poll cycle. With the default `1`, each configured repo runs at most one issue at a time.
 
 ### `repos[].labels`
 

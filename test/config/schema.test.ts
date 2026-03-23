@@ -98,6 +98,7 @@ describe('ConfigSchema', () => {
       expect(result.data.security.maxDailyCostUsd).toBe(50)
       expect(result.data.repos[0]?.baseBranch).toBe('main')
       expect(result.data.repos[0]?.branchPrefix).toBe('orch')
+      expect(result.data.repos[0]?.maxConcurrentRuns).toBe(1)
     }
   })
 
@@ -166,6 +167,25 @@ describe('ConfigSchema', () => {
         color: 'XYZ',
       },
     }
+
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(false)
+  })
+
+  it('accepts maxConcurrentRuns override per repo', () => {
+    const raw = loadExampleConfig()
+    raw.repos[0].maxConcurrentRuns = 3
+
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.repos[0]?.maxConcurrentRuns).toBe(3)
+    }
+  })
+
+  it.each([0, -1, 1.5])('rejects invalid maxConcurrentRuns value: %s', (value) => {
+    const raw = loadExampleConfig()
+    raw.repos[0].maxConcurrentRuns = value
 
     const result = ConfigSchema.safeParse(raw)
     expect(result.success).toBe(false)

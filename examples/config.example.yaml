@@ -74,6 +74,7 @@ repos:
     localPath: ~/code/myrepo
     baseBranch: main
     branchPrefix: orch
+    maxConcurrentRuns: 1
     labels:
       ready:
         - orch:ready

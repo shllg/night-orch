@@ -210,6 +210,43 @@ describe('setupEnvironment', () => {
     expect(result.composeProjectName).toBe('orch-42')
   })
 
+  it('uses withPortAllocationLock for dedicated env file setup when provided', async () => {
+    const config = makeRepoConfig({
+      environment: {
+        defaultMode: 'dedicated',
+        dedicated: {
+          compose: {
+            file: 'docker-compose.yml',
+            services: ['db'],
+            projectName: 'orch-{issue}',
+          },
+          env: {
+            copyFrom: '.env',
+            overrides: {},
+            overrideFiles: [],
+          },
+          teardownOnComplete: true,
+        },
+        bootstrap: [],
+        cleanup: [],
+      },
+    })
+
+    const lock = vi.fn(async (task: () => unknown) => Promise.resolve(task()))
+
+    await setupEnvironment({
+      worktreePath: '/tmp/wt',
+      issueNumber: 101,
+      repoConfig: config,
+      mode: 'dedicated',
+      usedPorts: [],
+      withPortAllocationLock: lock,
+    })
+
+    expect(lock).toHaveBeenCalledTimes(1)
+    expect(setupEnvFile).toHaveBeenCalledTimes(1)
+  })
+
   it('substitutes {issue} in project name and env overrides', async () => {
     const config = makeRepoConfig({
       environment: {

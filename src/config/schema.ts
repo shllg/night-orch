@@ -146,6 +146,7 @@ const RepoConfigSchema = z.object({
   localPath: z.string(),
   baseBranch: z.string().default('main'),
   branchPrefix: z.string().default('orch'),
+  maxConcurrentRuns: z.number().int().positive().default(1),
   labels: LabelsSchema.default({ ready: ['orch:ready'] }),
   labelConfig: z.record(LabelPresentationSchema).default({}),
   defaults: DefaultsSchema.default({}),

@@ -102,13 +102,45 @@ function makeConfig(dbPath: string): Config {
       repo: 'org/repo', forge: 'github', localPath: '/tmp/repo', baseBranch: 'main',
       branchPrefix: 'orch', labels: { ready: ['orch:ready'], running: 'orch:running', blocked: ['orch:blocked'], reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry' },
       defaults: { planner: 'claude', coder: 'claude', reviewer: 'claude', doneMode: 'pr-ready', notifyPriority: 'normal', prMentions: [] },
-      verify: ['pnpm test'], selectors: { includeLabelsAny: [], excludeLabelsAny: [] }, agents: { claude: 'claude' },
+      verify: ['pnpm test'], selectors: { includeLabelsAny: [], excludeLabelsAny: [] }, agents: { claude: 'claude' }, maxConcurrentRuns: 1,
     }],
     mcp: { enabled: false, transport: 'stdio', authTokenEnv: null },
     workerProfiles: {
       claude: { type: 'claude', command: 'claude', args: ['-p'], workerTimeoutSeconds: 1800, minimalEnv: true, runtimeWrapper: null, env: {} },
     },
   } as Config
+}
+
+function makeDiscoveredIssue(issueNumber: number, title: string): {
+  issue: {
+    number: number
+    nodeId: string
+    title: string
+    body: string
+    labels: string[]
+    assignees: string[]
+    state: 'open'
+    createdAt: string
+    updatedAt: string
+    url: string
+  }
+  triage: { level: 'standard'; reason: string }
+} {
+  return {
+    issue: {
+      number: issueNumber,
+      nodeId: '',
+      title,
+      body: '',
+      labels: ['orch:ready'],
+      assignees: [],
+      state: 'open',
+      createdAt: '',
+      updatedAt: '',
+      url: '',
+    },
+    triage: { level: 'standard', reason: '' },
+  }
 }
 
 describe('pollOnce', () => {
@@ -283,6 +315,100 @@ describe('pollOnce', () => {
     expect(typeof planCommentBody).toBe('string')
     expect(planCommentBody).toContain('**Automated comment** posted by **night-orch**')
     expect(callOrder).toEqual(['executeLoop', 'comment', 'afterOnPlanReady'])
+  })
+
+  it('defaults to one run per repo per poll cycle', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([
+      makeDiscoveredIssue(1, 'First'),
+      makeDiscoveredIssue(2, 'Second'),
+    ])
+    mockExecuteLoop.mockResolvedValue({
+      currentPhase: 'publish',
+      terminalStatus: 'blocked',
+    })
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    const result = await pollOnce(config, db, false)
+
+    expect(result.processed).toBe(1)
+    expect(result.errors).toBe(0)
+    const rows = db
+      .prepare('SELECT issue_number FROM runs ORDER BY issue_number ASC')
+      .all() as Array<{ issue_number: number }>
+    expect(rows).toEqual([{ issue_number: 1 }])
+  })
+
+  it('processes up to repo maxConcurrentRuns issues per poll cycle', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([
+      makeDiscoveredIssue(1, 'First'),
+      makeDiscoveredIssue(2, 'Second'),
+      makeDiscoveredIssue(3, 'Third'),
+    ])
+    mockExecuteLoop.mockResolvedValue({
+      currentPhase: 'publish',
+      terminalStatus: 'blocked',
+    })
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    config.repos[0]!.maxConcurrentRuns = 2
+    const result = await pollOnce(config, db, false)
+
+    expect(result.processed).toBe(2)
+    expect(result.errors).toBe(0)
+    const rows = db
+      .prepare('SELECT issue_number FROM runs ORDER BY issue_number ASC')
+      .all() as Array<{ issue_number: number }>
+    expect(rows).toEqual([{ issue_number: 1 }, { issue_number: 2 }])
+  })
+
+  it('runs one issue per configured repo in parallel by default', async () => {
+    mockDiscoverEligibleIssues.mockImplementation(async (repoConfig: { repo: string }) => {
+      if (repoConfig.repo === 'org/repo') {
+        return [makeDiscoveredIssue(1, 'Repo 1 issue')]
+      }
+      return [makeDiscoveredIssue(2, 'Repo 2 issue')]
+    })
+
+    let inFlight = 0
+    let maxInFlight = 0
+    mockExecuteLoop.mockImplementation(async () => {
+      inFlight += 1
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      inFlight -= 1
+      return {
+        currentPhase: 'publish',
+        terminalStatus: 'blocked',
+      }
+    })
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    config.repos.push({
+      repo: 'other/repo',
+      forge: 'github',
+      localPath: '/tmp/other-repo',
+      baseBranch: 'main',
+      branchPrefix: 'orch',
+      labels: { ready: ['orch:ready'], running: 'orch:running', blocked: ['orch:blocked'], reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry' },
+      defaults: { planner: 'claude', coder: 'claude', reviewer: 'claude', doneMode: 'pr-ready', notifyPriority: 'normal', prMentions: [] },
+      verify: ['pnpm test'],
+      selectors: { includeLabelsAny: [], excludeLabelsAny: [] },
+      agents: { claude: 'claude' },
+      maxConcurrentRuns: 1,
+    })
+
+    const result = await pollOnce(config, db, false)
+
+    expect(result.processed).toBe(2)
+    expect(result.errors).toBe(0)
+    expect(maxInFlight).toBeGreaterThan(1)
+    const rows = db
+      .prepare('SELECT repo, issue_number FROM runs ORDER BY repo ASC, issue_number ASC')
+      .all() as Array<{ repo: string; issue_number: number }>
+    expect(rows).toEqual([
+      { repo: 'org/repo', issue_number: 1 },
+      { repo: 'other/repo', issue_number: 2 },
+    ])
   })
 
   it('processes only the targeted issue when targetIssue is provided', async () => {
