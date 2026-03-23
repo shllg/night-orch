@@ -13,6 +13,7 @@ vi.mock('../../src/utils/logger.js', () => ({
 }))
 
 const mockDiscoverEligibleIssues = vi.fn().mockResolvedValue([])
+const mockCommentOnIssue = vi.fn().mockResolvedValue(undefined)
 vi.mock('../../src/discovery/discover.js', () => ({
   discoverEligibleIssues: (...args: unknown[]) => mockDiscoverEligibleIssues(...args),
 }))
@@ -34,7 +35,7 @@ vi.mock('../../src/forge/factory.js', () => ({
     }),
     addLabels: vi.fn().mockResolvedValue(undefined),
     removeLabels: vi.fn().mockResolvedValue(undefined),
-    commentOnIssue: vi.fn().mockResolvedValue(undefined),
+    commentOnIssue: (...args: unknown[]) => mockCommentOnIssue(...args),
     validateAuth: vi.fn(),
     createPR: vi.fn(),
     updatePR: vi.fn(),
@@ -236,6 +237,52 @@ describe('pollOnce', () => {
     expect(result.errors).toBe(1)
     const row = db.prepare('SELECT status FROM runs ORDER BY created_at DESC LIMIT 1').get() as { status: string }
     expect(row.status).toBe('error')
+  })
+
+  it('posts a night-orch plan summary comment through the loop onPlanReady hook', async () => {
+    const callOrder: string[] = []
+    mockDiscoverEligibleIssues.mockResolvedValue([{
+      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      triage: { level: 'standard', reason: '' },
+    }])
+    mockCommentOnIssue.mockImplementation(async () => {
+      callOrder.push('comment')
+    })
+    mockExecuteLoop.mockImplementationOnce(async (initialCtx: Record<string, unknown>, deps: { onPlanReady?: (ctx: Record<string, unknown>) => Promise<void> }) => {
+      callOrder.push('executeLoop')
+      expect(typeof deps.onPlanReady).toBe('function')
+      await deps.onPlanReady?.({
+        ...initialCtx,
+        plan: {
+          objective: 'Ship the requested issue change',
+          assumptions: [],
+          filesToChange: ['src/loop/engine.ts'],
+          steps: [{ order: 1, description: 'Wire plan summary hook', files: ['src/loop/engine.ts'] }],
+          risks: [],
+          testStrategy: 'Run test suite',
+        },
+      })
+      callOrder.push('afterOnPlanReady')
+      return {
+        currentPhase: 'publish',
+        terminalStatus: 'blocked',
+      }
+    })
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    await pollOnce(config, db, false)
+
+    expect(mockCommentOnIssue).toHaveBeenCalled()
+    const planCommentCall = mockCommentOnIssue.mock.calls.find(
+      (call) => typeof call[2] === 'string' && call[2].includes('[night-orch] Plan Summary'),
+    )
+    expect(planCommentCall).toBeDefined()
+    expect(planCommentCall?.[0]).toBe('org/repo')
+    expect(planCommentCall?.[1]).toBe(1)
+    const planCommentBody = planCommentCall?.[2]
+    expect(typeof planCommentBody).toBe('string')
+    expect(planCommentBody).toContain('**Automated comment** posted by **night-orch**')
+    expect(callOrder).toEqual(['executeLoop', 'comment', 'afterOnPlanReady'])
   })
 
   it('processes only the targeted issue when targetIssue is provided', async () => {
