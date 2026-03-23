@@ -74,44 +74,65 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
  */
 function extractClaudeOutput(raw: string): string {
   try {
-    const parsed = JSON.parse(raw)
+    const parsed: unknown = JSON.parse(raw)
 
     // Streaming format: array of event objects
     if (Array.isArray(parsed)) {
       const textParts: string[] = []
       for (const event of parsed) {
-        if (typeof event !== 'object' || event === null) continue
+        if (!isRecord(event)) continue
+        const eventType = event['type']
         // assistant message events contain content blocks with text
-        if (event.type === 'assistant' && Array.isArray(event.message?.content)) {
-          for (const block of event.message.content) {
-            if (block?.type === 'text' && typeof block.text === 'string') {
-              textParts.push(block.text)
+        if (eventType === 'assistant') {
+          const message = event['message']
+          if (isRecord(message) && Array.isArray(message['content'])) {
+            for (const block of message['content']) {
+              const text = getTextBlock(block)
+              if (text) {
+                textParts.push(text)
+              }
             }
           }
         }
         // result message at the end
-        if (event.type === 'result' && Array.isArray(event.result)) {
-          for (const block of event.result) {
-            if (block?.type === 'text' && typeof block.text === 'string') {
-              textParts.push(block.text)
+        if (eventType === 'result') {
+          const result = event['result']
+          if (Array.isArray(result)) {
+            for (const block of result) {
+              const text = getTextBlock(block)
+              if (text) {
+                textParts.push(text)
+              }
             }
           }
-        }
-        if (event.type === 'result' && typeof event.result === 'string') {
-          textParts.push(event.result)
+          if (typeof result === 'string') {
+            textParts.push(result)
+          }
         }
       }
       if (textParts.length > 0) return textParts.join('\n')
     }
 
     // Single object envelope: { result: "..." }
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      if (typeof parsed.result === 'string') return parsed.result
+    if (isRecord(parsed)) {
+      const result = parsed['result']
+      if (typeof result === 'string') return result
     }
   } catch {
     // Not JSON — return raw
   }
   return raw
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function getTextBlock(value: unknown): string | null {
+  if (!isRecord(value)) return null
+  if (value['type'] !== 'text') return null
+  const text = value['text']
+  return typeof text === 'string' ? text : null
 }
 
 function parseOutput(role: string, raw: string): { parsed: WorkerTaskResult['parsed']; parseError: string | null } {

@@ -73,6 +73,11 @@ src/utils/           — Logger, IDs, time helpers
 
 Implementation specs in `docs/specs-active/`. Consult the relevant phase spec before implementing.
 
+## Config Documentation
+
+Configuration authoring reference lives in `docs/CONFIGURATION.md`.
+When changing config schema, config loading behavior, or config-dependent runtime behavior, update `docs/CONFIGURATION.md` in the same change.
+
 ## Extended Rules
 
 Domain-specific rules are in `.claude/rules/` — architecture, security, TypeScript, loop engine, testing, specs, and operational patterns. These are loaded automatically when relevant.
