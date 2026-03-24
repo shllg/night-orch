@@ -101,9 +101,11 @@ const LabelsSchema = z.object({
     Array.isArray(v) ? v : [v],
   ),
   running: z.string().default('orch:running'),
-  blocked: z.union([z.string(), z.array(z.string())]).transform(v =>
-    Array.isArray(v) ? v : [v],
-  ).default(['orch:blocked', 'orch:needs-human']),
+  blocked: z.union([
+    z.string(),
+    z.array(z.string()).transform(v => v[0] ?? 'orch:blocked'),
+  ]).default('orch:blocked'),
+  needsHuman: z.string().default('orch:needs-human'),
   reviewReady: z.string().default('orch:review-ready'),
   error: z.string().default('orch:error'),
   retry: z.string().default('orch:retry'),
@@ -192,6 +194,15 @@ export const ConfigSchema = z.object({
     dbPath: z.string().default('~/.config/night-orch/state.db'),
     worktreeRoot: z.string().default('~/code/.night-orch/worktrees'),
     logsRoot: z.string().default('~/code/.night-orch/logs'),
+    autoCleanup: z.object({
+      enabled: z.boolean().default(true),
+      intervalMinutes: z.number().positive().default(60),
+    }).default({}),
+    retention: z.object({
+      worktreeAgeDays: z.number().positive().default(7),
+      detailDays: z.number().positive().default(30),
+      archiveDays: z.number().positive().default(90),
+    }).default({}),
   }).default({}),
 
   notifications: z.object({
@@ -222,6 +233,11 @@ export const ConfigSchema = z.object({
     authTokenEnv: z.string().nullable().default(null),
     httpPort: z.number().int().positive().default(3100),
     httpHost: z.string().default('127.0.0.1'),
+  }).default({}),
+
+  commentCommands: z.object({
+    enabled: z.boolean().default(true),
+    requireCollaborator: z.boolean().default(false),
   }).default({}),
 
   repos: z.array(RepoConfigSchema).min(1, 'At least one repository must be configured'),

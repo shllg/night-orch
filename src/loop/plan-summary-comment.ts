@@ -1,5 +1,8 @@
 import type { ForgeAdapter } from '../forge/types.js'
 import type { PlannerOutput } from '../workers/types.js'
+import { markerTag, upsertBotComment } from '../forge/bot-comment.js'
+
+const PLAN_MARKER = markerTag('plan')
 
 const MAX_STEPS = 6
 const MAX_FILES = 8
@@ -82,10 +85,17 @@ export async function postPlanSummaryComment(
   repo: string,
   issueNumber: number,
   plan: PlannerOutput | null | undefined,
+  botUser?: string,
 ): Promise<boolean> {
   if (!plan || !hasRenderableContent(plan)) {
     return false
   }
-  await forge.commentOnIssue(repo, issueNumber, formatPlanSummaryComment(plan))
+  const body = formatPlanSummaryComment(plan)
+  if (botUser) {
+    await upsertBotComment(forge, repo, issueNumber, PLAN_MARKER, body, botUser)
+  } else {
+    // Fallback: append-only when botUser unknown (backward compat)
+    await forge.commentOnIssue(repo, issueNumber, body)
+  }
   return true
 }

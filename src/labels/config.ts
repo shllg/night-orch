@@ -6,6 +6,7 @@ export function buildLabelConfig(repoConfig: Pick<RepoConfig, 'labels'>): LabelC
     ready: repoConfig.labels.ready,
     running: repoConfig.labels.running,
     blocked: repoConfig.labels.blocked,
+    needsHuman: repoConfig.labels.needsHuman,
     reviewReady: repoConfig.labels.reviewReady,
     error: repoConfig.labels.error,
     retry: repoConfig.labels.retry,

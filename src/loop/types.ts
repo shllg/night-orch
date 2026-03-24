@@ -4,6 +4,16 @@ import type { ResolvedRoles } from '../discovery/roles.js'
 import type { TriageResult, TriageAdjustedLimits } from '../discovery/triage.js'
 import type { PlannerOutput, CoderOutput, ReviewerOutput, ReviewFinding, VerifyResult } from '../workers/types.js'
 
+export type BlockReason =
+  | 'cost_limit'
+  | 'iteration_limit'
+  | 'agent_pass_limit'
+  | 'reviewer_blocked'
+  | 'ambiguous_review'
+  | 'verify_config'
+
+export type RunMode = 'fresh' | 'followup'
+
 export type LoopPhase =
   | 'plan'
   | 'code'
@@ -52,12 +62,16 @@ export interface RunContext {
   readonly phaseHistory: PhaseRecord[]
 
   readonly dryRun: boolean
+
+  readonly runMode: RunMode
+  readonly blockReason: BlockReason | null
+  readonly prReviewFeedback: unknown | null
 }
 
 export type LoopDecision =
   | { action: 'publish'; reason: string }
   | { action: 'iterate'; reason: string; findings: ReviewFinding[] }
-  | { action: 'block'; reason: string }
+  | { action: 'block'; reason: string; blockReason: BlockReason }
   | { action: 'error'; reason: string }
 
 export type TerminalStatus = 'running' | 'publish' | 'blocked' | 'error'

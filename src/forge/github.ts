@@ -1,6 +1,9 @@
 import { Octokit } from '@octokit/rest'
 import type { RepoConfig } from '../config/schema.js'
-import type { ForgeAdapter, ForgeIssue, ForgePR, PRParams, ForgeAuthInfo } from './types.js'
+import type {
+  ForgeAdapter, ForgeIssue, ForgePR, PRParams, ForgeAuthInfo,
+  ForgeComment, ForgePRReview, ForgePRReviewComment, PRReviewState, MergeMethod,
+} from './types.js'
 import { logger } from '../utils/logger.js'
 
 function splitRepo(repo: string): { owner: string; repo: string } {
@@ -193,6 +196,82 @@ export class GitHubForgeAdapter implements ForgeAdapter {
     return data as unknown as string
   }
 
+  async listIssueComments(repo: string, issueNumber: number): Promise<ForgeComment[]> {
+    const { owner, repo: repoName } = splitRepo(repo)
+    const comments = await this.octokit.paginate(
+      this.octokit.rest.issues.listComments,
+      { owner, repo: repoName, issue_number: issueNumber, per_page: 100 },
+    )
+    return comments.map((c) => ({
+      id: c.id,
+      body: c.body ?? '',
+      user: c.user?.login ?? '',
+      createdAt: c.created_at ?? '',
+      updatedAt: c.updated_at ?? '',
+    }))
+  }
+
+  async updateComment(repo: string, commentId: number, body: string): Promise<void> {
+    const { owner, repo: repoName } = splitRepo(repo)
+    await this.octokit.rest.issues.updateComment({
+      owner,
+      repo: repoName,
+      comment_id: commentId,
+      body,
+    })
+  }
+
+  async listPRReviews(repo: string, prNumber: number): Promise<ForgePRReview[]> {
+    const { owner, repo: repoName } = splitRepo(repo)
+    const reviews = await this.octokit.paginate(
+      this.octokit.rest.pulls.listReviews,
+      { owner, repo: repoName, pull_number: prNumber, per_page: 100 },
+    )
+    return reviews.map((r) => ({
+      id: r.id,
+      user: r.user?.login ?? '',
+      state: mapReviewState(r.state),
+      body: r.body ?? '',
+      submittedAt: r.submitted_at ?? '',
+    }))
+  }
+
+  async listPRReviewComments(repo: string, prNumber: number): Promise<ForgePRReviewComment[]> {
+    const { owner, repo: repoName } = splitRepo(repo)
+    const comments = await this.octokit.paginate(
+      this.octokit.rest.pulls.listReviewComments,
+      { owner, repo: repoName, pull_number: prNumber, per_page: 100 },
+    )
+    return comments.map((c) => ({
+      id: c.id,
+      user: c.user?.login ?? '',
+      body: c.body ?? '',
+      path: c.path ?? null,
+      line: c.line ?? null,
+      createdAt: c.created_at ?? '',
+    }))
+  }
+
+  async mergePR(repo: string, prNumber: number, method: MergeMethod): Promise<void> {
+    const { owner, repo: repoName } = splitRepo(repo)
+    await this.octokit.rest.pulls.merge({
+      owner,
+      repo: repoName,
+      pull_number: prNumber,
+      merge_method: method,
+    })
+  }
+
+  async closePR(repo: string, prNumber: number): Promise<void> {
+    const { owner, repo: repoName } = splitRepo(repo)
+    await this.octokit.rest.pulls.update({
+      owner,
+      repo: repoName,
+      pull_number: prNumber,
+      state: 'closed',
+    })
+  }
+
   private mapPR(data: Record<string, unknown>): ForgePR {
     const d = data as {
       number: number
@@ -270,4 +349,13 @@ export class GitHubForgeAdapter implements ForgeAdapter {
 
 function isOctokitError(err: unknown): err is { status: number } {
   return typeof err === 'object' && err !== null && 'status' in err
+}
+
+function mapReviewState(state: string): PRReviewState {
+  switch (state.toLowerCase()) {
+    case 'approved': return 'approved'
+    case 'changes_requested': return 'changes_requested'
+    case 'dismissed': return 'dismissed'
+    default: return 'commented'
+  }
 }

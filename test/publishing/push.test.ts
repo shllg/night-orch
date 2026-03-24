@@ -30,7 +30,7 @@ describe('pushBranch', () => {
 
     expect(mockExeca).toHaveBeenCalledWith(
       'git',
-      ['push', '-u', 'origin', 'orch/1-fix'],
+      ['push', '--force-with-lease', '-u', 'origin', 'orch/1-fix'],
       { cwd: '/tmp/wt', timeout: 60_000 },
     )
   })
@@ -67,7 +67,7 @@ describe('pushBranch', () => {
     )
     expect(mockExeca).toHaveBeenNthCalledWith(3,
       'git',
-      ['push', '-u', 'origin', 'orch/1-fix'],
+      ['push', '--force-with-lease', '-u', 'origin', 'orch/1-fix'],
       expect.any(Object),
     )
   })

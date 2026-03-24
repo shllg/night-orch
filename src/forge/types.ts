@@ -1,5 +1,34 @@
 import type { RepoConfig } from '../config/schema.js'
 
+export interface ForgeComment {
+  id: number
+  body: string
+  user: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type PRReviewState = 'approved' | 'changes_requested' | 'commented' | 'dismissed'
+
+export interface ForgePRReview {
+  id: number
+  user: string
+  state: PRReviewState
+  body: string
+  submittedAt: string
+}
+
+export interface ForgePRReviewComment {
+  id: number
+  user: string
+  body: string
+  path: string | null
+  line: number | null
+  createdAt: string
+}
+
+export type MergeMethod = 'merge' | 'squash' | 'rebase'
+
 export interface ForgeIssue {
   number: number
   nodeId: string | null
@@ -72,4 +101,22 @@ export interface ForgeAdapter {
 
   /** Get PR diff. */
   getPRDiff(repo: string, prNumber: number): Promise<string>
+
+  /** List comments on an issue (includes PR conversation comments). */
+  listIssueComments(repo: string, issueNumber: number): Promise<ForgeComment[]>
+
+  /** Update an existing comment by ID. */
+  updateComment(repo: string, commentId: number, body: string): Promise<void>
+
+  /** List reviews on a pull request. */
+  listPRReviews(repo: string, prNumber: number): Promise<ForgePRReview[]>
+
+  /** List review-level comments on a pull request (inline code comments). */
+  listPRReviewComments(repo: string, prNumber: number): Promise<ForgePRReviewComment[]>
+
+  /** Merge a pull request. */
+  mergePR(repo: string, prNumber: number, method: MergeMethod): Promise<void>
+
+  /** Close a pull request without merging. */
+  closePR(repo: string, prNumber: number): Promise<void>
 }

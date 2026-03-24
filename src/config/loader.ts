@@ -64,6 +64,7 @@ function expandConfigPaths(config: Config): Config {
   return {
     ...config,
     storage: {
+      ...config.storage,
       dbPath: expandPath(config.storage.dbPath),
       worktreeRoot: expandPath(config.storage.worktreeRoot),
       logsRoot: expandPath(config.storage.logsRoot),

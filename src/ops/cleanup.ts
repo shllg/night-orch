@@ -11,6 +11,8 @@ import { logger } from '../utils/logger.js'
 export interface CleanupOptions {
   completedWorktrees: boolean
   errorWorktreeAgeDays: number
+  terminalWorktreeAgeDays: number
+  orphanedWorktrees: boolean
   mergedBranches: boolean
   logArchiveAgeDays: number
   dryRun: boolean
@@ -27,6 +29,8 @@ export interface CleanupResult {
 const DEFAULT_OPTIONS: CleanupOptions = {
   completedWorktrees: true,
   errorWorktreeAgeDays: 7,
+  terminalWorktreeAgeDays: 7,
+  orphanedWorktrees: true,
   mergedBranches: false,
   logArchiveAgeDays: 30,
   dryRun: false,
@@ -85,20 +89,19 @@ export class CleanupEngine {
             .prepare("SELECT status, ended_at, branch_name, pr_number FROM runs WHERE worktree_path = ? ORDER BY created_at DESC LIMIT 1")
             .get(wt.path) as WorktreeRunRow | undefined
 
-          if (!row) continue
-
           const shouldRemove = this.shouldRemoveWorktree(row, opts)
           if (!shouldRemove) continue
 
-          const sizeMb = this.estimateDirSizeMb(wt.path)
+          const sizeMb = await this.estimateDirSizeMb(wt.path)
 
+          const rowStatus = row?.status ?? 'orphaned'
           if (opts.dryRun) {
-            logger.info({ path: wt.path, status: row.status }, '[dry-run] Would remove worktree')
+            logger.info({ path: wt.path, status: rowStatus }, '[dry-run] Would remove worktree')
           } else {
             try {
               await worktreeManager.remove(wt.path, false)
               result.freedDiskMb += sizeMb
-              logger.info({ path: wt.path, status: row.status }, 'Removed worktree')
+              logger.info({ path: wt.path, status: rowStatus }, 'Removed worktree')
             } catch (err) {
               logger.warn({ path: wt.path, err }, 'Failed to remove worktree')
               continue
@@ -107,7 +110,7 @@ export class CleanupEngine {
           result.removedWorktrees.push(wt.path)
 
           // Branch deletion for merged PRs
-          if (opts.mergedBranches && row.branch_name && row.pr_number && row.status === 'completed') {
+          if (opts.mergedBranches && row?.branch_name && row.pr_number && row.status === 'completed') {
             const isMerged = await this.isPrMerged(repoConfig.repo, row.pr_number)
             if (!isMerged) {
               logger.info(
@@ -144,25 +147,35 @@ export class CleanupEngine {
     return result
   }
 
-  private shouldRemoveWorktree(row: WorktreeRunRow, opts: CleanupOptions): boolean {
+  private shouldRemoveWorktree(row: WorktreeRunRow | undefined, opts: CleanupOptions): boolean {
+    // No matching run → orphaned worktree
+    if (!row) return opts.orphanedWorktrees
+
     if (row.status === 'completed' && opts.completedWorktrees) {
       return true
     }
 
     if (row.status === 'error' && row.ended_at) {
-      const endedAt = new Date(row.ended_at)
-      const ageDays = (Date.now() - endedAt.getTime()) / (1000 * 60 * 60 * 24)
+      const ageDays = (Date.now() - new Date(row.ended_at).getTime()) / (1000 * 60 * 60 * 24)
       return ageDays >= opts.errorWorktreeAgeDays
+    }
+
+    // Blocked and review_ready: clean after terminalWorktreeAgeDays
+    if ((row.status === 'blocked' || row.status === 'review_ready') && row.ended_at) {
+      const ageDays = (Date.now() - new Date(row.ended_at).getTime()) / (1000 * 60 * 60 * 24)
+      return ageDays >= opts.terminalWorktreeAgeDays
     }
 
     return false
   }
 
-  private estimateDirSizeMb(dirPath: string): number {
+  private async estimateDirSizeMb(dirPath: string): Promise<number> {
     try {
-      const stat = statSync(dirPath)
-      // Rough estimate — real size would need recursive walk
-      return Math.round((stat.size || 0) / (1024 * 1024) * 100) / 100
+      const { execa: execaFn } = await import('execa')
+      const { stdout } = await execaFn('du', ['-sk', dirPath], { timeout: 10_000 })
+      const firstField = stdout.split('\t')[0]
+      const kb = parseInt(firstField ?? '0', 10)
+      return Math.round(kb / 1024 * 100) / 100
     } catch {
       return 0
     }

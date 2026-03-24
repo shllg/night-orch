@@ -15,7 +15,8 @@ vi.mock('../../src/utils/logger.js', () => ({
 const labelConfig: LabelConfig = {
   ready: ['orch:ready'],
   running: 'orch:running',
-  blocked: ['orch:blocked', 'orch:needs-human'],
+  blocked: 'orch:blocked',
+  needsHuman: 'orch:needs-human',
   reviewReady: 'orch:review-ready',
   error: 'orch:error',
   retry: 'orch:retry',
@@ -33,6 +34,12 @@ function makeMockForge(): ForgeAdapter {
     updatePR: vi.fn(),
     findPRByBranch: vi.fn(),
     getPRDiff: vi.fn(),
+    listIssueComments: vi.fn(),
+    updateComment: vi.fn(),
+    listPRReviews: vi.fn(),
+    listPRReviewComments: vi.fn(),
+    mergePR: vi.fn(),
+    closePR: vi.fn(),
   }
 }
 
@@ -110,12 +117,29 @@ describe('transitionLabels', () => {
     expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, expect.arrayContaining(['orch:running', 'orch:review-ready']))
   })
 
-  it('handles transition to blocked — adds blocked labels', async () => {
+  it('handles transition to blocked without blockReason — adds only blocked label', async () => {
     const forge = makeMockForge()
 
     await transitionLabels(forge, 'org/repo', 1, ['orch:running'], 'running', 'blocked', labelConfig)
 
+    expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:blocked'])
+    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:running'])
+  })
+
+  it('handles transition to blocked with reviewer_blocked — adds blocked + needsHuman', async () => {
+    const forge = makeMockForge()
+
+    await transitionLabels(forge, 'org/repo', 1, ['orch:running'], 'running', 'blocked', labelConfig, 'reviewer_blocked')
+
     expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:blocked', 'orch:needs-human'])
     expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:running'])
+  })
+
+  it('handles transition to blocked with cost_limit — adds only blocked label', async () => {
+    const forge = makeMockForge()
+
+    await transitionLabels(forge, 'org/repo', 1, ['orch:running'], 'running', 'blocked', labelConfig, 'cost_limit')
+
+    expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:blocked'])
   })
 })

@@ -27,12 +27,12 @@ export function decide(
   // Rule 1: Cost limit
   // (Caller should check before invoking, but double-check here)
   if (ctx.estimatedCostUsd > securityConfig.maxCostPerRunUsd) {
-    return { action: 'block', reason: `Per-run cost limit exceeded: $${ctx.estimatedCostUsd.toFixed(2)} > $${securityConfig.maxCostPerRunUsd}` }
+    return { action: 'block', reason: `Per-run cost limit exceeded: $${ctx.estimatedCostUsd.toFixed(2)} > $${securityConfig.maxCostPerRunUsd}`, blockReason: 'cost_limit' }
   }
 
   // Rule 2: Max total passes
   if (ctx.totalAgentPasses >= maxTotalPasses) {
-    return { action: 'block', reason: `Max total agent passes reached: ${ctx.totalAgentPasses}/${maxTotalPasses}` }
+    return { action: 'block', reason: `Max total agent passes reached: ${ctx.totalAgentPasses}/${maxTotalPasses}`, blockReason: 'agent_pass_limit' }
   }
 
   const review = ctx.reviewResult
@@ -47,10 +47,10 @@ export function decide(
   if (!review) {
     // Rules 8, 9
     if (loopConfig.blockOnAmbiguousReview) {
-      return { action: 'block', reason: 'Review output not parseable and blockOnAmbiguousReview is true' }
+      return { action: 'block', reason: 'Review output not parseable and blockOnAmbiguousReview is true', blockReason: 'ambiguous_review' }
     }
     if (ctx.iteration >= maxReviewIter) {
-      return { action: 'block', reason: 'Review parse failure at max iterations' }
+      return { action: 'block', reason: 'Review parse failure at max iterations', blockReason: 'iteration_limit' }
     }
     return { action: 'iterate', reason: 'Review output not parseable — retrying', findings: [] }
   }
@@ -59,10 +59,10 @@ export function decide(
     case 'APPROVED':
       // Rules 3, 4
       if (loopConfig.requireVerificationPass && !verifyCommandsConfigured) {
-        return { action: 'block', reason: 'Verification required but no verify commands are configured' }
+        return { action: 'block', reason: 'Verification required but no verify commands are configured', blockReason: 'verify_config' }
       }
       if (loopConfig.requireVerificationPass && !verifyResultsAvailable) {
-        return { action: 'block', reason: 'Verification required but no verify results are available' }
+        return { action: 'block', reason: 'Verification required but no verify results are available', blockReason: 'verify_config' }
       }
       if (verificationSatisfied) {
         return { action: 'publish', reason: 'Review approved, all verification passed' }
@@ -76,7 +76,7 @@ export function decide(
     case 'CHANGES_REQUIRED':
       // Rules 5, 6
       if (ctx.iteration >= maxReviewIter) {
-        return { action: 'block', reason: `Max review iterations reached: ${ctx.iteration}/${maxReviewIter}` }
+        return { action: 'block', reason: `Max review iterations reached: ${ctx.iteration}/${maxReviewIter}`, blockReason: 'iteration_limit' }
       }
       return {
         action: 'iterate',
@@ -86,7 +86,7 @@ export function decide(
 
     case 'BLOCKED':
       // Rule 7
-      return { action: 'block', reason: `Reviewer blocked: ${review.summary}` }
+      return { action: 'block', reason: `Reviewer blocked: ${review.summary}`, blockReason: 'reviewer_blocked' }
 
     default:
       return { action: 'error', reason: `Unknown review verdict: ${review.verdict as string}` }

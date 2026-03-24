@@ -23,6 +23,7 @@ export interface RunRecord {
   branchSlug: string | null
   worktreePath: string | null
   estimatedCostUsd: number
+  blockReason: string | null
 }
 
 export interface CreateRunParams {
@@ -75,6 +76,7 @@ export class RunManager {
       'branchSlug',
       'worktreePath',
       'estimatedCostUsd',
+      'blockReason',
     ] as const
 
     const columnMap: Record<string, string> = {
@@ -91,6 +93,7 @@ export class RunManager {
       branchSlug: 'branch_slug',
       worktreePath: 'worktree_path',
       estimatedCostUsd: 'estimated_cost_usd',
+      blockReason: 'block_reason',
     }
 
     const setClauses: string[] = []
@@ -180,6 +183,7 @@ export class RunManager {
       branchSlug: row.branch_slug,
       worktreePath: row.worktree_path,
       estimatedCostUsd: row.estimated_cost_usd ?? 0,
+      blockReason: row.block_reason ?? null,
     }
   }
 }
@@ -204,4 +208,5 @@ interface RawRunRow {
   branch_slug: string | null
   worktree_path: string | null
   estimated_cost_usd: number | null
+  block_reason: string | null
 }

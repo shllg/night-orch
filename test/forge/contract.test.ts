@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import type { ForgeAdapter, ForgeIssue, ForgePR, PRParams } from '../../src/forge/types.js'
+import type { ForgeAdapter, ForgeIssue, ForgePR, PRParams, ForgeComment, ForgePRReview, ForgePRReviewComment } from '../../src/forge/types.js'
 import { GitHubForgeAdapter } from '../../src/forge/github.js'
 import { ForgejoForgeAdapter } from '../../src/forge/forgejo.js'
 import type { RepoConfig } from '../../src/config/schema.js'
@@ -135,12 +135,17 @@ const mockIssuesGet = vi.fn()
 const mockIssuesAddLabels = vi.fn()
 const mockIssuesRemoveLabel = vi.fn()
 const mockIssuesCreateComment = vi.fn()
+const mockIssuesListComments = vi.fn()
+const mockIssuesUpdateComment = vi.fn()
 const mockIssuesListForRepo = vi.fn()
 const mockUsersGetAuthenticated = vi.fn()
 const mockPullsCreate = vi.fn()
 const mockPullsUpdate = vi.fn()
 const mockPullsList = vi.fn()
 const mockPullsGet = vi.fn()
+const mockPullsListReviews = vi.fn()
+const mockPullsListReviewComments = vi.fn()
+const mockPullsMerge = vi.fn()
 const mockRateLimitGet = vi.fn()
 
 vi.mock('@octokit/rest', () => {
@@ -154,6 +159,8 @@ vi.mock('@octokit/rest', () => {
           addLabels: mockIssuesAddLabels,
           removeLabel: mockIssuesRemoveLabel,
           createComment: mockIssuesCreateComment,
+          listComments: mockIssuesListComments,
+          updateComment: mockIssuesUpdateComment,
         },
         users: {
           getAuthenticated: mockUsersGetAuthenticated,
@@ -163,6 +170,9 @@ vi.mock('@octokit/rest', () => {
           update: mockPullsUpdate,
           list: mockPullsList,
           get: mockPullsGet,
+          listReviews: mockPullsListReviews,
+          listReviewComments: mockPullsListReviewComments,
+          merge: mockPullsMerge,
         },
         rateLimit: {
           get: mockRateLimitGet,
@@ -203,6 +213,19 @@ const adapters: AdapterFactory[] = [
       mockPullsUpdate.mockResolvedValue({ data: makeGitHubPRData(10) })
       mockPullsList.mockResolvedValue({ data: [makeGitHubPRData(10)] })
       mockPullsGet.mockResolvedValue({ data: '--- a/file\n+++ b/file\n' })
+      mockPullsMerge.mockResolvedValue({})
+      mockPullsListReviews.mockResolvedValue([])
+      mockPullsListReviewComments.mockResolvedValue([])
+      mockIssuesListComments.mockResolvedValue([])
+      mockIssuesUpdateComment.mockResolvedValue({})
+      // For paginate: handle the new methods
+      mockPaginate.mockImplementation((method: unknown) => {
+        if (method === mockIssuesListForRepo) return Promise.resolve([makeGitHubIssueData(1), makeGitHubIssueData(2)])
+        if (method === mockIssuesListComments) return Promise.resolve([{ id: 100, body: 'A comment', user: { login: 'bot' }, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' }])
+        if (method === mockPullsListReviews) return Promise.resolve([{ id: 200, user: { login: 'reviewer' }, state: 'APPROVED', body: 'LGTM', submitted_at: '2026-01-01T00:00:00Z' }])
+        if (method === mockPullsListReviewComments) return Promise.resolve([{ id: 300, user: { login: 'reviewer' }, body: 'Fix this', path: 'src/main.ts', line: 10, created_at: '2026-01-01T00:00:00Z' }])
+        return Promise.resolve([makeGitHubIssueData(1), makeGitHubIssueData(2)])
+      })
     },
   },
   {
@@ -225,6 +248,13 @@ const adapters: AdapterFactory[] = [
         // GET labels (for cache)
         if (method === 'GET' && urlStr.includes('/labels') && !urlStr.includes('/issues/')) {
           return Promise.resolve(forgejoJsonResponse(FORGEJO_REPO_LABELS))
+        }
+
+        // GET issue comments (must be before generic /issues/ match)
+        if (method === 'GET' && /\/issues\/\d+\/comments/.test(urlStr)) {
+          return Promise.resolve(forgejoJsonResponse([
+            { id: 100, body: 'A comment', user: { login: 'bot' }, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
+          ]))
         }
 
         // GET single issue
@@ -255,12 +285,36 @@ const adapters: AdapterFactory[] = [
           return Promise.resolve(forgejoJsonResponse({ id: 1 }))
         }
 
+        // PATCH comment (updateComment)
+        if (method === 'PATCH' && /\/issues\/comments\/\d+/.test(urlStr)) {
+          return Promise.resolve(forgejoJsonResponse({ id: 100 }))
+        }
+
+        // GET PR reviews
+        if (method === 'GET' && /\/pulls\/\d+\/reviews/.test(urlStr)) {
+          return Promise.resolve(forgejoJsonResponse([
+            { id: 200, user: { login: 'reviewer' }, state: 'approved', body: 'LGTM', submitted_at: '2026-01-01T00:00:00Z' },
+          ]))
+        }
+
+        // GET PR review comments
+        if (method === 'GET' && /\/pulls\/\d+\/comments/.test(urlStr)) {
+          return Promise.resolve(forgejoJsonResponse([
+            { id: 300, user: { login: 'reviewer' }, body: 'Fix this', path: 'src/main.ts', line: 10, created_at: '2026-01-01T00:00:00Z' },
+          ]))
+        }
+
+        // POST merge PR
+        if (method === 'POST' && /\/pulls\/\d+\/merge/.test(urlStr)) {
+          return Promise.resolve(forgejoJsonResponse(undefined, 200))
+        }
+
         // POST pulls (create PR)
         if (method === 'POST' && urlStr.includes('/pulls')) {
           return Promise.resolve(forgejoJsonResponse(makeForgejoPRData(10)))
         }
 
-        // PATCH pulls (update PR)
+        // PATCH pulls (update PR or close PR)
         if (method === 'PATCH' && urlStr.includes('/pulls/')) {
           return Promise.resolve(forgejoJsonResponse(makeForgejoPRData(10)))
         }
@@ -429,6 +483,75 @@ for (const { name, create, setupMocks } of adapters) {
       it('returns a string', async () => {
         const diff = await adapter.getPRDiff('org/repo', 10)
         expect(typeof diff).toBe('string')
+      })
+    })
+
+    // --- New comment/review/merge methods ---
+
+    describe('listIssueComments', () => {
+      it('returns an array of ForgeComment with required fields', async () => {
+        const comments = await adapter.listIssueComments('org/repo', 1)
+
+        expect(Array.isArray(comments)).toBe(true)
+        expect(comments.length).toBeGreaterThan(0)
+
+        const comment = comments[0]!
+        expect(typeof comment.id).toBe('number')
+        expect(typeof comment.body).toBe('string')
+        expect(typeof comment.user).toBe('string')
+        expect(typeof comment.createdAt).toBe('string')
+        expect(typeof comment.updatedAt).toBe('string')
+      })
+    })
+
+    describe('updateComment', () => {
+      it('completes without error', async () => {
+        await expect(adapter.updateComment('org/repo', 100, 'Updated body')).resolves.toBeUndefined()
+      })
+    })
+
+    describe('listPRReviews', () => {
+      it('returns an array of ForgePRReview with required fields', async () => {
+        const reviews = await adapter.listPRReviews('org/repo', 10)
+
+        expect(Array.isArray(reviews)).toBe(true)
+        expect(reviews.length).toBeGreaterThan(0)
+
+        const review = reviews[0]!
+        expect(typeof review.id).toBe('number')
+        expect(typeof review.user).toBe('string')
+        expect(['approved', 'changes_requested', 'commented', 'dismissed']).toContain(review.state)
+        expect(typeof review.body).toBe('string')
+        expect(typeof review.submittedAt).toBe('string')
+      })
+    })
+
+    describe('listPRReviewComments', () => {
+      it('returns an array of ForgePRReviewComment with required fields', async () => {
+        const comments = await adapter.listPRReviewComments('org/repo', 10)
+
+        expect(Array.isArray(comments)).toBe(true)
+        expect(comments.length).toBeGreaterThan(0)
+
+        const comment = comments[0]!
+        expect(typeof comment.id).toBe('number')
+        expect(typeof comment.user).toBe('string')
+        expect(typeof comment.body).toBe('string')
+        expect(comment.path === null || typeof comment.path === 'string').toBe(true)
+        expect(comment.line === null || typeof comment.line === 'number').toBe(true)
+        expect(typeof comment.createdAt).toBe('string')
+      })
+    })
+
+    describe('mergePR', () => {
+      it('completes without error', async () => {
+        await expect(adapter.mergePR('org/repo', 10, 'squash')).resolves.toBeUndefined()
+      })
+    })
+
+    describe('closePR', () => {
+      it('completes without error', async () => {
+        await expect(adapter.closePR('org/repo', 10)).resolves.toBeUndefined()
       })
     })
   })

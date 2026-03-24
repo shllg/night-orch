@@ -165,7 +165,7 @@ describe('CleanupEngine', () => {
     expect(mockRemove).not.toHaveBeenCalled()
   })
 
-  it('orphaned worktree (no DB record) → not auto-removed', async () => {
+  it('orphaned worktree (no DB record) → removed by default', async () => {
     const wtPath = join(tmpDir, 'wt', 'org-repo-orphan')
     mockList.mockResolvedValue([{ path: wtPath, branchName: 'orch/orphan', exists: true, isClean: true }])
 
@@ -173,7 +173,18 @@ describe('CleanupEngine', () => {
     const engine = new CleanupEngine(db, config)
     const result = await engine.run()
 
-    // No DB record means the query returns undefined → not removed
+    expect(result.removedWorktrees).toContain(wtPath)
+    expect(mockRemove).toHaveBeenCalled()
+  })
+
+  it('orphaned worktree → not removed when orphanedWorktrees=false', async () => {
+    const wtPath = join(tmpDir, 'wt', 'org-repo-orphan')
+    mockList.mockResolvedValue([{ path: wtPath, branchName: 'orch/orphan', exists: true, isClean: true }])
+
+    const config = makeConfig(tmpDir)
+    const engine = new CleanupEngine(db, config)
+    const result = await engine.run({ orphanedWorktrees: false })
+
     expect(result.removedWorktrees).not.toContain(wtPath)
     expect(mockRemove).not.toHaveBeenCalled()
   })
@@ -242,6 +253,10 @@ describe('CleanupEngine', () => {
     const result = await engine.run({ mergedBranches: true })
 
     expect(result.removedBranches).not.toContain('orch/1-fix')
-    expect(execa).not.toHaveBeenCalled()
+    // execa may be called for `du -sk` (disk size estimation), but not for `git branch -D`
+    const gitBranchCalls = (execa as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (call: unknown[]) => call[0] === 'git' && (call[1] as string[])?.[0] === 'branch',
+    )
+    expect(gitBranchCalls).toHaveLength(0)
   })
 })

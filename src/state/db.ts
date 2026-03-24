@@ -5,11 +5,15 @@ import { logger } from '../utils/logger.js'
 import { up as migration001 } from './migrations/001-initial.js'
 import { up as migration002 } from './migrations/002-placeholder.js'
 import { up as migration003 } from './migrations/003-mention-tracking.js'
+import { up as migration004 } from './migrations/004-command-tracking.js'
+import { up as migration005 } from './migrations/005-block-reason.js'
 
 const MIGRATIONS = [
   { version: 1, name: '001-initial', up: migration001 },
   { version: 2, name: '002-placeholder', up: migration002 },
   { version: 3, name: '003-mention-tracking', up: migration003 },
+  { version: 4, name: '004-command-tracking', up: migration004 },
+  { version: 5, name: '005-block-reason', up: migration005 },
 ]
 
 export function initDatabase(dbPath: string): Database.Database {

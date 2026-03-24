@@ -1,5 +1,8 @@
 import type { RepoConfig } from '../config/schema.js'
-import type { ForgeAdapter, ForgeIssue, ForgePR, PRParams, ForgeAuthInfo } from './types.js'
+import type {
+  ForgeAdapter, ForgeIssue, ForgePR, PRParams, ForgeAuthInfo,
+  ForgeComment, ForgePRReview, ForgePRReviewComment, PRReviewState, MergeMethod,
+} from './types.js'
 import { ForgejoClient, ForgejoApiError } from './forgejo-client.js'
 import { LabelCache } from './forgejo-labels.js'
 
@@ -20,6 +23,31 @@ interface ForgejoIssueData {
   updated_at: string
   html_url: string
   pull_request?: unknown
+}
+
+interface ForgejoCommentData {
+  id: number
+  body: string
+  user: { login: string }
+  created_at: string
+  updated_at: string
+}
+
+interface ForgejoReviewData {
+  id: number
+  user: { login: string }
+  state: string
+  body: string
+  submitted_at: string
+}
+
+interface ForgejoReviewCommentData {
+  id: number
+  user: { login: string }
+  body: string
+  path: string
+  line: number | null
+  created_at: string
 }
 
 interface ForgejoPRData {
@@ -212,6 +240,74 @@ export class ForgejoForgeAdapter implements ForgeAdapter {
     return res.text()
   }
 
+  async listIssueComments(repo: string, issueNumber: number): Promise<ForgeComment[]> {
+    const { owner, repo: repoName } = splitRepo(repo)
+    const comments = await this.client.getPaginated<ForgejoCommentData>(
+      `/repos/${owner}/${repoName}/issues/${issueNumber}/comments`,
+    )
+    return comments.map((c) => ({
+      id: c.id,
+      body: c.body ?? '',
+      user: c.user?.login ?? '',
+      createdAt: c.created_at,
+      updatedAt: c.updated_at,
+    }))
+  }
+
+  async updateComment(repo: string, commentId: number, body: string): Promise<void> {
+    const { owner, repo: repoName } = splitRepo(repo)
+    await this.client.patch(
+      `/repos/${owner}/${repoName}/issues/comments/${commentId}`,
+      { body },
+    )
+  }
+
+  async listPRReviews(repo: string, prNumber: number): Promise<ForgePRReview[]> {
+    const { owner, repo: repoName } = splitRepo(repo)
+    const reviews = await this.client.getPaginated<ForgejoReviewData>(
+      `/repos/${owner}/${repoName}/pulls/${prNumber}/reviews`,
+    )
+    return reviews.map((r) => ({
+      id: r.id,
+      user: r.user?.login ?? '',
+      state: mapForgejoReviewState(r.state),
+      body: r.body ?? '',
+      submittedAt: r.submitted_at ?? '',
+    }))
+  }
+
+  async listPRReviewComments(repo: string, prNumber: number): Promise<ForgePRReviewComment[]> {
+    const { owner, repo: repoName } = splitRepo(repo)
+    const comments = await this.client.getPaginated<ForgejoReviewCommentData>(
+      `/repos/${owner}/${repoName}/pulls/${prNumber}/comments`,
+    )
+    return comments.map((c) => ({
+      id: c.id,
+      user: c.user?.login ?? '',
+      body: c.body ?? '',
+      path: c.path || null,
+      line: c.line ?? null,
+      createdAt: c.created_at,
+    }))
+  }
+
+  async mergePR(repo: string, prNumber: number, method: MergeMethod): Promise<void> {
+    const { owner, repo: repoName } = splitRepo(repo)
+    const doMap: Record<MergeMethod, string> = { merge: 'merge', squash: 'squash', rebase: 'rebase' }
+    await this.client.post(
+      `/repos/${owner}/${repoName}/pulls/${prNumber}/merge`,
+      { Do: doMap[method] },
+    )
+  }
+
+  async closePR(repo: string, prNumber: number): Promise<void> {
+    const { owner, repo: repoName } = splitRepo(repo)
+    await this.client.patch(
+      `/repos/${owner}/${repoName}/pulls/${prNumber}`,
+      { state: 'closed' },
+    )
+  }
+
   // --- Internal mapping ---
 
   private mapIssue(data: ForgejoIssueData, _repoSlug: string): ForgeIssue {
@@ -242,5 +338,15 @@ export class ForgejoForgeAdapter implements ForgeAdapter {
       baseBranch: data.base.ref,
       url: data.html_url,
     }
+  }
+}
+
+function mapForgejoReviewState(state: string): PRReviewState {
+  switch (state.toLowerCase()) {
+    case 'approved': return 'approved'
+    case 'request_changes':
+    case 'changes_requested': return 'changes_requested'
+    case 'dismissed': return 'dismissed'
+    default: return 'commented'
   }
 }

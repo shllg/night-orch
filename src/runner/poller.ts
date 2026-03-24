@@ -28,6 +28,10 @@ import { logger } from '../utils/logger.js'
 import type { RunContext } from '../loop/types.js'
 import type { NotificationPayload } from '../notify/types.js'
 import { postPlanSummaryComment } from '../loop/plan-summary-comment.js'
+import { markerTag, upsertBotComment } from '../forge/bot-comment.js'
+import { formatStatusComment } from '../forge/status-comment.js'
+
+const STATUS_MARKER = markerTag('status')
 
 export interface PollResult {
   processed: number
@@ -77,6 +81,16 @@ export async function pollOnce(
     const channels = createChannels(config.notifications, forge)
     const notifier = new NotificationDispatcher(channels, config.notifications.events)
     const usedPortsInPass: number[] = []
+
+    // Resolve bot user for comment upserts (best-effort, fallback to empty string)
+    let botUser = ''
+    try {
+      const authInfo = await forge.validateAuth()
+      botUser = authInfo.user
+    } catch {
+      logger.debug({ repo: repoConfig.repo }, 'Could not resolve bot user for comment upserts')
+    }
+
     const discoveredAll = await discoverEligibleIssues(repoConfig, forge, leaseManager)
     const discovered = targetIssue
       ? discoveredAll.filter((d) => d.issue.number === targetIssue.issueNumber)
@@ -101,11 +115,12 @@ export async function pollOnce(
     for (const discoveredIssue of discovered) {
       if (discoveredIssue.triage.level === 'architectural') {
         await forge.addLabels(repoConfig.repo, discoveredIssue.issue.number, ['orch:needs-human'])
-        await forge.commentOnIssue(
-          repoConfig.repo,
-          discoveredIssue.issue.number,
-          '🏗️ **night-orch**: This issue is classified as architectural and requires human guidance.',
-        )
+        const archBody = formatStatusComment({ blockReason: 'This issue is classified as architectural and requires human guidance.' })
+        if (botUser) {
+          await upsertBotComment(forge, repoConfig.repo, discoveredIssue.issue.number, STATUS_MARKER, archBody, botUser)
+        } else {
+          await forge.commentOnIssue(repoConfig.repo, discoveredIssue.issue.number, `🏗️ **night-orch**: This issue is classified as architectural and requires human guidance.`)
+        }
         continue
       }
 
@@ -222,6 +237,9 @@ export async function pollOnce(
           terminalStatus: 'running',
           phaseHistory: [],
           dryRun: false,
+          runMode: 'fresh',
+          blockReason: null,
+          prReviewFeedback: null,
         }
 
         // Execute loop
@@ -235,7 +253,7 @@ export async function pollOnce(
           envOverrides: envSetup?.envOverrides ?? {},
           metrics,
           onPlanReady: async (ctx) => {
-            await postPlanSummaryComment(forge, ctx.repo, ctx.issueNumber, ctx.plan)
+            await postPlanSummaryComment(forge, ctx.repo, ctx.issueNumber, ctx.plan, botUser)
           },
         })
 
@@ -254,6 +272,7 @@ export async function pollOnce(
           notifier,
           metrics,
           maxAutoRetries: config.loop.maxAutoRetries,
+          botUser,
         })
 
         if (outcome === 'processed') processed++
@@ -292,11 +311,16 @@ export async function pollOnce(
             try {
               const latestIssue = await forge.getIssue(repoConfig.repo, discoveredIssue.issue.number)
               await transitionLabels(forge, repoConfig.repo, discoveredIssue.issue.number, latestIssue.labels, 'running', 'error', labelConfig)
-              await forge.commentOnIssue(
-                repoConfig.repo,
-                discoveredIssue.issue.number,
-                `⚠️ **night-orch**: Failed after ${recentErrors + 1} attempts. Last error: ${(err as Error).message}\n\nRemove \`orch:error\` and add \`orch:ready\` to retry.`,
-              )
+              const errorBody = formatStatusComment({
+                error: `Failed after ${recentErrors + 1} attempts. Last error: ${(err as Error).message}`,
+                retryCount: recentErrors + 1,
+                maxRetries: maxRetries,
+              })
+              if (botUser) {
+                await upsertBotComment(forge, repoConfig.repo, discoveredIssue.issue.number, STATUS_MARKER, errorBody, botUser)
+              } else {
+                await forge.commentOnIssue(repoConfig.repo, discoveredIssue.issue.number, `⚠️ **night-orch**: Failed after ${recentErrors + 1} attempts. Last error: ${(err as Error).message}\n\nRemove \`orch:error\` and add \`orch:ready\` to retry.`)
+              }
             } catch (labelErr) {
               logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: labelErr }, 'Failed to transition labels after retry exhaustion')
             }
@@ -349,6 +373,7 @@ interface FinalizeRunOutcomeParams {
   notifier: NotificationDispatcher
   metrics?: MetricsService
   maxAutoRetries: number
+  botUser: string
 }
 
 async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'processed' | 'error'> {
@@ -366,6 +391,7 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
     notifier,
     metrics,
     maxAutoRetries,
+    botUser,
   } = params
 
   if (finalCtx.terminalStatus === 'publish') {
@@ -433,9 +459,19 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
       labelConfig,
     )
 
-    // Post block reason as a comment so the user knows why
+    // Upsert status comment with block reason
     try {
-      await forge.commentOnIssue(repo, issueNumber, formatBlockComment(blockReason, finalCtx))
+      const statusBody = formatStatusComment({
+        blockReason,
+        iteration: finalCtx.iteration,
+        maxIterations: finalCtx.adjustedLimits.maxReviewIterations,
+        cost: finalCtx.estimatedCostUsd,
+      })
+      if (botUser) {
+        await upsertBotComment(forge, repo, issueNumber, STATUS_MARKER, statusBody, botUser)
+      } else {
+        await forge.commentOnIssue(repo, issueNumber, formatBlockComment(blockReason, finalCtx))
+      }
     } catch (commentErr) {
       logger.warn({ repo, issueNumber, err: commentErr }, 'Failed to post block reason comment')
     }
@@ -465,7 +501,12 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
   } else {
     await transitionLabels(forge, repo, issueNumber, latestIssue.labels, 'running', 'error', labelConfig)
     try {
-      await forge.commentOnIssue(repo, issueNumber, `⚠️ **night-orch**: Failed after ${recentErrors + 1} attempts. Last error: ${unexpectedError}`)
+      const unexpectedBody = formatStatusComment({ error: `Failed after ${recentErrors + 1} attempts. Last error: ${unexpectedError}` })
+      if (botUser) {
+        await upsertBotComment(forge, repo, issueNumber, STATUS_MARKER, unexpectedBody, botUser)
+      } else {
+        await forge.commentOnIssue(repo, issueNumber, `⚠️ **night-orch**: Failed after ${recentErrors + 1} attempts. Last error: ${unexpectedError}`)
+      }
     } catch { /* best-effort */ }
   }
   try {
