@@ -16,6 +16,8 @@ export interface WorktreeInfo {
   branchName: string
   exists: boolean
   isClean: boolean
+  /** True if rebase onto base branch was attempted but failed due to conflicts. */
+  rebaseConflict: boolean
 }
 
 export interface EnsureWorktreeParams {
@@ -60,15 +62,13 @@ export function createWorktreeManager(): WorktreeManager {
           logger.info({ worktreePath, branchName }, 'Reusing existing worktree')
           // Clean any leftover state from prior runs before reusing
           await resetWorktree(worktreePath)
-          // Rebase onto latest base branch; on failure, nuke and recreate
+          // Attempt rebase onto latest base branch; on conflict, preserve branch as-is
           const rebased = await rebaseOnto(worktreePath, baseBranch)
           if (!rebased) {
-            logger.warn({ worktreePath, baseBranch }, 'Rebase failed — recreating worktree from clean base')
-            await removeWorktree(repoLocalPath, worktreePath)
-            return await createFreshWorktree(repoLocalPath, baseBranch, branchName, worktreePath)
+            logger.warn({ worktreePath, baseBranch }, 'Rebase conflict — preserving existing work, coder will handle divergence')
           }
           const isClean = await isWorktreeClean(worktreePath)
-          return { path: worktreePath, branchName, exists: true, isClean }
+          return { path: worktreePath, branchName, exists: true, isClean, rebaseConflict: !rebased }
         }
 
         // Corrupt — remove and recreate
@@ -118,6 +118,7 @@ export function createWorktreeManager(): WorktreeManager {
               branchName: currentBranch,
               exists: existsSync(currentPath),
               isClean: true, // Would need git status check for accuracy
+              rebaseConflict: false,
             })
           }
           currentPath = ''
@@ -146,16 +147,15 @@ async function createFreshWorktree(
     cwd: repoLocalPath,
   })
 
-  // Rebase onto latest base; if this fails on a brand-new worktree, it's
-  // likely a branch that diverged badly — reset hard to the base branch
+  // Attempt rebase onto latest base; on conflict, preserve branch as-is.
+  // The AI coder will see the divergence and integrate base branch changes.
   const rebased = await rebaseOnto(worktreePath, baseBranch)
   if (!rebased) {
-    logger.warn({ worktreePath, baseBranch }, 'Rebase failed on fresh worktree — resetting to base branch')
-    await execa('git', ['reset', '--hard', `origin/${baseBranch}`], { cwd: worktreePath })
+    logger.warn({ worktreePath, baseBranch }, 'Rebase conflict — branch preserved as-is, coder will handle divergence')
   }
 
   const isClean = await isWorktreeClean(worktreePath)
-  return { path: worktreePath, branchName, exists: true, isClean }
+  return { path: worktreePath, branchName, exists: true, isClean, rebaseConflict: !rebased }
 }
 
 async function validateWorktree(worktreePath: string, expectedBranch: string): Promise<boolean> {
