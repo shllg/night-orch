@@ -227,7 +227,7 @@ describe('CodexWorkerAdapter', () => {
 
     expect(mockExecWithTimeout).toHaveBeenCalledWith(
       'codex',
-      ['-p'],
+      expect.arrayContaining(['-p', '--output-last-message']),
       expect.objectContaining({ stdin: 'Plan the fix' }),
     )
   })
@@ -251,7 +251,7 @@ describe('CodexWorkerAdapter', () => {
 
     expect(mockExecWithTimeout).toHaveBeenCalledWith(
       'firejail',
-      ['--quiet', 'codex', '-p'],
+      expect.arrayContaining(['--quiet', 'codex', '-p', '--output-last-message']),
       expect.objectContaining({ stdin: 'Plan the fix' }),
     )
   })

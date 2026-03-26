@@ -5,10 +5,21 @@ import { parseCoderOutput } from './parsers/coder.js'
 import { parseReviewerOutput } from './parsers/reviewer.js'
 import { buildWorkerCommand } from './command.js'
 import { logger } from '../utils/logger.js'
+import { randomUUID } from 'node:crypto'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { readFile, unlink, mkdir } from 'node:fs/promises'
 
 export class CodexWorkerAdapter implements WorkerAdapter {
   async runTask(input: WorkerTaskInput): Promise<WorkerTaskResult> {
-    const taskArgs = [...input.profile.args]
+    // Use --output-last-message to reliably capture the final agent response,
+    // since streaming JSONL events don't include sub-agent output.
+    // Store outside worktree (in system tmpdir) to avoid polluting target repos.
+    const outputDir = join(tmpdir(), 'night-orch-codex-output')
+    await mkdir(outputDir, { recursive: true })
+    const outputFile = join(outputDir, `codex-output-${randomUUID()}.txt`)
+
+    const taskArgs = [...input.profile.args, '--output-last-message', outputFile]
     const { command, args } = buildWorkerCommand(input.profile, taskArgs)
 
     logger.info(
@@ -27,11 +38,20 @@ export class CodexWorkerAdapter implements WorkerAdapter {
       logger.warn({ role: input.role, durationMs: result.durationMs }, 'Codex worker timed out')
     }
 
-    // Extract text from Codex streaming event format
-    const assistantText = extractCodexOutput(result.stdout)
-    const extracted = assistantText !== result.stdout
-    if (extracted) {
-      logger.info({ role: input.role, rawLength: result.stdout.length, extractedLength: assistantText.length }, 'Codex output extraction')
+    // Read the final message from the output file (preferred),
+    // fall back to extracting from streaming events if file missing
+    let assistantText: string
+    try {
+      assistantText = await readFile(outputFile, 'utf-8')
+      logger.info({ role: input.role, outputFileLength: assistantText.length }, 'Read Codex output from --output-last-message')
+    } catch {
+      logger.warn({ role: input.role }, 'Could not read --output-last-message file, falling back to stream extraction')
+      assistantText = extractCodexOutput(result.stdout)
+      if (assistantText !== result.stdout) {
+        logger.info({ role: input.role, rawLength: result.stdout.length, extractedLength: assistantText.length }, 'Codex output extracted from stream')
+      }
+    } finally {
+      unlink(outputFile).catch(() => {})
     }
 
     // Parse output based on role
