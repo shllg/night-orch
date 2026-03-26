@@ -11,7 +11,7 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
     const maxTurns = input.role === 'coder' ? '50' : '1'
     const taskArgs = [
       ...input.profile.args,
-      '--output-format', 'json',
+      '--output-format', 'text',
       '--max-turns', maxTurns,
     ]
     const { command, args } = buildWorkerCommand(input.profile, taskArgs)
@@ -32,10 +32,13 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
       logger.warn({ role: input.role, durationMs: result.durationMs }, 'Claude worker timed out')
     }
 
-    // Extract assistant text from Claude CLI JSON envelope
-    const assistantText = extractClaudeOutput(result.stdout)
-    const extracted = assistantText !== result.stdout
-    logger.info({ role: input.role, rawLength: result.stdout.length, extractedLength: assistantText.length, extracted, extractedHead: assistantText.slice(0, 500) }, 'Claude output extraction')
+    // With --output-format text, stdout IS the assistant text directly.
+    // Fall back to JSON extraction if the output looks like a JSON envelope.
+    const assistantText = result.stdout.trimStart().startsWith('[') || result.stdout.trimStart().startsWith('{')
+      ? extractClaudeOutput(result.stdout)
+      : result.stdout
+
+    logger.info({ role: input.role, rawLength: result.stdout.length, textLength: assistantText.length }, 'Claude output received')
 
     // Parse output based on role
     const { parsed, parseError } = parseOutput(input.role, assistantText)
