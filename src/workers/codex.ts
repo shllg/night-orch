@@ -65,34 +65,76 @@ export class CodexWorkerAdapter implements WorkerAdapter {
 }
 
 /**
- * Codex CLI outputs newline-delimited JSON streaming events.
- * Agent text is in item.completed events with item.type === "agent_message".
- * Extract and concatenate all agent message text.
+ * Codex CLI outputs streaming events in two possible formats:
+ * 1. A JSON array: [{...}, {...}, ...]
+ * 2. Newline-delimited JSON (NDJSON): {...}\n{...}\n...
+ *
+ * Agent text is in events where type === "item.completed" and
+ * item.type === "agent_message", with text in item.text.
+ *
+ * Also handles the "message" event type with content array containing
+ * text entries.
  */
-function extractCodexOutput(raw: string): string {
+export function extractCodexOutput(raw: string): string {
+  const events = parseCodexEvents(raw)
+  if (events.length === 0) return raw
+
   const textParts: string[] = []
 
-  for (const line of raw.split('\n')) {
-    if (!line.trim()) continue
-    try {
-      const event = JSON.parse(line) as Record<string, unknown>
-      if (
-        event.type === 'item.completed' &&
-        typeof event.item === 'object' &&
-        event.item !== null
-      ) {
-        const item = event.item as Record<string, unknown>
-        if (item.type === 'agent_message' && typeof item.text === 'string') {
-          textParts.push(item.text)
+  for (const event of events) {
+    if (typeof event !== 'object' || event === null) continue
+    const e = event as Record<string, unknown>
+
+    // Format: { type: "item.completed", item: { type: "agent_message", text: "..." } }
+    if (e.type === 'item.completed' && typeof e.item === 'object' && e.item !== null) {
+      const item = e.item as Record<string, unknown>
+      if (item.type === 'agent_message' && typeof item.text === 'string') {
+        textParts.push(item.text)
+      }
+    }
+
+    // Format: { type: "message", content: [{ type: "text", text: "..." }] }
+    if (e.type === 'message' && Array.isArray(e.content)) {
+      for (const block of e.content) {
+        const b = block as Record<string, unknown>
+        if (b.type === 'text' && typeof b.text === 'string') {
+          textParts.push(b.text)
         }
       }
-    } catch {
-      // Not JSON — skip
     }
   }
 
   if (textParts.length > 0) return textParts.join('\n')
   return raw
+}
+
+/** Parse Codex output as either a JSON array or NDJSON. */
+function parseCodexEvents(raw: string): unknown[] {
+  const trimmed = raw.trim()
+
+  // Try JSON array first (starts with [)
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (Array.isArray(parsed)) return parsed
+    } catch {
+      // Might be truncated array — fall through to NDJSON
+    }
+  }
+
+  // Try NDJSON (one JSON object per line)
+  const events: unknown[] = []
+  for (const line of raw.split('\n')) {
+    const t = line.trim()
+    if (!t) continue
+    try {
+      events.push(JSON.parse(t))
+    } catch {
+      // Not JSON — skip
+    }
+  }
+
+  return events
 }
 
 function parseOutput(role: string, raw: string): { parsed: WorkerTaskResult['parsed']; parseError: string | null } {
