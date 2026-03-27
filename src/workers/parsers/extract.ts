@@ -1,14 +1,19 @@
 /**
- * Extract the first JSON block from a markdown-fenced code block.
- * Looks for ```json ... ``` patterns.
+ * Extract the last JSON block from markdown-fenced code blocks.
+ * With multi-turn output, earlier turns may reference JSON examples;
+ * the structured output is always the final fence.
  */
 export function extractJsonBlock(raw: string): unknown | null {
-  const pattern = /```json\s*\n([\s\S]*?)\n\s*```/
-  const match = raw.match(pattern)
-  if (!match?.[1]) return null
+  const pattern = /```json\s*\n([\s\S]*?)\n\s*```/g
+  let lastContent: string | null = null
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(raw)) !== null) {
+    if (match[1]) lastContent = match[1]
+  }
+  if (!lastContent) return null
 
   try {
-    return JSON.parse(match[1])
+    return JSON.parse(lastContent)
   } catch {
     return null
   }

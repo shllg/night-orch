@@ -95,4 +95,18 @@ describe('parsePlannerOutput', () => {
     expect(error).toBeNull()
     expect(result!.objective).toBe('Direct JSON')
   })
+
+  it('extracts plan from multi-turn output with analysis', () => {
+    const raw = [
+      'I explored the codebase and found the following structure:',
+      '```json\n{"type": "package.json", "name": "my-app"}\n```',
+      'The config uses a standard pattern. Based on my analysis:',
+      '```json\n{"objective": "Add user auth", "steps": [{"order": 1, "description": "Create auth module", "files": ["src/auth.ts"]}]}\n```',
+    ].join('\n\n')
+    const { result, error } = parsePlannerOutput(raw)
+
+    expect(error).toBeNull()
+    expect(result!.objective).toBe('Add user auth')
+    expect(result!.steps).toHaveLength(1)
+  })
 })

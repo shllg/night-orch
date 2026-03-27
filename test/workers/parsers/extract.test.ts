@@ -17,10 +17,21 @@ describe('extractJsonBlock', () => {
     expect(extractJsonBlock(raw)).toBeNull()
   })
 
-  it('extracts first JSON block when multiple exist', () => {
+  it('extracts last JSON block when multiple exist', () => {
     const raw = '```json\n{"first": true}\n```\nmore text\n```json\n{"second": true}\n```'
     const result = extractJsonBlock(raw)
-    expect(result).toEqual({ first: true })
+    expect(result).toEqual({ second: true })
+  })
+
+  it('extracts final JSON block from multi-turn output', () => {
+    const raw = [
+      'I found the following structure:',
+      '```json\n{"type": "example", "note": "this is from a file I read"}\n```',
+      'Based on my analysis of the codebase, here is my plan:',
+      '```json\n{"objective": "Implement the feature"}\n```',
+    ].join('\n\n')
+    const result = extractJsonBlock(raw)
+    expect(result).toEqual({ objective: 'Implement the feature' })
   })
 })
 

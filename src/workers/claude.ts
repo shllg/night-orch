@@ -8,7 +8,7 @@ import { logger } from '../utils/logger.js'
 
 export class ClaudeWorkerAdapter implements WorkerAdapter {
   async runTask(input: WorkerTaskInput): Promise<WorkerTaskResult> {
-    const maxTurns = input.role === 'coder' ? '50' : '1'
+    const maxTurns = '50'
     const taskArgs = [
       ...input.profile.args,
       '--output-format', 'text',

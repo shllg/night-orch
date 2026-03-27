@@ -206,9 +206,9 @@ export async function executeLoop(
 }
 
 const ESTIMATED_USD_PER_MINUTE: Record<'planner' | 'coder' | 'reviewer', number> = {
-  planner: 0.004,
+  planner: 0.008,
   coder: 0.008,
-  reviewer: 0.004,
+  reviewer: 0.008,
 }
 
 function applyEstimatedWorkerCost(
@@ -377,11 +377,21 @@ function getWorkerProfile(ctx: RunContext, role: 'planner' | 'coder' | 'reviewer
   throw new Error(`No worker profile found for agent "${agentName}" (role: ${role})`)
 }
 
-const DEFAULT_PLANNER_TEMPLATE = `You are a software planning assistant. Analyze the issue and create a detailed implementation plan.
+const DEFAULT_PLANNER_TEMPLATE = `You are a software planning assistant. Create a thorough, evidence-based implementation plan.
 
-IMPORTANT: Do NOT use any tools. Do NOT explore the codebase. Respond immediately with your plan based on the issue description provided. You have one turn only.
+## Phase 1: Codebase Exploration
 
-Your ENTIRE response must be a single JSON block — nothing else:
+Explore the codebase to understand the project before planning:
+- Read the project structure and key configuration files
+- Find and read files relevant to the issue
+- Identify existing patterns, conventions, and utilities that should be reused
+- Understand dependencies and how components interact
+
+Use tools freely: Read files, search with Glob/Grep, run read-only commands.
+
+## Phase 2: Implementation Plan
+
+After exploring, produce your plan as a JSON block. Reference actual files and patterns you found.
 
 \`\`\`json
 {
@@ -392,7 +402,9 @@ Your ENTIRE response must be a single JSON block — nothing else:
   "risks": ["Potential issues"],
   "testStrategy": "How to verify the changes work"
 }
-\`\`\``
+\`\`\`
+
+CRITICAL: Your response MUST end with exactly one \\\`\\\`\\\`json block containing your plan. This JSON block is the LAST thing in your response.`
 
 const DEFAULT_CODER_TEMPLATE = `You are a software implementation assistant. Implement the changes described in the plan.
 
@@ -406,11 +418,21 @@ After making changes, output a summary as JSON:
 }
 \`\`\``
 
-const DEFAULT_REVIEWER_TEMPLATE = `You are a code reviewer. Review the changes made for the issue.
+const DEFAULT_REVIEWER_TEMPLATE = `You are a code reviewer. Perform a thorough, evidence-based review of the changes.
 
-IMPORTANT: Do NOT use any tools. Respond immediately with your review based on the diff provided. You have one turn only.
+## Phase 1: Context Gathering
 
-Your ENTIRE response must be a single JSON block — nothing else:
+Before reviewing, understand what changed and why:
+- Read the changed files IN FULL (not just the diff) to understand context
+- Check related tests and verify they cover the changes
+- Read adjacent code to verify the changes follow existing patterns
+- Check for security concerns, error handling, and edge cases
+
+Use tools freely: Read files, search with Glob/Grep, run read-only commands.
+
+## Phase 2: Review Verdict
+
+After thorough analysis, produce your review as a JSON block. Reference specific files and lines in your findings.
 
 \`\`\`json
 {
@@ -419,4 +441,6 @@ Your ENTIRE response must be a single JSON block — nothing else:
   "findings": [{"severity": "critical or major or minor", "message": "What's wrong", "suggestedFix": "How to fix it"}],
   "definitionOfDoneCheck": {"issueAddressed": true, "testsPassing": true, "noBlockingFindings": true}
 }
-\`\`\``
+\`\`\`
+
+CRITICAL: Your response MUST end with exactly one \\\`\\\`\\\`json block containing your review. This JSON block is the LAST thing in your response.`

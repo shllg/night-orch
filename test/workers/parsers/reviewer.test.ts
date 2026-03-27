@@ -39,4 +39,16 @@ describe('parseReviewerOutput', () => {
     expect(result).toBeNull()
     expect(error).toContain('No JSON block found')
   })
+
+  it('extracts review from multi-turn output with analysis', () => {
+    const raw = [
+      'I read the changed files and checked the test coverage.',
+      '```json\n{"type": "tsconfig", "strict": true}\n```',
+      'The implementation follows existing patterns. Here is my review:',
+      '```json\n{"verdict":"APPROVED","summary":"Changes look good","findings":[],"definitionOfDoneCheck":{"issueAddressed":true,"testsPassing":true,"noBlockingFindings":true}}\n```',
+    ].join('\n\n')
+    const { result, error } = parseReviewerOutput(raw)
+    expect(error).toBeNull()
+    expect(result?.verdict).toBe('APPROVED')
+  })
 })
