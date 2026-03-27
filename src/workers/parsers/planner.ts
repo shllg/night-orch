@@ -22,7 +22,7 @@ const PlannerOutputSchema = z.object({
 export function parsePlannerOutput(raw: string): { result: PlannerOutput | null; error: string | null } {
   const parsed = parseJsonFromOutput(raw)
   if (!parsed || typeof parsed !== 'object') {
-    return { result: null, error: 'No JSON block found in planner output' }
+    return buildTextFallback(raw)
   }
 
   const validation = PlannerOutputSchema.safeParse(parsed)
@@ -38,6 +38,29 @@ export function parsePlannerOutput(raw: string): { result: PlannerOutput | null;
   return {
     result: validation.data,
     error: null,
+  }
+}
+
+/**
+ * When the planner produces useful text but no JSON block, construct a
+ * synthetic PlannerOutput so the analysis still flows to the coder.
+ */
+function buildTextFallback(raw: string): { result: PlannerOutput | null; error: string | null } {
+  const trimmed = raw.trim()
+  if (trimmed.length === 0) {
+    return { result: null, error: 'No JSON block found in planner output' }
+  }
+
+  return {
+    result: {
+      objective: trimmed,
+      assumptions: [],
+      filesToChange: [],
+      steps: [],
+      risks: [],
+      testStrategy: '',
+    },
+    error: 'No JSON block found — used planner text as fallback',
   }
 }
 

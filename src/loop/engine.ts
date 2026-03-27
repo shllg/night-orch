@@ -389,6 +389,8 @@ Explore the codebase to understand the project before planning:
 
 Use tools freely: Read files, search with Glob/Grep, run read-only commands.
 
+IMPORTANT: The branch may contain commits from prior attempts at this issue. Do NOT assume prior work is complete or correct. Evaluate what exists: check if it compiles, passes tests, and fully addresses the issue. Then plan what remains — whether that is finishing incomplete work, fixing broken work, or starting fresh.
+
 ## Phase 2: Implementation Plan
 
 After exploring, produce your plan as a JSON block. Reference actual files and patterns you found.

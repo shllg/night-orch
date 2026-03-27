@@ -144,7 +144,7 @@ describe('ClaudeWorkerAdapter', () => {
     expect(result.exitCode).toBe(143)
   })
 
-  it('handles unparseable output', async () => {
+  it('falls back to text plan when output has no JSON block', async () => {
     mockExecWithTimeout.mockResolvedValue({
       stdout: 'This is not JSON at all',
       stderr: '',
@@ -155,8 +155,9 @@ describe('ClaudeWorkerAdapter', () => {
 
     const result = await adapter.runTask(makeTaskInput())
 
-    expect(result.parsed).toBeNull()
-    expect(result.parseError).toContain('No JSON block found')
+    expect(result.parsed).not.toBeNull()
+    expect((result.parsed as { objective: string }).objective).toBe('This is not JSON at all')
+    expect(result.parseError).toContain('fallback')
   })
 
   it('returns raw output regardless of parse success', async () => {

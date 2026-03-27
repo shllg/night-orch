@@ -53,11 +53,13 @@ describe('parsePlannerOutput', () => {
     expect(error).toContain('missing "objective"')
   })
 
-  it('returns error for non-JSON output', () => {
+  it('falls back to text when no JSON block found', () => {
     const { result, error } = parsePlannerOutput('This is just plain text')
 
-    expect(result).toBeNull()
-    expect(error).toContain('No JSON block found')
+    expect(result).not.toBeNull()
+    expect(result!.objective).toBe('This is just plain text')
+    expect(result!.steps).toEqual([])
+    expect(error).toContain('fallback')
   })
 
   it('returns error for empty input', () => {
