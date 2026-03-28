@@ -40,6 +40,10 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
 
     logger.info({ role: input.role, rawLength: result.stdout.length, textLength: assistantText.length }, 'Claude output received')
 
+    if (result.stdout.length === 0 && result.stderr.length > 0) {
+      logger.warn({ role: input.role, stderrTail: result.stderr.slice(-1000) }, 'Claude produced no stdout — stderr may contain error details')
+    }
+
     // Parse output based on role
     const { parsed, parseError } = parseOutput(input.role, assistantText)
 
