@@ -179,12 +179,16 @@ export async function pollOnce(
         // Notify
         await notifier.dispatch(makePayload('run_started', repoConfig.repo, discoveredIssue.issue))
 
+        // Check if prior run left tainted work that should be discarded
+        const resetToBase = shouldResetBranch(runManager, repoConfig.repo, discoveredIssue.issue.number, run.id)
+
         // Create worktree
         await worktreeManager.ensure({
           repoLocalPath: repoConfig.localPath,
           baseBranch: repoConfig.baseBranch,
           branchName: branch,
           worktreePath,
+          resetToBase,
         })
 
         if (repoConfig.environment) {
@@ -447,7 +451,7 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
 
   if (finalCtx.terminalStatus === 'blocked') {
     const blockReason = buildBlockReason(finalCtx)
-    runManager.update(runId, { status: 'blocked', lastError: blockReason, endedAt: new Date().toISOString() })
+    runManager.update(runId, { status: 'blocked', lastError: blockReason, blockReason: finalCtx.blockReason, endedAt: new Date().toISOString() })
     const latestIssue = await forge.getIssue(repo, issueNumber)
     await transitionLabels(
       forge,
@@ -573,4 +577,30 @@ function makePayload(
     timestamp: new Date().toISOString(),
     ...extra,
   }
+}
+
+/**
+ * Block reasons that indicate the coder's work is broken and the branch
+ * should be hard-reset to base on the next attempt. Salvageable states
+ * (reviewer_blocked, iteration_limit, ambiguous_review, verify_config)
+ * preserve the branch so existing work can be continued.
+ */
+const TAINTED_BLOCK_REASONS = new Set(['agent_pass_limit', 'cost_limit'])
+
+function shouldResetBranch(
+  runManager: RunManager,
+  repo: string,
+  issueNumber: number,
+  currentRunId: string,
+): boolean {
+  const prior = runManager.getLatestFinishedByIssue(repo, issueNumber, currentRunId)
+  if (!prior) return false
+
+  // Infrastructure errors — work is unreliable
+  if (prior.status === 'error') return true
+
+  // Blocked with tainted block reason — coder couldn't produce working code
+  if (prior.status === 'blocked' && prior.blockReason && TAINTED_BLOCK_REASONS.has(prior.blockReason)) return true
+
+  return false
 }

@@ -25,6 +25,8 @@ export interface EnsureWorktreeParams {
   baseBranch: string
   branchName: string
   worktreePath: string
+  /** Hard-reset the branch to baseBranch, discarding all prior commits. */
+  resetToBase?: boolean
 }
 
 export interface WorktreeManager {
@@ -36,7 +38,7 @@ export interface WorktreeManager {
 export function createWorktreeManager(): WorktreeManager {
   return {
     async ensure(params: EnsureWorktreeParams): Promise<WorktreeInfo> {
-      const { repoLocalPath, baseBranch, branchName, worktreePath } = params
+      const { repoLocalPath, baseBranch, branchName, worktreePath, resetToBase } = params
 
       // 1. Fetch
       await fetchOrigin(repoLocalPath)
@@ -59,9 +61,18 @@ export function createWorktreeManager(): WorktreeManager {
       if (existsSync(worktreePath)) {
         const valid = await validateWorktree(worktreePath, branchName)
         if (valid) {
-          logger.info({ worktreePath, branchName }, 'Reusing existing worktree')
-          // Clean any leftover state from prior runs before reusing
+          // Clean any leftover uncommitted state from prior runs
           await resetWorktree(worktreePath)
+
+          if (resetToBase) {
+            // Prior run produced tainted work — discard all commits and start fresh
+            logger.info({ worktreePath, branchName, baseBranch }, 'Resetting branch to base — prior run was tainted')
+            await hardResetToBase(worktreePath, baseBranch)
+            const isClean = await isWorktreeClean(worktreePath)
+            return { path: worktreePath, branchName, exists: true, isClean, rebaseConflict: false }
+          }
+
+          logger.info({ worktreePath, branchName }, 'Reusing existing worktree')
           // Attempt rebase onto latest base branch; on conflict, preserve branch as-is
           const rebased = await rebaseOnto(worktreePath, baseBranch)
           if (!rebased) {
@@ -197,6 +208,15 @@ async function resetWorktree(worktreePath: string): Promise<void> {
   } catch (err) {
     logger.warn({ worktreePath, err }, 'Failed to reset worktree — continuing anyway')
   }
+}
+
+/**
+ * Hard-reset the branch to the base branch tip, discarding all prior commits.
+ * Used when a prior run produced tainted work that should not be preserved.
+ */
+async function hardResetToBase(worktreePath: string, baseBranch: string): Promise<void> {
+  await execa('git', ['reset', '--hard', `origin/${baseBranch}`], { cwd: worktreePath })
+  await execa('git', ['clean', '-fd'], { cwd: worktreePath })
 }
 
 /**

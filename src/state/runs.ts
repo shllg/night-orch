@@ -155,6 +155,22 @@ export class RunManager {
     return row?.cnt ?? 0
   }
 
+  /**
+   * Get the most recent non-queued, non-running run for an issue,
+   * excluding the current run. Used to check if prior work is tainted.
+   */
+  getLatestFinishedByIssue(repo: string, issueNumber: number, excludeRunId: string): RunRecord | null {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM runs
+         WHERE repo = ? AND issue_number = ? AND id != ?
+         AND status NOT IN ('queued', 'running')
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(repo, issueNumber, excludeRunId) as RawRunRow | undefined
+    return row ? this.mapRow(row) : null
+  }
+
   getActive(): RunRecord[] {
     const rows = this.db
       .prepare("SELECT * FROM runs WHERE status IN ('queued', 'running') ORDER BY created_at")
