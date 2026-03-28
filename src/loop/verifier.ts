@@ -30,21 +30,34 @@ export async function runVerifyCommands(
         reject: false,
       })
 
+      const passed = result.exitCode === 0
+      const durationMs = Date.now() - start
+
+      if (passed) {
+        logger.info({ command: commandLabel, durationMs }, 'Verify command passed')
+      } else {
+        logger.warn({ command: commandLabel, exitCode: result.exitCode, durationMs, stderrTail: result.stderr.slice(-500) }, 'Verify command failed')
+      }
+
       results.push({
         command: commandLabel,
         exitCode: result.exitCode ?? 0,
         stdout: result.stdout,
         stderr: result.stderr,
-        durationMs: Date.now() - start,
-        passed: result.exitCode === 0,
+        durationMs,
+        passed,
       })
     } catch (err) {
+      const durationMs = Date.now() - start
+      const stderr = String(err)
+      logger.warn({ command: commandLabel, durationMs, stderrTail: stderr.slice(-500) }, 'Verify command crashed')
+
       results.push({
         command: commandLabel,
         exitCode: 1,
         stdout: '',
-        stderr: String(err),
-        durationMs: Date.now() - start,
+        stderr,
+        durationMs,
         passed: false,
       })
     }
