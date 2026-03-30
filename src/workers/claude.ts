@@ -11,9 +11,16 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
     const maxTurns = '50'
     const taskArgs = [
       ...input.profile.args,
-      '--output-format', 'text',
+      '--output-format', 'json',
       '--max-turns', maxTurns,
     ]
+
+    // Continue from a prior session if available
+    if (input.continueSessionId) {
+      taskArgs.push('--continue', input.continueSessionId)
+      logger.info({ role: input.role, sessionId: input.continueSessionId }, 'Continuing Claude session')
+    }
+
     const { command, args } = buildWorkerCommand(input.profile, taskArgs)
 
     logger.info(
@@ -32,13 +39,11 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
       logger.warn({ role: input.role, durationMs: result.durationMs }, 'Claude worker timed out')
     }
 
-    // With --output-format text, stdout IS the assistant text directly.
-    // Fall back to JSON extraction if the output looks like a JSON envelope.
-    const assistantText = result.stdout.trimStart().startsWith('[') || result.stdout.trimStart().startsWith('{')
-      ? extractClaudeOutput(result.stdout)
-      : result.stdout
+    // With --output-format json, extract assistant text and session ID from the JSON envelope.
+    // Fall back to raw text if not parseable as JSON.
+    const { assistantText, sessionId } = extractFromJsonOutput(result.stdout)
 
-    logger.info({ role: input.role, rawLength: result.stdout.length, textLength: assistantText.length }, 'Claude output received')
+    logger.info({ role: input.role, rawLength: result.stdout.length, textLength: assistantText.length, sessionId }, 'Claude output received')
 
     if (result.stdout.length === 0 && result.stderr.length > 0) {
       logger.warn({ role: input.role, stderrTail: result.stderr.slice(-1000) }, 'Claude produced no stdout — stderr may contain error details')
@@ -54,6 +59,7 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
       durationMs: result.durationMs,
       parsed,
       parseError,
+      sessionId,
     }
   }
 
@@ -75,60 +81,81 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
 }
 
 /**
- * Claude CLI with --output-format json returns a JSON array of streaming events.
- * Extract the assistant's text content from the event stream.
- * Falls back to raw string if not parseable.
+ * Extract assistant text and session ID from Claude's JSON output format.
+ * The JSON output is an array of streaming events or a result envelope.
+ *
+ * Falls back to treating the raw string as the assistant text if not parseable.
  */
-function extractClaudeOutput(raw: string): string {
+function extractFromJsonOutput(raw: string): { assistantText: string; sessionId: string | null } {
+  const trimmed = raw.trimStart()
+
+  // If it doesn't look like JSON, treat as raw text
+  if (!trimmed.startsWith('[') && !trimmed.startsWith('{')) {
+    return { assistantText: raw, sessionId: null }
+  }
+
   try {
     const parsed: unknown = JSON.parse(raw)
+    let sessionId: string | null = null
+    const textParts: string[] = []
 
     // Streaming format: array of event objects
     if (Array.isArray(parsed)) {
-      const textParts: string[] = []
       for (const event of parsed) {
         if (!isRecord(event)) continue
         const eventType = event['type']
+
+        // Extract session ID from init or result events
+        if (eventType === 'system' && isRecord(event['session'])) {
+          const sid = event['session']['session_id']
+          if (typeof sid === 'string') sessionId = sid
+        }
+
         // assistant message events contain content blocks with text
         if (eventType === 'assistant') {
           const message = event['message']
           if (isRecord(message) && Array.isArray(message['content'])) {
             for (const block of message['content']) {
               const text = getTextBlock(block)
-              if (text) {
-                textParts.push(text)
-              }
+              if (text) textParts.push(text)
             }
           }
         }
-        // result message at the end
+
+        // result message at the end — also may contain session_id
         if (eventType === 'result') {
           const result = event['result']
           if (Array.isArray(result)) {
             for (const block of result) {
               const text = getTextBlock(block)
-              if (text) {
-                textParts.push(text)
-              }
+              if (text) textParts.push(text)
             }
           }
           if (typeof result === 'string') {
             textParts.push(result)
           }
+          // Session ID can appear at the result level
+          const sid = event['session_id']
+          if (typeof sid === 'string') sessionId = sid
         }
       }
-      if (textParts.length > 0) return textParts.join('\n')
+      if (textParts.length > 0) {
+        return { assistantText: textParts.join('\n'), sessionId }
+      }
     }
 
-    // Single object envelope: { result: "..." }
+    // Single object envelope: { result: "...", session_id: "..." }
     if (isRecord(parsed)) {
       const result = parsed['result']
-      if (typeof result === 'string') return result
+      const sid = parsed['session_id']
+      if (typeof sid === 'string') sessionId = sid
+      if (typeof result === 'string') return { assistantText: result, sessionId }
     }
   } catch {
-    // Not JSON — return raw
+    // Not JSON — fall through
   }
-  return raw
+
+  return { assistantText: raw, sessionId: null }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

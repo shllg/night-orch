@@ -30,6 +30,9 @@ import type { NotificationPayload } from '../notify/types.js'
 import { postPlanSummaryComment } from '../loop/plan-summary-comment.js'
 import { markerTag, upsertBotComment } from '../forge/bot-comment.js'
 import { formatStatusComment } from '../forge/status-comment.js'
+import { scanForReactions } from '../reactions/scanner.js'
+import { handleReaction } from '../reactions/handler.js'
+import type { ReactionCursor } from '../reactions/types.js'
 
 const STATUS_MARKER = markerTag('status')
 
@@ -91,6 +94,17 @@ export async function pollOnce(
       logger.debug({ repo: repoConfig.repo }, 'Could not resolve bot user for comment upserts')
     }
 
+    const labelConfig = buildLabelConfig(repoConfig)
+
+    // --- Reaction scan: check review_ready PRs for CI failures or human reviews ---
+    try {
+      await scanAndHandleReactions({
+        db, forge, runManager, repoConfig, labelConfig, botUser,
+      })
+    } catch (err) {
+      logger.warn({ repo: repoConfig.repo, err }, 'Reaction scan failed — continuing with issue discovery')
+    }
+
     const discoveredAll = await discoverEligibleIssues(repoConfig, forge, leaseManager)
     const discovered = targetIssue
       ? discoveredAll.filter((d) => d.issue.number === targetIssue.issueNumber)
@@ -108,8 +122,6 @@ export async function pollOnce(
       }
       continue
     }
-
-    const labelConfig = buildLabelConfig(repoConfig)
 
     // Process all currently eligible issues serially for this repo.
     for (const discoveredIssue of discovered) {
@@ -244,6 +256,7 @@ export async function pollOnce(
           runMode: 'fresh',
           blockReason: null,
           prReviewFeedback: null,
+          sessionIds: {},
         }
 
         // Execute loop
@@ -586,6 +599,60 @@ function makePayload(
  * preserve the branch so existing work can be continued.
  */
 const TAINTED_BLOCK_REASONS = new Set(['agent_pass_limit', 'cost_limit'])
+
+// --- Reaction scanning ---
+
+/** In-memory reaction cursors, keyed by "repo#issueNumber". */
+const reactionCursors = new Map<string, ReactionCursor>()
+
+interface ScanAndHandleReactionsParams {
+  db: Database.Database
+  forge: ReturnType<typeof createForgeAdapter>
+  runManager: RunManager
+  repoConfig: Config['repos'][0]
+  labelConfig: ReturnType<typeof buildLabelConfig>
+  botUser: string
+}
+
+async function scanAndHandleReactions(params: ScanAndHandleReactionsParams): Promise<void> {
+  const { db, forge, runManager, repoConfig, labelConfig, botUser } = params
+
+  // Find review_ready runs with PRs for this repo
+  const rows = db
+    .prepare(
+      "SELECT * FROM runs WHERE repo = ? AND status = 'review_ready' AND pr_number IS NOT NULL",
+    )
+    .all(repoConfig.repo) as Array<{ id: string; repo: string; issue_number: number; pr_number: number }>
+
+  for (const row of rows) {
+    const cursorKey = `${row.repo}#${row.issue_number}`
+    const cursor = reactionCursors.get(cursorKey)
+
+    const result = await scanForReactions(
+      forge,
+      row.repo,
+      row.pr_number,
+      row.issue_number,
+      botUser,
+      cursor,
+    )
+
+    // Update cursor regardless of reactions
+    reactionCursors.set(cursorKey, result.cursor)
+
+    // Handle each reaction
+    for (const reaction of result.reactions) {
+      try {
+        await handleReaction(reaction, { db, forge, runManager, labelConfig })
+      } catch (err) {
+        logger.warn(
+          { repo: row.repo, issueNumber: row.issue_number, reactionType: reaction.type, err },
+          'Failed to handle reaction',
+        )
+      }
+    }
+  }
+}
 
 function shouldResetBranch(
   runManager: RunManager,

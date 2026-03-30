@@ -66,6 +66,9 @@ export interface RunContext {
   readonly runMode: RunMode
   readonly blockReason: BlockReason | null
   readonly prReviewFeedback: unknown | null
+
+  /** Session IDs from worker adapters, keyed by role, for conversation continuity. */
+  readonly sessionIds: Readonly<Record<string, string>>
 }
 
 export type LoopDecision =

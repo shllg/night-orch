@@ -14,17 +14,23 @@ const ReviewerOutputSchema = z.object({
 export function parseReviewerOutput(raw: string): { result: ReviewerOutput | null; error: string | null } {
   const parsed = parseJsonFromOutput(raw)
   if (!parsed || typeof parsed !== 'object') {
-    return { result: null, error: 'No JSON block found in reviewer output' }
+    return buildTextFallback(raw)
   }
 
   const obj = parsed as Record<string, unknown>
   const verdict = obj['verdict'] as string
 
   if (!verdict || !VALID_VERDICTS.has(verdict as ReviewVerdict)) {
-    return { result: null, error: `Invalid or missing verdict: "${verdict}". Expected: ${[...VALID_VERDICTS].join(', ')}` }
+    // Try to infer verdict from text before failing
+    const inferredVerdict = inferVerdictFromText(raw)
+    if (inferredVerdict) {
+      obj['verdict'] = inferredVerdict
+    } else {
+      return { result: null, error: `Invalid or missing verdict: "${verdict}". Expected: ${[...VALID_VERDICTS].join(', ')}` }
+    }
   }
 
-  const validation = ReviewerOutputSchema.safeParse(parsed)
+  const validation = ReviewerOutputSchema.safeParse(obj)
   if (!validation.success) {
     const firstIssue = validation.error.issues[0]
     const path = firstIssue?.path.join('.') || 'root'
@@ -35,6 +41,58 @@ export function parseReviewerOutput(raw: string): { result: ReviewerOutput | nul
     result: validation.data,
     error: null,
   }
+}
+
+/**
+ * When the reviewer produces text with no parseable JSON, try to infer
+ * a verdict from keywords in the text and construct a synthetic output.
+ */
+function buildTextFallback(raw: string): { result: ReviewerOutput | null; error: string | null } {
+  const trimmed = raw.trim()
+  if (trimmed.length === 0) {
+    return { result: null, error: 'No JSON block found in reviewer output' }
+  }
+
+  const verdict = inferVerdictFromText(trimmed)
+  if (!verdict) {
+    return { result: null, error: 'No JSON block found and could not infer verdict from reviewer text' }
+  }
+
+  const firstLine = trimmed.split('\n').find((l) => l.trim().length > 0) ?? trimmed
+  const summary = firstLine.length > 300 ? firstLine.slice(0, 300) + '...' : firstLine
+
+  return {
+    result: {
+      verdict,
+      summary,
+      findings: [],
+      definitionOfDoneCheck: {
+        issueAddressed: verdict === 'APPROVED',
+        testsPassing: verdict === 'APPROVED',
+        noBlockingFindings: verdict === 'APPROVED',
+      },
+    },
+    error: `No JSON block found — inferred verdict "${verdict}" from reviewer text`,
+  }
+}
+
+/**
+ * Scan reviewer text for verdict keywords. Case-insensitive matching
+ * with word boundaries to avoid false positives.
+ */
+function inferVerdictFromText(text: string): ReviewVerdict | null {
+  const upper = text.toUpperCase()
+
+  // Exact keyword match (strongest signal)
+  if (upper.includes('APPROVED') && !upper.includes('NOT APPROVED')) return 'APPROVED'
+  if (upper.includes('CHANGES_REQUIRED') || upper.includes('CHANGES REQUIRED')) return 'CHANGES_REQUIRED'
+  if (upper.includes('BLOCKED')) return 'BLOCKED'
+
+  // Weaker signals — only use if no ambiguity
+  if (/\bLGTM\b/.test(upper) || /\bLOOKS GOOD\b/.test(upper)) return 'APPROVED'
+  if (/\bNEEDS? (?:CHANGES?|FIX(?:ES)?|WORK)\b/.test(upper)) return 'CHANGES_REQUIRED'
+
+  return null
 }
 
 function parseFindings(val: unknown): ReviewFinding[] {

@@ -33,11 +33,14 @@ describe('parseCoderOutput', () => {
     expect(result!.blockers).toBeNull()
   })
 
-  it('returns error for non-JSON output', () => {
+  it('returns text fallback for non-JSON output', () => {
     const { result, error } = parseCoderOutput('Just some text about code changes')
 
-    expect(result).toBeNull()
-    expect(error).toContain('No JSON block found')
+    expect(result).not.toBeNull()
+    expect(result!.summary).toBe('Just some text about code changes')
+    expect(result!.changedFiles).toEqual([])
+    expect(result!.remainingUncertainty).toContain('not parseable')
+    expect(error).toContain('fallback')
   })
 
   it('returns error for empty input', () => {

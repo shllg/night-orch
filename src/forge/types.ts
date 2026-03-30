@@ -119,4 +119,20 @@ export interface ForgeAdapter {
 
   /** Close a pull request without merging. */
   closePR(repo: string, prNumber: number): Promise<void>
+
+  /** Get combined CI/check status for a PR's head commit. */
+  getPRCheckStatus?(repo: string, prNumber: number): Promise<PRCheckStatus>
+}
+
+export type CheckConclusion = 'success' | 'failure' | 'pending' | 'neutral' | 'skipped' | 'cancelled'
+
+export interface PRCheckRun {
+  name: string
+  conclusion: CheckConclusion
+  detailsUrl: string | null
+}
+
+export interface PRCheckStatus {
+  overall: CheckConclusion
+  checks: PRCheckRun[]
 }

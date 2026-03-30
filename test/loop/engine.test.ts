@@ -45,6 +45,7 @@ function makePlannerResult(objective = 'Fix it'): WorkerTaskResult {
       testStrategy: 'unit tests',
     },
     parseError: null,
+    sessionId: null,
   }
 }
 
@@ -61,6 +62,7 @@ function makeCoderResult(): WorkerTaskResult {
       blockers: null,
     },
     parseError: null,
+    sessionId: null,
   }
 }
 
@@ -83,6 +85,7 @@ function makeReviewerResult(verdict: 'APPROVED' | 'CHANGES_REQUIRED' | 'BLOCKED'
       },
     },
     parseError: null,
+    sessionId: null,
   }
 }
 
@@ -158,6 +161,10 @@ function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
     terminalStatus: 'running',
     phaseHistory: [],
     dryRun: false,
+    runMode: 'fresh' as const,
+    blockReason: null,
+    prReviewFeedback: null,
+    sessionIds: {},
     ...overrides,
   }
 }

@@ -17,7 +17,7 @@ const CoderOutputSchema = z.object({
 export function parseCoderOutput(raw: string): { result: CoderOutput | null; error: string | null } {
   const parsed = parseJsonFromOutput(raw)
   if (!parsed || typeof parsed !== 'object') {
-    return { result: null, error: 'No JSON block found in coder output' }
+    return buildTextFallback(raw)
   }
 
   const validation = CoderOutputSchema.safeParse(parsed)
@@ -30,6 +30,33 @@ export function parseCoderOutput(raw: string): { result: CoderOutput | null; err
   return {
     result: validation.data,
     error: null,
+  }
+}
+
+/**
+ * When the coder produces text with no parseable JSON, construct a
+ * synthetic CoderOutput. The engine's git-diff fallback will fill in
+ * changedFiles later, but having a non-null result here prevents
+ * a hard failure when the coder did real work but skipped the JSON.
+ */
+function buildTextFallback(raw: string): { result: CoderOutput | null; error: string | null } {
+  const trimmed = raw.trim()
+  if (trimmed.length === 0) {
+    return { result: null, error: 'No JSON block found in coder output' }
+  }
+
+  // Extract a summary from the first meaningful line
+  const firstLine = trimmed.split('\n').find((l) => l.trim().length > 0) ?? trimmed
+  const summary = firstLine.length > 200 ? firstLine.slice(0, 200) + '...' : firstLine
+
+  return {
+    result: {
+      summary,
+      changedFiles: [],
+      remainingUncertainty: 'Coder structured output was not parseable — review carefully.',
+      blockers: null,
+    },
+    error: 'No JSON block found — used coder text as fallback',
   }
 }
 

@@ -3,6 +3,7 @@ import type { RepoConfig } from '../config/schema.js'
 import type {
   ForgeAdapter, ForgeIssue, ForgePR, PRParams, ForgeAuthInfo,
   ForgeComment, ForgePRReview, ForgePRReviewComment, PRReviewState, MergeMethod,
+  PRCheckStatus, PRCheckRun, CheckConclusion,
 } from './types.js'
 import { logger } from '../utils/logger.js'
 
@@ -272,6 +273,65 @@ export class GitHubForgeAdapter implements ForgeAdapter {
     })
   }
 
+  async getPRCheckStatus(repo: string, prNumber: number): Promise<PRCheckStatus> {
+    const { owner, repo: repoName } = splitRepo(repo)
+
+    // Get the PR to find the head SHA
+    const { data: pr } = await this.octokit.rest.pulls.get({
+      owner,
+      repo: repoName,
+      pull_number: prNumber,
+    })
+    const sha = pr.head.sha
+
+    // Get combined status (legacy status API)
+    const { data: combined } = await this.octokit.rest.repos.getCombinedStatusForRef({
+      owner,
+      repo: repoName,
+      ref: sha,
+    })
+
+    // Get check runs (checks API)
+    const { data: checkRuns } = await this.octokit.rest.checks.listForRef({
+      owner,
+      repo: repoName,
+      ref: sha,
+      per_page: 100,
+    })
+
+    const checks: PRCheckRun[] = []
+
+    // Map legacy statuses
+    for (const status of combined.statuses) {
+      checks.push({
+        name: status.context,
+        conclusion: mapStatusState(status.state),
+        detailsUrl: status.target_url ?? null,
+      })
+    }
+
+    // Map check runs
+    for (const run of checkRuns.check_runs) {
+      checks.push({
+        name: run.name,
+        conclusion: mapCheckConclusion(run.status, run.conclusion),
+        detailsUrl: run.details_url ?? null,
+      })
+    }
+
+    // Determine overall status
+    let overall: CheckConclusion = 'success'
+    if (checks.length === 0) {
+      overall = 'pending'
+    } else if (checks.some((c) => c.conclusion === 'failure')) {
+      overall = 'failure'
+    } else if (checks.some((c) => c.conclusion === 'pending')) {
+      overall = 'pending'
+    }
+
+    return { overall, checks }
+  }
+
   private mapPR(data: Record<string, unknown>): ForgePR {
     const d = data as {
       number: number
@@ -349,6 +409,27 @@ export class GitHubForgeAdapter implements ForgeAdapter {
 
 function isOctokitError(err: unknown): err is { status: number } {
   return typeof err === 'object' && err !== null && 'status' in err
+}
+
+function mapStatusState(state: string): CheckConclusion {
+  switch (state) {
+    case 'success': return 'success'
+    case 'failure': case 'error': return 'failure'
+    case 'pending': return 'pending'
+    default: return 'pending'
+  }
+}
+
+function mapCheckConclusion(status: string, conclusion: string | null): CheckConclusion {
+  if (status !== 'completed') return 'pending'
+  switch (conclusion) {
+    case 'success': return 'success'
+    case 'failure': case 'timed_out': return 'failure'
+    case 'cancelled': return 'cancelled'
+    case 'skipped': return 'skipped'
+    case 'neutral': return 'neutral'
+    default: return 'pending'
+  }
 }
 
 function mapReviewState(state: string): PRReviewState {

@@ -20,6 +20,12 @@ export class CodexWorkerAdapter implements WorkerAdapter {
     const outputFile = join(outputDir, `codex-output-${randomUUID()}.txt`)
 
     const taskArgs = [...input.profile.args, '--output-last-message', outputFile]
+
+    // Resume a prior session if available
+    if (input.continueSessionId) {
+      taskArgs.push('--resume', input.continueSessionId)
+      logger.info({ role: input.role, sessionId: input.continueSessionId }, 'Resuming Codex session')
+    }
     const { command, args } = buildWorkerCommand(input.profile, taskArgs)
 
     logger.info(
@@ -54,6 +60,9 @@ export class CodexWorkerAdapter implements WorkerAdapter {
       unlink(outputFile).catch(() => {})
     }
 
+    // Extract thread ID from Codex streaming events for session continuity
+    const sessionId = extractCodexThreadId(result.stdout)
+
     // Parse output based on role
     const { parsed, parseError } = parseOutput(input.role, assistantText)
 
@@ -64,6 +73,7 @@ export class CodexWorkerAdapter implements WorkerAdapter {
       durationMs: result.durationMs,
       parsed,
       parseError,
+      sessionId,
     }
   }
 
@@ -135,7 +145,7 @@ function parseCodexEvents(raw: string): unknown[] {
   // Try JSON array first (starts with [)
   if (trimmed.startsWith('[')) {
     try {
-      const parsed = JSON.parse(trimmed)
+      const parsed: unknown = JSON.parse(trimmed)
       if (Array.isArray(parsed)) return parsed
     } catch {
       // Might be truncated array — fall through to NDJSON
@@ -155,6 +165,29 @@ function parseCodexEvents(raw: string): unknown[] {
   }
 
   return events
+}
+
+/**
+ * Extract a thread/session ID from Codex streaming events.
+ * Codex emits thread_id in session-related events.
+ */
+function extractCodexThreadId(raw: string): string | null {
+  const events = parseCodexEvents(raw)
+  for (const event of events) {
+    if (typeof event !== 'object' || event === null) continue
+    const e = event as Record<string, unknown>
+    // Look for thread_id in various event shapes
+    if (typeof e['thread_id'] === 'string') return e['thread_id']
+    if (typeof e['id'] === 'string' && e['object'] === 'thread') return e['id']
+    if (isRecord(e['session']) && typeof e['session']['thread_id'] === 'string') {
+      return e['session']['thread_id']
+    }
+  }
+  return null
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
 }
 
 function parseOutput(role: string, raw: string): { parsed: WorkerTaskResult['parsed']; parseError: string | null } {

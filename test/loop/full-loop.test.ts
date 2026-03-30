@@ -89,6 +89,10 @@ function makeCtx(): RunContext {
     terminalStatus: 'running',
     phaseHistory: [],
     dryRun: false,
+    runMode: 'fresh' as const,
+    blockReason: null,
+    prReviewFeedback: null,
+    sessionIds: {},
   }
 }
 
@@ -100,6 +104,7 @@ function makeWorkerResult(parsed: unknown): WorkerTaskResult {
     durationMs: 1000,
     parsed: parsed as WorkerTaskResult['parsed'],
     parseError: null,
+    sessionId: null,
   }
 }
 

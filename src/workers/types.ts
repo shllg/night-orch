@@ -10,6 +10,8 @@ export interface WorkerTaskInput {
   profile: WorkerProfileInput
   timeoutSeconds: number
   env: Record<string, string>
+  /** Session ID from a prior phase to continue the conversation. */
+  continueSessionId?: string | null
 }
 
 export interface WorkerProfileInput {
@@ -29,6 +31,8 @@ export interface WorkerTaskResult {
   durationMs: number
   parsed: PlannerOutput | CoderOutput | ReviewerOutput | null
   parseError: string | null
+  /** Session/thread ID for continuing the conversation in subsequent phases. */
+  sessionId: string | null
 }
 
 export interface PlannerOutput {

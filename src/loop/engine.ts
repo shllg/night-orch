@@ -239,6 +239,9 @@ async function runPlanStep(ctx: RunContext, deps: LoopDependencies): Promise<Run
   return updateContext(ctx, {
     plan: result.parsed as RunContext['plan'],
     totalAgentPasses: ctx.totalAgentPasses + 1,
+    sessionIds: result.sessionId
+      ? { ...ctx.sessionIds, planner: result.sessionId }
+      : ctx.sessionIds,
   })
 }
 
@@ -273,6 +276,9 @@ async function runCodeStep(ctx: RunContext, deps: LoopDependencies): Promise<Run
   return updateContext(ctx, {
     codeResult,
     totalAgentPasses: ctx.totalAgentPasses + 1,
+    sessionIds: result.sessionId
+      ? { ...ctx.sessionIds, coder: result.sessionId }
+      : ctx.sessionIds,
   })
 }
 
@@ -289,6 +295,9 @@ async function runReviewStep(ctx: RunContext, deps: LoopDependencies): Promise<R
   return updateContext(ctx, {
     reviewResult: result.parsed as RunContext['reviewResult'],
     totalAgentPasses: ctx.totalAgentPasses + 1,
+    sessionIds: result.sessionId
+      ? { ...ctx.sessionIds, reviewer: result.sessionId }
+      : ctx.sessionIds,
   })
 }
 
@@ -309,6 +318,11 @@ async function runWorkerStep(
 
   const profile = getWorkerProfile(ctx, role, deps.config)
   const env = buildWorkerEnv(profile, deps.envOverrides)
+
+  // Session continuity: coder continues from planner (or its own prior iteration),
+  // reviewer always starts fresh to avoid bias from the coding session.
+  const continueSessionId = resolveContinueSession(ctx, role)
+
   const start = Date.now()
   const result = await adapter.runTask({
     role,
@@ -317,6 +331,7 @@ async function runWorkerStep(
     profile,
     timeoutSeconds: ctx.adjustedLimits.workerTimeoutSeconds,
     env,
+    continueSessionId,
   })
 
   try {
@@ -337,6 +352,28 @@ async function runWorkerStep(
   }
 
   return result
+}
+
+/**
+ * Determine which session to continue for a given role.
+ *
+ * - Coder: continues from planner session (first iteration) or its own
+ *   prior session (subsequent iterations), so it retains full context.
+ * - Planner: always starts fresh.
+ * - Reviewer: always starts fresh to avoid bias from coding session.
+ *
+ * Only continues when both the prior and current phase use the same
+ * adapter type (e.g., both Claude). Cross-adapter continuation is not possible.
+ */
+function resolveContinueSession(ctx: RunContext, role: 'planner' | 'coder' | 'reviewer'): string | null {
+  if (role === 'coder') {
+    // On iteration 2+, continue from the coder's own prior session
+    if (ctx.iteration > 1 && ctx.sessionIds['coder']) return ctx.sessionIds['coder']
+    // On iteration 1, continue from the planner's session
+    if (ctx.sessionIds['planner']) return ctx.sessionIds['planner']
+  }
+  // Planner and reviewer always start fresh
+  return null
 }
 
 function buildPromptContext(ctx: RunContext, role: 'planner' | 'coder' | 'reviewer'): PromptContext {

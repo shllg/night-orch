@@ -34,8 +34,36 @@ describe('parseReviewerOutput', () => {
     expect(error).toContain('Invalid or missing verdict')
   })
 
-  it('returns error for non-JSON output', () => {
-    const { result, error } = parseReviewerOutput('This is just text')
+  it('infers APPROVED from text with LGTM keyword', () => {
+    const { result, error } = parseReviewerOutput('LGTM - the changes look good and tests pass')
+    expect(result).not.toBeNull()
+    expect(result?.verdict).toBe('APPROVED')
+    expect(error).toContain('inferred')
+  })
+
+  it('infers CHANGES_REQUIRED from text', () => {
+    const { result, error } = parseReviewerOutput('CHANGES_REQUIRED - need to add error handling for edge cases')
+    expect(result).not.toBeNull()
+    expect(result?.verdict).toBe('CHANGES_REQUIRED')
+    expect(error).toContain('inferred')
+  })
+
+  it('returns error for ambiguous text with no verdict keywords', () => {
+    const { result, error } = parseReviewerOutput('This is just text with no clear verdict')
+    expect(result).toBeNull()
+    expect(error).toContain('could not infer verdict')
+  })
+
+  it('infers verdict from JSON with wrong verdict value', () => {
+    const raw = '```json\n{"verdict":"MAYBE","summary":"unsure but looks fine"}\n```'
+    const { result, error } = parseReviewerOutput(raw)
+    // "MAYBE" is not valid, but the text "looks fine" is too weak to infer
+    expect(result).toBeNull()
+    expect(error).toContain('Invalid or missing verdict')
+  })
+
+  it('returns error for empty input', () => {
+    const { result, error } = parseReviewerOutput('')
     expect(result).toBeNull()
     expect(error).toContain('No JSON block found')
   })

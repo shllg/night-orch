@@ -66,7 +66,7 @@ describe('ClaudeWorkerAdapter', () => {
 
     expect(mockExecWithTimeout).toHaveBeenCalledWith(
       'claude',
-      ['-p', '--output-format', 'text', '--max-turns', '50'],
+      ['-p', '--output-format', 'json', '--max-turns', '50'],
       {
         cwd: '/tmp/worktree',
         env: { PATH: '/usr/bin' },
