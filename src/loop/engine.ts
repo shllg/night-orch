@@ -11,6 +11,7 @@ import { buildWorkerEnv, buildVerifierEnv } from '../workers/env.js'
 import { Checkpoint } from './checkpoint.js'
 import { CostTracker } from './cost.js'
 import { getDiffAgainstBranch, getChangedFilesAgainstBranch } from '../git/repo.js'
+import { superviseWorker } from './supervisor.js'
 import { logger } from '../utils/logger.js'
 import type Database from 'better-sqlite3'
 
@@ -46,9 +47,10 @@ export async function executeLoop(
   if (ctx.triageResult.level !== 'trivial') {
     const planStart = Date.now()
     const planStartedAt = new Date(planStart).toISOString()
-    ctx = await runPlanStep(ctx, deps)
+    const planResult = await runPlanStep(ctx, deps)
+    ctx = planResult.ctx
     const planDurationMs = Date.now() - planStart
-    ctx = applyEstimatedWorkerCost(ctx, costTracker, 'planner', planDurationMs)
+    ctx = applyEstimatedWorkerCost(ctx, costTracker, 'planner', planDurationMs, planResult.tokenUsage)
     try { metrics?.observePhaseDuration('plan', planDurationMs / 1000) } catch { /* best-effort */ }
     checkpoint.phaseCompleted(ctx.runId, 'plan', { plan: ctx.plan })
 
@@ -93,9 +95,10 @@ export async function executeLoop(
     const codeStartedAt = new Date(codeStart).toISOString()
     ctx = updateContext(ctx, { currentPhase: 'code' as LoopPhase })
     checkpoint.phaseStarted(ctx.runId, 'code')
-    ctx = await runCodeStep(ctx, deps)
+    const codeStepResult = await runCodeStep(ctx, deps)
+    ctx = codeStepResult.ctx
     const codeDurationMs = Date.now() - codeStart
-    ctx = applyEstimatedWorkerCost(ctx, costTracker, 'coder', codeDurationMs)
+    ctx = applyEstimatedWorkerCost(ctx, costTracker, 'coder', codeDurationMs, codeStepResult.tokenUsage)
     try { metrics?.observePhaseDuration('code', codeDurationMs / 1000) } catch { /* best-effort */ }
     checkpoint.phaseCompleted(ctx.runId, 'code', { codeResult: ctx.codeResult })
     ctx = recordPhase(ctx, 'code', ctx.codeResult ? 'success' : 'failure', {}, codeStartedAt)
@@ -135,9 +138,10 @@ export async function executeLoop(
     const reviewStartedAt = new Date(reviewStart).toISOString()
     ctx = updateContext(ctx, { currentPhase: 'review' as LoopPhase })
     checkpoint.phaseStarted(ctx.runId, 'review')
-    ctx = await runReviewStep(ctx, deps)
+    const reviewStepResult = await runReviewStep(ctx, deps)
+    ctx = reviewStepResult.ctx
     const reviewDurationMs = Date.now() - reviewStart
-    ctx = applyEstimatedWorkerCost(ctx, costTracker, 'reviewer', reviewDurationMs)
+    ctx = applyEstimatedWorkerCost(ctx, costTracker, 'reviewer', reviewDurationMs, reviewStepResult.tokenUsage)
     try { metrics?.observePhaseDuration('review', reviewDurationMs / 1000) } catch { /* best-effort */ }
     checkpoint.phaseCompleted(ctx.runId, 'review', { reviewResult: ctx.reviewResult })
     ctx = recordPhase(ctx, 'review', ctx.reviewResult ? 'success' : 'failure', {}, reviewStartedAt)
@@ -205,6 +209,9 @@ export async function executeLoop(
   }
 }
 
+const ESTIMATED_USD_PER_INPUT_TOKEN = 0.000003
+const ESTIMATED_USD_PER_OUTPUT_TOKEN = 0.000015
+
 const ESTIMATED_USD_PER_MINUTE: Record<'planner' | 'coder' | 'reviewer', number> = {
   planner: 0.008,
   coder: 0.008,
@@ -216,9 +223,19 @@ function applyEstimatedWorkerCost(
   costTracker: CostTracker,
   role: 'planner' | 'coder' | 'reviewer',
   durationMs: number,
+  tokenUsage?: { promptTokens: number; completionTokens: number },
 ): RunContext {
-  const rate = ESTIMATED_USD_PER_MINUTE[role]
-  const estimatedCost = Math.max(0, Number(((durationMs / 60_000) * rate).toFixed(6)))
+  let estimatedCost: number
+  if (tokenUsage) {
+    estimatedCost = Number((
+      tokenUsage.promptTokens * ESTIMATED_USD_PER_INPUT_TOKEN +
+      tokenUsage.completionTokens * ESTIMATED_USD_PER_OUTPUT_TOKEN
+    ).toFixed(6))
+  } else {
+    const rate = ESTIMATED_USD_PER_MINUTE[role]
+    estimatedCost = Number(((durationMs / 60_000) * rate).toFixed(6))
+  }
+  estimatedCost = Math.max(0, estimatedCost)
   if (estimatedCost <= 0) return ctx
   costTracker.recordCost(ctx.runId, estimatedCost)
   return updateContext(ctx, {
@@ -226,7 +243,7 @@ function applyEstimatedWorkerCost(
   })
 }
 
-async function runPlanStep(ctx: RunContext, deps: LoopDependencies): Promise<RunContext> {
+async function runPlanStep(ctx: RunContext, deps: LoopDependencies): Promise<{ ctx: RunContext; tokenUsage?: WorkerTaskResult['tokenUsage'] }> {
   const result = await runWorkerStep(
     ctx,
     deps,
@@ -236,16 +253,19 @@ async function runPlanStep(ctx: RunContext, deps: LoopDependencies): Promise<Run
     DEFAULT_PLANNER_TEMPLATE,
   )
 
-  return updateContext(ctx, {
-    plan: result.parsed as RunContext['plan'],
-    totalAgentPasses: ctx.totalAgentPasses + 1,
-    sessionIds: result.sessionId
-      ? { ...ctx.sessionIds, planner: result.sessionId }
-      : ctx.sessionIds,
-  })
+  return {
+    ctx: updateContext(ctx, {
+      plan: result.parsed as RunContext['plan'],
+      totalAgentPasses: ctx.totalAgentPasses + 1,
+      sessionIds: result.sessionId
+        ? { ...ctx.sessionIds, planner: result.sessionId }
+        : ctx.sessionIds,
+    }),
+    tokenUsage: result.tokenUsage,
+  }
 }
 
-async function runCodeStep(ctx: RunContext, deps: LoopDependencies): Promise<RunContext> {
+async function runCodeStep(ctx: RunContext, deps: LoopDependencies): Promise<{ ctx: RunContext; tokenUsage?: WorkerTaskResult['tokenUsage'] }> {
   const result = await runWorkerStep(
     ctx,
     deps,
@@ -273,16 +293,19 @@ async function runCodeStep(ctx: RunContext, deps: LoopDependencies): Promise<Run
     }
   }
 
-  return updateContext(ctx, {
-    codeResult,
-    totalAgentPasses: ctx.totalAgentPasses + 1,
-    sessionIds: result.sessionId
-      ? { ...ctx.sessionIds, coder: result.sessionId }
-      : ctx.sessionIds,
-  })
+  return {
+    ctx: updateContext(ctx, {
+      codeResult,
+      totalAgentPasses: ctx.totalAgentPasses + 1,
+      sessionIds: result.sessionId
+        ? { ...ctx.sessionIds, coder: result.sessionId }
+        : ctx.sessionIds,
+    }),
+    tokenUsage: result.tokenUsage,
+  }
 }
 
-async function runReviewStep(ctx: RunContext, deps: LoopDependencies): Promise<RunContext> {
+async function runReviewStep(ctx: RunContext, deps: LoopDependencies): Promise<{ ctx: RunContext; tokenUsage?: WorkerTaskResult['tokenUsage'] }> {
   const result = await runWorkerStep(
     ctx,
     deps,
@@ -292,13 +315,16 @@ async function runReviewStep(ctx: RunContext, deps: LoopDependencies): Promise<R
     DEFAULT_REVIEWER_TEMPLATE,
   )
 
-  return updateContext(ctx, {
-    reviewResult: result.parsed as RunContext['reviewResult'],
-    totalAgentPasses: ctx.totalAgentPasses + 1,
-    sessionIds: result.sessionId
-      ? { ...ctx.sessionIds, reviewer: result.sessionId }
-      : ctx.sessionIds,
-  })
+  return {
+    ctx: updateContext(ctx, {
+      reviewResult: result.parsed as RunContext['reviewResult'],
+      totalAgentPasses: ctx.totalAgentPasses + 1,
+      sessionIds: result.sessionId
+        ? { ...ctx.sessionIds, reviewer: result.sessionId }
+        : ctx.sessionIds,
+    }),
+    tokenUsage: result.tokenUsage,
+  }
 }
 
 async function runWorkerStep(
@@ -323,16 +349,27 @@ async function runWorkerStep(
   // reviewer always starts fresh to avoid bias from the coding session.
   const continueSessionId = resolveContinueSession(ctx, role)
 
-  const start = Date.now()
-  const result = await adapter.runTask({
-    role,
-    worktreePath: ctx.worktreePath,
-    prompt: `${systemPrompt}\n\n${userPrompt}`,
-    profile,
-    timeoutSeconds: ctx.adjustedLimits.workerTimeoutSeconds,
-    env,
-    continueSessionId,
+  const supervisor = superviseWorker(role, ctx.adjustedLimits.workerTimeoutSeconds * 1000, () => {
+    // Advisory — the timeout.ts layer handles actual SIGTERM
   })
+
+  let result: WorkerTaskResult
+  const start = Date.now()
+  try {
+    result = await adapter.runTask({
+      role,
+      worktreePath: ctx.worktreePath,
+      prompt: `${systemPrompt}\n\n${userPrompt}`,
+      profile,
+      timeoutSeconds: ctx.adjustedLimits.workerTimeoutSeconds,
+      env,
+      continueSessionId,
+    })
+    supervisor.cancel()
+  } catch (err) {
+    supervisor.cancel()
+    throw err
+  }
 
   try {
     const adapterType = profile.type === 'codex' ? 'codex' : 'claude'

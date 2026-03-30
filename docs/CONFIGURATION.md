@@ -116,8 +116,16 @@ Discriminated by `type`:
 | `reviewApprovalKeyword` | string | `APPROVED` | Expected reviewer verdict keyword. |
 | `reviewNeedsChangesKeyword` | string | `CHANGES_REQUIRED` | Expected reviewer verdict keyword. |
 | `blockOnAmbiguousReview` | boolean | `true` | Parse failures in review phase become blocked state. |
+| `maxAutoRetries` | int >= 0 | `3` | Auto-retry count for infrastructure errors. |
+| `decompose` | boolean | `false` | Enable automatic issue decomposition into sub-tasks. |
+| `maxSubtasks` | int 1-10 | `5` | Maximum sub-tasks per decomposition. |
+| `maxConcurrentSubtasks` | int 1-10 | `3` | Max parallel sub-task worktrees. |
 
 Note: loop limits are later triage-adjusted per issue (trivial/standard/architectural), so these are base values.
+
+### Decomposition
+
+When `decompose: true`, issues classified as `standard` triage level with a body exceeding 500 characters (or containing 3+ numbered items/headings) are sent to the planner for decomposition. The planner decides whether to split the issue and outputs 2-5 atomic sub-tasks. Each sub-task runs the full Plan→Code→Verify→Review loop in its own git worktree. Sub-tasks execute in parallel waves based on their dependency graph, up to `maxConcurrentSubtasks` concurrent worktrees.
 
 ## `security`
 
@@ -146,7 +154,7 @@ workerProfiles:
 
 | Key | Type | Required | Default | Notes |
 | --- | --- | --- | --- | --- |
-| `type` | `claude` or `codex` | yes | none | Adapter selection. |
+| `type` | string | yes | none | Adapter type. Built-in: `claude`, `codex`, `acp`. |
 | `command` | string | yes | none | Binary to execute. |
 | `args` | string[] | no | `[]` | Base CLI args for every task invocation. |
 | `workerTimeoutSeconds` | positive number | no | `1800` | Base timeout before triage scaling. |
@@ -155,6 +163,23 @@ workerProfiles:
 | `env` | record string->string | no | `{}` | Extra env vars for worker process; blacklist still applies. |
 
 `repos[].agents` references these profile names. Unknown profile references fail config load.
+
+### ACP Adapter
+
+The `acp` adapter type uses the [Agent Client Protocol](https://github.com/openclaw/acpx) for agent-agnostic communication:
+
+```yaml
+workerProfiles:
+  gemini-acp:
+    type: acp
+    command: gemini     # acpx agent name
+    args: []
+    workerTimeoutSeconds: 1800
+```
+
+The `command` field specifies the acpx agent name (e.g., `codex`, `claude`, `gemini`, `pi`). ACPX resolves this to the correct ACP adapter. Supported agents include any ACP-compatible agent registered with acpx.
+
+Requires `acpx` installed as a dependency (`pnpm add acpx`).
 
 ## `metrics`
 

@@ -15,7 +15,7 @@ export interface WorkerTaskInput {
 }
 
 export interface WorkerProfileInput {
-  type: 'claude' | 'codex'
+  type: string
   command: string
   args: string[]
   workerTimeoutSeconds: number
@@ -33,6 +33,11 @@ export interface WorkerTaskResult {
   parseError: string | null
   /** Session/thread ID for continuing the conversation in subsequent phases. */
   sessionId: string | null
+  /** Real token counts from the agent, when available. */
+  tokenUsage?: {
+    promptTokens: number
+    completionTokens: number
+  }
 }
 
 export interface PlannerOutput {

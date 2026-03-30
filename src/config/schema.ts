@@ -45,7 +45,7 @@ const AppMentionSchema = z.object({
 // --- Worker profile schema ---
 
 const WorkerProfileSchema = z.object({
-  type: z.enum(['claude', 'codex']),
+  type: z.string().min(1, 'Worker type must not be empty'),
   command: z.string(),
   args: z.array(z.string()).default([]),
   workerTimeoutSeconds: z.number().positive().default(1800),
@@ -219,6 +219,9 @@ export const ConfigSchema = z.object({
     reviewNeedsChangesKeyword: z.string().default('CHANGES_REQUIRED'),
     blockOnAmbiguousReview: z.boolean().default(true),
     maxAutoRetries: z.number().int().min(0).default(3),
+    decompose: z.boolean().default(false),
+    maxSubtasks: z.number().int().min(1).max(10).default(5),
+    maxConcurrentSubtasks: z.number().int().min(1).max(10).default(3),
   }).default({}),
 
   security: SecuritySchema.default({}),

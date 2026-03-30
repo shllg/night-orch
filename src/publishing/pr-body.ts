@@ -11,6 +11,7 @@ export interface PRBodyContext {
   roles: ResolvedRoles
   iterationCount: number
   triageLevel: TriageLevel
+  subtaskSummaries?: { title: string; summary: string; success: boolean }[]
 }
 
 const MAX_PR_BODY_CHARS = 60_000
@@ -73,6 +74,18 @@ export function compilePRBody(ctx: PRBodyContext): string {
     sections.push(`**Verdict:** ${ctx.reviewResult.verdict}`)
     sections.push(ctx.reviewResult.summary)
     sections.push('')
+  }
+
+  // Sub-task summaries
+  if (ctx.subtaskSummaries && ctx.subtaskSummaries.length > 0) {
+    sections.push('## Sub-Tasks')
+    sections.push('')
+    for (const st of ctx.subtaskSummaries) {
+      const icon = st.success ? ':white_check_mark:' : ':x:'
+      sections.push(`### ${icon} ${st.title}`)
+      sections.push(st.summary)
+      sections.push('')
+    }
   }
 
   // Metadata

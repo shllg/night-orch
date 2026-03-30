@@ -22,6 +22,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@octokit/rest": "^22.0.1",
+    "acpx": "^0.4.0",
     "better-sqlite3": "^12.8.0",
     "commander": "^14.0.3",
     "content-type": "^1.0.5",

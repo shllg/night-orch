@@ -286,7 +286,7 @@ describe('createWorkerAdapter (factory)', () => {
 
   it('throws for unknown worker type', () => {
     expect(() =>
-      createWorkerAdapter({ ...baseProfile, type: 'unknown' as 'claude' }),
-    ).toThrow('Unknown worker type')
+      createWorkerAdapter({ ...baseProfile, type: 'unknown' }),
+    ).toThrow('No adapter registered for worker type "unknown"')
   })
 })

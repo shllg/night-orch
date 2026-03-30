@@ -24,6 +24,7 @@ export interface RunRecord {
   worktreePath: string | null
   estimatedCostUsd: number
   blockReason: string | null
+  parentRunId: string | null
 }
 
 export interface CreateRunParams {
@@ -33,6 +34,7 @@ export interface CreateRunParams {
   planner: string
   coder: string
   reviewer: string
+  parentRunId?: string | null
 }
 
 export class RunManager {
@@ -44,8 +46,8 @@ export class RunManager {
 
     this.db
       .prepare(
-        `INSERT INTO runs (id, repo, issue_number, issue_node_id, status, planner, coder, reviewer, started_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO runs (id, repo, issue_number, issue_node_id, status, planner, coder, reviewer, parent_run_id, started_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -55,6 +57,7 @@ export class RunManager {
         params.planner,
         params.coder,
         params.reviewer,
+        params.parentRunId ?? null,
         now,
         now,
         now,
@@ -77,6 +80,7 @@ export class RunManager {
       'worktreePath',
       'estimatedCostUsd',
       'blockReason',
+      'parentRunId',
     ] as const
 
     const columnMap: Record<string, string> = {
@@ -94,6 +98,7 @@ export class RunManager {
       worktreePath: 'worktree_path',
       estimatedCostUsd: 'estimated_cost_usd',
       blockReason: 'block_reason',
+      parentRunId: 'parent_run_id',
     }
 
     const setClauses: string[] = []
@@ -178,6 +183,13 @@ export class RunManager {
     return rows.map((r) => this.mapRow(r))
   }
 
+  getSubRuns(parentRunId: string): RunRecord[] {
+    const rows = this.db
+      .prepare('SELECT * FROM runs WHERE parent_run_id = ? ORDER BY created_at')
+      .all(parentRunId) as RawRunRow[]
+    return rows.map((r) => this.mapRow(r))
+  }
+
   private mapRow(row: RawRunRow): RunRecord {
     return {
       id: row.id,
@@ -200,6 +212,7 @@ export class RunManager {
       worktreePath: row.worktree_path,
       estimatedCostUsd: row.estimated_cost_usd ?? 0,
       blockReason: row.block_reason ?? null,
+      parentRunId: row.parent_run_id ?? null,
     }
   }
 }
@@ -225,4 +238,5 @@ interface RawRunRow {
   worktree_path: string | null
   estimated_cost_usd: number | null
   block_reason: string | null
+  parent_run_id: string | null
 }

@@ -33,6 +33,9 @@ import { formatStatusComment } from '../forge/status-comment.js'
 import { scanForReactions } from '../reactions/scanner.js'
 import { handleReaction } from '../reactions/handler.js'
 import type { ReactionCursor } from '../reactions/types.js'
+import { decomposeIssue, shouldAttemptDecompose } from '../discovery/decomposer.js'
+import { executeParallelSubtasks } from '../loop/parallel.js'
+import { buildWorkerEnv } from '../workers/env.js'
 
 const STATUS_MARKER = markerTag('status')
 
@@ -259,7 +262,69 @@ export async function pollOnce(
           sessionIds: {},
         }
 
-        // Execute loop
+        // Check if decomposition is enabled and appropriate
+        const shouldDecompose = config.loop.decompose
+          && discoveredIssue.triage.level === 'standard'
+          && shouldAttemptDecompose(discoveredIssue.issue)
+
+        if (shouldDecompose) {
+          logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number }, 'Attempting issue decomposition')
+          const decomposition = await decomposeIssue(
+            discoveredIssue.issue,
+            createWorkerAdapter(plannerProfile),
+            plannerProfile,
+            buildWorkerEnv(plannerProfile, envSetup?.envOverrides ?? {}),
+            worktreePath,
+            config.loop.maxSubtasks,
+          )
+
+          if (decomposition.shouldDecompose && decomposition.subtasks.length > 1) {
+            logger.info(
+              { repo: repoConfig.repo, issue: discoveredIssue.issue.number, subtasks: decomposition.subtasks.length },
+              'Decomposed issue into sub-tasks — executing in parallel',
+            )
+
+            const loopDeps = {
+              db, config,
+              plannerAdapter: createWorkerAdapter(plannerProfile),
+              coderAdapter: createWorkerAdapter(coderProfile),
+              reviewerAdapter: createWorkerAdapter(reviewerProfile),
+              envOverrides: envSetup?.envOverrides ?? {},
+              metrics,
+            }
+
+            const subResults = await executeParallelSubtasks(
+              initialCtx,
+              decomposition.subtasks,
+              loopDeps,
+              config.loop.maxConcurrentSubtasks,
+            )
+
+            const allSucceeded = subResults.every((r) => r.success)
+            if (allSucceeded) {
+              runManager.update(run.id, { status: 'review_ready', endedAt: new Date().toISOString() })
+              const latestIssue = await forge.getIssue(repoConfig.repo, discoveredIssue.issue.number)
+              await transitionLabels(forge, repoConfig.repo, discoveredIssue.issue.number, latestIssue.labels, 'running', 'review_ready', labelConfig)
+              await notifier.dispatch(makePayload('pr_ready', repoConfig.repo, discoveredIssue.issue, {
+                summary: `Decomposed into ${decomposition.subtasks.length} sub-tasks, all completed`,
+              }))
+              processed++
+            } else {
+              const failed = subResults.filter((r) => !r.success).length
+              runManager.update(run.id, {
+                status: 'blocked',
+                lastError: `${failed}/${decomposition.subtasks.length} sub-tasks failed`,
+                endedAt: new Date().toISOString(),
+              })
+              const latestIssue = await forge.getIssue(repoConfig.repo, discoveredIssue.issue.number)
+              await transitionLabels(forge, repoConfig.repo, discoveredIssue.issue.number, latestIssue.labels, 'running', 'blocked', labelConfig)
+              errors++
+            }
+            continue
+          }
+        }
+
+        // Execute loop (single-issue path)
         const loopStart = Date.now()
         const finalCtx = await executeLoop(initialCtx, {
           db,

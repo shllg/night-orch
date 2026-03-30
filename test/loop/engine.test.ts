@@ -383,6 +383,25 @@ describe('executeLoop', () => {
     expect(onPlanReady).not.toHaveBeenCalled()
   })
 
+  it('uses token-based cost when available', async () => {
+    const plannerResult = {
+      ...makePlannerResult(),
+      tokenUsage: { promptTokens: 1000, completionTokens: 500 },
+    }
+    const deps: LoopDependencies = {
+      db,
+      config: makeConfig(),
+      plannerAdapter: makeMockAdapter([plannerResult]),
+      coderAdapter: makeMockAdapter([makeCoderResult()]),
+      reviewerAdapter: makeMockAdapter([makeReviewerResult('APPROVED')]),
+    }
+
+    const result = await executeLoop(makeCtx(), deps)
+
+    expect(result.estimatedCostUsd).toBeGreaterThan(0)
+    expect(result.terminalStatus).toBe('publish')
+  })
+
   it('BLOCKED verdict → blocked', async () => {
     const deps: LoopDependencies = {
       db,
