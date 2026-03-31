@@ -7,6 +7,8 @@ import { resolveConfigPath, loadConfig, ConfigError } from '../../config/loader.
 interface GlobalOpts {
   config?: string
   trustWorkspace?: boolean
+  dryRun?: boolean
+  logLevel?: string
 }
 
 export async function runWatch(globalOpts?: GlobalOpts): Promise<void> {
@@ -28,7 +30,12 @@ export async function runWatch(globalOpts?: GlobalOpts): Promise<void> {
   const db = initDatabase(config.storage.dbPath)
 
   const { waitUntilExit } = render(
-    React.createElement(App, { db, pollIntervalMs: 2000 }),
+    React.createElement(App, {
+      db,
+      config,
+      pollIntervalMs: 2000,
+      dryRun: globalOpts?.dryRun ?? false,
+    }),
   )
 
   await waitUntilExit()
