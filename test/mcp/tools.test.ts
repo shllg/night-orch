@@ -54,7 +54,8 @@ describe('MCP Tools', () => {
     expect(names).toContain('night-orch-poll')
     expect(names).toContain('night-orch-list-issues')
     expect(names).toContain('night-orch-stream-events')
-    expect(tools.length).toBe(10)
+    expect(names).toContain('night-orch-rebase')
+    expect(tools.length).toBe(11)
   })
 
   it('status tool returns summary', async () => {

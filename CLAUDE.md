@@ -38,6 +38,7 @@ pnpm typecheck        # tsc --noEmit
 - **ESM imports**: Always `.js` extension even for `.ts` files: `import { x } from './y.js'`
 - **Node builtins**: Always `node:` prefix: `import { x } from 'node:fs/promises'`
 - **No `any`**: Use `unknown` and narrow with type guards
+- **Command parity**: Every operational command MUST be available in all three surfaces: CLI (`src/cli/commands/`), TUI (`src/cli/tui/`), and MCP (`src/mcp/tools/`). Never add a command to just one surface.
 
 ## Commit Messages
 

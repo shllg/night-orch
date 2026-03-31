@@ -23,7 +23,7 @@ A self-hosted Node.js/TypeScript CLI that autonomously processes GitHub/Forgejo 
 3. Verify: `night-orch doctor`
 4. Labels: `night-orch labels-init`
 5. Run: `night-orch run`
-6. Monitor: `night-orch watch` (in another terminal)
+6. Monitor: `night-orch tui` (in another terminal)
 
 ## Setup
 
@@ -44,9 +44,10 @@ night-orch run-once         # single poll cycle (for testing/CI)
 night-orch init             # interactive setup wizard
 night-orch doctor           # validate config, auth, CLIs, repos, DB
 night-orch status           # show active runs, costs, recent history
-night-orch watch            # live monitoring TUI dashboard
+night-orch tui              # live monitoring TUI dashboard
 night-orch sync             # reconcile DB state with GitHub
 night-orch retry <repo> <#> # re-run a blocked/errored issue
+night-orch rebase <repo> <#> # rebase PR branch + verify, requeue if broken
 night-orch cleanup          # remove stale worktrees, branches, logs
 night-orch labels-init      # create/update GitHub labels from config
 night-orch notify-test      # send test notification to all channels

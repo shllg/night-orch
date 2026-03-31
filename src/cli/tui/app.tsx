@@ -5,7 +5,10 @@ import { RetryEngine } from '../../ops/retry.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { CleanupEngine } from '../../ops/cleanup.js'
 import { pollOnce } from '../../runner/poller.js'
+import { rebaseAndCheck } from '../../ops/rebase-and-check.js'
+import { createForgeAdapter } from '../../forge/factory.js'
 import type Database from 'better-sqlite3'
+import { ActionsBar } from './actions-bar.js'
 
 interface AppProps {
   db: Database.Database
@@ -186,6 +189,33 @@ export function App({ db, config, pollIntervalMs = 2000, dryRun = false }: AppPr
     })
   }, [config, db, dryRun, runAction, selectedRun])
 
+  const runRebase = useCallback(async () => {
+    await runAction('rebase', async () => {
+      // Use selected run if it has a branch, otherwise find the most recent review_ready run
+      const target = selectedRun ?? runs.find((r) => r.status === 'review_ready')
+      if (!target) throw new Error('No review_ready run found')
+      const repoConfig = config.repos.find((r) => r.repo === target.repo)
+      if (!repoConfig) throw new Error(`Repo not found in config: ${target.repo}`)
+      const forge = createForgeAdapter(repoConfig, config)
+      let botUser = ''
+      try {
+        const auth = await forge.validateAuth()
+        botUser = auth.user
+      } catch { /* best effort */ }
+      const result = await rebaseAndCheck(db, forge, repoConfig, target.issue_number, botUser, true)
+      return `${target.repo}#${target.issue_number}: ${result.rebaseResult}${result.requeued ? ' (re-queued)' : ''}`
+    })
+  }, [config, db, runAction, runs, selectedRun])
+
+  const onAction = useCallback((action: string) => {
+    if (action === 'retry') void runRetry()
+    if (action === 'rebase') void runRebase()
+    if (action === 'sync') void runSync()
+    if (action === 'cleanup') void runCleanup()
+    if (action === 'poll') void runPoll()
+    if (action === 'quit') exit()
+  }, [exit, runCleanup, runPoll, runRebase, runRetry, runSync])
+
   useInput((input, key) => {
     if (key.ctrl && input === 'c') {
       exit()
@@ -212,6 +242,10 @@ export function App({ db, config, pollIntervalMs = 2000, dryRun = false }: AppPr
     }
     if (input === 'r') {
       void runRetry()
+      return
+    }
+    if (input === 'b') {
+      void runRebase()
       return
     }
     if (input === 's') {
@@ -330,11 +364,7 @@ export function App({ db, config, pollIntervalMs = 2000, dryRun = false }: AppPr
         ))}
       </Box>
 
-      <Box>
-        <Text color="gray">
-          keys: ↑/↓ or j/k select  r retry  p poll  s sync  c cleanup  f refresh  q quit
-        </Text>
-      </Box>
+      <ActionsBar db={db} onAction={onAction} />
     </Box>
   )
 }

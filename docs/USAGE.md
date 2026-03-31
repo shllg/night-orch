@@ -59,7 +59,7 @@ From any terminal:
 
 ```bash
 night-orch status    # one-shot status snapshot
-night-orch watch     # live-updating terminal dashboard
+night-orch tui       # live-updating terminal dashboard
 ```
 
 The `watch` command shows:
@@ -370,7 +370,7 @@ Run diagnostic checks: config validity, environment variables, forge authenticat
 
 Show current state: active runs, active leases, daily cost against budget, recent run history.
 
-### `night-orch watch`
+### `night-orch tui`
 
 Live-updating terminal dashboard. Refreshes every 2 seconds. Shows active runs, merge queue, cost bar, and recent history. Press Ctrl+C to exit.
 
@@ -381,6 +381,14 @@ Reconcile database state with GitHub: mark runs for merged PRs as completed, det
 ### `night-orch retry <repo> <issue>`
 
 Force re-run of a blocked or errored issue. Options: `--immediate` (process now instead of queuing), `--reset-plan` (discard prior plan and start fresh).
+
+### `night-orch rebase <repo> <issue>`
+
+Rebase a PR's branch onto the latest base branch, then run verify commands to check if code adjustments are needed. If verify fails after rebase, the issue is automatically re-queued for the coder to fix.
+
+Options: `--no-check` (skip verify commands after rebase — just rebase and push).
+
+Also available as a comment command: `/orch rebase` (with `--check` by default).
 
 ### `night-orch cleanup`
 

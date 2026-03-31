@@ -54,6 +54,17 @@ program
   .action((repo, issueNumber, opts, cmd) => retryCommand(repo, issueNumber, { ...cmd.parent?.opts(), ...opts }))
 
 program
+  .command('rebase')
+  .argument('<repo>', 'Repository (owner/name)')
+  .argument('<issue-number>', 'Issue number')
+  .option('--no-check', 'Skip verify commands after rebase')
+  .description('Rebase a PR branch and check if code adjustments are needed')
+  .action(async (repo, issueNumber, opts, cmd) => {
+    const { rebaseCommand } = await import('./commands/rebase.js')
+    await rebaseCommand(repo, issueNumber, { ...cmd.parent?.opts(), ...opts })
+  })
+
+program
   .command('cleanup')
   .description('Clean stale worktrees, expired leases, and old logs')
   .action((_opts, cmd) => cleanupCommand(cmd.parent?.opts()))
@@ -87,7 +98,7 @@ program
   })
 
 program
-  .command('watch')
+  .command('tui')
   .description('Interactive monitoring and control TUI')
   .action((_opts, cmd) => runWatch(cmd.parent?.opts()))
 

@@ -3,7 +3,7 @@ import type Database from 'better-sqlite3'
 
 export type OrchCommand =
   | { type: 'retry'; resetPlan: boolean }
-  | { type: 'rebase' }
+  | { type: 'rebase'; checkAfter: boolean }
   | { type: 'continue' }
   | { type: 'cancel' }
 
@@ -32,7 +32,7 @@ function parseCommand(verb: string, args: string | undefined): OrchCommand | und
     case 'retry':
       return { type: 'retry', resetPlan: args?.includes('--reset-plan') ?? false }
     case 'rebase':
-      return { type: 'rebase' }
+      return { type: 'rebase', checkAfter: args?.includes('--check') ?? true }
     case 'continue':
       return { type: 'continue' }
     case 'cancel':

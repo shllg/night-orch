@@ -8,6 +8,7 @@ import { RetryEngine } from '../../ops/retry.js'
 import { filterEligible } from '../../discovery/selector.js'
 import { pollOnce } from '../../runner/poller.js'
 import { flushActiveAgentObservability } from '../../events/observability.js'
+import { createForgeAdapter } from '../../forge/factory.js'
 
 interface ToolDefinition {
   name: string
@@ -136,6 +137,20 @@ export function registerTools(): ToolDefinition[] {
         required: ['runId'],
       },
     },
+    {
+      name: 'night-orch-rebase',
+      description: 'Rebase a PR branch onto latest base and verify. Re-queues issue if verify fails post-rebase.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          repo: { type: 'string', description: 'Repository (owner/name)' },
+          issueNumber: { type: 'number', description: 'Issue number' },
+          check: { type: 'boolean', description: 'Run verify commands after rebase (default: true)', default: true },
+          authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
+        },
+        required: ['repo', 'issueNumber'],
+      },
+    },
   ]
 }
 
@@ -165,6 +180,8 @@ export async function handleToolCall(
       return handleListIssues(args as { repo: string; filter?: string }, deps)
     case 'night-orch-stream-events':
       return handleStreamEvents(args as { runId: string; since?: number; limit?: number }, deps)
+    case 'night-orch-rebase':
+      return handleRebase(args as { repo: string; issueNumber: number; check?: boolean; authToken?: string }, deps)
     default:
       throw new Error(`Unknown tool: ${name}`)
   }
@@ -457,6 +474,32 @@ interface AgentEventRow {
   event_type: string
   data: string | null
   created_at: string
+}
+
+async function handleRebase(
+  args: { repo: string; issueNumber: number; check?: boolean; authToken?: string },
+  deps: MCPDependencies,
+): Promise<unknown> {
+  assertMcpMutationAuth(args.authToken, deps)
+
+  const repoConfig = deps.config.repos.find((r) => r.repo === args.repo)
+  if (!repoConfig) throw new Error(`Repository not found: ${args.repo}`)
+
+  const forge = createForgeAdapter(repoConfig, deps.config)
+  let botUser = ''
+  try {
+    const auth = await forge.validateAuth()
+    botUser = auth.user
+  } catch { /* best effort */ }
+
+  const { rebaseAndCheck } = await import('../../ops/rebase-and-check.js')
+  const result = await rebaseAndCheck(deps.db, forge, repoConfig, args.issueNumber, botUser, args.check !== false)
+
+  return {
+    rebaseResult: result.rebaseResult,
+    verifyPassed: result.verifyPassed,
+    requeued: result.requeued,
+  }
 }
 
 function assertMcpMutationAuth(providedToken: string | undefined, deps: MCPDependencies): void {

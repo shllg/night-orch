@@ -28,7 +28,7 @@ describe('parseOrchCommands', () => {
     const comments = [makeComment(1, '/orch rebase')]
     const result = parseOrchCommands(comments, since)
     expect(result).toHaveLength(1)
-    expect(result[0]!.command).toEqual({ type: 'rebase' })
+    expect(result[0]!.command).toEqual({ type: 'rebase', checkAfter: true })
   })
 
   it('parses /orch continue', () => {
