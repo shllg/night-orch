@@ -64,17 +64,37 @@ export async function publishPR(
     throw pushErr
   }
 
-  // 2. Look for existing PR — DB first, then API fallback
+  // 2. Look for existing OPEN PR — DB first, then API fallback.
+  //    If the linked PR is closed (manually or by branch protection),
+  //    clear the stale link and create a new PR instead.
   let existingPrNumber = getLinkedPR(db, ctx.repo, ctx.issueNumber)
   let existingPr = null
 
   if (existingPrNumber) {
-    logger.debug({ prNumber: existingPrNumber }, 'Found linked PR in DB')
-  } else {
+    // Verify the linked PR is still open
+    try {
+      if (forge.getPR) {
+        const linkedPr = await forge.getPR(ctx.repo, existingPrNumber)
+        if (linkedPr.state !== 'open') {
+          logger.info({ prNumber: existingPrNumber, state: linkedPr.state }, 'Linked PR is no longer open — will create a new one')
+          clearLinkedPR(db, ctx.repo, ctx.issueNumber)
+          existingPrNumber = null
+        } else {
+          logger.debug({ prNumber: existingPrNumber }, 'Found linked open PR in DB')
+        }
+      } else {
+        logger.debug({ prNumber: existingPrNumber }, 'Found linked PR in DB (cannot verify state)')
+      }
+    } catch (checkErr) {
+      logger.warn({ prNumber: existingPrNumber, err: checkErr }, 'Failed to verify linked PR state — will try to update anyway')
+    }
+  }
+
+  if (!existingPrNumber) {
     existingPr = await forge.findPRByBranch(ctx.repo, ctx.branchName)
     if (existingPr) {
       existingPrNumber = existingPr.number
-      logger.debug({ prNumber: existingPrNumber }, 'Found existing PR via API')
+      logger.debug({ prNumber: existingPrNumber }, 'Found existing open PR via API')
     }
   }
 
@@ -92,14 +112,14 @@ export async function publishPR(
 
   try {
     if (existingPrNumber) {
-      // 3. Update existing PR
+      // 3. Update existing open PR
       const updated = await forge.updatePR(ctx.repo, existingPrNumber, { title, body })
       updateLinkedPR(db, ctx.repo, ctx.issueNumber, updated.number, updated.url)
       logger.info({ prNumber: updated.number }, 'Updated existing PR')
       return { prNumber: updated.number, prUrl: updated.url, created: false }
     }
 
-    // 4. Create new PR
+    // 4. Create new PR (no open PR exists — either first time or old one was closed)
     const pr = await forge.createPR(ctx.repo, {
       title,
       body,
@@ -130,4 +150,10 @@ function updateLinkedPR(db: Database.Database, repo: string, issueNumber: number
   db.prepare(
     'UPDATE issue_links SET pr_number = ?, pr_url = ? WHERE repo = ? AND issue_number = ?',
   ).run(prNumber, prUrl, repo, issueNumber)
+}
+
+function clearLinkedPR(db: Database.Database, repo: string, issueNumber: number): void {
+  db.prepare(
+    'UPDATE issue_links SET pr_number = NULL, pr_url = NULL WHERE repo = ? AND issue_number = ?',
+  ).run(repo, issueNumber)
 }

@@ -13,6 +13,8 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
       ...input.profile.args,
       '--output-format', 'json',
       '--max-turns', maxTurns,
+      '--permission-mode', 'bypassPermissions',
+      '--append-system-prompt', 'IMPORTANT: Do NOT use plan mode. Do NOT call EnterPlanMode. Output everything directly in your response. Do NOT write files to ~/.claude/plans/.',
     ]
 
     // Continue from a prior session if available

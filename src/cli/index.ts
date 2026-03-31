@@ -48,8 +48,10 @@ program
   .command('retry')
   .argument('<repo>', 'Repository (owner/name)')
   .argument('<issue-number>', 'Issue number')
+  .option('--immediate', 'Process immediately instead of queuing for next poll')
+  .option('--reset-plan', 'Discard prior plan and start fresh')
   .description('Force a re-run of one task')
-  .action((repo, issueNumber, _opts, cmd) => retryCommand(repo, issueNumber, cmd.parent?.opts()))
+  .action((repo, issueNumber, opts, cmd) => retryCommand(repo, issueNumber, { ...cmd.parent?.opts(), ...opts }))
 
 program
   .command('cleanup')

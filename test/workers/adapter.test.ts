@@ -66,7 +66,7 @@ describe('ClaudeWorkerAdapter', () => {
 
     expect(mockExecWithTimeout).toHaveBeenCalledWith(
       'claude',
-      ['-p', '--output-format', 'json', '--max-turns', '50'],
+      ['-p', '--output-format', 'json', '--max-turns', '50', '--permission-mode', 'bypassPermissions', '--append-system-prompt', expect.stringContaining('Do NOT use plan mode')],
       {
         cwd: '/tmp/worktree',
         env: { PATH: '/usr/bin' },
