@@ -1,5 +1,6 @@
 import type { RunContext, LoopDecision } from './types.js'
 import type { Config } from '../config/schema.js'
+import { isPlanningIssue } from '../planning/mode.js'
 
 /**
  * Determine next action based on review verdict, verify results,
@@ -33,6 +34,15 @@ export function decide(
   // Rule 2: Max total passes
   if (ctx.totalAgentPasses >= maxTotalPasses) {
     return { action: 'block', reason: `Max total agent passes reached: ${ctx.totalAgentPasses}/${maxTotalPasses}`, blockReason: 'agent_pass_limit' }
+  }
+
+  // Planning-only mode bypasses verify/review gates. The commit guard enforces
+  // that only the configured PRD markdown file is committed.
+  if (isPlanningIssue(ctx.issue.labels, ctx.repoConfig)) {
+    if (!ctx.codeResult) {
+      return { action: 'block', reason: 'Planning-only mode requires a PRD output from the coder', blockReason: 'ambiguous_review' }
+    }
+    return { action: 'publish', reason: 'Planning-only mode: PRD ready for publishing' }
   }
 
   const review = ctx.reviewResult

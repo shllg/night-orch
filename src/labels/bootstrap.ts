@@ -6,7 +6,7 @@ export interface LabelBootstrapDefinition {
   description: string
 }
 
-type LabelRole = 'ready' | 'running' | 'blocked' | 'reviewReady' | 'error' | 'retry' | 'mergeQueued' | 'merging' | 'mergeFailed'
+type LabelRole = 'ready' | 'running' | 'blocked' | 'reviewReady' | 'error' | 'retry' | 'planning' | 'mergeQueued' | 'merging' | 'mergeFailed'
 
 const DEFAULT_LABEL_PRESENTATION: Record<LabelRole, { color: string; description: string }> = {
   ready: {
@@ -32,6 +32,10 @@ const DEFAULT_LABEL_PRESENTATION: Record<LabelRole, { color: string; description
   retry: {
     color: '5319E7',
     description: 'Queued for retry',
+  },
+  planning: {
+    color: 'C2E0C6',
+    description: 'Planning-only mode: produce a PRD markdown file (no code changes)',
   },
   mergeQueued: {
     color: '006B75',
@@ -77,6 +81,7 @@ export function buildLabelBootstrapDefinitions(
   add(repoConfig.labels.reviewReady, 'reviewReady')
   add(repoConfig.labels.error, 'error')
   add(repoConfig.labels.retry, 'retry')
+  add(repoConfig.labels.planning, 'planning')
   add(repoConfig.labels.mergeQueued, 'mergeQueued')
   add(repoConfig.labels.merging, 'merging')
   add(repoConfig.labels.mergeFailed, 'mergeFailed')

@@ -10,6 +10,7 @@ import { Checkpoint } from './checkpoint.js'
 import { CostTracker } from './cost.js'
 import { logger } from '../utils/logger.js'
 import type Database from 'better-sqlite3'
+import { buildPlanningPrdPath, isPlanningIssue } from '../planning/mode.js'
 
 export interface LoopDependencies {
   db: Database.Database
@@ -127,15 +128,21 @@ export async function executeLoop(
 
       switch (decision.action) {
         case 'publish': {
+          const planningOnly = isPlanningIssue(ctx.issue.labels, ctx.repoConfig)
+          const planningOnlyPrdPath = planningOnly
+            ? buildPlanningPrdPath(ctx.issueNumber, ctx.issue.title, ctx.repoConfig)
+            : undefined
+
           const commitResult = await commitChanges(
             ctx.worktreePath,
             ctx.issueNumber,
             ctx.issue.title,
             config.security,
+            { planningOnlyPrdPath },
           )
           if (!commitResult.committed) {
             logger.warn({ reason: commitResult.reason }, 'Commit skipped')
-            if (commitResult.reason?.startsWith('Diff-size guard')) {
+            if (commitResult.blockRun) {
               return recordPhase(
                 updateContext(ctx, { currentPhase: 'blocked', terminalStatus: 'blocked' }),
                 'publish',

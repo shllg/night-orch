@@ -1,5 +1,6 @@
 import type { Config, RepoConfig } from '../config/schema.js'
 import type { TriageLevel } from '../discovery/triage.js'
+import { isPlanningIssue } from '../planning/mode.js'
 
 export type WorkerStep = {
   type: 'worker'
@@ -38,6 +39,14 @@ export const DEFAULT_WORKFLOW: ResolvedWorkflow = {
   ],
 }
 
+export const PLANNING_ONLY_WORKFLOW: ResolvedWorkflow = {
+  steps: [
+    { type: 'worker', id: 'plan', role: 'planner' },
+    { type: 'worker', id: 'code', role: 'coder', continueFrom: 'plan' },
+    { type: 'decide', id: 'decide', onIterate: 'code' },
+  ],
+}
+
 /**
  * Resolve which workflow to use for a given repo and triage level.
  * Falls back to DEFAULT_WORKFLOW when no workflow is configured.
@@ -45,8 +54,11 @@ export const DEFAULT_WORKFLOW: ResolvedWorkflow = {
 export function resolveWorkflow(
   repoConfig: RepoConfig,
   config: Config,
+  issueLabels: string[],
   _triageLevel: TriageLevel,
 ): ResolvedWorkflow {
+  if (isPlanningIssue(issueLabels, repoConfig)) return PLANNING_ONLY_WORKFLOW
+
   const workflowName = repoConfig.workflow
   if (!workflowName) return DEFAULT_WORKFLOW
 

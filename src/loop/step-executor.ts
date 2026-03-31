@@ -11,6 +11,7 @@ import { buildWorkerEnv, buildVerifierEnv } from '../workers/env.js'
 import { getDiffAgainstBranch, getChangedFilesAgainstBranch } from '../git/repo.js'
 import { superviseWorker } from './supervisor.js'
 import { logger } from '../utils/logger.js'
+import { buildPlanningPrdPath, isPlanningIssue } from '../planning/mode.js'
 
 export interface StepDependencies {
   adapters: Record<string, WorkerAdapter>
@@ -56,7 +57,11 @@ export async function executeWorkerStep(
   const adapter = resolveAdapter(step.role, ctx, deps)
   const profile = getWorkerProfile(ctx, step.role, deps)
   const promptCtx = buildPromptContext(ctx, step.role)
-  const template = step.prompt ?? getDefaultTemplate(step.role)
+  let template = step.prompt ?? getDefaultTemplate(step.role)
+  if (!step.prompt && step.role === 'coder' && isPlanningIssue(ctx.issue.labels, ctx.repoConfig)) {
+    const prdPath = buildPlanningPrdPath(ctx.issueNumber, ctx.issue.title, ctx.repoConfig)
+    template = buildPlanningOnlyCoderTemplate(prdPath)
+  }
   const { systemPrompt, userPrompt } = compilePrompt(
     null,
     template,
@@ -368,6 +373,34 @@ After making changes, output a summary as JSON:
   "blockers": null
 }
 \`\`\``
+
+function buildPlanningOnlyCoderTemplate(prdPath: string): string {
+  return `You are a software planning implementation assistant.
+
+Create exactly one PRD markdown file at:
+\`${prdPath}\`
+
+Constraints:
+- This is planning-only mode. Do NOT modify code, tests, configs, or any other file.
+- The PR must contain only this single markdown file.
+- If the directory does not exist, create it.
+- The PRD must include:
+  1. Problem statement and scope
+  2. Assumptions and open questions
+  3. Implementation phases
+  4. A checklist for each phase
+  5. Risks and validation strategy
+
+After making changes, output a summary as JSON:
+\`\`\`json
+{
+  "summary": "...",
+  "changedFiles": ["${prdPath}"],
+  "remainingUncertainty": null,
+  "blockers": null
+}
+\`\`\``
+}
 
 export const DEFAULT_REVIEWER_TEMPLATE = `You are a code reviewer. Perform a thorough, evidence-based review of the changes.
 

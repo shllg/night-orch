@@ -15,6 +15,7 @@ export interface LabelConfig {
   reviewReady: string
   error: string
   retry: string
+  planning: string
   mergeQueued: string
   merging: string
   mergeFailed: string

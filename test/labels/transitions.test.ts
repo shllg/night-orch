@@ -9,6 +9,10 @@ const config: LabelConfig = {
   reviewReady: 'orch:review-ready',
   error: 'orch:error',
   retry: 'orch:retry',
+  planning: 'orch:planning',
+  mergeQueued: 'orch:merge-queued',
+  merging: 'orch:merging',
+  mergeFailed: 'orch:merge-failed',
 }
 
 describe('isHumanRequired', () => {

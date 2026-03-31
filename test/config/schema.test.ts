@@ -111,6 +111,17 @@ describe('ConfigSchema', () => {
     }
   })
 
+  it('applies planning defaults for labels and PRD directory', () => {
+    const minimal = {
+      version: 1,
+      github: { tokenEnv: 'GITHUB_TOKEN' },
+      repos: [{ repo: 'org/repo', localPath: '/tmp/repo' }],
+    }
+    const result = ConfigSchema.parse(minimal)
+    expect(result.repos[0]!.labels.planning).toBe('orch:planning')
+    expect(result.repos[0]!.planning.prdDirectory).toBe('docs/prd')
+  })
+
   it('validates worker profile schema', () => {
     const raw = loadExampleConfig()
     raw.workerProfiles['claude-default'].workerTimeoutSeconds = -1
