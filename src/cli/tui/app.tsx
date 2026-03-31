@@ -8,6 +8,7 @@ import { pollOnce } from '../../runner/poller.js'
 import { queueRebase } from '../../ops/rebase-and-check.js'
 import { createForgeAdapter } from '../../forge/factory.js'
 import type Database from 'better-sqlite3'
+import { loadTuiStats, type StatusAggregate, type TuiStatsSnapshot } from '../../state/stats.js'
 import { ActionsBar } from './actions-bar.js'
 
 interface AppProps {
@@ -45,14 +46,17 @@ interface MergeBatchRow {
   pr_numbers: string
 }
 
-interface DailyCostRow {
-  total_cost_usd: number
-}
-
 interface ActionState {
   busy: boolean
   action: string | null
 }
+
+type TabId = 'runs' | 'stats'
+
+const TABS: Array<{ id: TabId; hotkey: string; label: string }> = [
+  { id: 'runs', hotkey: '1', label: 'Runs' },
+  { id: 'stats', hotkey: '2', label: 'Stats' },
+]
 
 const STATUS_COLORS: Record<string, 'white' | 'yellow' | 'cyan' | 'magenta' | 'green' | 'red'> = {
   running: 'yellow',
@@ -80,21 +84,22 @@ export function App({ db, config, pollIntervalMs = 2000, dryRun = false }: AppPr
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [statusLine, setStatusLine] = useState('Ready')
   const [actionState, setActionState] = useState<ActionState>({ busy: false, action: null })
+  const [activeTab, setActiveTab] = useState<TabId>('runs')
 
   useEffect(() => {
-    const timer = setInterval(() => setTick(t => t + 1), pollIntervalMs)
+    const timer = setInterval(() => setTick((t) => t + 1), pollIntervalMs)
     return () => clearInterval(timer)
   }, [pollIntervalMs])
 
   const runs = useMemo(() => loadRuns(db), [db, tick])
   const selectedIndex = runs.findIndex((run) => run.id === selectedRunId)
-  const selectedRun = selectedIndex >= 0 ? runs[selectedIndex] : (runs[0] ?? null)
+  const selectedRun = selectedIndex >= 0 ? (runs[selectedIndex] ?? null) : (runs[0] ?? null)
   const selectedRunEvents = useMemo(
     () => (selectedRun ? loadAgentEvents(db, selectedRun.id, 12) : []),
     [db, tick, selectedRun?.id],
   )
   const mergeBatches = useMemo(() => loadMergeBatches(db), [db, tick])
-  const dailyCost = useMemo(() => loadDailyCost(db), [db, tick])
+  const stats = useMemo(() => loadTuiStats(db), [db, tick])
 
   useEffect(() => {
     if (runs.length === 0) {
@@ -118,6 +123,13 @@ export function App({ db, config, pollIntervalMs = 2000, dryRun = false }: AppPr
       setSelectedRunId(nextRun.id)
     }
   }, [runs, selectedRun])
+
+  const switchTab = useCallback((direction: -1 | 1) => {
+    const currentIndex = TABS.findIndex((tab) => tab.id === activeTab)
+    const nextIndex = Math.max(0, Math.min(TABS.length - 1, currentIndex + direction))
+    const next = TABS[nextIndex]
+    if (next) setActiveTab(next.id)
+  }, [activeTab])
 
   const forceRefresh = useCallback(() => {
     setTick((t) => t + 1)
@@ -206,15 +218,6 @@ export function App({ db, config, pollIntervalMs = 2000, dryRun = false }: AppPr
     })
   }, [config, db, runAction, runs, selectedRun])
 
-  const onAction = useCallback((action: string) => {
-    if (action === 'retry') void runRetry()
-    if (action === 'rebase') void runRebase()
-    if (action === 'sync') void runSync()
-    if (action === 'cleanup') void runCleanup()
-    if (action === 'poll') void runPoll()
-    if (action === 'quit') exit()
-  }, [exit, runCleanup, runPoll, runRebase, runRetry, runSync])
-
   useInput((input, key) => {
     if (key.ctrl && input === 'c') {
       exit()
@@ -224,18 +227,40 @@ export function App({ db, config, pollIntervalMs = 2000, dryRun = false }: AppPr
       exit()
       return
     }
-    if (key.downArrow || input === 'j') {
-      moveSelection(1)
+
+    if (input === '1') {
+      setActiveTab('runs')
       return
     }
-    if (key.upArrow || input === 'k') {
-      moveSelection(-1)
+    if (input === '2') {
+      setActiveTab('stats')
       return
     }
+    if (key.rightArrow || input === 'l') {
+      switchTab(1)
+      return
+    }
+    if (key.leftArrow || input === 'h') {
+      switchTab(-1)
+      return
+    }
+
+    if (activeTab === 'runs') {
+      if (key.downArrow || input === 'j') {
+        moveSelection(1)
+        return
+      }
+      if (key.upArrow || input === 'k') {
+        moveSelection(-1)
+        return
+      }
+    }
+
     if (input === 'f') {
       forceRefresh()
       return
     }
+
     if (actionState.busy) {
       return
     }
@@ -260,15 +285,15 @@ export function App({ db, config, pollIntervalMs = 2000, dryRun = false }: AppPr
     }
   })
 
-  const activeCount = runs.filter((run) => run.status === 'running' || run.status === 'queued').length
-
   return (
     <Box flexDirection="column" padding={1}>
-      <Box marginBottom={1}>
-        <Text bold color="cyan">night-orch control</Text>
-        <Text color="gray">  refresh {pollIntervalMs / 1000}s</Text>
-        {dryRun && <Text color="yellow">  [dry-run]</Text>}
-      </Box>
+      <Header
+        pollIntervalMs={pollIntervalMs}
+        dryRun={dryRun}
+        status={stats}
+      />
+
+      <TabBar activeTab={activeTab} />
 
       <Box marginBottom={1}>
         <Text color={actionState.busy ? 'yellow' : 'gray'}>
@@ -276,6 +301,77 @@ export function App({ db, config, pollIntervalMs = 2000, dryRun = false }: AppPr
         </Text>
       </Box>
 
+      {activeTab === 'runs'
+        ? (
+            <RunsView
+              runs={runs}
+              selectedRun={selectedRun}
+              selectedRunEvents={selectedRunEvents}
+              mergeBatches={mergeBatches}
+              stats={stats}
+            />
+          )
+        : (
+            <StatsView stats={stats} />
+          )}
+
+      <ActionsBar activeTab={activeTab} busy={actionState.busy} />
+    </Box>
+  )
+}
+
+interface HeaderProps {
+  pollIntervalMs: number
+  dryRun: boolean
+  status: TuiStatsSnapshot
+}
+
+function Header({ pollIntervalMs, dryRun, status }: HeaderProps): React.ReactElement {
+  return (
+    <Box flexDirection="column" marginBottom={1}>
+      <Box>
+        <Text bold color="cyan">night-orch monitor</Text>
+        <Text color="gray">  refresh {pollIntervalMs / 1000}s</Text>
+        {dryRun && <Text color="yellow">  [dry-run]</Text>}
+        <Text color="gray">  updated {formatTime(status.updatedAt)}</Text>
+      </Box>
+      <Text color="gray">
+        runs {status.overview.totalRuns}  active {status.overview.activeRuns}  queued {status.overview.queuedRuns}  daily cost ${status.cost.todayCostUsd.toFixed(2)}
+      </Text>
+    </Box>
+  )
+}
+
+interface TabBarProps {
+  activeTab: TabId
+}
+
+function TabBar({ activeTab }: TabBarProps): React.ReactElement {
+  return (
+    <Box marginBottom={1}>
+      {TABS.map((tab, index) => (
+        <Box key={tab.id} marginRight={2}>
+          <Text color={activeTab === tab.id ? 'cyan' : 'gray'}>
+            {activeTab === tab.id ? '▸' : ' '}[{tab.hotkey}] {tab.label}
+          </Text>
+          {index < TABS.length - 1 && <Text color="gray"> </Text>}
+        </Box>
+      ))}
+    </Box>
+  )
+}
+
+interface RunsViewProps {
+  runs: RunListRow[]
+  selectedRun: RunListRow | null
+  selectedRunEvents: AgentEventRow[]
+  mergeBatches: MergeBatchRow[]
+  stats: TuiStatsSnapshot
+}
+
+function RunsView({ runs, selectedRun, selectedRunEvents, mergeBatches, stats }: RunsViewProps): React.ReactElement {
+  return (
+    <>
       <Box marginBottom={1}>
         <Box flexDirection="column" width="42%">
           <Text bold>Runs ({runs.length})</Text>
@@ -349,7 +445,7 @@ export function App({ db, config, pollIntervalMs = 2000, dryRun = false }: AppPr
       <Box marginBottom={1} flexDirection="column">
         <Text bold>System</Text>
         <Text color="gray">
-          {'  '}active {activeCount}  daily cost ${dailyCost.toFixed(2)}  merge queue {mergeBatches.length}
+          {'  '}active {stats.overview.activeRuns}  daily cost ${stats.cost.todayCostUsd.toFixed(2)}  merge queue {mergeBatches.length}
         </Text>
         {mergeBatches.slice(0, 3).map((batch) => (
           <Text key={batch.id}>
@@ -362,8 +458,107 @@ export function App({ db, config, pollIntervalMs = 2000, dryRun = false }: AppPr
           </Text>
         ))}
       </Box>
+    </>
+  )
+}
 
-      <ActionsBar db={db} onAction={onAction} />
+interface StatsViewProps {
+  stats: TuiStatsSnapshot
+}
+
+function StatsView({ stats }: StatsViewProps): React.ReactElement {
+  return (
+    <Box flexDirection="column" marginBottom={1}>
+      <Box marginBottom={1} flexDirection="column">
+        <Text bold>Overview</Text>
+        <Text color="gray">
+          {'  '}total {stats.overview.totalRuns}  active {stats.overview.activeRuns}  running {stats.overview.runningRuns}  queued {stats.overview.queuedRuns}
+        </Text>
+        <Text color="gray">
+          {'  '}completed {stats.overview.completedRuns}  review_ready {stats.overview.reviewReadyRuns}  blocked {stats.overview.blockedRuns}  error {stats.overview.errorRuns}
+        </Text>
+        <Text color="gray">{'  '}status mix {formatStatusMix(stats.statusCounts)}</Text>
+      </Box>
+
+      <Box marginBottom={1} flexDirection="column">
+        <Text bold>Throughput</Text>
+        <Text color="gray">
+          {'  '}runs 24h {stats.throughput.runs24h}  7d {stats.throughput.runs7d}  30d {stats.throughput.runs30d}
+        </Text>
+        <Text color="gray">
+          {'  '}terminal 7d completed {stats.throughput.completed7d} blocked {stats.throughput.blocked7d} error {stats.throughput.error7d} success {stats.throughput.successRate7d.toFixed(1)}%
+        </Text>
+        <Text color="gray">
+          {'  '}avg duration 7d {formatMinutes(stats.throughput.avgDurationMinutes7d)}  avg iterations 7d {stats.throughput.avgIterations7d.toFixed(2)}
+        </Text>
+        <Text color="gray">
+          {'  '}active phases {stats.phaseCounts.length === 0 ? '-' : stats.phaseCounts.map((row) => `${row.phase}:${row.count}`).join('  ')}
+        </Text>
+      </Box>
+
+      <Box marginBottom={1} flexDirection="column">
+        <Text bold>Cost</Text>
+        <Text color="gray">
+          {'  '}today ${stats.cost.todayCostUsd.toFixed(2)} ({stats.cost.todayRunCount} runs)  7d ${stats.cost.cost7d.toFixed(2)}  30d ${stats.cost.cost30d.toFixed(2)}  avg/day ${stats.cost.avgDailyCost7d.toFixed(2)}
+        </Text>
+        {stats.cost.dailyHistory.length === 0 && <Text color="gray">  No daily cost history</Text>}
+        {stats.cost.dailyHistory.slice().reverse().map((row) => (
+          <Text key={row.date} color="gray">
+            {'  '}
+            <Text>{row.date}</Text>
+            {'  '}
+            <Text>${row.totalCostUsd.toFixed(2)}</Text>
+            {'  '}
+            <Text>{row.runCount} run(s)</Text>
+          </Text>
+        ))}
+      </Box>
+
+      <Box marginBottom={1} flexDirection="column">
+        <Text bold>Agent Activity</Text>
+        <Text color="gray">
+          {'  '}events total {stats.agents.eventsTotal}  24h {stats.agents.events24h}  7d {stats.agents.events7d}  runs 7d {stats.agents.uniqueRuns7d}
+        </Text>
+        <Text color="gray">
+          {'  '}tool calls 24h {stats.agents.toolCalls24h}  thinking 24h {stats.agents.thinking24h}
+        </Text>
+        <Text color="gray">
+          {'  '}role mix 7d {stats.agents.roleBreakdown7d.length === 0 ? '-' : stats.agents.roleBreakdown7d.map((row) => `${row.role}:${row.events}`).join('  ')}
+        </Text>
+      </Box>
+
+      <Box marginBottom={1} flexDirection="column">
+        <Text bold>Merge Queue</Text>
+        <Text color="gray">
+          {'  '}active batches {stats.queue.activeBatches}  statuses {stats.queue.statuses.length === 0 ? '-' : stats.queue.statuses.map((row) => `${row.status}:${row.count}`).join('  ')}
+        </Text>
+      </Box>
+
+      <Box flexDirection="column">
+        <Text bold>Top Repos (30d)</Text>
+        {stats.topRepos30d.length === 0 && <Text color="gray">  No run history</Text>}
+        {stats.topRepos30d.map((row) => {
+          const terminalCount = row.completedRuns + row.blockedRuns + row.errorRuns
+          const successPct = terminalCount > 0 ? (row.completedRuns / terminalCount) * 100 : 0
+          const errorPct = terminalCount > 0 ? (row.errorRuns / terminalCount) * 100 : 0
+          return (
+            <Text key={row.repo}>
+              {'  '}
+              <Text>{truncate(row.repo, 26)}</Text>
+              {'  '}
+              <Text color="gray">runs {row.totalRuns}</Text>
+              {'  '}
+              <Text color="green">ok {successPct.toFixed(0)}%</Text>
+              {'  '}
+              <Text color="red">err {errorPct.toFixed(0)}%</Text>
+              {'  '}
+              <Text color="gray">cost ${row.totalCostUsd.toFixed(2)}</Text>
+              {'  '}
+              <Text color="gray">iter {row.avgIterations.toFixed(1)}</Text>
+            </Text>
+          )
+        })}
+      </Box>
     </Box>
   )
 }
@@ -413,12 +608,9 @@ function loadMergeBatches(db: Database.Database): MergeBatchRow[] {
     .all() as MergeBatchRow[]
 }
 
-function loadDailyCost(db: Database.Database): number {
-  const today = new Date().toISOString().split('T')[0]!
-  const row = db
-    .prepare('SELECT total_cost_usd FROM daily_costs WHERE date = ?')
-    .get(today) as DailyCostRow | undefined
-  return row?.total_cost_usd ?? 0
+function formatStatusMix(statuses: StatusAggregate[]): string {
+  if (statuses.length === 0) return '-'
+  return statuses.map((row) => `${row.status}:${row.count}`).join('  ')
 }
 
 function formatEventSummary(event: AgentEventRow): string {
@@ -472,6 +664,15 @@ function formatTime(timestamp: string): string {
   const date = new Date(timestamp)
   if (Number.isNaN(date.getTime())) return '--:--:--'
   return date.toISOString().slice(11, 19)
+}
+
+function formatMinutes(minutes: number): string {
+  if (minutes <= 0) return '-'
+  if (minutes < 1) return `${Math.round(minutes * 60)}s`
+  if (minutes < 60) return `${minutes.toFixed(1)}m`
+  const hours = Math.floor(minutes / 60)
+  const mins = Math.round(minutes % 60)
+  return `${hours}h${String(mins).padStart(2, '0')}m`
 }
 
 function formatPrList(prNumbersRaw: string): string {
