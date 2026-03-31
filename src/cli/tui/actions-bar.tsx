@@ -1,26 +1,23 @@
 import React from 'react'
-import { Box, Text, useInput } from 'ink'
-import type Database from 'better-sqlite3'
+import { Box, Text } from 'ink'
 
 interface ActionsBarProps {
-  db: Database.Database
-  onAction: (action: string, args?: Record<string, unknown>) => void
+  activeTab: 'runs' | 'stats'
+  busy: boolean
 }
 
-export function ActionsBar({ db: _db, onAction }: ActionsBarProps): React.ReactElement {
-  useInput((input, key) => {
-    if (input === 'r') onAction('retry')
-    if (input === 'b') onAction('rebase')
-    if (input === 's') onAction('sync')
-    if (input === 'c') onAction('cleanup')
-    if (input === 'p') onAction('poll')
-    if (key.escape || input === 'q') onAction('quit')
-  })
+export function ActionsBar({ activeTab, busy }: ActionsBarProps): React.ReactElement {
+  const tabHints = '[1]runs  [2]stats  [h/l] switch tab'
+  const listHints = activeTab === 'runs' ? '  [j/k] select run' : ''
+  const actionHints = busy
+    ? 'actions locked while task is running'
+    : '[r]etry  [b]rebase  [s]ync  [c]leanup  [p]oll'
 
   return (
-    <Box marginTop={1}>
+    <Box marginTop={1} flexDirection="column">
+      <Text color="gray">{tabHints}{listHints}</Text>
       <Text color="gray">
-        [r]etry  [b]rebase  [s]ync  [c]leanup  [p]oll  [q]uit
+        {actionHints}  [f]refresh  [q]uit
       </Text>
     </Box>
   )
