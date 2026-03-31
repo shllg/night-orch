@@ -39,7 +39,7 @@ describe('commitChanges', () => {
 
     const result = await commitChanges('/tmp/wt', 1, 'No-op', limits)
 
-    expect(result).toEqual({ committed: false, reason: 'No changes to commit' })
+    expect(result).toEqual({ committed: false, reason: 'No changes to commit', blockRun: false })
     expect(mockCheckDiffSize).not.toHaveBeenCalled()
   })
 
@@ -56,7 +56,7 @@ describe('commitChanges', () => {
 
     const result = await commitChanges('/tmp/wt', 42, 'Fix title', limits)
 
-    expect(result.committed).toBe(true)
+    expect(result).toEqual({ committed: true, reason: null, blockRun: false })
     expect(mockCheckDiffSize).toHaveBeenCalledWith('/tmp/wt', limits, { staged: true })
     expect(mockExeca).toHaveBeenCalledWith('git', ['add', '-A'], { cwd: '/tmp/wt' })
     expect(mockExeca).toHaveBeenCalledWith(
@@ -100,11 +100,53 @@ describe('commitChanges', () => {
     const result = await commitChanges('/tmp/wt', 1, 'Big diff', limits)
 
     expect(result.committed).toBe(false)
+    expect(result.blockRun).toBe(true)
     expect(result.reason).toContain('Diff-size guard')
     expect(mockExeca).toHaveBeenCalledWith(
       'git',
       ['reset', 'HEAD', '--', '.'],
       { cwd: '/tmp/wt', reject: false },
     )
+  })
+
+  it('blocks planning-only commit when staged files are not exactly the expected PRD file', async () => {
+    mockExeca
+      .mockResolvedValueOnce({ stdout: ' M src/a.ts\n?? docs/prd/1-test.md\n' } as never) // git status
+      .mockResolvedValueOnce({} as never) // git add -A
+      .mockResolvedValueOnce({ stdout: 'docs/prd/1-test.md\nsrc/a.ts\n' } as never) // git diff --cached --name-only
+      .mockResolvedValueOnce({} as never) // git reset
+    mockCheckDiffSize.mockResolvedValue({
+      ok: true,
+      stats: { changedFiles: 2, insertions: 10, deletions: 1, totalChangedLines: 11 },
+      reason: null,
+    })
+
+    const result = await commitChanges('/tmp/wt', 1, 'Planning', limits, {
+      planningOnlyPrdPath: 'docs/prd/1-test.md',
+    })
+
+    expect(result.committed).toBe(false)
+    expect(result.blockRun).toBe(true)
+    expect(result.reason).toContain('Planning-only guard')
+    expect(mockExeca).toHaveBeenCalledWith('git', ['diff', '--cached', '--name-only'], { cwd: '/tmp/wt' })
+  })
+
+  it('allows planning-only commit when only the expected PRD file is staged', async () => {
+    mockExeca
+      .mockResolvedValueOnce({ stdout: '?? docs/prd/1-test.md\n' } as never) // git status
+      .mockResolvedValueOnce({} as never) // git add -A
+      .mockResolvedValueOnce({ stdout: 'docs/prd/1-test.md\n' } as never) // git diff --cached --name-only
+      .mockResolvedValueOnce({} as never) // git commit
+    mockCheckDiffSize.mockResolvedValue({
+      ok: true,
+      stats: { changedFiles: 1, insertions: 50, deletions: 0, totalChangedLines: 50 },
+      reason: null,
+    })
+
+    const result = await commitChanges('/tmp/wt', 1, 'Planning', limits, {
+      planningOnlyPrdPath: 'docs/prd/1-test.md',
+    })
+
+    expect(result).toEqual({ committed: true, reason: null, blockRun: false })
   })
 })

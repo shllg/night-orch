@@ -109,6 +109,7 @@ const LabelsSchema = z.object({
   reviewReady: z.string().default('orch:review-ready'),
   error: z.string().default('orch:error'),
   retry: z.string().default('orch:retry'),
+  planning: z.string().default('orch:planning'),
   mergeQueued: z.string().default('orch:merge-queued'),
   merging: z.string().default('orch:merging'),
   mergeFailed: z.string().default('orch:merge-failed'),
@@ -139,6 +140,10 @@ const PromptsSchema = z.object({
   plannerSystem: z.string().optional(),
   coderSystem: z.string().optional(),
   reviewerSystem: z.string().optional(),
+})
+
+const PlanningConfigSchema = z.object({
+  prdDirectory: z.string().default('docs/prd'),
 })
 
 // --- Workflow schemas ---
@@ -201,6 +206,7 @@ const RepoConfigSchema = z.object({
   environment: EnvironmentConfigSchema.optional(),
   verify: z.array(CommandSpecSchema).default([]),
   prompts: PromptsSchema.optional(),
+  planning: PlanningConfigSchema.default({}),
   selectors: SelectorsSchema.default({}),
   agents: z.record(z.string()).default({}),
   workflow: z.string().optional(),

@@ -26,7 +26,11 @@ function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
     repo: 'org/repo',
     issueNumber: 1,
     issue: { number: 1, nodeId: '', title: '', body: '', labels: [], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
-    repoConfig: { verify: ['pnpm test'] } as RunContext['repoConfig'],
+    repoConfig: {
+      verify: ['pnpm test'],
+      labels: { planning: 'orch:planning' },
+      planning: { prdDirectory: 'docs/prd' },
+    } as RunContext['repoConfig'],
     roles: { planner: 'claude', coder: 'claude', reviewer: 'claude' },
     triageResult: { level: 'standard', reason: '' },
     adjustedLimits: { maxReviewIterations: 4, maxTotalAgentPasses: 10, workerTimeoutSeconds: 1800 },
@@ -67,6 +71,33 @@ describe('decide', () => {
     })
     const d = decide(ctx, loopConfig, securityConfig)
     expect(d.action).toBe('publish')
+  })
+
+  it('planning label + coder output present → publish without review/verify', () => {
+    const ctx = makeCtx({
+      issue: { ...makeCtx().issue, labels: ['orch:planning'] },
+      codeResult: {
+        summary: 'Wrote PRD',
+        changedFiles: ['docs/prd/1-test.md'],
+        remainingUncertainty: null,
+        blockers: null,
+      },
+      reviewResult: null,
+      verifyResults: [],
+    })
+    const d = decide(ctx, loopConfig, securityConfig)
+    expect(d.action).toBe('publish')
+  })
+
+  it('planning label + missing coder output → block', () => {
+    const ctx = makeCtx({
+      issue: { ...makeCtx().issue, labels: ['orch:planning'] },
+      codeResult: null,
+      reviewResult: null,
+      verifyResults: [],
+    })
+    const d = decide(ctx, loopConfig, securityConfig)
+    expect(d.action).toBe('block')
   })
 
   it('APPROVED + verify fail → iterate', () => {
@@ -189,7 +220,7 @@ describe('decide', () => {
 
   it('APPROVED with no verify commands + requireVerificationPass=false → publish', () => {
     const ctx = makeCtx({
-      repoConfig: { verify: [] } as RunContext['repoConfig'],
+      repoConfig: { ...makeCtx().repoConfig, verify: [] },
       verifyResults: [],
       reviewResult: {
         verdict: 'APPROVED',

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolveWorkflow, DEFAULT_WORKFLOW } from '../../src/loop/workflow.js'
+import { resolveWorkflow, DEFAULT_WORKFLOW, PLANNING_ONLY_WORKFLOW } from '../../src/loop/workflow.js'
 import type { Config, RepoConfig } from '../../src/config/schema.js'
 
 function makeRepoConfig(overrides: Partial<RepoConfig> = {}): RepoConfig {
@@ -9,8 +9,9 @@ function makeRepoConfig(overrides: Partial<RepoConfig> = {}): RepoConfig {
     localPath: '/tmp/repo',
     baseBranch: 'main',
     branchPrefix: 'orch',
-    labels: { ready: ['orch:ready'], running: 'orch:running', blocked: 'orch:blocked', needsHuman: 'orch:needs-human', reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry' },
+    labels: { ready: ['orch:ready'], running: 'orch:running', blocked: 'orch:blocked', needsHuman: 'orch:needs-human', reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry', planning: 'orch:planning' },
     defaults: { planner: 'claude', coder: 'claude', reviewer: 'claude', doneMode: 'pr-ready', notifyPriority: 'normal', prMentions: [] },
+    planning: { prdDirectory: 'docs/prd' },
     verify: [],
     selectors: { includeLabelsAny: [], excludeLabelsAny: [] },
     agents: {},
@@ -37,7 +38,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
 
 describe('resolveWorkflow', () => {
   it('returns DEFAULT_WORKFLOW when no workflow configured', () => {
-    const result = resolveWorkflow(makeRepoConfig(), makeConfig(), 'standard')
+    const result = resolveWorkflow(makeRepoConfig(), makeConfig(), [], 'standard')
     expect(result).toBe(DEFAULT_WORKFLOW)
   })
 
@@ -45,6 +46,7 @@ describe('resolveWorkflow', () => {
     const result = resolveWorkflow(
       makeRepoConfig({ workflow: 'nonexistent' }),
       makeConfig(),
+      [],
       'standard',
     )
     expect(result).toBe(DEFAULT_WORKFLOW)
@@ -61,10 +63,21 @@ describe('resolveWorkflow', () => {
     const result = resolveWorkflow(
       makeRepoConfig({ workflow: 'minimal' }),
       makeConfig({ workflows: { minimal: customWorkflow } }),
+      [],
       'standard',
     )
     expect(result.steps).toHaveLength(3)
     expect(result.steps[0]!.id).toBe('code')
+  })
+
+  it('returns PLANNING_ONLY_WORKFLOW when planning label is present', () => {
+    const result = resolveWorkflow(
+      makeRepoConfig({ workflow: 'minimal' }),
+      makeConfig(),
+      ['orch:planning'],
+      'standard',
+    )
+    expect(result).toBe(PLANNING_ONLY_WORKFLOW)
   })
 })
 

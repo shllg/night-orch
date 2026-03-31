@@ -30,6 +30,10 @@ const labelConfig: LabelConfig = {
   reviewReady: 'orch:review-ready',
   error: 'orch:error',
   retry: 'orch:retry',
+  planning: 'orch:planning',
+  mergeQueued: 'orch:merge-queued',
+  merging: 'orch:merging',
+  mergeFailed: 'orch:merge-failed',
 }
 
 function makePR(num: number): ForgePR {
@@ -71,7 +75,8 @@ function makeCtx(): RunContext {
       localPath: '/tmp/repo',
       baseBranch: 'main',
       branchPrefix: 'orch',
-      labels: { ready: ['orch:ready'], running: 'orch:running', blocked: ['orch:blocked'], reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry' },
+      labels: { ready: ['orch:ready'], running: 'orch:running', blocked: ['orch:blocked'], reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry', planning: 'orch:planning' },
+      planning: { prdDirectory: 'docs/prd' },
       defaults: { planner: 'claude', coder: 'claude', reviewer: 'claude', doneMode: 'pr-ready', notifyPriority: 'normal', prMentions: [] },
       verify: [],
       selectors: { includeLabelsAny: [], excludeLabelsAny: [] },

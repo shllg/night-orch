@@ -99,6 +99,8 @@ Each repo can have its own worker profiles, verify commands, workflow, merge que
 5. **Publishing** — approved changes are committed, pushed, and a PR is created on the remote
 6. **Merge queue** (optional) — approved PRs are batched, tested, and merged automatically
 
+Planning-only override: if an issue also has the planning label (default `orch:planning`), night-orch runs a planning-only workflow and publishes exactly one PRD markdown file (no code/test/config changes).
+
 ### Label lifecycle
 
 ```

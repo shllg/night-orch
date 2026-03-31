@@ -282,6 +282,7 @@ Reference a workflow in `repos[].workflow` by name.
 | `labels` | object | no | object with defaults | Orchestration label names. |
 | `labelConfig` | record | no | `{}` | Label metadata overrides for `labels-init`. |
 | `defaults` | object | no | object with defaults | Default roles + mention settings. |
+| `planning` | object | no | object with defaults | Planning-only mode settings (PRD path). |
 | `environment` | object | no | none | Shared/dedicated env setup. |
 | `verify` | `CommandSpec[]` | no | `[]` | Verify commands run in worktree. |
 | `prompts` | object | no | none | Optional custom system prompt template paths. |
@@ -301,6 +302,7 @@ Reference a workflow in `repos[].workflow` by name.
 | `reviewReady` | string | `orch:review-ready` |  |
 | `error` | string | `orch:error` |  |
 | `retry` | string | `orch:retry` |  |
+| `planning` | string | `orch:planning` | When present on an issue, night-orch switches to planning-only mode and publishes only a PRD markdown file. |
 | `mergeQueued` | string | `orch:merge-queued` | Set when PR enters the merge queue. |
 | `merging` | string | `orch:merging` | Set while staging branch CI is running. |
 | `mergeFailed` | string | `orch:merge-failed` | Set when the merge queue identifies this PR as the culprit. |
@@ -334,6 +336,18 @@ Role labels can override these defaults per issue:
 - `plan:claude` / `plan:codex`
 - `code:claude` / `code:codex`
 - `review:claude` / `review:codex`
+
+Planning-only mode label:
+
+- `orch:planning` (or whatever `repos[].labels.planning` is set to)
+
+When this label is present, night-orch uses a planning-only workflow and must produce a PR containing exactly one PRD markdown file.
+
+### `repos[].planning`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `prdDirectory` | string | `docs/prd` | Repository-relative directory where planning-mode PRD files are created. |
 
 ### `repos[].environment`
 

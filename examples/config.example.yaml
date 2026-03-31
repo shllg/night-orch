@@ -120,9 +120,12 @@ repos:
       reviewReady: orch:review-ready
       error: orch:error
       retry: orch:retry
+      planning: orch:planning
       # mergeQueued: orch:merge-queued
       # merging: orch:merging
       # mergeFailed: orch:merge-failed
+    planning:
+      prdDirectory: docs/prd
     # Optional per-label metadata overrides used by `night-orch labels-init`
     labelConfig:
       orch:ready:
@@ -131,6 +134,9 @@ repos:
       orch:running:
         color: FBCA04
         description: Currently being processed by night-orch
+      orch:planning:
+        color: C2E0C6
+        description: Planning-only mode (PRD markdown only)
     defaults:
       planner: claude
       coder: codex

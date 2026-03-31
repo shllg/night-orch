@@ -11,6 +11,7 @@ describe('buildLabelBootstrapDefinitions', () => {
         reviewReady: 'orch:review-ready',
         error: 'orch:error',
         retry: 'orch:retry',
+        planning: 'orch:planning',
       },
       labelConfig: {},
     })
@@ -23,6 +24,7 @@ describe('buildLabelBootstrapDefinitions', () => {
       'orch:review-ready',
       'orch:error',
       'orch:retry',
+      'orch:planning',
     ])
     expect(result.find((l) => l.name === 'orch:ready')).toEqual({
       name: 'orch:ready',
@@ -40,6 +42,7 @@ describe('buildLabelBootstrapDefinitions', () => {
         reviewReady: 'team:review',
         error: 'team:error',
         retry: 'team:retry',
+        planning: 'team:planning',
       },
       labelConfig: {
         'team:triage': { color: 'abcdef', description: 'Ready in team workflow' },
@@ -68,6 +71,7 @@ describe('buildLabelBootstrapDefinitions', () => {
         reviewReady: 'orch:shared',
         error: 'orch:shared',
         retry: 'orch:shared',
+        planning: 'orch:shared',
       },
       labelConfig: {},
     })

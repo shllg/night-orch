@@ -5,6 +5,7 @@ A self-hosted Node.js/TypeScript CLI that autonomously processes GitHub/Forgejo 
 ## Features
 
 - **Configurable workflows** — YAML-defined pipelines (Plan→Code→Verify→Review or custom)
+- **Planning-only mode** — label an issue to produce a single PRD markdown artifact (no code changes)
 - **Multi-agent support** — Claude, Codex, Gemini, and 17+ agents via ACP protocol
 - **Issue decomposition** — automatically splits complex issues into parallel sub-tasks
 - **Merge queue** — Bors-style batch-and-bisect for automated PR merging
@@ -71,6 +72,8 @@ mise run labels-init
 5. Reviewer can bounce back to coder (up to configured max iterations)
 6. Push branch, create/update PR, label `orch:review-ready`
 7. Notify via console, webhook, GitHub comment, or email
+
+Special case: issues labeled `orch:planning` (configurable) run in planning-only mode and generate only one PRD markdown file in the configured PRD directory.
 
 The orchestrator's job ends when the PR is ready. A human merges.
 

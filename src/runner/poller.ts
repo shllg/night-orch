@@ -38,6 +38,7 @@ import { processMergeQueue } from '../merge-queue/runner.js'
 import { decomposeIssue, shouldAttemptDecompose } from '../discovery/decomposer.js'
 import { executeParallelSubtasks } from '../loop/parallel.js'
 import { buildWorkerEnv } from '../workers/env.js'
+import { isPlanningIssue } from '../planning/mode.js'
 
 const STATUS_MARKER = markerTag('status')
 
@@ -204,7 +205,8 @@ export async function pollOnce(
         await notifier.dispatch(makePayload('run_started', repoConfig.repo, discoveredIssue.issue))
 
         // Check if prior run left tainted work that should be discarded
-        const resetToBase = shouldResetBranch(runManager, repoConfig.repo, discoveredIssue.issue.number, run.id)
+        const planningMode = isPlanningIssue(discoveredIssue.issue.labels, repoConfig)
+        const resetToBase = planningMode || shouldResetBranch(runManager, repoConfig.repo, discoveredIssue.issue.number, run.id)
 
         // Create worktree
         await worktreeManager.ensure({
@@ -275,6 +277,7 @@ export async function pollOnce(
         // Check if decomposition is enabled and appropriate
         const shouldDecompose = config.loop.decompose
           && discoveredIssue.triage.level === 'standard'
+          && !planningMode
           && shouldAttemptDecompose(discoveredIssue.issue)
 
         if (shouldDecompose) {
@@ -301,7 +304,7 @@ export async function pollOnce(
                 coder: createWorkerAdapter(coderProfile),
                 reviewer: createWorkerAdapter(reviewerProfile),
               },
-              workflow: resolveWorkflow(repoConfig, config, discoveredIssue.triage.level),
+              workflow: resolveWorkflow(repoConfig, config, discoveredIssue.issue.labels, discoveredIssue.triage.level),
               envOverrides: envSetup?.envOverrides ?? {},
               metrics,
             }
@@ -347,7 +350,7 @@ export async function pollOnce(
             coder: createWorkerAdapter(coderProfile),
             reviewer: createWorkerAdapter(reviewerProfile),
           },
-          workflow: resolveWorkflow(repoConfig, config, discoveredIssue.triage.level),
+          workflow: resolveWorkflow(repoConfig, config, discoveredIssue.issue.labels, discoveredIssue.triage.level),
           envOverrides: envSetup?.envOverrides ?? {},
           metrics,
           onPlanReady: async (ctx) => {

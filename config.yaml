@@ -103,6 +103,9 @@ repos:
       reviewReady: orch:review-ready
       error: orch:error
       retry: orch:retry
+      planning: orch:planning
+    planning:
+      prdDirectory: docs/prd
     defaults:
       planner: claude
       coder: codex
