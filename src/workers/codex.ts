@@ -1,5 +1,6 @@
 import type { WorkerAdapter, WorkerTaskInput, WorkerTaskResult } from './types.js'
 import { execWithTimeout } from './timeout.js'
+import { streamingExec } from './streaming-exec.js'
 import { parsePlannerOutput } from './parsers/planner.js'
 import { parseCoderOutput } from './parsers/coder.js'
 import { parseReviewerOutput } from './parsers/reviewer.js'
@@ -9,6 +10,7 @@ import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { readFile, unlink, mkdir } from 'node:fs/promises'
+import { emitWorkerEvent, summarizeValue, isRecord } from './events.js'
 
 export class CodexWorkerAdapter implements WorkerAdapter {
   async runTask(input: WorkerTaskInput): Promise<WorkerTaskResult> {
@@ -33,15 +35,28 @@ export class CodexWorkerAdapter implements WorkerAdapter {
       'Running Codex worker',
     )
 
-    const result = await execWithTimeout(command, args, {
+    emitWorkerEvent(input, 'session_start', {
+      agent: 'codex',
+      continueSessionId: input.continueSessionId ?? null,
+    })
+
+    const result = await streamingExec({
+      command,
+      args,
       cwd: input.worktreePath,
       env: input.env,
       timeoutMs: input.timeoutSeconds * 1000,
       stdin: input.prompt,
+      onStdoutLine: (line) => {
+        emitCodexStreamEvents(line, input)
+      },
     })
 
     if (result.timedOut) {
       logger.warn({ role: input.role, durationMs: result.durationMs }, 'Codex worker timed out')
+      emitWorkerEvent(input, 'error', {
+        error: `Codex worker timed out after ${input.timeoutSeconds}s`,
+      })
     }
 
     // Read the final message from the output file (preferred),
@@ -65,6 +80,17 @@ export class CodexWorkerAdapter implements WorkerAdapter {
 
     // Parse output based on role
     const { parsed, parseError } = parseOutput(input.role, assistantText)
+
+    if (result.stderr.trim().length > 0) {
+      emitWorkerEvent(input, 'error', { error: summarizeValue(result.stderr, 400) })
+    }
+
+    emitWorkerEvent(input, 'session_end', {
+      exitCode: result.exitCode,
+      timedOut: result.timedOut,
+      durationMs: result.durationMs,
+      sessionId,
+    })
 
     return {
       rawOutput: result.stdout,
@@ -90,6 +116,57 @@ export class CodexWorkerAdapter implements WorkerAdapter {
       return { available: false, version: null }
     } catch {
       return { available: false, version: null }
+    }
+  }
+}
+
+function emitCodexStreamEvents(line: string, input: WorkerTaskInput): void {
+  const event = tryParseJson(line)
+  if (!isRecord(event)) return
+  const type = event['type']
+
+  if (type === 'item.completed' && isRecord(event['item'])) {
+    const item = event['item']
+    if (item['type'] === 'agent_message' && typeof item['text'] === 'string') {
+      emitWorkerEvent(input, 'text', { text: item['text'] })
+      return
+    }
+    if ((item['type'] === 'function_call' || item['type'] === 'tool_call') && typeof item['name'] === 'string') {
+      emitWorkerEvent(input, 'tool_call', {
+        toolName: item['name'],
+        toolArgs: summarizeValue(item['arguments'] ?? item['args']),
+      })
+      return
+    }
+    if (item['type'] === 'function_call_output' || item['type'] === 'tool_result') {
+      emitWorkerEvent(input, 'tool_result', { text: summarizeValue(item['output'] ?? item['result']) })
+      return
+    }
+    if (item['type'] === 'reasoning' && typeof item['text'] === 'string') {
+      emitWorkerEvent(input, 'thinking', { text: item['text'] })
+    }
+    return
+  }
+
+  if (type === 'function_call') {
+    emitWorkerEvent(input, 'tool_call', {
+      toolName: typeof event['name'] === 'string' ? event['name'] : 'tool',
+      toolArgs: summarizeValue(event['arguments'] ?? event['args']),
+    })
+    return
+  }
+
+  if (type === 'error') {
+    emitWorkerEvent(input, 'error', { error: summarizeValue(event['error']) })
+    return
+  }
+
+  if (type === 'response.completed' || type === 'turn.completed') {
+    const usage = event['usage']
+    if (!isRecord(usage)) return
+    const outputTokens = usage['output_tokens']
+    if (typeof outputTokens === 'number') {
+      emitWorkerEvent(input, 'turn_complete', { tokenCount: outputTokens })
     }
   }
 }
@@ -186,8 +263,12 @@ function extractCodexThreadId(raw: string): string | null {
   return null
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
+function tryParseJson(line: string): unknown | null {
+  try {
+    return JSON.parse(line)
+  } catch {
+    return null
+  }
 }
 
 function parseOutput(role: string, raw: string): { parsed: WorkerTaskResult['parsed']; parseError: string | null } {

@@ -230,6 +230,15 @@ const MetricsSchema = z.object({
   host: z.string().default('127.0.0.1'),
 })
 
+// --- Observability schema ---
+
+const ObservabilitySchema = z.object({
+  agentStreaming: z.boolean().default(true),
+  eventRetention: z.number().int().min(100).max(10_000).default(1000),
+  sessionLogs: z.boolean().default(true),
+  sessionLogRetention: z.number().int().positive().default(7),
+})
+
 // --- Top-level config schema ---
 
 export const ConfigSchema = z.object({
@@ -284,6 +293,8 @@ export const ConfigSchema = z.object({
   workerProfiles: z.record(WorkerProfileSchema).default({}),
 
   metrics: MetricsSchema.default({}),
+
+  observability: ObservabilitySchema.default({}),
 
   mcp: z.object({
     enabled: z.boolean().default(false),

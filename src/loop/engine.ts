@@ -11,6 +11,7 @@ import { CostTracker } from './cost.js'
 import { logger } from '../utils/logger.js'
 import type Database from 'better-sqlite3'
 import { buildPlanningPrdPath, isPlanningIssue } from '../planning/mode.js'
+import type { AgentEvent } from '../events/types.js'
 
 export interface LoopDependencies {
   db: Database.Database
@@ -19,6 +20,7 @@ export interface LoopDependencies {
   workflow: ResolvedWorkflow
   envOverrides?: Record<string, string>
   metrics?: MetricsService
+  onAgentEvent?: (event: AgentEvent) => void
   onPlanReady?: (ctx: RunContext) => Promise<void>
 }
 
@@ -42,6 +44,7 @@ export async function executeLoop(
     config: deps.config,
     envOverrides: deps.envOverrides,
     metrics: deps.metrics,
+    onAgentEvent: deps.onAgentEvent,
   }
 
   const steps = deps.workflow.steps

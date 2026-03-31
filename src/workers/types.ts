@@ -1,15 +1,19 @@
 import type { TriageLevel } from '../discovery/triage.js'
+import type { AgentEvent } from '../events/types.js'
 
 export type AgentRole = 'planner' | 'coder' | 'reviewer'
 export type ReviewVerdict = 'APPROVED' | 'CHANGES_REQUIRED' | 'BLOCKED'
 
 export interface WorkerTaskInput {
+  runId?: string
+  phase?: string
   role: AgentRole
   worktreePath: string
   prompt: string
   profile: WorkerProfileInput
   timeoutSeconds: number
   env: Record<string, string>
+  onEvent?: (event: AgentEvent) => void
   /** Session ID from a prior phase to continue the conversation. */
   continueSessionId?: string | null
 }

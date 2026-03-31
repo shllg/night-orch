@@ -53,7 +53,8 @@ describe('MCP Tools', () => {
     expect(names).toContain('night-orch-cleanup')
     expect(names).toContain('night-orch-poll')
     expect(names).toContain('night-orch-list-issues')
-    expect(tools.length).toBe(9)
+    expect(names).toContain('night-orch-stream-events')
+    expect(tools.length).toBe(10)
   })
 
   it('status tool returns summary', async () => {
@@ -98,6 +99,35 @@ describe('MCP Tools', () => {
     const result = await handleToolCall('night-orch-cost-report', { days: 7 }, deps) as { totalCostUsd: number; dailyBudgetUsd: number }
     expect(result.totalCostUsd).toBe(0)
     expect(result.dailyBudgetUsd).toBe(50)
+  })
+
+  it('stream-events returns events and supports since cursor', async () => {
+    const runManager = new RunManager(db)
+    const run = runManager.create({ repo: 'org/repo', issueNumber: 5, issueNodeId: '', planner: 'claude', coder: 'claude', reviewer: 'claude' })
+
+    db.prepare(
+      `INSERT INTO agent_events (run_id, phase, role, event_type, data, created_at)
+       VALUES (?, 'code', 'coder', 'tool_call', '{"toolName":"Read"}', datetime('now'))`,
+    ).run(run.id)
+    db.prepare(
+      `INSERT INTO agent_events (run_id, phase, role, event_type, data, created_at)
+       VALUES (?, 'code', 'coder', 'text', '{"text":"Working"}', datetime('now'))`,
+    ).run(run.id)
+
+    const first = await handleToolCall('night-orch-stream-events', { runId: run.id, limit: 1 }, deps) as {
+      events: Array<{ id: number }>
+      lastEventId: number
+    }
+    expect(first.events).toHaveLength(1)
+    expect(first.lastEventId).toBe(first.events[0]!.id)
+
+    const second = await handleToolCall('night-orch-stream-events', { runId: run.id, since: first.lastEventId }, deps) as {
+      events: Array<{ id: number }>
+      lastEventId: number
+    }
+    expect(second.events).toHaveLength(1)
+    expect(second.events[0]!.id).toBeGreaterThan(first.lastEventId)
+    expect(second.lastEventId).toBe(second.events[0]!.id)
   })
 
   it('unknown tool throws', async () => {

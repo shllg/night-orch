@@ -4,6 +4,7 @@ import { parseCoderOutput } from './parsers/coder.js'
 import { parseReviewerOutput } from './parsers/reviewer.js'
 import { logger } from '../utils/logger.js'
 import { loadAcpxRuntime } from './acpx-imports.js'
+import { emitWorkerEvent, isRecord, summarizeValue } from './events.js'
 
 export class AcpWorkerAdapter implements WorkerAdapter {
   async runTask(input: WorkerTaskInput): Promise<WorkerTaskResult> {
@@ -15,7 +16,13 @@ export class AcpWorkerAdapter implements WorkerAdapter {
     let tokenUsage: { promptTokens: number; completionTokens: number } | undefined
 
     const textParts: string[] = []
+    emitWorkerEvent(input, 'session_start', {
+      agent: 'acp',
+      continueSessionId: input.continueSessionId ?? null,
+    })
+
     const onSessionUpdate = (notification: Record<string, unknown>): void => {
+      emitAcpUpdateEvent(notification, input)
       if (notification['type'] === 'text' && typeof notification['text'] === 'string') {
         textParts.push(notification['text'])
       }
@@ -70,6 +77,13 @@ export class AcpWorkerAdapter implements WorkerAdapter {
       if (isAcpTimeout(err)) timedOut = true
       exitCode = 1
       logger.error({ role: input.role, err }, 'ACP worker failed')
+      emitWorkerEvent(input, 'error', { error: summarizeValue(err) })
+      emitWorkerEvent(input, 'session_end', {
+        exitCode,
+        timedOut,
+        durationMs,
+        sessionId,
+      })
       return {
         rawOutput: assistantText || textParts.join(''),
         exitCode,
@@ -91,6 +105,13 @@ export class AcpWorkerAdapter implements WorkerAdapter {
     )
 
     const { parsed, parseError } = parseOutput(input.role, assistantText)
+
+    emitWorkerEvent(input, 'session_end', {
+      exitCode,
+      timedOut,
+      durationMs,
+      sessionId,
+    })
 
     return {
       rawOutput: assistantText,
@@ -117,6 +138,50 @@ export class AcpWorkerAdapter implements WorkerAdapter {
 function isAcpTimeout(err: unknown): boolean {
   if (typeof err !== 'object' || err === null) return false
   return (err as Record<string, unknown>)['outputCode'] === 'TIMEOUT'
+}
+
+function emitAcpUpdateEvent(notification: Record<string, unknown>, input: WorkerTaskInput): void {
+  const type = notification['type']
+
+  if (type === 'text' && typeof notification['text'] === 'string') {
+    emitWorkerEvent(input, 'text', { text: notification['text'] })
+    return
+  }
+
+  if (type === 'thinking' && typeof notification['text'] === 'string') {
+    emitWorkerEvent(input, 'thinking', { text: notification['text'] })
+    return
+  }
+
+  if ((type === 'tool_call' || type === 'tool_use') && typeof notification['toolName'] === 'string') {
+    emitWorkerEvent(input, 'tool_call', {
+      toolName: notification['toolName'],
+      toolArgs: summarizeValue(notification['toolArgs']),
+    })
+    return
+  }
+
+  if (type === 'tool_result') {
+    emitWorkerEvent(input, 'tool_result', { text: summarizeValue(notification['result']) })
+    return
+  }
+
+  if (type === 'turn_complete') {
+    const tokenCount = typeof notification['tokenCount'] === 'number'
+      ? notification['tokenCount']
+      : undefined
+    emitWorkerEvent(input, 'turn_complete', { tokenCount })
+    return
+  }
+
+  if (type === 'error') {
+    emitWorkerEvent(input, 'error', { error: summarizeValue(notification['error']) })
+    return
+  }
+
+  if (isRecord(notification['event'])) {
+    emitWorkerEvent(input, 'text', { text: summarizeValue(notification['event']) })
+  }
 }
 
 function parseOutput(

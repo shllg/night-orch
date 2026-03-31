@@ -1,10 +1,12 @@
 import type { WorkerAdapter, WorkerTaskInput, WorkerTaskResult } from './types.js'
 import { execWithTimeout } from './timeout.js'
+import { streamingExec } from './streaming-exec.js'
 import { parsePlannerOutput } from './parsers/planner.js'
 import { parseCoderOutput } from './parsers/coder.js'
 import { parseReviewerOutput } from './parsers/reviewer.js'
 import { buildWorkerCommand } from './command.js'
 import { logger } from '../utils/logger.js'
+import { emitWorkerEvent, isRecord, summarizeValue } from './events.js'
 
 export class ClaudeWorkerAdapter implements WorkerAdapter {
   async runTask(input: WorkerTaskInput): Promise<WorkerTaskResult> {
@@ -30,15 +32,28 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
       'Running Claude worker',
     )
 
-    const result = await execWithTimeout(command, args, {
+    emitWorkerEvent(input, 'session_start', {
+      agent: 'claude',
+      continueSessionId: input.continueSessionId ?? null,
+    })
+
+    const result = await streamingExec({
+      command,
+      args,
       cwd: input.worktreePath,
       env: input.env,
       timeoutMs: input.timeoutSeconds * 1000,
       stdin: input.prompt,
+      onStdoutLine: (line) => {
+        emitClaudeStreamEvents(line, input)
+      },
     })
 
     if (result.timedOut) {
       logger.warn({ role: input.role, durationMs: result.durationMs }, 'Claude worker timed out')
+      emitWorkerEvent(input, 'error', {
+        error: `Claude worker timed out after ${input.timeoutSeconds}s`,
+      })
     }
 
     // With --output-format json, extract assistant text and session ID from the JSON envelope.
@@ -51,8 +66,19 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
       logger.warn({ role: input.role, stderrTail: result.stderr.slice(-1000) }, 'Claude produced no stdout — stderr may contain error details')
     }
 
+    if (result.stderr.trim().length > 0) {
+      emitWorkerEvent(input, 'error', { error: summarizeValue(result.stderr, 400) })
+    }
+
     // Parse output based on role
     const { parsed, parseError } = parseOutput(input.role, assistantText)
+
+    emitWorkerEvent(input, 'session_end', {
+      exitCode: result.exitCode,
+      timedOut: result.timedOut,
+      durationMs: result.durationMs,
+      sessionId,
+    })
 
     return {
       rawOutput: result.stdout,
@@ -79,6 +105,70 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
     } catch {
       return { available: false, version: null }
     }
+  }
+}
+
+function emitClaudeStreamEvents(line: string, input: WorkerTaskInput): void {
+  const parsed = tryParseJson(line)
+  if (!parsed) return
+
+  if (Array.isArray(parsed)) {
+    for (const event of parsed) {
+      if (!isRecord(event)) continue
+      emitClaudeEvent(event, input)
+    }
+    return
+  }
+
+  if (!isRecord(parsed)) return
+  emitClaudeEvent(parsed, input)
+}
+
+function emitClaudeEvent(event: Record<string, unknown>, input: WorkerTaskInput): void {
+  const eventType = event['type']
+  if (eventType === 'system' && isRecord(event['session'])) {
+    const sid = event['session']['session_id']
+    if (typeof sid === 'string') {
+      emitWorkerEvent(input, 'session_start', { sessionId: sid, agent: 'claude' })
+    }
+    return
+  }
+
+  if (eventType === 'assistant') {
+    const message = event['message']
+    if (!isRecord(message) || !Array.isArray(message['content'])) return
+    for (const block of message['content']) {
+      if (!isRecord(block)) continue
+      const blockType = block['type']
+      if (blockType === 'text' && typeof block['text'] === 'string') {
+        emitWorkerEvent(input, 'text', { text: block['text'] })
+      } else if (blockType === 'tool_use') {
+        emitWorkerEvent(input, 'tool_call', {
+          toolName: typeof block['name'] === 'string' ? block['name'] : 'tool',
+          toolArgs: summarizeValue(block['input']),
+        })
+      } else if (blockType === 'tool_result') {
+        emitWorkerEvent(input, 'tool_result', { text: summarizeValue(block['content']) })
+      } else if (blockType === 'thinking') {
+        emitWorkerEvent(input, 'thinking', { text: summarizeValue(block['thinking'] ?? block['text']) })
+      }
+    }
+    return
+  }
+
+  if (eventType === 'result') {
+    const usage = event['usage']
+    if (isRecord(usage)) {
+      const outputTokens = usage['output_tokens']
+      if (typeof outputTokens === 'number') {
+        emitWorkerEvent(input, 'turn_complete', { tokenCount: outputTokens })
+      }
+    }
+    return
+  }
+
+  if (eventType === 'error') {
+    emitWorkerEvent(input, 'error', { error: summarizeValue(event['error']) })
   }
 }
 
@@ -160,8 +250,12 @@ function extractFromJsonOutput(raw: string): { assistantText: string; sessionId:
   return { assistantText: raw, sessionId: null }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
+function tryParseJson(line: string): unknown | null {
+  try {
+    return JSON.parse(line)
+  } catch {
+    return null
+  }
 }
 
 function getTextBlock(value: unknown): string | null {
