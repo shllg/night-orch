@@ -12,7 +12,7 @@ export type BlockReason =
   | 'ambiguous_review'
   | 'verify_config'
 
-export type RunMode = 'fresh' | 'followup'
+export type RunMode = 'fresh' | 'followup' | 'rebase'
 
 export type LoopPhase = string
 

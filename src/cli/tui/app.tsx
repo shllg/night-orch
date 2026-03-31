@@ -5,7 +5,7 @@ import { RetryEngine } from '../../ops/retry.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { CleanupEngine } from '../../ops/cleanup.js'
 import { pollOnce } from '../../runner/poller.js'
-import { rebaseAndCheck } from '../../ops/rebase-and-check.js'
+import { queueRebase } from '../../ops/rebase-and-check.js'
 import { createForgeAdapter } from '../../forge/factory.js'
 import type Database from 'better-sqlite3'
 import { ActionsBar } from './actions-bar.js'
@@ -191,9 +191,8 @@ export function App({ db, config, pollIntervalMs = 2000, dryRun = false }: AppPr
 
   const runRebase = useCallback(async () => {
     await runAction('rebase', async () => {
-      // Use selected run if it has a branch, otherwise find the most recent review_ready run
       const target = selectedRun ?? runs.find((r) => r.status === 'review_ready')
-      if (!target) throw new Error('No review_ready run found')
+      if (!target) throw new Error('No run selected')
       const repoConfig = config.repos.find((r) => r.repo === target.repo)
       if (!repoConfig) throw new Error(`Repo not found in config: ${target.repo}`)
       const forge = createForgeAdapter(repoConfig, config)
@@ -202,8 +201,8 @@ export function App({ db, config, pollIntervalMs = 2000, dryRun = false }: AppPr
         const auth = await forge.validateAuth()
         botUser = auth.user
       } catch { /* best effort */ }
-      const result = await rebaseAndCheck(db, forge, repoConfig, target.issue_number, botUser, true)
-      return `${target.repo}#${target.issue_number}: ${result.rebaseResult}${result.requeued ? ' (re-queued)' : ''}`
+      const result = await queueRebase(db, forge, repoConfig, target.issue_number, botUser)
+      return `${target.repo}#${target.issue_number}: ${result.reason}`
     })
   }, [config, db, runAction, runs, selectedRun])
 

@@ -12,145 +12,123 @@ import { logger } from '../utils/logger.js'
 
 const STATUS_MARKER = markerTag('status')
 
-export interface RebaseAndCheckResult {
-  rebaseResult: 'up_to_date' | 'rebased' | 'conflict' | 'error'
-  verifyPassed: boolean | null  // null = verify not run (no rebase needed or rebase failed)
-  requeued: boolean
-}
-
 /**
- * Rebase a PR's branch onto the latest base, then run verify commands
- * to check if code adjustments are needed. If verify fails, re-queue
- * the issue so the coder can fix it.
+ * Queue an issue for rebase-and-re-evaluate.
+ *
+ * This does NOT perform the rebase inline. It transitions the run
+ * to 'queued' with runMode='rebase' so the poller picks it up on
+ * the next cycle. The poller will:
+ * 1. Rebase the branch onto latest base
+ * 2. Run verify commands
+ * 3. If verify fails, run a full code→verify→review cycle to fix
+ *
+ * This is the right approach when PRs conceptually conflict —
+ * a git rebase might succeed but the code could be semantically broken.
  */
-export async function rebaseAndCheck(
+export async function queueRebase(
   db: Database.Database,
   forge: ForgeAdapter,
   repoConfig: RepoConfig,
   issueNumber: number,
   botUser: string,
-  checkAfter: boolean,
-): Promise<RebaseAndCheckResult> {
+): Promise<{ queued: boolean; reason: string }> {
   const runManager = new RunManager(db)
   const labelConfig = buildLabelConfig(repoConfig)
 
   // Find the latest run with a branch for this issue
   const run = runManager.getByRepoAndIssue(repoConfig.repo, issueNumber)
-  if (!run || !run.branchName || !run.worktreePath) {
-    logger.warn({ repo: repoConfig.repo, issueNumber }, 'No run with branch found for rebase')
-    return { rebaseResult: 'error', verifyPassed: null, requeued: false }
+  if (!run || !run.branchName) {
+    return { queued: false, reason: 'No run with branch found for this issue' }
   }
 
-  const target: RebaseTarget = {
-    repo: repoConfig.repo,
-    issueNumber,
-    prNumber: run.prNumber ?? 0,
-    branchName: run.branchName,
-    baseBranch: repoConfig.baseBranch,
-    worktreePath: run.worktreePath,
+  if (run.status === 'running' || run.status === 'queued') {
+    return { queued: false, reason: `Run is already ${run.status}` }
   }
 
-  // Step 1: Rebase
-  const rebaseResult = await autoRebase(target, repoConfig.localPath)
-
-  if (rebaseResult === 'up_to_date') {
-    logger.info({ repo: repoConfig.repo, issueNumber }, 'Branch already up to date — no rebase needed')
-    await commentStatus(forge, repoConfig.repo, issueNumber, botUser,
-      'Branch is already up to date with base — no rebase needed.')
-    return { rebaseResult, verifyPassed: null, requeued: false }
-  }
-
-  if (rebaseResult === 'conflict') {
-    logger.warn({ repo: repoConfig.repo, issueNumber }, 'Rebase had conflicts — re-queuing for coder')
-    await commentStatus(forge, repoConfig.repo, issueNumber, botUser,
-      'Rebase onto latest base branch resulted in conflicts. Re-queuing for the coder to resolve.')
-    await requeueForFix(db, forge, repoConfig, issueNumber, run, labelConfig, 'Rebase conflict — coder needs to resolve merge conflicts with the latest base branch.')
-    return { rebaseResult, verifyPassed: null, requeued: true }
-  }
-
-  if (rebaseResult === 'error') {
-    logger.error({ repo: repoConfig.repo, issueNumber }, 'Rebase failed')
-    await commentStatus(forge, repoConfig.repo, issueNumber, botUser,
-      'Rebase failed due to an unexpected error. Check the logs.')
-    return { rebaseResult, verifyPassed: null, requeued: false }
-  }
-
-  // Step 2: Rebased successfully — run verify if checkAfter is enabled
-  if (!checkAfter) {
-    await commentStatus(forge, repoConfig.repo, issueNumber, botUser,
-      'Rebased successfully onto latest base branch.')
-    return { rebaseResult, verifyPassed: null, requeued: false }
-  }
-
-  if (repoConfig.verify.length === 0) {
-    await commentStatus(forge, repoConfig.repo, issueNumber, botUser,
-      'Rebased successfully. No verify commands configured — skipping post-rebase check.')
-    return { rebaseResult, verifyPassed: null, requeued: false }
-  }
-
-  logger.info({ repo: repoConfig.repo, issueNumber }, 'Rebase succeeded — running verify commands')
-  const verifyResults = await runVerifyCommands(
-    run.worktreePath,
-    repoConfig.verify,
-    buildVerifierEnv(),
-  )
-  const passed = allVerifyPassed(verifyResults)
-
-  if (passed) {
-    await commentStatus(forge, repoConfig.repo, issueNumber, botUser,
-      'Rebased and all verify commands pass. No code adjustments needed.')
-    return { rebaseResult, verifyPassed: true, requeued: false }
-  }
-
-  // Verify failed after rebase — re-queue for coder to fix
-  const failedCommands = verifyResults
-    .filter((r) => !r.passed)
-    .map((r) => `\`${r.command}\` (exit ${r.exitCode})`)
-    .join(', ')
-
-  logger.warn({ repo: repoConfig.repo, issueNumber, failedCommands }, 'Verify failed after rebase — re-queuing')
-  await commentStatus(forge, repoConfig.repo, issueNumber, botUser,
-    `Rebased onto latest base, but verify commands failed: ${failedCommands}. Re-queuing for the coder to fix.`)
-  await requeueForFix(db, forge, repoConfig, issueNumber, run, labelConfig,
-    `Post-rebase verify failed: ${failedCommands}. Fix the issues introduced by the rebase.`)
-
-  return { rebaseResult, verifyPassed: false, requeued: true }
-}
-
-async function requeueForFix(
-  db: Database.Database,
-  forge: ForgeAdapter,
-  repoConfig: RepoConfig,
-  issueNumber: number,
-  run: { id: string; status: string },
-  labelConfig: ReturnType<typeof buildLabelConfig>,
-  context: string,
-): Promise<void> {
-  const runManager = new RunManager(db)
-
-  // Store the rebase context so the coder knows what happened
-  const existingPhaseData = runManager.getById(run.id)?.phaseData ?? {}
+  // Store rebase context and transition to queued
+  const existingPhaseData = run.phaseData ?? {}
   runManager.update(run.id, {
     status: 'queued',
     lastError: null,
     endedAt: null,
     phaseData: {
       ...existingPhaseData,
-      reactionContext: context,
-      reactionType: 'rebase_check',
-      reactionSummary: 'Post-rebase verify failure',
+      reactionContext: 'Rebase requested. Rebase onto latest base branch, run verify, and fix any issues introduced by upstream changes.',
+      reactionType: 'rebase',
+      reactionSummary: 'Rebase and re-evaluate',
     },
   })
 
+  // Update run_mode in DB directly since RunManager.update doesn't support it yet
+  db.prepare("UPDATE runs SET status = 'queued', updated_at = datetime('now') WHERE id = ?").run(run.id)
+
+  // Transition labels
   try {
     const issue = await forge.getIssue(repoConfig.repo, issueNumber)
+    const fromState = run.status === 'review_ready' ? 'review_ready' : run.status === 'blocked' ? 'blocked' : 'error'
     await transitionLabels(
-      forge, repoConfig.repo, issue.number, issue.labels,
-      'review_ready', 'queued', labelConfig,
+      forge, repoConfig.repo, issueNumber, issue.labels,
+      fromState, 'queued', labelConfig,
     )
   } catch (err) {
-    logger.warn({ repo: repoConfig.repo, err }, 'Failed to transition labels for rebase-and-check requeue')
+    logger.warn({ repo: repoConfig.repo, issueNumber, err }, 'Failed to transition labels for rebase queue')
   }
+
+  // Post status comment
+  await commentStatus(forge, repoConfig.repo, issueNumber, botUser,
+    'Queued for rebase and re-evaluation. The branch will be rebased onto the latest base, verified, and if anything breaks the coder will fix it.')
+
+  logger.info({ repo: repoConfig.repo, issueNumber, runId: run.id }, 'Queued issue for rebase-and-re-evaluate')
+  return { queued: true, reason: 'Queued for rebase and re-evaluation on next poll cycle' }
+}
+
+/**
+ * Execute the rebase portion of a rebase run.
+ * Called by the poller when processing a queued run with rebase context.
+ *
+ * Returns true if the branch is clean after rebase (verify passes).
+ * Returns false if verify fails — the caller should continue with
+ * a code→verify→review cycle to fix the issues.
+ */
+export async function executeRebase(
+  repoLocalPath: string,
+  worktreePath: string,
+  branchName: string,
+  baseBranch: string,
+  repo: string,
+  issueNumber: number,
+  verifyCommands: Array<string | string[]>,
+): Promise<{ rebased: boolean; verifyPassed: boolean; conflict: boolean }> {
+  const target: RebaseTarget = {
+    repo,
+    issueNumber,
+    prNumber: 0,
+    branchName,
+    baseBranch,
+    worktreePath,
+  }
+
+  const rebaseResult = await autoRebase(target, repoLocalPath)
+
+  if (rebaseResult === 'up_to_date') {
+    return { rebased: false, verifyPassed: true, conflict: false }
+  }
+
+  if (rebaseResult === 'conflict') {
+    return { rebased: false, verifyPassed: false, conflict: true }
+  }
+
+  if (rebaseResult === 'error') {
+    return { rebased: false, verifyPassed: false, conflict: false }
+  }
+
+  // Rebased successfully — run verify
+  if (verifyCommands.length === 0) {
+    return { rebased: true, verifyPassed: true, conflict: false }
+  }
+
+  const verifyResults = await runVerifyCommands(worktreePath, verifyCommands, buildVerifierEnv())
+  return { rebased: true, verifyPassed: allVerifyPassed(verifyResults), conflict: false }
 }
 
 async function commentStatus(

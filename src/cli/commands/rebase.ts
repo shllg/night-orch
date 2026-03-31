@@ -1,7 +1,7 @@
 import { loadConfig, resolveConfigPath, ConfigError } from '../../config/loader.js'
 import { initDatabase } from '../../state/db.js'
 import { createForgeAdapter } from '../../forge/factory.js'
-import { rebaseAndCheck } from '../../ops/rebase-and-check.js'
+import { queueRebase } from '../../ops/rebase-and-check.js'
 
 interface GlobalOpts {
   config?: string
@@ -10,14 +10,10 @@ interface GlobalOpts {
   logLevel?: string
 }
 
-interface RebaseCommandOpts extends GlobalOpts {
-  check?: boolean
-}
-
 export async function rebaseCommand(
   repo: string,
   issueNumber: string,
-  globalOpts?: RebaseCommandOpts,
+  globalOpts?: GlobalOpts,
 ): Promise<void> {
   const num = parseInt(issueNumber, 10)
   if (isNaN(num)) {
@@ -61,15 +57,13 @@ export async function rebaseCommand(
   }
 
   try {
-    const checkAfter = globalOpts?.check !== false
-    const result = await rebaseAndCheck(db, forge, repoConfig, num, botUser, checkAfter)
+    const result = await queueRebase(db, forge, repoConfig, num, botUser)
 
-    console.log(`Rebase result: ${result.rebaseResult}`)
-    if (result.verifyPassed !== null) {
-      console.log(`Verify: ${result.verifyPassed ? 'PASSED' : 'FAILED'}`)
-    }
-    if (result.requeued) {
-      console.log('Issue re-queued for coder to fix')
+    if (result.queued) {
+      console.log(`Queued ${repo}#${num} for rebase and re-evaluation`)
+      console.log('The poller will rebase, verify, and fix any issues on the next cycle.')
+    } else {
+      console.log(`Not queued: ${result.reason}`)
     }
   } catch (err) {
     console.error((err as Error).message)

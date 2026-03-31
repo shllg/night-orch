@@ -57,11 +57,10 @@ program
   .command('rebase')
   .argument('<repo>', 'Repository (owner/name)')
   .argument('<issue-number>', 'Issue number')
-  .option('--no-check', 'Skip verify commands after rebase')
-  .description('Rebase a PR branch and check if code adjustments are needed')
-  .action(async (repo, issueNumber, opts, cmd) => {
+  .description('Queue issue for rebase onto latest base, verify, and fix if needed')
+  .action(async (repo, issueNumber, _opts, cmd) => {
     const { rebaseCommand } = await import('./commands/rebase.js')
-    await rebaseCommand(repo, issueNumber, { ...cmd.parent?.opts(), ...opts })
+    await rebaseCommand(repo, issueNumber, cmd.parent?.opts())
   })
 
 program

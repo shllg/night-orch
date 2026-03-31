@@ -492,13 +492,12 @@ async function handleRebase(
     botUser = auth.user
   } catch { /* best effort */ }
 
-  const { rebaseAndCheck } = await import('../../ops/rebase-and-check.js')
-  const result = await rebaseAndCheck(deps.db, forge, repoConfig, args.issueNumber, botUser, args.check !== false)
+  const { queueRebase } = await import('../../ops/rebase-and-check.js')
+  const result = await queueRebase(deps.db, forge, repoConfig, args.issueNumber, botUser)
 
   return {
-    rebaseResult: result.rebaseResult,
-    verifyPassed: result.verifyPassed,
-    requeued: result.requeued,
+    queued: result.queued,
+    reason: result.reason,
   }
 }
 
