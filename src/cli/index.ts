@@ -88,7 +88,7 @@ program
 
 program
   .command('watch')
-  .description('Live monitoring dashboard')
+  .description('Interactive monitoring and control TUI')
   .action((_opts, cmd) => runWatch(cmd.parent?.opts()))
 
 program.parse()
