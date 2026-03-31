@@ -10,5 +10,8 @@ export function buildLabelConfig(repoConfig: Pick<RepoConfig, 'labels'>): LabelC
     reviewReady: repoConfig.labels.reviewReady,
     error: repoConfig.labels.error,
     retry: repoConfig.labels.retry,
+    mergeQueued: repoConfig.labels.mergeQueued,
+    merging: repoConfig.labels.merging,
+    mergeFailed: repoConfig.labels.mergeFailed,
   }
 }

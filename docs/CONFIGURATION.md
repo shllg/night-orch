@@ -44,7 +44,9 @@ Source of truth for the schema is [src/config/schema.ts](../src/config/schema.ts
 | `workerProfiles` | record | no | `{}` | Named CLI profiles for agents. |
 | `metrics` | object | no | object with defaults | Prometheus exporter config. |
 | `mcp` | object | no | object with defaults | MCP server config for run/mcp commands. |
+| `commentCommands` | object | no | object with defaults | Issue comment command processing config. |
 | `repos` | array | yes | none | At least one repo is required. |
+| `workflows` | record | no | `{}` | Named workflow definitions for custom pipelines. |
 
 ## `github`
 
@@ -64,11 +66,28 @@ Source of truth for the schema is [src/config/schema.ts](../src/config/schema.ts
 
 ## `storage`
 
-| Key | Type | Required | Default |
+| Key | Type | Required | Default | Notes |
+| --- | --- | --- | --- | --- |
+| `dbPath` | string path | no | `~/.config/night-orch/state.db` |  |
+| `worktreeRoot` | string path | no | `~/code/.night-orch/worktrees` |  |
+| `logsRoot` | string path | no | `~/code/.night-orch/logs` |  |
+| `autoCleanup` | object | no | object with defaults | Automatic cleanup settings. |
+| `retention` | object | no | object with defaults | Data retention periods. |
+
+### `storage.autoCleanup`
+
+| Key | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `dbPath` | string path | no | `~/.config/night-orch/state.db` |
-| `worktreeRoot` | string path | no | `~/code/.night-orch/worktrees` |
-| `logsRoot` | string path | no | `~/code/.night-orch/logs` |
+| `enabled` | boolean | `true` | Enable automatic cleanup of stale worktrees and logs. |
+| `intervalMinutes` | positive number | `60` | How often auto-cleanup runs (in minutes). |
+
+### `storage.retention`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `worktreeAgeDays` | positive number | `7` | Remove completed/error worktrees older than this. |
+| `detailDays` | positive number | `30` | Retain detailed run data (events, phase data) for this many days. |
+| `archiveDays` | positive number | `90` | Archive run records older than this. |
 
 ## `notifications`
 
@@ -199,6 +218,56 @@ Requires `acpx` installed as a dependency (`pnpm add acpx`).
 | `httpPort` | positive int | `3100` | Host/port used by embedded HTTP/SSE server started by `run`. |
 | `httpHost` | string | `127.0.0.1` | Host bind for embedded HTTP/SSE server. |
 
+## `commentCommands`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `true` | Enable processing of `/orch` commands in issue comments. |
+| `requireCollaborator` | boolean | `false` | If true, only repo collaborators can use comment commands. |
+
+Supported commands (posted as issue comments):
+- `/orch retry` — re-queue a blocked/errored issue
+- `/orch rebase` — rebase the work branch onto the latest base
+- `/orch cancel` — cancel an active run
+- `/orch continue` — continue from where a blocked run left off
+
+## `workflows`
+
+Named workflow definitions for custom execution pipelines. When no workflow is configured, the default Plan→Code→Verify→Review→Decide pipeline is used.
+
+```yaml
+workflows:
+  minimal:
+    steps:
+      - { type: worker, id: code, role: coder }
+      - { type: verify, id: verify }
+      - { type: worker, id: review, role: reviewer }
+      - { type: decide, id: decide, onIterate: code }
+
+  with-security:
+    steps:
+      - { type: worker, id: plan, role: planner, skipWhen: trivial }
+      - { type: worker, id: code, role: coder, continueFrom: plan }
+      - { type: verify, id: verify }
+      - { type: worker, id: security, role: reviewer, prompt: security-review.md }
+      - { type: worker, id: review, role: reviewer }
+      - { type: decide, id: decide, onIterate: code }
+```
+
+### Step Types
+
+| Type | Fields | Description |
+| --- | --- | --- |
+| `worker` | `id`, `role`, `skipWhen?`, `continueFrom?`, `prompt?` | Invoke a worker adapter. Built-in roles: `planner`, `coder`, `reviewer`. |
+| `verify` | `id`, `skipWhen?` | Run configured verify commands. |
+| `decide` | `id`, `onIterate` | Evaluate review/verify results and route to publish, iterate (jump to `onIterate` step), or block. |
+
+- `skipWhen` — skip the step when the triage level matches (e.g., `trivial`)
+- `continueFrom` — continue the AI session from a prior step (e.g., coder continues planner's session)
+- `prompt` — path to a custom system prompt template (overrides the default)
+
+Reference a workflow in `repos[].workflow` by name.
+
 ## `repos[]`
 
 | Key | Type | Required | Default | Notes |
@@ -218,6 +287,8 @@ Requires `acpx` installed as a dependency (`pnpm add acpx`).
 | `prompts` | object | no | none | Optional custom system prompt template paths. |
 | `selectors` | object | no | object with defaults | Issue label inclusion/exclusion filters. |
 | `agents` | record | no | `{}` | Maps agent names to worker profile names. |
+| `workflow` | string | no | none | Name of a workflow from `workflows` section. Uses default pipeline if omitted. |
+| `mergeQueue` | object | no | object with defaults | Merge queue configuration. |
 
 ### `repos[].labels`
 
@@ -225,10 +296,14 @@ Requires `acpx` installed as a dependency (`pnpm add acpx`).
 | --- | --- | --- | --- |
 | `ready` | string or string[] | `['orch:ready']` | Normalized to array. |
 | `running` | string | `orch:running` |  |
-| `blocked` | string or string[] | `['orch:blocked', 'orch:needs-human']` | Normalized to array. |
+| `blocked` | string or string[] | `orch:blocked` | Normalized to array. |
+| `needsHuman` | string | `orch:needs-human` |  |
 | `reviewReady` | string | `orch:review-ready` |  |
 | `error` | string | `orch:error` |  |
 | `retry` | string | `orch:retry` |  |
+| `mergeQueued` | string | `orch:merge-queued` | Set when PR enters the merge queue. |
+| `merging` | string | `orch:merging` | Set while staging branch CI is running. |
+| `mergeFailed` | string | `orch:merge-failed` | Set when the merge queue identifies this PR as the culprit. |
 
 ### `repos[].labelConfig`
 
@@ -340,6 +415,27 @@ Resolution behavior:
 1. If mapping exists and profile exists, that profile is used.
 2. Otherwise, night-orch falls back to first profile whose `type` matches the role agent (`claude`/`codex`).
 3. If no matching profile exists, the run fails.
+
+### `repos[].mergeQueue`
+
+Bors-style merge queue that batches approved PRs, tests them together, and bisects on failure.
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `false` | Enable the merge queue for this repo. |
+| `batchSize` | int 1-20 | `5` | Max PRs per batch. |
+| `mergeMethod` | `merge` \| `squash` \| `rebase` | `merge` | Git merge strategy for staging branch. |
+| `retryFlakyOnce` | boolean | `true` | Retry a failed batch once before bisecting. |
+| `requireApproval` | boolean | `true` | Require human PR approval before entering queue. |
+| `stagingBranchPrefix` | string | `orch/staging` | Prefix for staging branches. |
+
+When enabled, each poll cycle:
+1. Checks for an active staging batch — if CI passed, fast-forwards base branch
+2. If CI failed, bisects the batch (halves it, tests each half) until the culprit PR is identified
+3. If no active batch, scans for eligible PRs (review_ready + CI passing + approved) and forms a new batch
+4. Conflicting PRs are ejected from the batch and continue to the next eligible PR
+
+Labels used: `orch:merge-queued`, `orch:merging`, `orch:merge-failed`.
 
 ## Forge-Specific Notes
 

@@ -94,6 +94,11 @@ function makeCtx(): RunContext {
     terminalStatus: 'publish',
     phaseHistory: [],
     dryRun: false,
+    runMode: 'fresh' as const,
+    blockReason: null,
+    prReviewFeedback: null,
+    sessionIds: {},
+    stepOutputs: {},
   }
 }
 

@@ -118,6 +118,7 @@ export async function executeParallelSubtasks(
             terminalStatus: 'running',
             phaseHistory: [],
             sessionIds: {},
+            stepOutputs: {},
             issue: {
               ...parentCtx.issue,
               title: subtask.title,

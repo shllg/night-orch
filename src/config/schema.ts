@@ -109,6 +109,9 @@ const LabelsSchema = z.object({
   reviewReady: z.string().default('orch:review-ready'),
   error: z.string().default('orch:error'),
   retry: z.string().default('orch:retry'),
+  mergeQueued: z.string().default('orch:merge-queued'),
+  merging: z.string().default('orch:merging'),
+  mergeFailed: z.string().default('orch:merge-failed'),
 })
 
 const LabelPresentationSchema = z.object({
@@ -138,6 +141,50 @@ const PromptsSchema = z.object({
   reviewerSystem: z.string().optional(),
 })
 
+// --- Workflow schemas ---
+
+const WorkflowWorkerStepSchema = z.object({
+  type: z.literal('worker'),
+  id: z.string(),
+  role: z.string(),
+  skipWhen: z.string().optional(),
+  continueFrom: z.string().optional(),
+  prompt: z.string().optional(),
+})
+
+const WorkflowVerifyStepSchema = z.object({
+  type: z.literal('verify'),
+  id: z.string(),
+  skipWhen: z.string().optional(),
+})
+
+const WorkflowDecideStepSchema = z.object({
+  type: z.literal('decide'),
+  id: z.string(),
+  onIterate: z.string(),
+})
+
+const WorkflowStepSchema = z.discriminatedUnion('type', [
+  WorkflowWorkerStepSchema,
+  WorkflowVerifyStepSchema,
+  WorkflowDecideStepSchema,
+])
+
+const WorkflowSchema = z.object({
+  steps: z.array(WorkflowStepSchema).min(1),
+})
+
+// --- Merge queue schema ---
+
+const MergeQueueSchema = z.object({
+  enabled: z.boolean().default(false),
+  batchSize: z.number().int().min(1).max(20).default(5),
+  mergeMethod: z.enum(['merge', 'squash', 'rebase']).default('merge'),
+  retryFlakyOnce: z.boolean().default(true),
+  requireApproval: z.boolean().default(true),
+  stagingBranchPrefix: z.string().default('orch/staging'),
+})
+
 // --- Repo schema ---
 
 const RepoConfigSchema = z.object({
@@ -156,6 +203,8 @@ const RepoConfigSchema = z.object({
   prompts: PromptsSchema.optional(),
   selectors: SelectorsSchema.default({}),
   agents: z.record(z.string()).default({}),
+  workflow: z.string().optional(),
+  mergeQueue: MergeQueueSchema.default({}),
 })
 
 // --- Security schema ---
@@ -244,6 +293,8 @@ export const ConfigSchema = z.object({
   }).default({}),
 
   repos: z.array(RepoConfigSchema).min(1, 'At least one repository must be configured'),
+
+  workflows: z.record(WorkflowSchema).default({}),
 })
 
 export type Config = z.infer<typeof ConfigSchema>

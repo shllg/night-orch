@@ -14,17 +14,7 @@ export type BlockReason =
 
 export type RunMode = 'fresh' | 'followup'
 
-export type LoopPhase =
-  | 'plan'
-  | 'code'
-  | 'verify'
-  | 'review'
-  | 'decision'
-  | 'publish'
-  | 'notify'
-  | 'completed'
-  | 'blocked'
-  | 'error'
+export type LoopPhase = string
 
 export interface PhaseRecord {
   phase: LoopPhase
@@ -69,6 +59,9 @@ export interface RunContext {
 
   /** Session IDs from worker adapters, keyed by role, for conversation continuity. */
   readonly sessionIds: Readonly<Record<string, string>>
+
+  /** Generic step outputs keyed by step ID, for custom workflow steps. */
+  readonly stepOutputs: Readonly<Record<string, unknown>>
 }
 
 export type LoopDecision =

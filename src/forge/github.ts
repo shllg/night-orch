@@ -332,6 +332,52 @@ export class GitHubForgeAdapter implements ForgeAdapter {
     return { overall, checks }
   }
 
+  async getRefCheckStatus(repo: string, ref: string): Promise<PRCheckStatus> {
+    const { owner, repo: repoName } = splitRepo(repo)
+
+    const { data: combined } = await this.octokit.rest.repos.getCombinedStatusForRef({
+      owner, repo: repoName, ref,
+    })
+
+    const { data: checkRuns } = await this.octokit.rest.checks.listForRef({
+      owner, repo: repoName, ref, per_page: 100,
+    })
+
+    const checks: PRCheckRun[] = []
+    for (const status of combined.statuses) {
+      checks.push({
+        name: status.context,
+        conclusion: mapStatusState(status.state),
+        detailsUrl: status.target_url ?? null,
+      })
+    }
+    for (const run of checkRuns.check_runs) {
+      checks.push({
+        name: run.name,
+        conclusion: mapCheckConclusion(run.status, run.conclusion),
+        detailsUrl: run.details_url ?? null,
+      })
+    }
+
+    let overall: CheckConclusion = 'success'
+    if (checks.length === 0) overall = 'pending'
+    else if (checks.some((c) => c.conclusion === 'failure')) overall = 'failure'
+    else if (checks.some((c) => c.conclusion === 'pending')) overall = 'pending'
+
+    return { overall, checks }
+  }
+
+  async updateRef(repo: string, ref: string, sha: string, force = false): Promise<void> {
+    const { owner, repo: repoName } = splitRepo(repo)
+    await this.octokit.rest.git.updateRef({
+      owner,
+      repo: repoName,
+      ref: ref.replace(/^refs\//, ''),
+      sha,
+      force,
+    })
+  }
+
   private mapPR(data: Record<string, unknown>): ForgePR {
     const d = data as {
       number: number

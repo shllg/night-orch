@@ -1,33 +1,29 @@
-import type { RunContext, LoopPhase } from './types.js'
+import type { RunContext } from './types.js'
 import type { Config } from '../config/schema.js'
-import type { WorkerAdapter, PromptContext, WorkerTaskResult } from '../workers/types.js'
+import type { WorkerAdapter } from '../workers/types.js'
 import type { MetricsService } from '../metrics/service.js'
+import type { ResolvedWorkflow } from './workflow.js'
 import { updateContext, recordPhase } from './context.js'
-import { decide } from './decision.js'
-import { runVerifyCommands, allVerifyPassed } from './verifier.js'
 import { commitChanges } from './commit.js'
-import { compilePrompt } from '../workers/prompt/compiler.js'
-import { buildWorkerEnv, buildVerifierEnv } from '../workers/env.js'
+import { executeStep, type StepDependencies } from './step-executor.js'
 import { Checkpoint } from './checkpoint.js'
 import { CostTracker } from './cost.js'
-import { getDiffAgainstBranch, getChangedFilesAgainstBranch } from '../git/repo.js'
-import { superviseWorker } from './supervisor.js'
 import { logger } from '../utils/logger.js'
 import type Database from 'better-sqlite3'
 
 export interface LoopDependencies {
   db: Database.Database
   config: Config
-  plannerAdapter: WorkerAdapter
-  coderAdapter: WorkerAdapter
-  reviewerAdapter: WorkerAdapter
+  adapters: Record<string, WorkerAdapter>
+  workflow: ResolvedWorkflow
   envOverrides?: Record<string, string>
   metrics?: MetricsService
   onPlanReady?: (ctx: RunContext) => Promise<void>
 }
 
 /**
- * Execute the full Plan → Code → Verify → Review loop.
+ * Execute the configurable workflow loop.
+ * Walks through workflow steps in order, delegating execution to the step executor.
  * Returns the final RunContext with terminal state.
  */
 export async function executeLoop(
@@ -40,179 +36,214 @@ export async function executeLoop(
 
   let ctx = checkpoint.resumeFromCheckpoint(initialCtx.runId, initialCtx) ?? initialCtx
 
-  // PLAN
-  ctx = updateContext(ctx, { currentPhase: 'plan' as LoopPhase })
-  checkpoint.phaseStarted(ctx.runId, 'plan')
-
-  if (ctx.triageResult.level !== 'trivial') {
-    const planStart = Date.now()
-    const planStartedAt = new Date(planStart).toISOString()
-    const planResult = await runPlanStep(ctx, deps)
-    ctx = planResult.ctx
-    const planDurationMs = Date.now() - planStart
-    ctx = applyEstimatedWorkerCost(ctx, costTracker, 'planner', planDurationMs, planResult.tokenUsage)
-    try { metrics?.observePhaseDuration('plan', planDurationMs / 1000) } catch { /* best-effort */ }
-    checkpoint.phaseCompleted(ctx.runId, 'plan', { plan: ctx.plan })
-
-    if (!ctx.plan && config.loop.stopOnPlannerFailure) {
-      logger.error({ runId: ctx.runId }, 'Planner failed and stopOnPlannerFailure is true')
-      return recordPhase(
-        updateContext(ctx, { currentPhase: 'error', terminalStatus: 'error' }),
-        'plan',
-        'failure',
-        {},
-        planStartedAt,
-      )
-    }
-  } else {
-    checkpoint.phaseCompleted(ctx.runId, 'plan', {})
-    ctx = recordPhase(ctx, 'plan', 'skipped')
-    logger.info({ runId: ctx.runId }, 'Trivial issue — skipping planning')
+  const stepDeps: StepDependencies = {
+    adapters: deps.adapters,
+    config: deps.config,
+    envOverrides: deps.envOverrides,
+    metrics: deps.metrics,
   }
 
-  if (ctx.plan && deps.onPlanReady) {
-    try {
-      await deps.onPlanReady(ctx)
-    } catch (err) {
-      logger.warn({ runId: ctx.runId, repo: ctx.repo, issueNumber: ctx.issueNumber, err }, 'Failed to post plan summary')
-    }
-  }
+  const steps = deps.workflow.steps
+  let stepIndex = 0
 
-  // ITERATION LOOP
-  while (true) {
-    // Cost check
-    if (costTracker.isOverBudget(ctx.runId, config.security)) {
+  while (stepIndex < steps.length) {
+    const step = steps[stepIndex]!
+
+    // Skip step if skipWhen matches triage level
+    if ('skipWhen' in step && step.skipWhen === ctx.triageResult.level) {
+      checkpoint.phaseCompleted(ctx.runId, step.id, {})
+      ctx = recordPhase(ctx, step.id, 'skipped')
+      stepIndex++
+      continue
+    }
+
+    // Cost check before worker steps
+    if (step.type === 'worker' && costTracker.isOverBudget(ctx.runId, config.security)) {
       logger.warn({ runId: ctx.runId }, 'Cost limit exceeded')
       return recordPhase(
         updateContext(ctx, { currentPhase: 'blocked', terminalStatus: 'blocked' }),
-        'code',
+        step.id,
         'failure',
       )
     }
 
-    // CODE
-    const codeStart = Date.now()
-    const codeStartedAt = new Date(codeStart).toISOString()
-    ctx = updateContext(ctx, { currentPhase: 'code' as LoopPhase })
-    checkpoint.phaseStarted(ctx.runId, 'code')
-    const codeStepResult = await runCodeStep(ctx, deps)
-    ctx = codeStepResult.ctx
-    const codeDurationMs = Date.now() - codeStart
-    ctx = applyEstimatedWorkerCost(ctx, costTracker, 'coder', codeDurationMs, codeStepResult.tokenUsage)
-    try { metrics?.observePhaseDuration('code', codeDurationMs / 1000) } catch { /* best-effort */ }
-    checkpoint.phaseCompleted(ctx.runId, 'code', { codeResult: ctx.codeResult })
-    ctx = recordPhase(ctx, 'code', ctx.codeResult ? 'success' : 'failure', {}, codeStartedAt)
+    // Execute step
+    const stepStart = Date.now()
+    const stepStartedAt = new Date(stepStart).toISOString()
+    ctx = updateContext(ctx, { currentPhase: step.id })
+    checkpoint.phaseStarted(ctx.runId, step.id)
 
-    // VERIFY
-    const verifyStart = Date.now()
-    const verifyStartedAt = new Date(verifyStart).toISOString()
-    ctx = updateContext(ctx, { currentPhase: 'verify' as LoopPhase })
-    checkpoint.phaseStarted(ctx.runId, 'verify')
-    const verifyResults = await runVerifyCommands(
-      ctx.worktreePath,
-      ctx.repoConfig.verify,
-      buildVerifierEnv(deps.envOverrides),
-    )
-    const verifyDurationMs = Date.now() - verifyStart
-    try {
-      metrics?.observePhaseDuration('verify', verifyDurationMs / 1000)
-      metrics?.observeVerifyDuration(verifyDurationMs / 1000)
-      metrics?.incVerifyRuns(allVerifyPassed(verifyResults) ? 'pass' : 'fail')
-    } catch { /* best-effort */ }
-    ctx = updateContext(ctx, { verifyResults })
-    checkpoint.phaseCompleted(ctx.runId, 'verify', { verifyResults })
-    ctx = recordPhase(
-      ctx,
-      'verify',
-      allVerifyPassed(verifyResults) ? 'success' : 'failure',
-      {},
-      verifyStartedAt,
-    )
+    const result = await executeStep(ctx, step, stepDeps)
+    ctx = result.ctx
+    const stepDurationMs = Date.now() - stepStart
 
-    // Fetch diff against target branch for the reviewer
-    const diff = await getDiffAgainstBranch(ctx.worktreePath, ctx.repoConfig.baseBranch)
-    ctx = updateContext(ctx, { diff })
+    // Cost tracking for worker steps
+    if (step.type === 'worker') {
+      ctx = applyEstimatedWorkerCost(ctx, costTracker, step.role, stepDurationMs, result.tokenUsage)
+      try { metrics?.observePhaseDuration(step.id, stepDurationMs / 1000) } catch { /* best-effort */ }
+    }
+    if (step.type === 'verify') {
+      try {
+        metrics?.observePhaseDuration('verify', stepDurationMs / 1000)
+        metrics?.observeVerifyDuration(stepDurationMs / 1000)
+        const allPassed = ctx.verifyResults.length > 0 && ctx.verifyResults.every(r => r.passed)
+        metrics?.incVerifyRuns(allPassed ? 'pass' : 'fail')
+      } catch { /* best-effort */ }
+    }
 
-    // REVIEW
-    const reviewStart = Date.now()
-    const reviewStartedAt = new Date(reviewStart).toISOString()
-    ctx = updateContext(ctx, { currentPhase: 'review' as LoopPhase })
-    checkpoint.phaseStarted(ctx.runId, 'review')
-    const reviewStepResult = await runReviewStep(ctx, deps)
-    ctx = reviewStepResult.ctx
-    const reviewDurationMs = Date.now() - reviewStart
-    ctx = applyEstimatedWorkerCost(ctx, costTracker, 'reviewer', reviewDurationMs, reviewStepResult.tokenUsage)
-    try { metrics?.observePhaseDuration('review', reviewDurationMs / 1000) } catch { /* best-effort */ }
-    checkpoint.phaseCompleted(ctx.runId, 'review', { reviewResult: ctx.reviewResult })
-    ctx = recordPhase(ctx, 'review', ctx.reviewResult ? 'success' : 'failure', {}, reviewStartedAt)
+    // Determine step success
+    const stepSuccess = determineStepSuccess(step, ctx)
 
-    // DECISION
-    const decision = decide(ctx, config.loop, config.security)
-    logger.info({ runId: ctx.runId, decision: decision.action, reason: decision.reason }, 'Loop decision')
+    // stopOnPlannerFailure check
+    if (step.type === 'worker' && step.role === 'planner' && !stepSuccess && config.loop.stopOnPlannerFailure) {
+      logger.error({ runId: ctx.runId }, 'Planner failed and stopOnPlannerFailure is true')
+      const artifacts = buildStepArtifacts(step, ctx)
+      checkpoint.phaseCompleted(ctx.runId, step.id, artifacts)
+      return recordPhase(
+        updateContext(ctx, { currentPhase: 'error', terminalStatus: 'error' }),
+        step.id,
+        'failure',
+        {},
+        stepStartedAt,
+      )
+    }
 
-    switch (decision.action) {
-      case 'publish': {
-        // Commit changes
-        const commitResult = await commitChanges(
-          ctx.worktreePath,
-          ctx.issueNumber,
-          ctx.issue.title,
-          config.security,
-        )
-        if (!commitResult.committed) {
-          logger.warn({ reason: commitResult.reason }, 'Commit skipped')
-          if (commitResult.reason?.startsWith('Diff-size guard')) {
+    // Checkpoint and record
+    const artifacts = buildStepArtifacts(step, ctx)
+    checkpoint.phaseCompleted(ctx.runId, step.id, artifacts)
+    ctx = recordPhase(ctx, step.id, stepSuccess ? 'success' : 'failure', {}, stepStartedAt)
+
+    // Fire onPlanReady after plan step completes with a plan
+    if (step.type === 'worker' && step.role === 'planner' && ctx.plan && deps.onPlanReady) {
+      try { await deps.onPlanReady(ctx) } catch (err) {
+        logger.warn({ runId: ctx.runId, repo: ctx.repo, issueNumber: ctx.issueNumber, err }, 'Failed to post plan summary')
+      }
+    }
+
+    // Handle decide step routing
+    if (step.type === 'decide' && result.decision) {
+      const decision = result.decision
+      logger.info({ runId: ctx.runId, decision: decision.action, reason: decision.reason }, 'Loop decision')
+
+      switch (decision.action) {
+        case 'publish': {
+          const commitResult = await commitChanges(
+            ctx.worktreePath,
+            ctx.issueNumber,
+            ctx.issue.title,
+            config.security,
+          )
+          if (!commitResult.committed) {
+            logger.warn({ reason: commitResult.reason }, 'Commit skipped')
+            if (commitResult.reason?.startsWith('Diff-size guard')) {
+              return recordPhase(
+                updateContext(ctx, { currentPhase: 'blocked', terminalStatus: 'blocked' }),
+                'publish',
+                'failure',
+              )
+            }
+          }
+          return recordPhase(
+            updateContext(ctx, { currentPhase: 'completed', terminalStatus: 'publish' }),
+            'publish',
+            'success',
+          )
+        }
+
+        case 'iterate': {
+          ctx = updateContext(ctx, {
+            iteration: ctx.iteration + 1,
+            totalAgentPasses: ctx.totalAgentPasses + 1,
+            reviewFindings: [...ctx.reviewFindings, ...decision.findings],
+            reviewResult: null,
+            verifyResults: [],
+          })
+          try { metrics?.incLoopIterations(ctx.repo) } catch { /* best-effort */ }
+          logger.info({ runId: ctx.runId, iteration: ctx.iteration }, 'Iterating loop')
+
+          const jumpTarget = step.onIterate
+          const jumpIndex = steps.findIndex(s => s.id === jumpTarget)
+          if (jumpIndex === -1) {
+            logger.error({ runId: ctx.runId, jumpTarget }, 'Iterate target step not found')
             return recordPhase(
-              updateContext(ctx, { currentPhase: 'blocked', terminalStatus: 'blocked' }),
-              'publish',
+              updateContext(ctx, { currentPhase: 'error', terminalStatus: 'error' }),
+              'decision',
               'failure',
             )
           }
+          stepIndex = jumpIndex
+          continue
         }
-        return recordPhase(
-          updateContext(ctx, { currentPhase: 'completed', terminalStatus: 'publish' }),
-          'publish',
-          'success',
-        )
+
+        case 'block':
+          return recordPhase(
+            updateContext(ctx, { currentPhase: 'blocked', terminalStatus: 'blocked' }),
+            'decision',
+            'failure',
+          )
+
+        case 'error':
+          return recordPhase(
+            updateContext(ctx, { currentPhase: 'error', terminalStatus: 'error' }),
+            'decision',
+            'failure',
+          )
       }
-
-      case 'iterate': {
-        ctx = updateContext(ctx, {
-          iteration: ctx.iteration + 1,
-          totalAgentPasses: ctx.totalAgentPasses + 1,
-          reviewFindings: [...ctx.reviewFindings, ...decision.findings],
-          reviewResult: null,
-          verifyResults: [],
-        })
-        try { metrics?.incLoopIterations(ctx.repo) } catch { /* best-effort */ }
-        logger.info(
-          { runId: ctx.runId, iteration: ctx.iteration },
-          'Iterating loop',
-        )
-        continue
-      }
-
-      case 'block':
-        return recordPhase(
-          updateContext(ctx, { currentPhase: 'blocked', terminalStatus: 'blocked' }),
-          'decision',
-          'failure',
-        )
-
-      case 'error':
-        return recordPhase(
-          updateContext(ctx, { currentPhase: 'error', terminalStatus: 'error' }),
-          'decision',
-          'failure',
-        )
     }
+
+    stepIndex++
+  }
+
+  // Should not reach here — the decide step should have routed to a terminal state
+  return recordPhase(
+    updateContext(ctx, { currentPhase: 'error', terminalStatus: 'error' }),
+    'error',
+    'failure',
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+import type { WorkflowStep } from './workflow.js'
+
+function determineStepSuccess(step: WorkflowStep, ctx: RunContext): boolean {
+  switch (step.type) {
+    case 'worker':
+      if (step.role === 'planner') return ctx.plan !== null
+      if (step.role === 'coder') return ctx.codeResult !== null
+      if (step.role === 'reviewer') return ctx.reviewResult !== null
+      return true
+    case 'verify':
+      return ctx.verifyResults.length > 0 && ctx.verifyResults.every(r => r.passed)
+    case 'decide':
+      return true
   }
 }
+
+function buildStepArtifacts(step: WorkflowStep, ctx: RunContext): Record<string, unknown> {
+  switch (step.type) {
+    case 'worker':
+      if (step.role === 'planner') return { plan: ctx.plan }
+      if (step.role === 'coder') return { codeResult: ctx.codeResult }
+      if (step.role === 'reviewer') return { reviewResult: ctx.reviewResult }
+      return {}
+    case 'verify':
+      return { verifyResults: ctx.verifyResults }
+    case 'decide':
+      return {}
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cost estimation
+// ---------------------------------------------------------------------------
 
 const ESTIMATED_USD_PER_INPUT_TOKEN = 0.000003
 const ESTIMATED_USD_PER_OUTPUT_TOKEN = 0.000015
 
-const ESTIMATED_USD_PER_MINUTE: Record<'planner' | 'coder' | 'reviewer', number> = {
+const ESTIMATED_USD_PER_MINUTE: Record<string, number> = {
   planner: 0.008,
   coder: 0.008,
   reviewer: 0.008,
@@ -221,7 +252,7 @@ const ESTIMATED_USD_PER_MINUTE: Record<'planner' | 'coder' | 'reviewer', number>
 function applyEstimatedWorkerCost(
   ctx: RunContext,
   costTracker: CostTracker,
-  role: 'planner' | 'coder' | 'reviewer',
+  role: string,
   durationMs: number,
   tokenUsage?: { promptTokens: number; completionTokens: number },
 ): RunContext {
@@ -232,7 +263,7 @@ function applyEstimatedWorkerCost(
       tokenUsage.completionTokens * ESTIMATED_USD_PER_OUTPUT_TOKEN
     ).toFixed(6))
   } else {
-    const rate = ESTIMATED_USD_PER_MINUTE[role]
+    const rate = ESTIMATED_USD_PER_MINUTE[role] ?? 0.008
     estimatedCost = Number(((durationMs / 60_000) * rate).toFixed(6))
   }
   estimatedCost = Math.max(0, estimatedCost)
@@ -242,281 +273,3 @@ function applyEstimatedWorkerCost(
     estimatedCostUsd: Number((ctx.estimatedCostUsd + estimatedCost).toFixed(6)),
   })
 }
-
-async function runPlanStep(ctx: RunContext, deps: LoopDependencies): Promise<{ ctx: RunContext; tokenUsage?: WorkerTaskResult['tokenUsage'] }> {
-  const result = await runWorkerStep(
-    ctx,
-    deps,
-    'planner',
-    deps.plannerAdapter,
-    ctx.repoConfig.prompts?.plannerSystem,
-    DEFAULT_PLANNER_TEMPLATE,
-  )
-
-  return {
-    ctx: updateContext(ctx, {
-      plan: result.parsed as RunContext['plan'],
-      totalAgentPasses: ctx.totalAgentPasses + 1,
-      sessionIds: result.sessionId
-        ? { ...ctx.sessionIds, planner: result.sessionId }
-        : ctx.sessionIds,
-    }),
-    tokenUsage: result.tokenUsage,
-  }
-}
-
-async function runCodeStep(ctx: RunContext, deps: LoopDependencies): Promise<{ ctx: RunContext; tokenUsage?: WorkerTaskResult['tokenUsage'] }> {
-  const result = await runWorkerStep(
-    ctx,
-    deps,
-    'coder',
-    deps.coderAdapter,
-    ctx.repoConfig.prompts?.coderSystem,
-    DEFAULT_CODER_TEMPLATE,
-  )
-
-  let codeResult = result.parsed as RunContext['codeResult']
-
-  // Fallback: if parse failed but coder exited successfully, build a synthetic
-  // codeResult from git. The coder wrote files to disk — we just couldn't parse
-  // its structured output.
-  if (!codeResult && result.exitCode === 0) {
-    logger.info({ runId: ctx.runId }, 'Coder parse failed — falling back to git diff for changed files')
-    const changedFiles = await getChangedFilesAgainstBranch(ctx.worktreePath, ctx.repoConfig.baseBranch)
-    if (changedFiles.length > 0) {
-      codeResult = {
-        summary: 'Coder output could not be parsed. Changed files detected via git diff.',
-        changedFiles,
-        remainingUncertainty: 'Coder structured output was not parseable — review carefully.',
-        blockers: null,
-      }
-    }
-  }
-
-  return {
-    ctx: updateContext(ctx, {
-      codeResult,
-      totalAgentPasses: ctx.totalAgentPasses + 1,
-      sessionIds: result.sessionId
-        ? { ...ctx.sessionIds, coder: result.sessionId }
-        : ctx.sessionIds,
-    }),
-    tokenUsage: result.tokenUsage,
-  }
-}
-
-async function runReviewStep(ctx: RunContext, deps: LoopDependencies): Promise<{ ctx: RunContext; tokenUsage?: WorkerTaskResult['tokenUsage'] }> {
-  const result = await runWorkerStep(
-    ctx,
-    deps,
-    'reviewer',
-    deps.reviewerAdapter,
-    ctx.repoConfig.prompts?.reviewerSystem,
-    DEFAULT_REVIEWER_TEMPLATE,
-  )
-
-  return {
-    ctx: updateContext(ctx, {
-      reviewResult: result.parsed as RunContext['reviewResult'],
-      totalAgentPasses: ctx.totalAgentPasses + 1,
-      sessionIds: result.sessionId
-        ? { ...ctx.sessionIds, reviewer: result.sessionId }
-        : ctx.sessionIds,
-    }),
-    tokenUsage: result.tokenUsage,
-  }
-}
-
-async function runWorkerStep(
-  ctx: RunContext,
-  deps: LoopDependencies,
-  role: 'planner' | 'coder' | 'reviewer',
-  adapter: WorkerAdapter,
-  customTemplate: string | undefined,
-  defaultTemplate: string,
-): Promise<WorkerTaskResult> {
-  const promptCtx = buildPromptContext(ctx, role)
-  const { systemPrompt, userPrompt } = compilePrompt(
-    customTemplate ?? null,
-    defaultTemplate,
-    promptCtx,
-  )
-
-  const profile = getWorkerProfile(ctx, role, deps.config)
-  const env = buildWorkerEnv(profile, deps.envOverrides)
-
-  // Session continuity: coder continues from planner (or its own prior iteration),
-  // reviewer always starts fresh to avoid bias from the coding session.
-  const continueSessionId = resolveContinueSession(ctx, role)
-
-  const supervisor = superviseWorker(role, ctx.adjustedLimits.workerTimeoutSeconds * 1000, () => {
-    // Advisory — the timeout.ts layer handles actual SIGTERM
-  })
-
-  let result: WorkerTaskResult
-  const start = Date.now()
-  try {
-    result = await adapter.runTask({
-      role,
-      worktreePath: ctx.worktreePath,
-      prompt: `${systemPrompt}\n\n${userPrompt}`,
-      profile,
-      timeoutSeconds: ctx.adjustedLimits.workerTimeoutSeconds,
-      env,
-      continueSessionId,
-    })
-    supervisor.cancel()
-  } catch (err) {
-    supervisor.cancel()
-    throw err
-  }
-
-  try {
-    const adapterType = profile.type === 'codex' ? 'codex' : 'claude'
-    deps.metrics?.incAgentInvocations(role, adapterType)
-    deps.metrics?.observeAgentDuration(role, adapterType, (Date.now() - start) / 1000)
-  } catch { /* best-effort */ }
-
-  if (result.timedOut) {
-    throw new Error(`${role} worker timed out after ${ctx.adjustedLimits.workerTimeoutSeconds}s`)
-  }
-  if (result.exitCode !== 0) {
-    logger.error({ role, exitCode: result.exitCode, rawLength: result.rawOutput.length, rawTail: result.rawOutput.slice(-500) }, `${role} worker exited with non-zero code`)
-    throw new Error(`${role} worker exited with code ${result.exitCode}`)
-  }
-  if (result.parseError) {
-    logger.warn({ role, parseError: result.parseError, rawLength: result.rawOutput.length, rawHead: result.rawOutput.slice(0, 500), rawTail: result.rawOutput.slice(-500) }, `${role} worker output parse failed`)
-  }
-
-  return result
-}
-
-/**
- * Determine which session to continue for a given role.
- *
- * - Coder: continues from planner session (first iteration) or its own
- *   prior session (subsequent iterations), so it retains full context.
- * - Planner: always starts fresh.
- * - Reviewer: always starts fresh to avoid bias from coding session.
- *
- * Only continues when both the prior and current phase use the same
- * adapter type (e.g., both Claude). Cross-adapter continuation is not possible.
- */
-function resolveContinueSession(ctx: RunContext, role: 'planner' | 'coder' | 'reviewer'): string | null {
-  if (role === 'coder') {
-    // On iteration 2+, continue from the coder's own prior session
-    if (ctx.iteration > 1 && ctx.sessionIds['coder']) return ctx.sessionIds['coder']
-    // On iteration 1, continue from the planner's session
-    if (ctx.sessionIds['planner']) return ctx.sessionIds['planner']
-  }
-  // Planner and reviewer always start fresh
-  return null
-}
-
-function buildPromptContext(ctx: RunContext, role: 'planner' | 'coder' | 'reviewer'): PromptContext {
-  return {
-    role,
-    issue: {
-      number: ctx.issueNumber,
-      title: ctx.issue.title,
-      body: ctx.issue.body,
-      labels: ctx.issue.labels,
-    },
-    repo: {
-      name: ctx.repo,
-      baseBranch: ctx.repoConfig.baseBranch,
-    },
-    plan: ctx.plan?.objective ?? null,
-    diff: ctx.diff ?? null,
-    reviewFindings: ctx.reviewFindings.length > 0 ? ctx.reviewFindings : null,
-    verifyResults: ctx.verifyResults.length > 0 ? ctx.verifyResults : null,
-    iteration: {
-      current: ctx.iteration,
-      max: ctx.adjustedLimits.maxReviewIterations,
-      isRetry: ctx.iteration > 1,
-    },
-    triageLevel: ctx.triageResult.level,
-  }
-}
-
-function getWorkerProfile(ctx: RunContext, role: 'planner' | 'coder' | 'reviewer', config: Config) {
-  const agentName = ctx.roles[role]
-  const profileName = ctx.repoConfig.agents[agentName]
-  if (profileName && config.workerProfiles[profileName]) {
-    return config.workerProfiles[profileName]
-  }
-  // Fallback to first profile of the matching type
-  const fallback = Object.values(config.workerProfiles).find((p) => p.type === agentName)
-  if (fallback) return fallback
-  throw new Error(`No worker profile found for agent "${agentName}" (role: ${role})`)
-}
-
-const DEFAULT_PLANNER_TEMPLATE = `You are a software planning assistant. Create a thorough, evidence-based implementation plan.
-
-## Phase 1: Codebase Exploration
-
-Explore the codebase to understand the project before planning:
-- Read the project structure and key configuration files
-- Find and read files relevant to the issue
-- Identify existing patterns, conventions, and utilities that should be reused
-- Understand dependencies and how components interact
-
-Use tools freely: Read files, search with Glob/Grep, run read-only commands.
-
-IMPORTANT: The branch may contain commits from prior attempts at this issue. Do NOT assume prior work is complete or correct. Evaluate what exists: check if it compiles, passes tests, and fully addresses the issue. Then plan what remains — whether that is finishing incomplete work, fixing broken work, or starting fresh.
-
-## Phase 2: Implementation Plan
-
-After exploring, produce your plan as a JSON block. Reference actual files and patterns you found.
-
-\`\`\`json
-{
-  "objective": "One sentence describing the goal",
-  "assumptions": ["List assumptions about the codebase"],
-  "filesToChange": ["src/path/to/file.ts"],
-  "steps": [{"order": 1, "description": "What to do", "files": ["src/path/to/file.ts"]}],
-  "risks": ["Potential issues"],
-  "testStrategy": "How to verify the changes work"
-}
-\`\`\`
-
-CRITICAL: Your response MUST end with exactly one \\\`\\\`\\\`json block containing your plan. This JSON block is the LAST thing in your response.`
-
-const DEFAULT_CODER_TEMPLATE = `You are a software implementation assistant. Implement the changes described in the plan.
-
-After making changes, output a summary as JSON:
-\`\`\`json
-{
-  "summary": "...",
-  "changedFiles": ["..."],
-  "remainingUncertainty": null,
-  "blockers": null
-}
-\`\`\``
-
-const DEFAULT_REVIEWER_TEMPLATE = `You are a code reviewer. Perform a thorough, evidence-based review of the changes.
-
-## Phase 1: Context Gathering
-
-Before reviewing, understand what changed and why:
-- Read the changed files IN FULL (not just the diff) to understand context
-- Check related tests and verify they cover the changes
-- Read adjacent code to verify the changes follow existing patterns
-- Check for security concerns, error handling, and edge cases
-
-Use tools freely: Read files, search with Glob/Grep, run read-only commands.
-
-## Phase 2: Review Verdict
-
-After thorough analysis, produce your review as a JSON block. Reference specific files and lines in your findings.
-
-\`\`\`json
-{
-  "verdict": "APPROVED or CHANGES_REQUIRED or BLOCKED",
-  "summary": "Brief review summary",
-  "findings": [{"severity": "critical or major or minor", "message": "What's wrong", "suggestedFix": "How to fix it"}],
-  "definitionOfDoneCheck": {"issueAddressed": true, "testsPassing": true, "noBlockingFindings": true}
-}
-\`\`\`
-
-CRITICAL: Your response MUST end with exactly one \\\`\\\`\\\`json block containing your review. This JSON block is the LAST thing in your response.`

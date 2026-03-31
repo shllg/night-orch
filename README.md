@@ -2,6 +2,28 @@
 
 A self-hosted Node.js/TypeScript CLI that autonomously processes GitHub/Forgejo issues using AI agents (Claude Code, Codex CLI). Runs overnight or unattended — discovers issues, plans, codes, reviews, and opens PRs.
 
+## Features
+
+- **Configurable workflows** — YAML-defined pipelines (Plan→Code→Verify→Review or custom)
+- **Multi-agent support** — Claude, Codex, Gemini, and 17+ agents via ACP protocol
+- **Issue decomposition** — automatically splits complex issues into parallel sub-tasks
+- **Merge queue** — Bors-style batch-and-bisect for automated PR merging
+- **Session persistence** — agents retain context across pipeline phases
+- **Reaction engine** — auto-responds to CI failures and human review comments
+- **Live monitoring** — terminal dashboard with active runs, costs, merge queue status
+- **Prometheus metrics** — full observability with 13+ metrics
+- **MCP integration** — 9 tools for Claude Code integration
+- **GitHub + Forgejo** — dual forge support
+
+## Quick Start
+
+1. Install: `pnpm install`
+2. Setup: `night-orch init` (guided wizard)
+3. Verify: `night-orch doctor`
+4. Labels: `night-orch labels-init`
+5. Run: `night-orch run`
+6. Monitor: `night-orch watch` (in another terminal)
+
 ## Setup
 
 ```bash
@@ -16,15 +38,18 @@ Requires Node.js 24+ and at least one agent CLI (`claude` or `codex`).
 ## Commands
 
 ```
-night-orch run              # long-running poller
-night-orch run-once         # single poll + process cycle
-night-orch doctor           # validate config, auth, binaries, repos
-night-orch sync             # reconcile local state with GitHub
-night-orch retry <repo> <#> # force re-run of one issue
-night-orch labels-init [repo] # create/update orchestration labels via gh CLI
-night-orch cleanup          # remove stale worktrees, leases, logs
-night-orch notify-test      # send test notification
-night-orch mcp              # start MCP server (stdio)
+night-orch run              # long-running poller daemon
+night-orch run-once         # single poll cycle (for testing/CI)
+night-orch init             # interactive setup wizard
+night-orch doctor           # validate config, auth, CLIs, repos, DB
+night-orch status           # show active runs, costs, recent history
+night-orch watch            # live monitoring TUI dashboard
+night-orch sync             # reconcile DB state with GitHub
+night-orch retry <repo> <#> # re-run a blocked/errored issue
+night-orch cleanup          # remove stale worktrees, branches, logs
+night-orch labels-init      # create/update GitHub labels from config
+night-orch notify-test      # send test notification to all channels
+night-orch mcp              # start MCP stdio server
 ```
 
 All mutating commands support `--dry-run`.

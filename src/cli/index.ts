@@ -10,6 +10,8 @@ import { notifyTestCommand } from './commands/notify-test.js'
 import { mcpCommand } from './commands/mcp.js'
 import { labelsInitCommand } from './commands/labels-init.js'
 import { statusCommand } from './commands/status.js'
+import { runInit } from './commands/init.js'
+import { runWatch } from './commands/watch.js'
 
 const program = new Command()
 
@@ -74,5 +76,17 @@ program
   .argument('[repo]', 'Repository (owner/name) from config; defaults to all configured repos')
   .description('Create or update issue labels from per-repo label configuration via gh CLI')
   .action((repo, _opts, cmd) => labelsInitCommand(repo, cmd.parent?.opts()))
+
+program
+  .command('init')
+  .description('Interactive setup wizard')
+  .action(async () => {
+    await runInit()
+  })
+
+program
+  .command('watch')
+  .description('Live monitoring dashboard')
+  .action((_opts, cmd) => runWatch(cmd.parent?.opts()))
 
 program.parse()

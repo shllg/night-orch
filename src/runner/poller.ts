@@ -17,6 +17,7 @@ import {
 } from '../environment/manager.js'
 import { createWorkerAdapter } from '../workers/factory.js'
 import { executeLoop } from '../loop/engine.js'
+import { resolveWorkflow } from '../loop/workflow.js'
 import { publishPR } from '../publishing/publisher.js'
 import { transitionLabels } from '../labels/manager.js'
 import { buildLabelConfig } from '../labels/config.js'
@@ -33,6 +34,7 @@ import { formatStatusComment } from '../forge/status-comment.js'
 import { scanForReactions } from '../reactions/scanner.js'
 import { handleReaction } from '../reactions/handler.js'
 import type { ReactionCursor } from '../reactions/types.js'
+import { processMergeQueue } from '../merge-queue/runner.js'
 import { decomposeIssue, shouldAttemptDecompose } from '../discovery/decomposer.js'
 import { executeParallelSubtasks } from '../loop/parallel.js'
 import { buildWorkerEnv } from '../workers/env.js'
@@ -106,6 +108,13 @@ export async function pollOnce(
       })
     } catch (err) {
       logger.warn({ repo: repoConfig.repo, err }, 'Reaction scan failed — continuing with issue discovery')
+    }
+
+    // --- Merge queue: process pending merges before discovering new work ---
+    try {
+      await processMergeQueue(db, forge, repoConfig)
+    } catch (err) {
+      logger.warn({ repo: repoConfig.repo, err }, 'Merge queue processing failed — continuing')
     }
 
     const discoveredAll = await discoverEligibleIssues(repoConfig, forge, leaseManager)
@@ -260,6 +269,7 @@ export async function pollOnce(
           blockReason: null,
           prReviewFeedback: null,
           sessionIds: {},
+          stepOutputs: {},
         }
 
         // Check if decomposition is enabled and appropriate
@@ -286,9 +296,12 @@ export async function pollOnce(
 
             const loopDeps = {
               db, config,
-              plannerAdapter: createWorkerAdapter(plannerProfile),
-              coderAdapter: createWorkerAdapter(coderProfile),
-              reviewerAdapter: createWorkerAdapter(reviewerProfile),
+              adapters: {
+                planner: createWorkerAdapter(plannerProfile),
+                coder: createWorkerAdapter(coderProfile),
+                reviewer: createWorkerAdapter(reviewerProfile),
+              },
+              workflow: resolveWorkflow(repoConfig, config, discoveredIssue.triage.level),
               envOverrides: envSetup?.envOverrides ?? {},
               metrics,
             }
@@ -329,9 +342,12 @@ export async function pollOnce(
         const finalCtx = await executeLoop(initialCtx, {
           db,
           config,
-          plannerAdapter: createWorkerAdapter(plannerProfile),
-          coderAdapter: createWorkerAdapter(coderProfile),
-          reviewerAdapter: createWorkerAdapter(reviewerProfile),
+          adapters: {
+            planner: createWorkerAdapter(plannerProfile),
+            coder: createWorkerAdapter(coderProfile),
+            reviewer: createWorkerAdapter(reviewerProfile),
+          },
+          workflow: resolveWorkflow(repoConfig, config, discoveredIssue.triage.level),
           envOverrides: envSetup?.envOverrides ?? {},
           metrics,
           onPlanReady: async (ctx) => {

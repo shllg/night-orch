@@ -2,12 +2,27 @@ version: 1
 
 github:
   tokenEnv: GITHUB_TOKEN
+  apiBaseUrl: https://api.github.com
   pollIntervalSeconds: 300
+  appMentions:
+    claude:
+      enabled: true
+      commentTemplate: "@claude Please review this PR and apply fixes if needed."
+    codex:
+      enabled: false
+      commentTemplate: "@codex please review and patch any remaining issues."
 
 storage:
   dbPath: ~/.night-orch/state.db
   worktreeRoot: ~/.night-orch/worktrees
   logsRoot: ~/.night-orch/logs
+  autoCleanup:
+    enabled: true
+    intervalMinutes: 120
+  retention:
+    worktreeAgeDays: 7
+    detailDays: 30
+    archiveDays: 90
 
 notifications:
   channels:
@@ -25,6 +40,9 @@ loop:
   stopOnPlannerFailure: true
   requireVerificationPass: true
   blockOnAmbiguousReview: true
+  decompose: true
+  maxSubtasks: 5
+  maxConcurrentSubtasks: 3
 
 security:
   maxChangedFiles: 50
@@ -50,15 +68,24 @@ workerProfiles:
     workerTimeoutSeconds: 1800
     minimalEnv: true
     env: {}
-
-mcp:
-  enabled: true
-  httpPort: 3100
+  # gemini-acp:
+  #   type: acp
+  #   command: gemini            # acpx agent name
+  #   args: []
+  #   workerTimeoutSeconds: 1800
 
 metrics:
   enabled: true
   port: 9100
   host: 0.0.0.0
+
+commentCommands:
+  enabled: true
+  requireCollaborator: false
+
+mcp:
+  enabled: true
+  httpPort: 3100
 
 repos:
   - repo: shllg/night-orch

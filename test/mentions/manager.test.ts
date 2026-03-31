@@ -87,6 +87,11 @@ function makeCtx(labels: string[] = [], prMentions: string[] = []): RunContext {
     terminalStatus: 'publish',
     phaseHistory: [],
     dryRun: false,
+    runMode: 'fresh' as const,
+    blockReason: null,
+    prReviewFeedback: null,
+    sessionIds: {},
+    stepOutputs: {},
   }
 }
 

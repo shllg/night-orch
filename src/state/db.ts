@@ -8,6 +8,7 @@ import { up as migration003 } from './migrations/003-mention-tracking.js'
 import { up as migration004 } from './migrations/004-command-tracking.js'
 import { up as migration005 } from './migrations/005-block-reason.js'
 import { up as migration006 } from './migrations/006-parent-run.js'
+import { up as migration007 } from './migrations/007-merge-queue.js'
 
 const MIGRATIONS = [
   { version: 1, name: '001-initial', up: migration001 },
@@ -16,6 +17,7 @@ const MIGRATIONS = [
   { version: 4, name: '004-command-tracking', up: migration004 },
   { version: 5, name: '005-block-reason', up: migration005 },
   { version: 6, name: '006-parent-run', up: migration006 },
+  { version: 7, name: '007-merge-queue', up: migration007 },
 ]
 
 export function initDatabase(dbPath: string): Database.Database {

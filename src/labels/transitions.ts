@@ -1,5 +1,6 @@
 import type { RunStatus } from '../state/runs.js'
 import type { BlockReason } from '../loop/types.js'
+import type { MergeBatchStatus } from '../merge-queue/types.js'
 
 export interface LabelMutation {
   add: string[]
@@ -14,6 +15,9 @@ export interface LabelConfig {
   reviewReady: string
   error: string
   retry: string
+  mergeQueued: string
+  merging: string
+  mergeFailed: string
 }
 
 /** Returns true if the block reason genuinely requires human intervention. */
@@ -67,6 +71,47 @@ export function computeLabelMutation(
   }
 
   // Filter: don't add labels already present, don't remove labels not present
+  add = add.filter((l) => !current.has(l))
+  remove = remove.filter((l) => current.has(l))
+
+  return { add, remove }
+}
+
+/**
+ * Compute label mutations for a merge batch status transition.
+ * Pure function — no side effects.
+ */
+export function computeMergeLabelMutation(
+  to: MergeBatchStatus,
+  currentLabels: string[],
+  config: LabelConfig,
+): LabelMutation {
+  const current = new Set(currentLabels)
+  let add: string[] = []
+  let remove: string[] = []
+
+  const allMergeLabels = [config.mergeQueued, config.merging, config.mergeFailed]
+
+  switch (to) {
+    case 'pending':
+    case 'building':
+    case 'testing':
+      add = [config.mergeQueued]
+      remove = [config.mergeFailed]
+      break
+    case 'bisecting':
+      add = [config.merging]
+      remove = [config.mergeQueued, config.mergeFailed]
+      break
+    case 'passed':
+      remove = allMergeLabels
+      break
+    case 'failed':
+      add = [config.mergeFailed]
+      remove = [config.mergeQueued, config.merging]
+      break
+  }
+
   add = add.filter((l) => !current.has(l))
   remove = remove.filter((l) => current.has(l))
 

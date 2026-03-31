@@ -45,6 +45,11 @@ function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
     terminalStatus: 'running',
     phaseHistory: [],
     dryRun: false,
+    runMode: 'fresh' as const,
+    blockReason: null,
+    prReviewFeedback: null,
+    sessionIds: {},
+    stepOutputs: {},
     ...overrides,
   }
 }

@@ -16,6 +16,13 @@ storage:
   dbPath: ~/.config/night-orch/state.db
   worktreeRoot: ~/code/.night-orch/worktrees
   logsRoot: ~/code/.night-orch/logs
+  autoCleanup:
+    enabled: true
+    intervalMinutes: 60
+  retention:
+    worktreeAgeDays: 7
+    detailDays: 30
+    archiveDays: 90
 
 notifications:
   channels:
@@ -37,6 +44,10 @@ loop:
   reviewApprovalKeyword: APPROVED
   reviewNeedsChangesKeyword: CHANGES_REQUIRED
   blockOnAmbiguousReview: true
+  maxAutoRetries: 3
+  # decompose: true              # Enable issue decomposition into sub-tasks
+  # maxSubtasks: 5               # Max sub-tasks per decomposition
+  # maxConcurrentSubtasks: 3     # Max parallel sub-task worktrees
 
 security:
   maxChangedFiles: 50
@@ -62,11 +73,36 @@ workerProfiles:
     workerTimeoutSeconds: 1800
     minimalEnv: true
     env: {}
+  # gemini-acp:
+  #   type: acp
+  #   command: gemini            # acpx agent name
+  #   args: []
+  #   workerTimeoutSeconds: 1800
 
 metrics:
   enabled: true
   port: 9090
   host: 127.0.0.1
+
+commentCommands:
+  enabled: true
+  requireCollaborator: false
+
+# workflows:
+#   minimal:
+#     steps:
+#       - { type: worker, id: code, role: coder }
+#       - { type: verify, id: verify }
+#       - { type: worker, id: review, role: reviewer }
+#       - { type: decide, id: decide, onIterate: code }
+#   with-security-review:
+#     steps:
+#       - { type: worker, id: plan, role: planner, skipWhen: trivial }
+#       - { type: worker, id: code, role: coder, continueFrom: plan }
+#       - { type: verify, id: verify }
+#       - { type: worker, id: security, role: reviewer }
+#       - { type: worker, id: review, role: reviewer }
+#       - { type: decide, id: decide, onIterate: code }
 
 repos:
   - repo: myorg/myrepo
@@ -84,6 +120,9 @@ repos:
       reviewReady: orch:review-ready
       error: orch:error
       retry: orch:retry
+      # mergeQueued: orch:merge-queued
+      # merging: orch:merging
+      # mergeFailed: orch:merge-failed
     # Optional per-label metadata overrides used by `night-orch labels-init`
     labelConfig:
       orch:ready:
@@ -137,3 +176,11 @@ repos:
     agents:
       claude: claude-default
       codex: codex-default
+    # workflow: minimal           # Reference a named workflow
+    # mergeQueue:
+    #   enabled: true
+    #   batchSize: 5
+    #   mergeMethod: merge
+    #   retryFlakyOnce: true
+    #   requireApproval: true
+    #   stagingBranchPrefix: orch/staging

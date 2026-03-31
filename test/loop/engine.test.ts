@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { executeLoop, type LoopDependencies } from '../../src/loop/engine.js'
+import { DEFAULT_WORKFLOW } from '../../src/loop/workflow.js'
 import type { RunContext } from '../../src/loop/types.js'
 import type { Config } from '../../src/config/schema.js'
 import type { WorkerAdapter, WorkerTaskResult } from '../../src/workers/types.js'
@@ -165,6 +166,7 @@ function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
     blockReason: null,
     prReviewFeedback: null,
     sessionIds: {},
+    stepOutputs: {},
     ...overrides,
   }
 }
@@ -193,9 +195,12 @@ describe('executeLoop', () => {
     const deps: LoopDependencies = {
       db,
       config: makeConfig(),
-      plannerAdapter: makeMockAdapter([makePlannerResult()]),
-      coderAdapter: makeMockAdapter([makeCoderResult()]),
-      reviewerAdapter: makeMockAdapter([makeReviewerResult('APPROVED')]),
+      adapters: {
+        planner: makeMockAdapter([makePlannerResult()]),
+        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: makeMockAdapter([makeReviewerResult('APPROVED')]),
+      },
+      workflow: DEFAULT_WORKFLOW,
     }
 
     const result = await executeLoop(makeCtx(), deps)
@@ -240,9 +245,12 @@ describe('executeLoop', () => {
     const deps: LoopDependencies = {
       db,
       config: makeConfig(),
-      plannerAdapter,
-      coderAdapter,
-      reviewerAdapter,
+      adapters: {
+        planner: plannerAdapter,
+        coder: coderAdapter,
+        reviewer: reviewerAdapter,
+      },
+      workflow: DEFAULT_WORKFLOW,
       onPlanReady,
     }
 
@@ -256,9 +264,12 @@ describe('executeLoop', () => {
     const deps: LoopDependencies = {
       db,
       config: makeConfig(),
-      plannerAdapter: makeMockAdapter([makePlannerResult()]),
-      coderAdapter: makeMockAdapter([makeCoderResult()]),
-      reviewerAdapter: makeMockAdapter([makeReviewerResult('APPROVED')]),
+      adapters: {
+        planner: makeMockAdapter([makePlannerResult()]),
+        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: makeMockAdapter([makeReviewerResult('APPROVED')]),
+      },
+      workflow: DEFAULT_WORKFLOW,
       onPlanReady: vi.fn().mockRejectedValue(new Error('comment failed')),
     }
 
@@ -275,9 +286,12 @@ describe('executeLoop', () => {
     const deps: LoopDependencies = {
       db,
       config: makeConfig(),
-      plannerAdapter: makeMockAdapter([makePlannerResult()]),
-      coderAdapter: makeMockAdapter([makeCoderResult(), makeCoderResult()]),
-      reviewerAdapter: makeMockAdapter([makeReviewerResult('CHANGES_REQUIRED'), makeReviewerResult('APPROVED')]),
+      adapters: {
+        planner: makeMockAdapter([makePlannerResult()]),
+        coder: makeMockAdapter([makeCoderResult(), makeCoderResult()]),
+        reviewer: makeMockAdapter([makeReviewerResult('CHANGES_REQUIRED'), makeReviewerResult('APPROVED')]),
+      },
+      workflow: DEFAULT_WORKFLOW,
     }
 
     const result = await executeLoop(makeCtx(), deps)
@@ -296,13 +310,16 @@ describe('executeLoop', () => {
     const deps: LoopDependencies = {
       db,
       config,
-      plannerAdapter: makeMockAdapter([makePlannerResult()]),
-      coderAdapter: makeMockAdapter([makeCoderResult(), makeCoderResult(), makeCoderResult()]),
-      reviewerAdapter: makeMockAdapter([
-        makeReviewerResult('CHANGES_REQUIRED'),
-        makeReviewerResult('CHANGES_REQUIRED'),
-        makeReviewerResult('CHANGES_REQUIRED'),
-      ]),
+      adapters: {
+        planner: makeMockAdapter([makePlannerResult()]),
+        coder: makeMockAdapter([makeCoderResult(), makeCoderResult(), makeCoderResult()]),
+        reviewer: makeMockAdapter([
+          makeReviewerResult('CHANGES_REQUIRED'),
+          makeReviewerResult('CHANGES_REQUIRED'),
+          makeReviewerResult('CHANGES_REQUIRED'),
+        ]),
+      },
+      workflow: DEFAULT_WORKFLOW,
     }
 
     const result = await executeLoop(ctx, deps)
@@ -327,9 +344,12 @@ describe('executeLoop', () => {
     const deps: LoopDependencies = {
       db,
       config: makeConfig(),
-      plannerAdapter: makeMockAdapter([failedPlannerResult]),
-      coderAdapter: makeMockAdapter([makeCoderResult()]),
-      reviewerAdapter: makeMockAdapter([makeReviewerResult()]),
+      adapters: {
+        planner: makeMockAdapter([failedPlannerResult]),
+        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: makeMockAdapter([makeReviewerResult()]),
+      },
+      workflow: DEFAULT_WORKFLOW,
     }
 
     await expect(executeLoop(makeCtx(), deps)).rejects.toThrow('planner worker exited with code 1')
@@ -348,9 +368,12 @@ describe('executeLoop', () => {
     const deps: LoopDependencies = {
       db,
       config: makeConfig(),
-      plannerAdapter: makeMockAdapter([timedOutPlannerResult]),
-      coderAdapter: makeMockAdapter([makeCoderResult()]),
-      reviewerAdapter: makeMockAdapter([makeReviewerResult()]),
+      adapters: {
+        planner: makeMockAdapter([timedOutPlannerResult]),
+        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: makeMockAdapter([makeReviewerResult()]),
+      },
+      workflow: DEFAULT_WORKFLOW,
     }
 
     await expect(executeLoop(makeCtx(), deps)).rejects.toThrow('planner worker timed out')
@@ -368,9 +391,12 @@ describe('executeLoop', () => {
     const deps: LoopDependencies = {
       db,
       config: makeConfig(),
-      plannerAdapter,
-      coderAdapter: makeMockAdapter([makeCoderResult()]),
-      reviewerAdapter: makeMockAdapter([makeReviewerResult('APPROVED')]),
+      adapters: {
+        planner: plannerAdapter,
+        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: makeMockAdapter([makeReviewerResult('APPROVED')]),
+      },
+      workflow: DEFAULT_WORKFLOW,
       onPlanReady,
     }
 
@@ -379,7 +405,7 @@ describe('executeLoop', () => {
     expect(result.currentPhase).toBe('publish')
     expect(result.terminalStatus).toBe('publish')
     // Planner should NOT have been called
-    expect(plannerAdapter.runTask).not.toHaveBeenCalled()
+    expect(deps.adapters['planner']!.runTask).not.toHaveBeenCalled()
     expect(onPlanReady).not.toHaveBeenCalled()
   })
 
@@ -391,9 +417,12 @@ describe('executeLoop', () => {
     const deps: LoopDependencies = {
       db,
       config: makeConfig(),
-      plannerAdapter: makeMockAdapter([plannerResult]),
-      coderAdapter: makeMockAdapter([makeCoderResult()]),
-      reviewerAdapter: makeMockAdapter([makeReviewerResult('APPROVED')]),
+      adapters: {
+        planner: makeMockAdapter([plannerResult]),
+        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: makeMockAdapter([makeReviewerResult('APPROVED')]),
+      },
+      workflow: DEFAULT_WORKFLOW,
     }
 
     const result = await executeLoop(makeCtx(), deps)
@@ -406,9 +435,12 @@ describe('executeLoop', () => {
     const deps: LoopDependencies = {
       db,
       config: makeConfig(),
-      plannerAdapter: makeMockAdapter([makePlannerResult()]),
-      coderAdapter: makeMockAdapter([makeCoderResult()]),
-      reviewerAdapter: makeMockAdapter([makeReviewerResult('BLOCKED')]),
+      adapters: {
+        planner: makeMockAdapter([makePlannerResult()]),
+        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: makeMockAdapter([makeReviewerResult('BLOCKED')]),
+      },
+      workflow: DEFAULT_WORKFLOW,
     }
 
     const result = await executeLoop(makeCtx(), deps)

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { executeLoop, type LoopDependencies } from '../../src/loop/engine.js'
+import { DEFAULT_WORKFLOW } from '../../src/loop/workflow.js'
 import { Checkpoint } from '../../src/loop/checkpoint.js'
 import type { RunContext } from '../../src/loop/types.js'
 import type { Config } from '../../src/config/schema.js'
@@ -93,6 +94,7 @@ function makeCtx(): RunContext {
     blockReason: null,
     prReviewFeedback: null,
     sessionIds: {},
+    stepOutputs: {},
   }
 }
 
@@ -152,9 +154,12 @@ describe('Full loop integration', () => {
     const deps: LoopDependencies = {
       db,
       config: makeConfig(),
-      plannerAdapter: { runTask: vi.fn().mockResolvedValue(planResult), checkAvailability: vi.fn() },
-      coderAdapter: { runTask: vi.fn().mockResolvedValue(codeResult), checkAvailability: vi.fn() },
-      reviewerAdapter: { runTask: vi.fn().mockResolvedValue(reviewResult), checkAvailability: vi.fn() },
+      adapters: {
+        planner: { runTask: vi.fn().mockResolvedValue(planResult), checkAvailability: vi.fn() },
+        coder: { runTask: vi.fn().mockResolvedValue(codeResult), checkAvailability: vi.fn() },
+        reviewer: { runTask: vi.fn().mockResolvedValue(reviewResult), checkAvailability: vi.fn() },
+      },
+      workflow: DEFAULT_WORKFLOW,
     }
 
     const result = await executeLoop(makeCtx(), deps)
@@ -171,9 +176,9 @@ describe('Full loop integration', () => {
     expect(lastPhase.result).toBe('success')
 
     // All three adapters should have been called
-    expect(deps.plannerAdapter.runTask).toHaveBeenCalledTimes(1)
-    expect(deps.coderAdapter.runTask).toHaveBeenCalledTimes(1)
-    expect(deps.reviewerAdapter.runTask).toHaveBeenCalledTimes(1)
+    expect(deps.adapters['planner']!.runTask).toHaveBeenCalledTimes(1)
+    expect(deps.adapters['coder']!.runTask).toHaveBeenCalledTimes(1)
+    expect(deps.adapters['reviewer']!.runTask).toHaveBeenCalledTimes(1)
   })
 
   it('checkpoint data persists across simulated crash', async () => {
@@ -201,9 +206,12 @@ describe('Full loop integration', () => {
     const deps: LoopDependencies = {
       db,
       config: makeConfig(),
-      plannerAdapter: { runTask: vi.fn().mockResolvedValue(planResult), checkAvailability: vi.fn() },
-      coderAdapter: { runTask: vi.fn().mockResolvedValue(codeResult), checkAvailability: vi.fn() },
-      reviewerAdapter: { runTask: vi.fn().mockResolvedValue(reviewResult), checkAvailability: vi.fn() },
+      adapters: {
+        planner: { runTask: vi.fn().mockResolvedValue(planResult), checkAvailability: vi.fn() },
+        coder: { runTask: vi.fn().mockResolvedValue(codeResult), checkAvailability: vi.fn() },
+        reviewer: { runTask: vi.fn().mockResolvedValue(reviewResult), checkAvailability: vi.fn() },
+      },
+      workflow: DEFAULT_WORKFLOW,
     }
 
     // Run the full loop
@@ -246,9 +254,12 @@ describe('Full loop integration', () => {
     const deps: LoopDependencies = {
       db,
       config: makeConfig(),
-      plannerAdapter: { runTask: vi.fn().mockResolvedValue(planResult), checkAvailability: vi.fn() },
-      coderAdapter: { runTask: vi.fn().mockResolvedValue(codeResult), checkAvailability: vi.fn() },
-      reviewerAdapter: { runTask: vi.fn().mockResolvedValue(reviewResult), checkAvailability: vi.fn() },
+      adapters: {
+        planner: { runTask: vi.fn().mockResolvedValue(planResult), checkAvailability: vi.fn() },
+        coder: { runTask: vi.fn().mockResolvedValue(codeResult), checkAvailability: vi.fn() },
+        reviewer: { runTask: vi.fn().mockResolvedValue(reviewResult), checkAvailability: vi.fn() },
+      },
+      workflow: DEFAULT_WORKFLOW,
     }
 
     const result = await executeLoop(makeCtx(), deps)

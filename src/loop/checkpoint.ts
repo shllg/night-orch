@@ -35,7 +35,7 @@ export class Checkpoint {
     const phaseArtifacts = (phaseData[row.current_phase] as Record<string, unknown>) ?? {}
 
     return {
-      phase: row.current_phase as LoopPhase,
+      phase: row.current_phase,
       artifacts: phaseArtifacts,
     }
   }
@@ -68,7 +68,7 @@ export class Checkpoint {
 
     return {
       ...baseCtx,
-      currentPhase: row.current_phase as LoopPhase,
+      currentPhase: row.current_phase,
       terminalStatus: 'running',
       iteration: row.iteration_count ?? baseCtx.iteration,
       estimatedCostUsd: row.estimated_cost_usd ?? baseCtx.estimatedCostUsd,

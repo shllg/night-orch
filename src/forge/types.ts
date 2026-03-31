@@ -122,6 +122,12 @@ export interface ForgeAdapter {
 
   /** Get combined CI/check status for a PR's head commit. */
   getPRCheckStatus?(repo: string, prNumber: number): Promise<PRCheckStatus>
+
+  /** Get CI/check status for an arbitrary ref or SHA. */
+  getRefCheckStatus?(repo: string, ref: string): Promise<PRCheckStatus>
+
+  /** Update a git reference (fast-forward merge via API). */
+  updateRef?(repo: string, ref: string, sha: string, force?: boolean): Promise<void>
 }
 
 export type CheckConclusion = 'success' | 'failure' | 'pending' | 'neutral' | 'skipped' | 'cancelled'

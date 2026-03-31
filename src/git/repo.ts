@@ -109,6 +109,54 @@ export async function getDiffAgainstBranch(
 }
 
 /**
+ * Get the HEAD commit SHA for a worktree.
+ */
+export async function getHeadSha(worktreePath: string): Promise<string> {
+  const result = await execa('git', ['rev-parse', 'HEAD'], { cwd: worktreePath })
+  return result.stdout.trim()
+}
+
+/**
+ * Merge a branch into the current HEAD using --no-ff.
+ * Returns success/failure so the caller can decide whether to eject.
+ */
+export async function mergeNoFF(
+  worktreePath: string,
+  branch: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await execa('git', ['merge', '--no-ff', branch, '-m', `Merge ${branch}`], { cwd: worktreePath })
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: String(err) }
+  }
+}
+
+/**
+ * Cherry-pick a single commit SHA onto the current HEAD.
+ * Aborts the cherry-pick automatically on failure.
+ */
+export async function cherryPick(
+  worktreePath: string,
+  sha: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await execa('git', ['cherry-pick', sha], { cwd: worktreePath })
+    return { success: true }
+  } catch (err) {
+    try { await execa('git', ['cherry-pick', '--abort'], { cwd: worktreePath }) } catch { /* ignore */ }
+    return { success: false, error: String(err) }
+  }
+}
+
+/**
+ * Abort an in-progress merge. No-op if there is nothing to abort.
+ */
+export async function abortMerge(worktreePath: string): Promise<void> {
+  try { await execa('git', ['merge', '--abort'], { cwd: worktreePath }) } catch { /* ignore */ }
+}
+
+/**
  * Get the list of changed files (committed + uncommitted + untracked)
  * relative to origin/<baseBranch>.
  */
