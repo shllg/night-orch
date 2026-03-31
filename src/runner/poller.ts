@@ -185,6 +185,7 @@ export async function pollOnce(
         const run = queuedRun ?? runManager.create({
           repo: repoConfig.repo,
           issueNumber: discoveredIssue.issue.number,
+          issueTitle: discoveredIssue.issue.title,
           issueNodeId: discoveredIssue.issue.nodeId,
           planner: roles.planner,
           coder: roles.coder,
@@ -193,6 +194,7 @@ export async function pollOnce(
         runId = run.id
         runManager.update(run.id, {
           status: 'running',
+          issueTitle: discoveredIssue.issue.title,
           branchName: branch,
           branchSlug: slug,
           worktreePath,
@@ -517,6 +519,7 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
       runManager.update(runId, {
         status: 'review_ready',
         prNumber: publishResult.prNumber,
+        prTitle: publishResult.prTitle,
         endedAt: new Date().toISOString(),
       })
       const latestIssue = await forge.getIssue(repo, issueNumber)

@@ -85,6 +85,7 @@ export async function executeParallelSubtasks(
           const subRun = runManager.create({
             repo: parentCtx.repo,
             issueNumber: parentCtx.issueNumber,
+            issueTitle: subtask.title,
             issueNodeId: parentCtx.issue.nodeId,
             planner: parentCtx.roles.planner,
             coder: parentCtx.roles.coder,

@@ -79,4 +79,15 @@ describe('initDatabase', () => {
     expect(indexes).toContain('idx_events_created')
     expect(indexes).toContain('idx_agent_events_run')
   })
+
+  it('adds run title columns via migrations', () => {
+    db = initDatabase(join(tmpDir, 'test.db'))
+    const columns = db
+      .prepare('PRAGMA table_info(runs)')
+      .all()
+      .map((row) => (row as { name: string }).name)
+
+    expect(columns).toContain('issue_title')
+    expect(columns).toContain('pr_title')
+  })
 })

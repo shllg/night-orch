@@ -7,6 +7,7 @@ export interface RunRecord {
   id: string
   repo: string
   issueNumber: number
+  issueTitle: string | null
   issueNodeId: string | null
   status: RunStatus
   planner: string
@@ -19,6 +20,7 @@ export interface RunRecord {
   endedAt: string | null
   lastError: string | null
   prNumber: number | null
+  prTitle: string | null
   branchName: string | null
   branchSlug: string | null
   worktreePath: string | null
@@ -30,6 +32,7 @@ export interface RunRecord {
 export interface CreateRunParams {
   repo: string
   issueNumber: number
+  issueTitle?: string | null
   issueNodeId: string | null
   planner: string
   coder: string
@@ -46,13 +49,14 @@ export class RunManager {
 
     this.db
       .prepare(
-        `INSERT INTO runs (id, repo, issue_number, issue_node_id, status, planner, coder, reviewer, parent_run_id, started_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO runs (id, repo, issue_number, issue_title, issue_node_id, status, planner, coder, reviewer, parent_run_id, started_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
         params.repo,
         params.issueNumber,
+        params.issueTitle ?? null,
         params.issueNodeId,
         params.planner,
         params.coder,
@@ -69,12 +73,14 @@ export class RunManager {
   update(id: string, fields: Partial<RunRecord>): void {
     const allowed = [
       'status',
+      'issueTitle',
       'iterationCount',
       'currentPhase',
       'phaseData',
       'endedAt',
       'lastError',
       'prNumber',
+      'prTitle',
       'branchName',
       'branchSlug',
       'worktreePath',
@@ -85,6 +91,7 @@ export class RunManager {
 
     const columnMap: Record<string, string> = {
       issueNumber: 'issue_number',
+      issueTitle: 'issue_title',
       issueNodeId: 'issue_node_id',
       iterationCount: 'iteration_count',
       currentPhase: 'current_phase',
@@ -93,6 +100,7 @@ export class RunManager {
       endedAt: 'ended_at',
       lastError: 'last_error',
       prNumber: 'pr_number',
+      prTitle: 'pr_title',
       branchName: 'branch_name',
       branchSlug: 'branch_slug',
       worktreePath: 'worktree_path',
@@ -195,6 +203,7 @@ export class RunManager {
       id: row.id,
       repo: row.repo,
       issueNumber: row.issue_number,
+      issueTitle: row.issue_title ?? null,
       issueNodeId: row.issue_node_id ?? null,
       status: row.status as RunStatus,
       planner: row.planner ?? '',
@@ -207,6 +216,7 @@ export class RunManager {
       endedAt: row.ended_at,
       lastError: row.last_error,
       prNumber: row.pr_number,
+      prTitle: row.pr_title ?? null,
       branchName: row.branch_name,
       branchSlug: row.branch_slug,
       worktreePath: row.worktree_path,
@@ -221,6 +231,7 @@ interface RawRunRow {
   id: string
   repo: string
   issue_number: number
+  issue_title: string | null
   issue_node_id: string | null
   status: string
   planner: string | null
@@ -233,6 +244,7 @@ interface RawRunRow {
   ended_at: string | null
   last_error: string | null
   pr_number: number | null
+  pr_title: string | null
   branch_name: string | null
   branch_slug: string | null
   worktree_path: string | null

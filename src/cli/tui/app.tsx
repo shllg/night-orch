@@ -21,11 +21,14 @@ interface RunListRow {
   id: string
   repo: string
   issue_number: number
+  issue_title: string | null
   status: string
   current_phase: string | null
   iteration_count: number | null
   estimated_cost_usd: number | null
   last_error: string | null
+  pr_number: number | null
+  pr_title: string | null
   updated_at: string
 }
 
@@ -295,6 +298,16 @@ export function App({ db, config, pollIntervalMs = 2000, dryRun = false }: AppPr
                 {' '}
                 <Text>{run.repo}#{run.issue_number}</Text>
                 {' '}
+                <Text color="gray">{truncate(run.issue_title ?? '(title unavailable)', 26)}</Text>
+                {' '}
+                {run.pr_number !== null && (
+                  <>
+                    <Text color="cyan">PR #{run.pr_number}</Text>
+                    {' '}
+                    <Text color="gray">{truncate(run.pr_title ?? '(title unavailable)', 18)}</Text>
+                    {' '}
+                  </>
+                )}
                 <Text color="gray">{idShort}</Text>
               </Text>
             )
@@ -312,6 +325,16 @@ export function App({ db, config, pollIntervalMs = 2000, dryRun = false }: AppPr
                 {'  '}
                 <Text color={STATUS_COLORS[selectedRun.status] ?? 'white'}>{selectedRun.status}</Text>
               </Text>
+              <Text color="gray">
+                {'  '}
+                {selectedRun.issue_title ?? '(title unavailable)'}
+              </Text>
+              {selectedRun.pr_number !== null && (
+                <Text color="gray">
+                  {'  '}
+                  PR #{selectedRun.pr_number}: {selectedRun.pr_title ?? '(title unavailable)'}
+                </Text>
+              )}
               <Text color="gray">
                 {'  '}phase {selectedRun.current_phase ?? '-'}  iter {selectedRun.iteration_count ?? 0}  cost ${(selectedRun.estimated_cost_usd ?? 0).toFixed(2)}
               </Text>
@@ -371,7 +394,7 @@ export function App({ db, config, pollIntervalMs = 2000, dryRun = false }: AppPr
 function loadRuns(db: Database.Database): RunListRow[] {
   return db
     .prepare(
-      `SELECT id, repo, issue_number, status, current_phase, iteration_count, estimated_cost_usd, last_error, updated_at
+      `SELECT id, repo, issue_number, issue_title, status, current_phase, iteration_count, estimated_cost_usd, last_error, pr_number, pr_title, updated_at
        FROM runs
        ORDER BY
          CASE status
