@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Box, Text, useApp, useInput } from 'ink'
 import type { Config } from '../../config/schema.js'
 import { RetryEngine } from '../../ops/retry.js'
@@ -10,6 +10,9 @@ import { createForgeAdapter } from '../../forge/factory.js'
 import type Database from 'better-sqlite3'
 import { loadTuiStats, type StatusAggregate, type TuiStatsSnapshot } from '../../state/stats.js'
 import { ActionsBar } from './actions-bar.js'
+import { loadRuns, loadAgentEvents, loadMergeBatches, type AgentEventRow, type MergeBatchRow, type RunListRow } from './data.js'
+import { collectMissingTitleTargets, hasReadableTitle, resolveIssueTitle, resolvePrTitle, type TitleLookup } from './titles.js'
+import { buildSparkline, sliceWindow } from './view-model.js'
 
 interface AppProps {
   db: Database.Database
@@ -18,43 +21,13 @@ interface AppProps {
   dryRun?: boolean
 }
 
-interface RunListRow {
-  id: string
-  repo: string
-  issue_number: number
-  issue_title: string | null
-  status: string
-  current_phase: string | null
-  iteration_count: number | null
-  estimated_cost_usd: number | null
-  last_error: string | null
-  pr_number: number | null
-  pr_title: string | null
-  updated_at: string
-}
-
-interface AgentEventRow {
-  id: number
-  run_id: string
-  role: string
-  event_type: string
-  data: string | null
-  created_at: string
-}
-
-interface MergeBatchRow {
-  id: string
-  repo: string
-  status: string
-  pr_numbers: string
-}
-
 interface ActionState {
   busy: boolean
   action: string | null
 }
 
 type TabId = 'runs' | 'stats'
+type RunsViewMode = 'list' | 'focus'
 
 const TABS: Array<{ id: TabId; hotkey: string; label: string }> = [
   { id: 'runs', hotkey: '1', label: 'Runs' },
@@ -83,23 +56,47 @@ const EVENT_COLORS: Record<string, 'gray' | 'cyan' | 'green' | 'yellow' | 'red' 
 
 export function App({ db, config, pollIntervalMs = 2000, dryRun = false }: AppProps): React.ReactElement {
   const { exit } = useApp()
+
   const [tick, setTick] = useState(0)
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [statusLine, setStatusLine] = useState('Ready')
   const [actionState, setActionState] = useState<ActionState>({ busy: false, action: null })
   const [activeTab, setActiveTab] = useState<TabId>('runs')
+  const [runsViewMode, setRunsViewMode] = useState<RunsViewMode>('list')
+  const [autoRefresh, setAutoRefresh] = useState(true)
+  const [lastRefreshAt, setLastRefreshAt] = useState(new Date().toISOString())
+  const [titleLookup, setTitleLookup] = useState<TitleLookup>({ issues: {}, prs: {} })
+
+  const attemptedIssueKeys = useRef<Set<string>>(new Set())
+  const attemptedPrKeys = useRef<Set<string>>(new Set())
+  const lastHydrationAt = useRef(0)
+
+  const forgeByRepo = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof createForgeAdapter>>()
+    for (const repoConfig of config.repos) {
+      map.set(repoConfig.repo, createForgeAdapter(repoConfig, config))
+    }
+    return map
+  }, [config])
 
   useEffect(() => {
-    const timer = setInterval(() => setTick((t) => t + 1), pollIntervalMs)
+    if (!autoRefresh) return
+    const timer = setInterval(() => {
+      setTick((t) => t + 1)
+    }, pollIntervalMs)
     return () => clearInterval(timer)
-  }, [pollIntervalMs])
+  }, [autoRefresh, pollIntervalMs])
+
+  useEffect(() => {
+    setLastRefreshAt(new Date().toISOString())
+  }, [tick])
 
   const runs = useMemo(() => loadRuns(db), [db, tick])
   const selectedIndex = runs.findIndex((run) => run.id === selectedRunId)
   const selectedRun = selectedIndex >= 0 ? (runs[selectedIndex] ?? null) : (runs[0] ?? null)
   const selectedRunEvents = useMemo(
-    () => (selectedRun ? loadAgentEvents(db, selectedRun.id, 12) : []),
-    [db, tick, selectedRun?.id],
+    () => (selectedRun ? loadAgentEvents(db, selectedRun.id, runsViewMode === 'focus' ? 40 : 10) : []),
+    [db, tick, selectedRun?.id, runsViewMode],
   )
   const mergeBatches = useMemo(() => loadMergeBatches(db), [db, tick])
   const stats = useMemo(() => loadTuiStats(db), [db, tick])
@@ -113,6 +110,94 @@ export function App({ db, config, pollIntervalMs = 2000, dryRun = false }: AppPr
       setSelectedRunId(runs[0]!.id)
     }
   }, [runs, selectedRunId])
+
+  useEffect(() => {
+    const now = Date.now()
+    if (now - lastHydrationAt.current < 3000) {
+      return
+    }
+
+    const missing = collectMissingTitleTargets(
+      runs,
+      titleLookup,
+      attemptedIssueKeys.current,
+      attemptedPrKeys.current,
+      6,
+    )
+
+    if (missing.issues.length === 0 && missing.prs.length === 0) {
+      return
+    }
+
+    lastHydrationAt.current = now
+
+    for (const issue of missing.issues) {
+      attemptedIssueKeys.current.add(issue.key)
+    }
+    for (const pr of missing.prs) {
+      attemptedPrKeys.current.add(pr.key)
+    }
+
+    void (async () => {
+      const nextIssueTitles: Record<string, string> = {}
+      const nextPrTitles: Record<string, string> = {}
+
+      const updateIssueStmt = db.prepare(
+        `UPDATE runs
+         SET issue_title = ?
+         WHERE repo = ?
+           AND issue_number = ?
+           AND (issue_title IS NULL OR TRIM(issue_title) = '')`,
+      )
+      const updatePrStmt = db.prepare(
+        `UPDATE runs
+         SET pr_title = ?
+         WHERE repo = ?
+           AND pr_number = ?
+           AND (pr_title IS NULL OR TRIM(pr_title) = '')`,
+      )
+
+      for (const target of missing.issues) {
+        const forge = forgeByRepo.get(target.repo)
+        if (!forge) continue
+        try {
+          const issue = await forge.getIssue(target.repo, target.issueNumber)
+          if (hasReadableTitle(issue.title)) {
+            const title = issue.title.trim()
+            nextIssueTitles[target.key] = title
+            updateIssueStmt.run(title, target.repo, target.issueNumber)
+          }
+        } catch {
+          // Best effort title hydration; keep previous UI value when unavailable.
+        }
+      }
+
+      for (const target of missing.prs) {
+        const forge = forgeByRepo.get(target.repo)
+        if (!forge?.getPR) continue
+        try {
+          const pr = await forge.getPR(target.repo, target.prNumber)
+          if (hasReadableTitle(pr.title)) {
+            const title = pr.title.trim()
+            nextPrTitles[target.key] = title
+            updatePrStmt.run(title, target.repo, target.prNumber)
+          }
+        } catch {
+          // Best effort title hydration; keep previous UI value when unavailable.
+        }
+      }
+
+      if (Object.keys(nextIssueTitles).length === 0 && Object.keys(nextPrTitles).length === 0) {
+        return
+      }
+
+      setTitleLookup((current) => ({
+        issues: { ...current.issues, ...nextIssueTitles },
+        prs: { ...current.prs, ...nextPrTitles },
+      }))
+      setTick((t) => t + 1)
+    })()
+  }, [db, forgeByRepo, runs, titleLookup])
 
   const moveSelection = useCallback((direction: -1 | 1) => {
     if (runs.length === 0) return
@@ -257,6 +342,16 @@ export function App({ db, config, pollIntervalMs = 2000, dryRun = false }: AppPr
         moveSelection(-1)
         return
       }
+      if (input === 'o' || key.return) {
+        if (selectedRun) {
+          setRunsViewMode((mode) => (mode === 'list' ? 'focus' : 'list'))
+        }
+        return
+      }
+      if (key.escape && runsViewMode === 'focus') {
+        setRunsViewMode('list')
+        return
+      }
     }
 
     if (input === 'f') {
@@ -264,9 +359,23 @@ export function App({ db, config, pollIntervalMs = 2000, dryRun = false }: AppPr
       return
     }
 
+    if (activeTab === 'stats' && input === 'a') {
+      setAutoRefresh((current) => {
+        const next = !current
+        setStatusLine(next ? 'Auto-refresh enabled' : 'Auto-refresh paused')
+        return next
+      })
+      return
+    }
+
     if (actionState.busy) {
       return
     }
+
+    if (activeTab !== 'runs') {
+      return
+    }
+
     if (input === 'r') {
       void runRetry()
       return
@@ -288,15 +397,18 @@ export function App({ db, config, pollIntervalMs = 2000, dryRun = false }: AppPr
     }
   })
 
+  const runsVisible = runsViewMode === 'focus' ? 8 : 10
+
   return (
     <Box flexDirection="column" padding={1}>
       <Header
+        activeTab={activeTab}
         pollIntervalMs={pollIntervalMs}
         dryRun={dryRun}
         status={stats}
+        autoRefresh={autoRefresh}
+        lastRefreshAt={lastRefreshAt}
       />
-
-      <TabBar activeTab={activeTab} />
 
       <Box marginBottom={1}>
         <Text color={actionState.busy ? 'yellow' : 'gray'}>
@@ -308,167 +420,192 @@ export function App({ db, config, pollIntervalMs = 2000, dryRun = false }: AppPr
         ? (
             <RunsView
               runs={runs}
+              selectedIndex={selectedIndex < 0 ? 0 : selectedIndex}
               selectedRun={selectedRun}
               selectedRunEvents={selectedRunEvents}
               mergeBatches={mergeBatches}
               stats={stats}
+              titleLookup={titleLookup}
+              mode={runsViewMode}
+              maxVisibleRuns={runsVisible}
             />
           )
         : (
-            <StatsView stats={stats} />
+            <StatsView
+              stats={stats}
+              autoRefresh={autoRefresh}
+              pollIntervalMs={pollIntervalMs}
+              lastRefreshAt={lastRefreshAt}
+            />
           )}
 
-      <ActionsBar activeTab={activeTab} busy={actionState.busy} />
+      <ActionsBar
+        activeTab={activeTab}
+        busy={actionState.busy}
+        runFocused={runsViewMode === 'focus'}
+        autoRefresh={autoRefresh}
+      />
     </Box>
   )
 }
 
 interface HeaderProps {
+  activeTab: TabId
   pollIntervalMs: number
   dryRun: boolean
   status: TuiStatsSnapshot
+  autoRefresh: boolean
+  lastRefreshAt: string
 }
 
-function Header({ pollIntervalMs, dryRun, status }: HeaderProps): React.ReactElement {
+function Header({ activeTab, pollIntervalMs, dryRun, status, autoRefresh, lastRefreshAt }: HeaderProps): React.ReactElement {
   return (
-    <Box flexDirection="column" marginBottom={1}>
+    <Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="cyan" paddingX={1}>
       <Box>
-        <Text bold color="cyan">night-orch monitor</Text>
+        <Text bold color="cyan">NIGHT-ORCH CONTROL ROOM</Text>
         <Text color="gray">  refresh {pollIntervalMs / 1000}s</Text>
         {dryRun && <Text color="yellow">  [dry-run]</Text>}
-        <Text color="gray">  updated {formatTime(status.updatedAt)}</Text>
+        <Text color={autoRefresh ? 'green' : 'yellow'}>  {autoRefresh ? '● live' : '○ paused'}</Text>
+        <Text color="gray">  updated {formatTime(lastRefreshAt)}</Text>
+      </Box>
+      <Box>
+        {TABS.map((tab) => (
+          <Box key={tab.id} marginRight={2}>
+            <Text color={activeTab === tab.id ? 'cyan' : 'gray'}>
+              {activeTab === tab.id ? '▸' : ' '}[{tab.hotkey}] {tab.label}
+            </Text>
+          </Box>
+        ))}
       </Box>
       <Text color="gray">
-        runs {status.overview.totalRuns}  active {status.overview.activeRuns}  queued {status.overview.queuedRuns}  daily cost ${status.cost.todayCostUsd.toFixed(2)}
+        runs {status.overview.totalRuns}  active {status.overview.activeRuns}  queued {status.overview.queuedRuns}  running {status.overview.runningRuns}  cost today ${status.cost.todayCostUsd.toFixed(2)}
       </Text>
-    </Box>
-  )
-}
-
-interface TabBarProps {
-  activeTab: TabId
-}
-
-function TabBar({ activeTab }: TabBarProps): React.ReactElement {
-  return (
-    <Box marginBottom={1}>
-      {TABS.map((tab, index) => (
-        <Box key={tab.id} marginRight={2}>
-          <Text color={activeTab === tab.id ? 'cyan' : 'gray'}>
-            {activeTab === tab.id ? '▸' : ' '}[{tab.hotkey}] {tab.label}
-          </Text>
-          {index < TABS.length - 1 && <Text color="gray"> </Text>}
-        </Box>
-      ))}
     </Box>
   )
 }
 
 interface RunsViewProps {
   runs: RunListRow[]
+  selectedIndex: number
   selectedRun: RunListRow | null
   selectedRunEvents: AgentEventRow[]
   mergeBatches: MergeBatchRow[]
   stats: TuiStatsSnapshot
+  titleLookup: TitleLookup
+  mode: RunsViewMode
+  maxVisibleRuns: number
 }
 
-function RunsView({ runs, selectedRun, selectedRunEvents, mergeBatches, stats }: RunsViewProps): React.ReactElement {
+function RunsView({
+  runs,
+  selectedIndex,
+  selectedRun,
+  selectedRunEvents,
+  mergeBatches,
+  stats,
+  titleLookup,
+  mode,
+  maxVisibleRuns,
+}: RunsViewProps): React.ReactElement {
+  if (mode === 'focus') {
+    return (
+      <FocusedRunView
+        selectedRun={selectedRun}
+        selectedRunEvents={selectedRunEvents}
+        titleLookup={titleLookup}
+        stats={stats}
+        mergeBatches={mergeBatches}
+      />
+    )
+  }
+
+  const windowed = sliceWindow(runs, selectedIndex, maxVisibleRuns)
+
   return (
     <>
       <Box marginBottom={1}>
-        <Box flexDirection="column" width="42%">
+        <Box width="72%" flexDirection="column" marginRight={1}>
           <Text bold>Runs ({runs.length})</Text>
           {runs.length === 0 && <Text color="gray">  No runs found</Text>}
-          {runs.map((run, index) => {
+          {windowed.rows.map((run, idx) => {
+            const absoluteIndex = windowed.start + idx
             const selected = selectedRun?.id === run.id
-            const marker = selected ? '>' : ' '
+            const issueTitle = resolveIssueTitle(run, titleLookup) ?? '(title unavailable)'
+            const prTitle = resolvePrTitle(run, titleLookup)
             const statusColor = STATUS_COLORS[run.status] ?? 'white'
-            const idShort = run.id.replace('run-', '').slice(0, 8)
+
             return (
-              <Text key={run.id}>
-                <Text color={selected ? 'cyan' : 'gray'}>{marker}</Text>
-                {' '}
-                <Text color="gray">{String(index + 1).padStart(2, '0')}</Text>
-                {' '}
-                <Text color={statusColor}>{run.status.padEnd(11)}</Text>
-                {' '}
-                <Text>{run.repo}#{run.issue_number}</Text>
-                {' '}
-                <Text color="gray">{truncate(run.issue_title ?? '(title unavailable)', 26)}</Text>
-                {' '}
-                {run.pr_number !== null && (
-                  <>
-                    <Text color="cyan">PR #{run.pr_number}</Text>
-                    {' '}
-                    <Text color="gray">{truncate(run.pr_title ?? '(title unavailable)', 18)}</Text>
-                    {' '}
-                  </>
-                )}
-                <Text color="gray">{idShort}</Text>
-              </Text>
+              <Box key={run.id} flexDirection="column">
+                <Text>
+                  <Text color={selected ? 'cyan' : 'gray'}>{selected ? '▶' : ' '}</Text>
+                  {' '}
+                  <Text color="gray">{String(absoluteIndex + 1).padStart(2, '0')}</Text>
+                  {' '}
+                  <Text color={statusColor}>{run.status.padEnd(11)}</Text>
+                  {' '}
+                  <Text>{run.repo}#{run.issue_number}</Text>
+                  {'  '}
+                  <Text>{truncate(issueTitle, 58)}</Text>
+                </Text>
+                <Text color="gray">
+                  {'    '}
+                  <Text>{run.pr_number !== null ? `PR #${run.pr_number} ${truncate(prTitle ?? '(title unavailable)', 40)}` : 'No PR yet'}</Text>
+                  {'  '}
+                  <Text>phase {run.current_phase ?? '-'}</Text>
+                  {'  '}
+                  <Text>iter {run.iteration_count ?? 0}</Text>
+                  {'  '}
+                  <Text>cost ${(run.estimated_cost_usd ?? 0).toFixed(2)}</Text>
+                  {'  '}
+                  <Text>{formatTime(run.updated_at)}</Text>
+                </Text>
+              </Box>
             )
           })}
+          {runs.length > windowed.rows.length && (
+            <Text color="gray">  showing {windowed.start + 1}-{windowed.start + windowed.rows.length} of {runs.length}</Text>
+          )}
         </Box>
 
-        <Box flexDirection="column" width="58%">
-          <Text bold>Selected Run</Text>
-          {!selectedRun && <Text color="gray">  Select a run to inspect</Text>}
+        <Box width="28%" flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
+          <Text bold color="cyan">Issue Preview</Text>
+          {!selectedRun && <Text color="gray">Select a run to inspect</Text>}
           {selectedRun && (
             <>
-              <Text>
-                {'  '}
-                <Text>{selectedRun.repo}#{selectedRun.issue_number}</Text>
-                {'  '}
-                <Text color={STATUS_COLORS[selectedRun.status] ?? 'white'}>{selectedRun.status}</Text>
-              </Text>
-              <Text color="gray">
-                {'  '}
-                {selectedRun.issue_title ?? '(title unavailable)'}
-              </Text>
+              <Text>{selectedRun.repo}#{selectedRun.issue_number}</Text>
+              <Text color={STATUS_COLORS[selectedRun.status] ?? 'white'}>{selectedRun.status}</Text>
+              <Text>{truncate(resolveIssueTitle(selectedRun, titleLookup) ?? '(title unavailable)', 46)}</Text>
               {selectedRun.pr_number !== null && (
-                <Text color="gray">
-                  {'  '}
-                  PR #{selectedRun.pr_number}: {selectedRun.pr_title ?? '(title unavailable)'}
-                </Text>
-              )}
-              <Text color="gray">
-                {'  '}phase {selectedRun.current_phase ?? '-'}  iter {selectedRun.iteration_count ?? 0}  cost ${(selectedRun.estimated_cost_usd ?? 0).toFixed(2)}
-              </Text>
-              <Text color="gray">
-                {'  '}run {selectedRun.id}  updated {formatTime(selectedRun.updated_at)}
-              </Text>
-              {selectedRun.last_error && (
-                <Text color="red">{'  '}last error: {truncate(selectedRun.last_error, 96)}</Text>
+                <Text color="gray">PR #{selectedRun.pr_number}: {truncate(resolvePrTitle(selectedRun, titleLookup) ?? '(title unavailable)', 36)}</Text>
               )}
 
               <Box marginTop={1} flexDirection="column">
-                <Text bold>Agent Stream</Text>
-                {selectedRunEvents.length === 0 && <Text color="gray">  No agent events</Text>}
-                {selectedRunEvents.map((event) => {
+                <Text bold>Log Glimpse</Text>
+                {selectedRunEvents.length === 0 && <Text color="gray">No agent events yet</Text>}
+                {selectedRunEvents.slice(-5).map((event) => {
                   const color = EVENT_COLORS[event.event_type] ?? 'gray'
                   return (
                     <Text key={event.id}>
-                      {'  '}
-                      <Text color="gray">[{formatTime(event.created_at)}]</Text>
+                      <Text color="gray">{formatTime(event.created_at)}</Text>
                       {' '}
-                      <Text color="gray">{event.role}</Text>
+                      <Text color={color}>{truncate(event.event_type, 10)}</Text>
                       {' '}
-                      <Text color={color}>{event.event_type}</Text>
-                      {' '}
-                      <Text>{formatEventSummary(event)}</Text>
+                      <Text>{truncate(formatEventSummary(event), 22)}</Text>
                     </Text>
                   )
                 })}
               </Box>
+
+              <Text color="gray">Press o or Enter for expanded view</Text>
             </>
           )}
         </Box>
       </Box>
 
       <Box marginBottom={1} flexDirection="column">
-        <Text bold>System</Text>
+        <Text bold>System Snapshot</Text>
         <Text color="gray">
-          {'  '}active {stats.overview.activeRuns}  daily cost ${stats.cost.todayCostUsd.toFixed(2)}  merge queue {mergeBatches.length}
+          {'  '}active {stats.overview.activeRuns}  running {stats.overview.runningRuns}  queued {stats.overview.queuedRuns}  merge queue {mergeBatches.length}
         </Text>
         {mergeBatches.slice(0, 3).map((batch) => (
           <Text key={batch.id}>
@@ -485,150 +622,182 @@ function RunsView({ runs, selectedRun, selectedRunEvents, mergeBatches, stats }:
   )
 }
 
-interface StatsViewProps {
+interface FocusedRunViewProps {
+  selectedRun: RunListRow | null
+  selectedRunEvents: AgentEventRow[]
+  titleLookup: TitleLookup
   stats: TuiStatsSnapshot
+  mergeBatches: MergeBatchRow[]
 }
 
-function StatsView({ stats }: StatsViewProps): React.ReactElement {
+function FocusedRunView({ selectedRun, selectedRunEvents, titleLookup, stats, mergeBatches }: FocusedRunViewProps): React.ReactElement {
+  return (
+    <Box marginBottom={1} flexDirection="column">
+      <Text bold>Run Detail</Text>
+      {!selectedRun && <Text color="gray">No run selected</Text>}
+      {selectedRun && (
+        <>
+          <Box>
+            <Box width="35%" flexDirection="column" marginRight={1} borderStyle="single" borderColor="gray" paddingX={1}>
+              <Text bold color="cyan">Overview</Text>
+              <Text>{selectedRun.repo}#{selectedRun.issue_number}</Text>
+              <Text color={STATUS_COLORS[selectedRun.status] ?? 'white'}>{selectedRun.status}</Text>
+              <Text>{resolveIssueTitle(selectedRun, titleLookup) ?? '(title unavailable)'}</Text>
+              {selectedRun.pr_number !== null && (
+                <Text color="gray">PR #{selectedRun.pr_number}: {resolvePrTitle(selectedRun, titleLookup) ?? '(title unavailable)'}</Text>
+              )}
+              <Text color="gray">phase {selectedRun.current_phase ?? '-'}</Text>
+              <Text color="gray">iter {selectedRun.iteration_count ?? 0}  cost ${(selectedRun.estimated_cost_usd ?? 0).toFixed(2)}</Text>
+              <Text color="gray">updated {formatTime(selectedRun.updated_at)}</Text>
+              {selectedRun.last_error && <Text color="red">error: {truncate(selectedRun.last_error, 90)}</Text>}
+              <Box marginTop={1} flexDirection="column">
+                <Text bold>System</Text>
+                <Text color="gray">active runs {stats.overview.activeRuns}</Text>
+                <Text color="gray">merge queue {mergeBatches.length}</Text>
+              </Box>
+            </Box>
+
+            <Box width="65%" flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
+              <Text bold color="cyan">Agent Stream ({selectedRunEvents.length})</Text>
+              {selectedRunEvents.length === 0 && <Text color="gray">No agent events</Text>}
+              {selectedRunEvents.map((event) => {
+                const color = EVENT_COLORS[event.event_type] ?? 'gray'
+                return (
+                  <Text key={event.id}>
+                    <Text color="gray">[{formatTime(event.created_at)}]</Text>
+                    {' '}
+                    <Text color="gray">{event.role}</Text>
+                    {' '}
+                    <Text color={color}>{event.event_type}</Text>
+                    {' '}
+                    <Text>{formatEventSummary(event)}</Text>
+                  </Text>
+                )
+              })}
+            </Box>
+          </Box>
+          <Text color="gray">Press Esc or o to return to list</Text>
+        </>
+      )}
+    </Box>
+  )
+}
+
+interface StatsViewProps {
+  stats: TuiStatsSnapshot
+  autoRefresh: boolean
+  pollIntervalMs: number
+  lastRefreshAt: string
+}
+
+function StatsView({ stats, autoRefresh, pollIntervalMs, lastRefreshAt }: StatsViewProps): React.ReactElement {
+  const costSeries = stats.cost.dailyHistory.slice().reverse().map((row) => row.totalCostUsd)
+
   return (
     <Box flexDirection="column" marginBottom={1}>
-      <Box marginBottom={1} flexDirection="column">
-        <Text bold>Overview</Text>
-        <Text color="gray">
-          {'  '}total {stats.overview.totalRuns}  active {stats.overview.activeRuns}  running {stats.overview.runningRuns}  queued {stats.overview.queuedRuns}
-        </Text>
-        <Text color="gray">
-          {'  '}completed {stats.overview.completedRuns}  review_ready {stats.overview.reviewReadyRuns}  blocked {stats.overview.blockedRuns}  error {stats.overview.errorRuns}
-        </Text>
-        <Text color="gray">{'  '}status mix {formatStatusMix(stats.statusCounts)}</Text>
+      <Box marginBottom={1}>
+        <Text color={autoRefresh ? 'green' : 'yellow'}>{autoRefresh ? '● stats polling active' : '○ stats polling paused'}</Text>
+        <Text color="gray">  interval {pollIntervalMs / 1000}s</Text>
+        <Text color="gray">  last refresh {formatTime(lastRefreshAt)}</Text>
       </Box>
 
-      <Box marginBottom={1} flexDirection="column">
-        <Text bold>Throughput</Text>
-        <Text color="gray">
-          {'  '}runs 24h {stats.throughput.runs24h}  7d {stats.throughput.runs7d}  30d {stats.throughput.runs30d}
-        </Text>
-        <Text color="gray">
-          {'  '}terminal 7d completed {stats.throughput.completed7d} blocked {stats.throughput.blocked7d} error {stats.throughput.error7d} success {stats.throughput.successRate7d.toFixed(1)}%
-        </Text>
-        <Text color="gray">
-          {'  '}avg duration 7d {formatMinutes(stats.throughput.avgDurationMinutes7d)}  avg iterations 7d {stats.throughput.avgIterations7d.toFixed(2)}
-        </Text>
-        <Text color="gray">
-          {'  '}active phases {stats.phaseCounts.length === 0 ? '-' : stats.phaseCounts.map((row) => `${row.phase}:${row.count}`).join('  ')}
-        </Text>
+      <Box marginBottom={1}>
+        <StatCard title="Run Health" width="50%" marginRight={1}>
+          <Text>total {stats.overview.totalRuns}  active {stats.overview.activeRuns}</Text>
+          <Text color="gray">running {stats.overview.runningRuns}  queued {stats.overview.queuedRuns}</Text>
+          <Text color="gray">review_ready {stats.overview.reviewReadyRuns}  completed {stats.overview.completedRuns}</Text>
+          <Text color="gray">blocked {stats.overview.blockedRuns}  error {stats.overview.errorRuns}</Text>
+          <Text color="gray">mix {formatStatusMix(stats.statusCounts)}</Text>
+        </StatCard>
+
+        <StatCard title="Throughput" width="50%">
+          <Text>runs 24h {stats.throughput.runs24h}  7d {stats.throughput.runs7d}  30d {stats.throughput.runs30d}</Text>
+          <Text color="gray">completed 7d {stats.throughput.completed7d}</Text>
+          <Text color="gray">blocked 7d {stats.throughput.blocked7d}  error 7d {stats.throughput.error7d}</Text>
+          <Text color="gray">success 7d {stats.throughput.successRate7d.toFixed(1)}%</Text>
+          <Text color="gray">avg duration {formatMinutes(stats.throughput.avgDurationMinutes7d)}  avg iter {stats.throughput.avgIterations7d.toFixed(2)}</Text>
+        </StatCard>
       </Box>
 
-      <Box marginBottom={1} flexDirection="column">
-        <Text bold>Cost</Text>
-        <Text color="gray">
-          {'  '}today ${stats.cost.todayCostUsd.toFixed(2)} ({stats.cost.todayRunCount} runs)  7d ${stats.cost.cost7d.toFixed(2)}  30d ${stats.cost.cost30d.toFixed(2)}  avg/day ${stats.cost.avgDailyCost7d.toFixed(2)}
-        </Text>
-        {stats.cost.dailyHistory.length === 0 && <Text color="gray">  No daily cost history</Text>}
-        {stats.cost.dailyHistory.slice().reverse().map((row) => (
-          <Text key={row.date} color="gray">
-            {'  '}
-            <Text>{row.date}</Text>
-            {'  '}
-            <Text>${row.totalCostUsd.toFixed(2)}</Text>
-            {'  '}
-            <Text>{row.runCount} run(s)</Text>
+      <Box marginBottom={1}>
+        <StatCard title="Cost" width="50%" marginRight={1}>
+          <Text>today ${stats.cost.todayCostUsd.toFixed(2)} ({stats.cost.todayRunCount} runs)</Text>
+          <Text color="gray">7d ${stats.cost.cost7d.toFixed(2)}  30d ${stats.cost.cost30d.toFixed(2)}</Text>
+          <Text color="gray">avg/day 7d ${stats.cost.avgDailyCost7d.toFixed(2)}</Text>
+          <Text color="gray">trend {buildSparkline(costSeries)}</Text>
+          {stats.cost.dailyHistory.slice(0, 4).map((row) => (
+            <Text key={row.date} color="gray">{row.date}: ${row.totalCostUsd.toFixed(2)} ({row.runCount})</Text>
+          ))}
+        </StatCard>
+
+        <StatCard title="Agent Activity" width="50%">
+          <Text>events total {stats.agents.eventsTotal}</Text>
+          <Text color="gray">24h {stats.agents.events24h}  7d {stats.agents.events7d}</Text>
+          <Text color="gray">tool calls 24h {stats.agents.toolCalls24h}</Text>
+          <Text color="gray">thinking 24h {stats.agents.thinking24h}  runs 7d {stats.agents.uniqueRuns7d}</Text>
+          <Text color="gray">
+            roles {stats.agents.roleBreakdown7d.length === 0 ? '-' : stats.agents.roleBreakdown7d.map((row) => `${row.role}:${row.events}`).join('  ')}
           </Text>
-        ))}
+        </StatCard>
       </Box>
 
-      <Box marginBottom={1} flexDirection="column">
-        <Text bold>Agent Activity</Text>
-        <Text color="gray">
-          {'  '}events total {stats.agents.eventsTotal}  24h {stats.agents.events24h}  7d {stats.agents.events7d}  runs 7d {stats.agents.uniqueRuns7d}
-        </Text>
-        <Text color="gray">
-          {'  '}tool calls 24h {stats.agents.toolCalls24h}  thinking 24h {stats.agents.thinking24h}
-        </Text>
-        <Text color="gray">
-          {'  '}role mix 7d {stats.agents.roleBreakdown7d.length === 0 ? '-' : stats.agents.roleBreakdown7d.map((row) => `${row.role}:${row.events}`).join('  ')}
-        </Text>
-      </Box>
+      <Box>
+        <StatCard title="Merge Queue" width="35%" marginRight={1}>
+          <Text>active batches {stats.queue.activeBatches}</Text>
+          <Text color="gray">
+            statuses {stats.queue.statuses.length === 0 ? '-' : stats.queue.statuses.map((row) => `${row.status}:${row.count}`).join('  ')}
+          </Text>
+          <Text color="gray">
+            active phases {stats.phaseCounts.length === 0 ? '-' : stats.phaseCounts.map((row) => `${row.phase}:${row.count}`).join('  ')}
+          </Text>
+        </StatCard>
 
-      <Box marginBottom={1} flexDirection="column">
-        <Text bold>Merge Queue</Text>
-        <Text color="gray">
-          {'  '}active batches {stats.queue.activeBatches}  statuses {stats.queue.statuses.length === 0 ? '-' : stats.queue.statuses.map((row) => `${row.status}:${row.count}`).join('  ')}
-        </Text>
-      </Box>
-
-      <Box flexDirection="column">
-        <Text bold>Top Repos (30d)</Text>
-        {stats.topRepos30d.length === 0 && <Text color="gray">  No run history</Text>}
-        {stats.topRepos30d.map((row) => {
-          const terminalCount = row.completedRuns + row.blockedRuns + row.errorRuns
-          const successPct = terminalCount > 0 ? (row.completedRuns / terminalCount) * 100 : 0
-          const errorPct = terminalCount > 0 ? (row.errorRuns / terminalCount) * 100 : 0
-          return (
-            <Text key={row.repo}>
-              {'  '}
-              <Text>{truncate(row.repo, 26)}</Text>
-              {'  '}
-              <Text color="gray">runs {row.totalRuns}</Text>
-              {'  '}
-              <Text color="green">ok {successPct.toFixed(0)}%</Text>
-              {'  '}
-              <Text color="red">err {errorPct.toFixed(0)}%</Text>
-              {'  '}
-              <Text color="gray">cost ${row.totalCostUsd.toFixed(2)}</Text>
-              {'  '}
-              <Text color="gray">iter {row.avgIterations.toFixed(1)}</Text>
-            </Text>
-          )
-        })}
+        <StatCard title="Top Repositories (30d)" width="65%">
+          {stats.topRepos30d.length === 0 && <Text color="gray">No run history</Text>}
+          {stats.topRepos30d.map((row) => {
+            const terminalCount = row.completedRuns + row.blockedRuns + row.errorRuns
+            const successPct = terminalCount > 0 ? (row.completedRuns / terminalCount) * 100 : 0
+            return (
+              <Text key={row.repo}>
+                <Text>{truncate(row.repo, 28)}</Text>
+                {'  '}
+                <Text color="gray">runs {row.totalRuns}</Text>
+                {'  '}
+                <Text color="green">ok {successPct.toFixed(0)}%</Text>
+                {'  '}
+                <Text color="gray">cost ${row.totalCostUsd.toFixed(2)}</Text>
+                {'  '}
+                <Text color="gray">iter {row.avgIterations.toFixed(1)}</Text>
+              </Text>
+            )
+          })}
+        </StatCard>
       </Box>
     </Box>
   )
 }
 
-function loadRuns(db: Database.Database): RunListRow[] {
-  return db
-    .prepare(
-      `SELECT id, repo, issue_number, issue_title, status, current_phase, iteration_count, estimated_cost_usd, last_error, pr_number, pr_title, updated_at
-       FROM runs
-       ORDER BY
-         CASE status
-           WHEN 'running' THEN 0
-           WHEN 'queued' THEN 1
-           WHEN 'review_ready' THEN 2
-           WHEN 'blocked' THEN 3
-           WHEN 'error' THEN 4
-           ELSE 5
-         END,
-         datetime(updated_at) DESC
-       LIMIT 24`,
-    )
-    .all() as RunListRow[]
+interface StatCardProps {
+  title: string
+  width: string
+  marginRight?: number
+  children: React.ReactNode
 }
 
-function loadAgentEvents(db: Database.Database, runId: string, maxLines: number): AgentEventRow[] {
-  const rows = db
-    .prepare(
-      `SELECT id, run_id, role, event_type, data, created_at
-       FROM agent_events
-       WHERE run_id = ?
-       ORDER BY id DESC
-       LIMIT ?`,
-    )
-    .all(runId, maxLines) as AgentEventRow[]
-  return [...rows].reverse()
-}
-
-function loadMergeBatches(db: Database.Database): MergeBatchRow[] {
-  return db
-    .prepare(
-      `SELECT id, repo, status, pr_numbers
-       FROM merge_batches
-       WHERE status NOT IN ('passed', 'failed')
-       ORDER BY created_at DESC
-       LIMIT 5`,
-    )
-    .all() as MergeBatchRow[]
+function StatCard({ title, width, marginRight = 0, children }: StatCardProps): React.ReactElement {
+  return (
+    <Box
+      width={width}
+      marginRight={marginRight}
+      flexDirection="column"
+      borderStyle="single"
+      borderColor="gray"
+      paddingX={1}
+    >
+      <Text bold color="cyan">{title}</Text>
+      {children}
+    </Box>
+  )
 }
 
 function formatStatusMix(statuses: StatusAggregate[]): string {
