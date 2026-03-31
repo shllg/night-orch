@@ -10,6 +10,7 @@ import { logger } from '../utils/logger.js'
 export interface PublishResult {
   prNumber: number
   prUrl: string
+  prTitle: string
   created: boolean
 }
 
@@ -116,7 +117,7 @@ export async function publishPR(
       const updated = await forge.updatePR(ctx.repo, existingPrNumber, { title, body })
       updateLinkedPR(db, ctx.repo, ctx.issueNumber, updated.number, updated.url)
       logger.info({ prNumber: updated.number }, 'Updated existing PR')
-      return { prNumber: updated.number, prUrl: updated.url, created: false }
+      return { prNumber: updated.number, prUrl: updated.url, prTitle: updated.title, created: false }
     }
 
     // 4. Create new PR (no open PR exists — either first time or old one was closed)
@@ -130,7 +131,7 @@ export async function publishPR(
 
     updateLinkedPR(db, ctx.repo, ctx.issueNumber, pr.number, pr.url)
     logger.info({ prNumber: pr.number, prUrl: pr.url }, 'Created new PR')
-    return { prNumber: pr.number, prUrl: pr.url, created: true }
+    return { prNumber: pr.number, prUrl: pr.url, prTitle: pr.title, created: true }
   } catch (prErr) {
     const message = prErr instanceof Error ? prErr.message : String(prErr)
     logger.error({ repo: ctx.repo, branch: ctx.branchName, err: prErr }, 'PR creation/update failed')

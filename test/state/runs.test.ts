@@ -26,6 +26,7 @@ describe('RunManager', () => {
     const run = runManager.create({
       repo: 'org/repo',
       issueNumber: 42,
+      issueTitle: 'Fix race condition',
       issueNodeId: 'MDU6SXNzdWU0Mg==',
       planner: 'claude',
       coder: 'codex',
@@ -34,6 +35,7 @@ describe('RunManager', () => {
     expect(run.id).toMatch(/^run-/)
     expect(run.repo).toBe('org/repo')
     expect(run.issueNumber).toBe(42)
+    expect(run.issueTitle).toBe('Fix race condition')
     expect(run.status).toBe('queued')
     expect(run.planner).toBe('claude')
     expect(run.coder).toBe('codex')
@@ -53,12 +55,14 @@ describe('RunManager', () => {
       status: 'running',
       branchName: 'orch/1-fix-bug',
       branchSlug: 'fix-bug',
+      prTitle: 'Fix race condition in startup',
     })
 
     const updated = runManager.getById(run.id)
     expect(updated?.status).toBe('running')
     expect(updated?.branchName).toBe('orch/1-fix-bug')
     expect(updated?.branchSlug).toBe('fix-bug')
+    expect(updated?.prTitle).toBe('Fix race condition in startup')
   })
 
   it('stores and retrieves phaseData as JSON', () => {
