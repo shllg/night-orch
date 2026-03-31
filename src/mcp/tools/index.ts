@@ -7,6 +7,7 @@ import { CleanupEngine } from '../../ops/cleanup.js'
 import { RetryEngine } from '../../ops/retry.js'
 import { filterEligible } from '../../discovery/selector.js'
 import { pollOnce } from '../../runner/poller.js'
+import { flushActiveAgentObservability } from '../../events/observability.js'
 
 interface ToolDefinition {
   name: string
@@ -122,6 +123,19 @@ export function registerTools(): ToolDefinition[] {
         required: ['repo'],
       },
     },
+    {
+      name: 'night-orch-stream-events',
+      description: 'Get recent in-flight agent events for a run.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          runId: { type: 'string', description: 'Run ID (e.g., run-abc123)' },
+          since: { type: 'number', description: 'Only return events with id > since' },
+          limit: { type: 'number', description: 'Max events (default: 50, max: 200)', default: 50 },
+        },
+        required: ['runId'],
+      },
+    },
   ]
 }
 
@@ -149,6 +163,8 @@ export async function handleToolCall(
       return handlePoll(args as { dryRun?: boolean; authToken?: string }, deps)
     case 'night-orch-list-issues':
       return handleListIssues(args as { repo: string; filter?: string }, deps)
+    case 'night-orch-stream-events':
+      return handleStreamEvents(args as { runId: string; since?: number; limit?: number }, deps)
     default:
       throw new Error(`Unknown tool: ${name}`)
   }
@@ -379,6 +395,68 @@ function parseEventData(data: string | null): unknown {
   } catch {
     return { raw: data, parseError: 'Invalid JSON in stored event payload' }
   }
+}
+
+async function handleStreamEvents(
+  args: { runId: string; since?: number; limit?: number },
+  deps: MCPDependencies,
+): Promise<unknown> {
+  if (!args.runId) {
+    throw new Error('runId is required')
+  }
+
+  const since = Math.max(0, Math.floor(args.since ?? 0))
+  const requestedLimit = Math.floor(args.limit ?? 50)
+  const limit = Math.min(200, Math.max(1, requestedLimit))
+
+  // Flush buffered in-memory events to DB so callers can poll near-real-time.
+  flushActiveAgentObservability()
+
+  const rows = since > 0
+    ? deps.db
+      .prepare(
+        `SELECT id, run_id, phase, role, event_type, data, created_at
+         FROM agent_events
+         WHERE run_id = ? AND id > ?
+         ORDER BY id ASC
+         LIMIT ?`,
+      )
+      .all(args.runId, since, limit) as AgentEventRow[]
+    : deps.db
+      .prepare(
+        `SELECT id, run_id, phase, role, event_type, data, created_at
+         FROM agent_events
+         WHERE run_id = ?
+         ORDER BY id ASC
+         LIMIT ?`,
+      )
+      .all(args.runId, limit) as AgentEventRow[]
+
+  const lastEventId = rows.length > 0 ? rows[rows.length - 1]!.id : since
+
+  return {
+    runId: args.runId,
+    events: rows.map((row) => ({
+      id: row.id,
+      runId: row.run_id,
+      phase: row.phase,
+      role: row.role,
+      type: row.event_type,
+      data: parseEventData(row.data),
+      timestamp: row.created_at,
+    })),
+    lastEventId,
+  }
+}
+
+interface AgentEventRow {
+  id: number
+  run_id: string
+  phase: string
+  role: string
+  event_type: string
+  data: string | null
+  created_at: string
 }
 
 function assertMcpMutationAuth(providedToken: string | undefined, deps: MCPDependencies): void {

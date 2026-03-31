@@ -1,0 +1,162 @@
+import type Database from 'better-sqlite3'
+import { mkdirSync, createWriteStream, type WriteStream } from 'node:fs'
+import { dirname, join } from 'node:path'
+import type { Config } from '../config/schema.js'
+import { logger } from '../utils/logger.js'
+import { agentEventBus } from './bus.js'
+import type { AgentEvent } from './types.js'
+
+const FLUSH_INTERVAL_MS = 2_000
+const FLUSH_BATCH_SIZE = 50
+
+export class AgentObservability {
+  private pending: AgentEvent[] = []
+  private flushTimer: NodeJS.Timeout | null = null
+  private streams = new Map<string, WriteStream>()
+  private insertEvents: (events: AgentEvent[]) => void
+  private options: {
+    agentStreaming: boolean
+    eventRetention: number
+    sessionLogs: boolean
+  }
+
+  constructor(
+    private db: Database.Database,
+    private config: Config,
+  ) {
+    this.insertEvents = this.db.transaction((events: AgentEvent[]) => {
+      const stmt = this.db.prepare(
+        `INSERT INTO agent_events (run_id, phase, role, event_type, data, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      for (const event of events) {
+        stmt.run(
+          event.runId,
+          event.phase,
+          event.role,
+          event.type,
+          JSON.stringify(event.data),
+          event.timestamp,
+        )
+      }
+    })
+    this.options = normalizeObservabilityOptions(config)
+    agentEventBus.setRetentionLimit(this.options.eventRetention)
+  }
+
+  record(event: AgentEvent): void {
+    if (!this.options.agentStreaming) return
+
+    const emitted = agentEventBus.emit(event)
+    this.pending.push(emitted)
+
+    if (this.options.sessionLogs) {
+      this.writeSessionLog(emitted)
+    }
+
+    if (this.pending.length >= FLUSH_BATCH_SIZE) {
+      this.flush()
+      return
+    }
+
+    this.ensureFlushTimer()
+  }
+
+  flush(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer)
+      this.flushTimer = null
+    }
+    if (this.pending.length === 0) return
+
+    const batch = this.pending.splice(0, this.pending.length)
+    try {
+      this.insertEvents(batch)
+    } catch (err) {
+      logger.warn({ err, events: batch.length }, 'Failed to persist agent events')
+    }
+  }
+
+  async close(): Promise<void> {
+    this.flush()
+    await this.closeStreams()
+  }
+
+  private ensureFlushTimer(): void {
+    if (this.flushTimer) return
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null
+      this.flush()
+    }, FLUSH_INTERVAL_MS)
+    this.flushTimer.unref()
+  }
+
+  private writeSessionLog(event: AgentEvent): void {
+    try {
+      const stream = this.getStream(event.runId, event.phase)
+      stream.write(`${JSON.stringify(event)}\n`)
+    } catch (err) {
+      logger.warn({ err, runId: event.runId, phase: event.phase }, 'Failed to write session log event')
+    }
+  }
+
+  private getStream(runId: string, phase: string): WriteStream {
+    const key = `${runId}:${phase}`
+    const existing = this.streams.get(key)
+    if (existing) return existing
+
+    const safePhase = sanitizeSegment(phase)
+    const dir = join(this.config.storage.logsRoot, runId)
+    mkdirSync(dir, { recursive: true })
+    const path = join(dir, `${safePhase}.jsonl`)
+    mkdirSync(dirname(path), { recursive: true })
+
+    const stream = createWriteStream(path, { flags: 'a' })
+    stream.on('error', (err) => {
+      logger.warn({ err, runId, phase, path }, 'Session log stream error')
+    })
+    this.streams.set(key, stream)
+    return stream
+  }
+
+  private async closeStreams(): Promise<void> {
+    const streams = [...this.streams.values()]
+    this.streams.clear()
+    await Promise.all(streams.map((stream) => new Promise<void>((resolve) => {
+      stream.end(() => resolve())
+    })))
+  }
+}
+
+function sanitizeSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]/g, '_')
+}
+
+function normalizeObservabilityOptions(config: Config): {
+  agentStreaming: boolean
+  eventRetention: number
+  sessionLogs: boolean
+} {
+  const raw = config.observability as Partial<Config['observability']> | undefined
+  return {
+    agentStreaming: raw?.agentStreaming ?? true,
+    eventRetention: raw?.eventRetention ?? 1000,
+    sessionLogs: raw?.sessionLogs ?? true,
+  }
+}
+
+let activeAgentObservability: AgentObservability | null = null
+
+export function setActiveAgentObservability(instance: AgentObservability | null): void {
+  activeAgentObservability = instance
+}
+
+export function flushActiveAgentObservability(): void {
+  activeAgentObservability?.flush()
+}
+
+export function clearActiveAgentObservability(instance: AgentObservability): void {
+  if (activeAgentObservability === instance) {
+    activeAgentObservability = null
+  }
+}

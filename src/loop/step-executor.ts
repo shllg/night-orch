@@ -3,6 +3,7 @@ import type { WorkflowStep, WorkerStep, VerifyStep, DecideStep } from './workflo
 import type { WorkerAdapter, WorkerTaskInput, PromptContext, WorkerTaskResult } from '../workers/types.js'
 import type { Config } from '../config/schema.js'
 import type { MetricsService } from '../metrics/service.js'
+import type { AgentEvent } from '../events/types.js'
 import { updateContext } from './context.js'
 import { decide } from './decision.js'
 import { runVerifyCommands, allVerifyPassed } from './verifier.js'
@@ -18,6 +19,7 @@ export interface StepDependencies {
   config: Config
   envOverrides?: Record<string, string>
   metrics?: MetricsService
+  onAgentEvent?: (event: AgentEvent) => void
 }
 
 export interface StepResult {
@@ -79,12 +81,15 @@ export async function executeWorkerStep(
   const start = Date.now()
   try {
     result = await adapter.runTask({
+      runId: ctx.runId,
+      phase: step.id,
       role: step.role as WorkerTaskInput['role'],
       worktreePath: ctx.worktreePath,
       prompt: `${systemPrompt}\n\n${userPrompt}`,
       profile,
       timeoutSeconds: ctx.adjustedLimits.workerTimeoutSeconds,
       env,
+      onEvent: deps.onAgentEvent,
       continueSessionId,
     })
     supervisor.cancel()

@@ -71,7 +71,8 @@ export class RetentionEngine {
         const ids = compactRows.map((r) => r.id)
         const placeholders = ids.map(() => '?').join(',')
         const eventInfo = this.db.prepare(`DELETE FROM events WHERE run_id IN (${placeholders})`).run(...ids)
-        result.deletedEvents += eventInfo.changes
+        const agentEventInfo = this.db.prepare(`DELETE FROM agent_events WHERE run_id IN (${placeholders})`).run(...ids)
+        result.deletedEvents += eventInfo.changes + agentEventInfo.changes
       }
 
       // Step 2: Delete — remove entire runs older than archiveDays
@@ -85,7 +86,8 @@ export class RetentionEngine {
 
         // Delete associated events
         const eventInfo = this.db.prepare(`DELETE FROM events WHERE run_id IN (${placeholders})`).run(...ids)
-        result.deletedEvents += eventInfo.changes
+        const agentEventInfo = this.db.prepare(`DELETE FROM agent_events WHERE run_id IN (${placeholders})`).run(...ids)
+        result.deletedEvents += eventInfo.changes + agentEventInfo.changes
 
         // Delete runs
         const runInfo = this.db.prepare(`DELETE FROM runs WHERE id IN (${placeholders})`).run(...ids)

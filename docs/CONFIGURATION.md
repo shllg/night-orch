@@ -43,6 +43,7 @@ Source of truth for the schema is [src/config/schema.ts](../src/config/schema.ts
 | `security` | object | no | object with defaults | Diff/cost safety limits. |
 | `workerProfiles` | record | no | `{}` | Named CLI profiles for agents. |
 | `metrics` | object | no | object with defaults | Prometheus exporter config. |
+| `observability` | object | no | object with defaults | Live agent event streaming/persistence settings. |
 | `mcp` | object | no | object with defaults | MCP server config for run/mcp commands. |
 | `commentCommands` | object | no | object with defaults | Issue comment command processing config. |
 | `repos` | array | yes | none | At least one repo is required. |
@@ -207,6 +208,15 @@ Requires `acpx` installed as a dependency (`pnpm add acpx`).
 | `enabled` | boolean | `true` |
 | `port` | positive int | `9090` |
 | `host` | string | `127.0.0.1` |
+
+## `observability`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `agentStreaming` | boolean | `true` | Enable live worker event emission and persistence. |
+| `eventRetention` | int (100-10000) | `1000` | In-memory max agent events retained per run. |
+| `sessionLogs` | boolean | `true` | Write per-phase JSONL session logs to `storage.logsRoot/<runId>/`. |
+| `sessionLogRetention` | positive int | `7` | Retention target in days for session logs (consumed by cleanup policy). |
 
 ## `mcp`
 

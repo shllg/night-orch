@@ -8,6 +8,9 @@ import type { WorkerTaskInput, WorkerProfileInput } from '../../src/workers/type
 vi.mock('../../src/workers/timeout.js', () => ({
   execWithTimeout: vi.fn(),
 }))
+vi.mock('../../src/workers/streaming-exec.js', () => ({
+  streamingExec: vi.fn(),
+}))
 
 // Suppress logger
 vi.mock('../../src/utils/logger.js', () => ({
@@ -20,8 +23,10 @@ vi.mock('../../src/utils/logger.js', () => ({
 }))
 
 import { execWithTimeout } from '../../src/workers/timeout.js'
+import { streamingExec } from '../../src/workers/streaming-exec.js'
 
 const mockExecWithTimeout = vi.mocked(execWithTimeout)
+const mockStreamingExec = vi.mocked(streamingExec)
 
 const baseProfile: WorkerProfileInput = {
   type: 'claude',
@@ -53,8 +58,8 @@ describe('ClaudeWorkerAdapter', () => {
     adapter = new ClaudeWorkerAdapter()
   })
 
-  it('passes correct args to execWithTimeout', async () => {
-    mockExecWithTimeout.mockResolvedValue({
+  it('passes correct args to streamingExec', async () => {
+    mockStreamingExec.mockResolvedValue({
       stdout: '```json\n{"objective": "Fix it"}\n```',
       stderr: '',
       exitCode: 0,
@@ -64,20 +69,19 @@ describe('ClaudeWorkerAdapter', () => {
 
     await adapter.runTask(makeTaskInput())
 
-    expect(mockExecWithTimeout).toHaveBeenCalledWith(
-      'claude',
-      ['-p', '--output-format', 'json', '--max-turns', '50', '--permission-mode', 'bypassPermissions', '--append-system-prompt', expect.stringContaining('Do NOT use plan mode')],
-      {
-        cwd: '/tmp/worktree',
-        env: { PATH: '/usr/bin' },
-        timeoutMs: 1_800_000,
-        stdin: 'Plan the fix',
-      },
-    )
+    expect(mockStreamingExec).toHaveBeenCalledWith({
+      command: 'claude',
+      args: ['-p', '--output-format', 'json', '--max-turns', '50', '--permission-mode', 'bypassPermissions', '--append-system-prompt', expect.stringContaining('Do NOT use plan mode')],
+      cwd: '/tmp/worktree',
+      env: { PATH: '/usr/bin' },
+      timeoutMs: 1_800_000,
+      stdin: 'Plan the fix',
+      onStdoutLine: expect.any(Function),
+    })
   })
 
   it('parses planner output for planner role', async () => {
-    mockExecWithTimeout.mockResolvedValue({
+    mockStreamingExec.mockResolvedValue({
       stdout: '```json\n{"objective": "Fix the login"}\n```',
       stderr: '',
       exitCode: 0,
@@ -93,7 +97,7 @@ describe('ClaudeWorkerAdapter', () => {
   })
 
   it('parses coder output for coder role', async () => {
-    mockExecWithTimeout.mockResolvedValue({
+    mockStreamingExec.mockResolvedValue({
       stdout: '```json\n{"summary": "Fixed the bug", "changedFiles": ["a.ts"]}\n```',
       stderr: '',
       exitCode: 0,
@@ -115,7 +119,7 @@ describe('ClaudeWorkerAdapter', () => {
       findings: [],
       definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
     })
-    mockExecWithTimeout.mockResolvedValue({
+    mockStreamingExec.mockResolvedValue({
       stdout: `\`\`\`json\n${reviewJson}\n\`\`\``,
       stderr: '',
       exitCode: 0,
@@ -130,7 +134,7 @@ describe('ClaudeWorkerAdapter', () => {
   })
 
   it('reports timeout', async () => {
-    mockExecWithTimeout.mockResolvedValue({
+    mockStreamingExec.mockResolvedValue({
       stdout: '',
       stderr: 'killed',
       exitCode: 143,
@@ -145,7 +149,7 @@ describe('ClaudeWorkerAdapter', () => {
   })
 
   it('falls back to text plan when output has no JSON block', async () => {
-    mockExecWithTimeout.mockResolvedValue({
+    mockStreamingExec.mockResolvedValue({
       stdout: 'This is not JSON at all',
       stderr: '',
       exitCode: 0,
@@ -162,7 +166,7 @@ describe('ClaudeWorkerAdapter', () => {
 
   it('returns raw output regardless of parse success', async () => {
     const rawOutput = 'Raw worker output here'
-    mockExecWithTimeout.mockResolvedValue({
+    mockStreamingExec.mockResolvedValue({
       stdout: rawOutput,
       stderr: '',
       exitCode: 0,
@@ -215,7 +219,7 @@ describe('CodexWorkerAdapter', () => {
   })
 
   it('passes prompt via stdin (no --output-format)', async () => {
-    mockExecWithTimeout.mockResolvedValue({
+    mockStreamingExec.mockResolvedValue({
       stdout: '```json\n{"objective": "Fix it"}\n```',
       stderr: '',
       exitCode: 0,
@@ -226,15 +230,19 @@ describe('CodexWorkerAdapter', () => {
     const codexProfile = { ...baseProfile, type: 'codex' as const, command: 'codex' }
     await adapter.runTask(makeTaskInput({ profile: codexProfile }))
 
-    expect(mockExecWithTimeout).toHaveBeenCalledWith(
-      'codex',
-      expect.arrayContaining(['-p', '--output-last-message']),
-      expect.objectContaining({ stdin: 'Plan the fix' }),
-    )
+    expect(mockStreamingExec).toHaveBeenCalledWith(expect.objectContaining({
+      command: 'codex',
+      args: expect.arrayContaining(['-p', '--output-last-message']),
+      cwd: '/tmp/worktree',
+      env: { PATH: '/usr/bin' },
+      timeoutMs: 1_800_000,
+      stdin: 'Plan the fix',
+      onStdoutLine: expect.any(Function),
+    }))
   })
 
   it('applies runtime wrapper when configured', async () => {
-    mockExecWithTimeout.mockResolvedValue({
+    mockStreamingExec.mockResolvedValue({
       stdout: '```json\n{"objective":"wrapped"}\n```',
       stderr: '',
       exitCode: 0,
@@ -250,15 +258,16 @@ describe('CodexWorkerAdapter', () => {
     }
     await adapter.runTask(makeTaskInput({ profile: wrappedProfile }))
 
-    expect(mockExecWithTimeout).toHaveBeenCalledWith(
-      'firejail',
-      expect.arrayContaining(['--quiet', 'codex', '-p', '--output-last-message']),
-      expect.objectContaining({ stdin: 'Plan the fix' }),
-    )
+    expect(mockStreamingExec).toHaveBeenCalledWith(expect.objectContaining({
+      command: 'firejail',
+      args: expect.arrayContaining(['--quiet', 'codex', '-p', '--output-last-message']),
+      stdin: 'Plan the fix',
+      onStdoutLine: expect.any(Function),
+    }))
   })
 
   it('parses output the same way as Claude adapter', async () => {
-    mockExecWithTimeout.mockResolvedValue({
+    mockStreamingExec.mockResolvedValue({
       stdout: '```json\n{"objective": "Codex plan"}\n```',
       stderr: '',
       exitCode: 0,

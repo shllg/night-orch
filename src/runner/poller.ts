@@ -39,6 +39,12 @@ import { decomposeIssue, shouldAttemptDecompose } from '../discovery/decomposer.
 import { executeParallelSubtasks } from '../loop/parallel.js'
 import { buildWorkerEnv } from '../workers/env.js'
 import { isPlanningIssue } from '../planning/mode.js'
+import {
+  AgentObservability,
+  setActiveAgentObservability,
+  clearActiveAgentObservability,
+} from '../events/observability.js'
+import type { AgentEvent } from '../events/types.js'
 
 const STATUS_MARKER = markerTag('status')
 
@@ -70,6 +76,10 @@ export async function pollOnce(
 
   let processed = 0
   let errors = 0
+  const observability = new AgentObservability(db, config)
+  setActiveAgentObservability(observability)
+
+  try {
 
   // Update active runs gauge
   try {
@@ -307,6 +317,7 @@ export async function pollOnce(
               workflow: resolveWorkflow(repoConfig, config, discoveredIssue.issue.labels, discoveredIssue.triage.level),
               envOverrides: envSetup?.envOverrides ?? {},
               metrics,
+              onAgentEvent: (event: AgentEvent) => observability.record(event),
             }
 
             const subResults = await executeParallelSubtasks(
@@ -353,6 +364,7 @@ export async function pollOnce(
           workflow: resolveWorkflow(repoConfig, config, discoveredIssue.issue.labels, discoveredIssue.triage.level),
           envOverrides: envSetup?.envOverrides ?? {},
           metrics,
+          onAgentEvent: (event) => observability.record(event),
           onPlanReady: async (ctx) => {
             await postPlanSummaryComment(forge, ctx.repo, ctx.issueNumber, ctx.plan, botUser)
           },
@@ -454,7 +466,11 @@ export async function pollOnce(
     }
   }
 
-  return { processed, errors }
+    return { processed, errors }
+  } finally {
+    clearActiveAgentObservability(observability)
+    await observability.close()
+  }
 }
 
 interface FinalizeRunOutcomeParams {

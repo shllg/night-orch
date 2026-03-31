@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Box, Text } from 'ink'
 import { ActiveRuns } from './active-runs.js'
+import { AgentStream } from './agent-stream.js'
 import { CostBar } from './cost-bar.js'
 import { RecentRuns } from './recent-runs.js'
 import { MergeQueuePanel } from './merge-queue-panel.js'
@@ -26,6 +27,7 @@ export function App({ db, pollIntervalMs = 2000 }: AppProps): React.ReactElement
         <Text color="gray"> — live dashboard (refreshing every {pollIntervalMs / 1000}s)</Text>
       </Box>
       <ActiveRuns db={db} tick={tick} />
+      <AgentStream db={db} tick={tick} />
       <MergeQueuePanel db={db} tick={tick} />
       <CostBar db={db} tick={tick} />
       <RecentRuns db={db} tick={tick} />
