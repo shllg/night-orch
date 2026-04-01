@@ -3,6 +3,11 @@ export interface WindowedSlice<T> {
   rows: T[]
 }
 
+export interface PartitionedRows<T> {
+  active: T[]
+  recent: T[]
+}
+
 export function sliceWindow<T>(rows: T[], selectedIndex: number, windowSize: number): WindowedSlice<T> {
   if (rows.length === 0) return { start: 0, rows: [] }
   const safeWindow = Math.max(1, windowSize)
@@ -14,6 +19,25 @@ export function sliceWindow<T>(rows: T[], selectedIndex: number, windowSize: num
     start,
     rows: rows.slice(start, start + safeWindow),
   }
+}
+
+export function isActiveRunStatus(status: string): boolean {
+  return status === 'queued' || status === 'running'
+}
+
+export function partitionRowsByActivity<T extends { status: string }>(rows: T[]): PartitionedRows<T> {
+  const active: T[] = []
+  const recent: T[] = []
+
+  for (const row of rows) {
+    if (isActiveRunStatus(row.status)) {
+      active.push(row)
+      continue
+    }
+    recent.push(row)
+  }
+
+  return { active, recent }
 }
 
 export function buildSparkline(values: number[]): string {
