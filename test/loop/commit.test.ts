@@ -58,11 +58,15 @@ describe('commitChanges', () => {
 
     expect(result).toEqual({ committed: true, reason: null, blockRun: false })
     expect(mockCheckDiffSize).toHaveBeenCalledWith('/tmp/wt', limits, { staged: true })
-    expect(mockExeca).toHaveBeenCalledWith('git', ['add', '-A'], { cwd: '/tmp/wt' })
+    expect(mockExeca).toHaveBeenCalledWith(
+      'git',
+      ['add', '-A'],
+      expect.objectContaining({ cwd: '/tmp/wt', extendEnv: false }),
+    )
     expect(mockExeca).toHaveBeenCalledWith(
       'git',
       ['commit', '-m', 'night-orch: implement #42 Fix title'],
-      { cwd: '/tmp/wt' },
+      expect.objectContaining({ cwd: '/tmp/wt', extendEnv: false }),
     )
   })
 
@@ -82,7 +86,7 @@ describe('commitChanges', () => {
     expect(mockExeca).toHaveBeenCalledWith(
       'git',
       ['commit', '-m', 'night-orch: implement #1 Fix Injected trailer: value'],
-      { cwd: '/tmp/wt' },
+      expect.objectContaining({ cwd: '/tmp/wt', extendEnv: false }),
     )
   })
 
@@ -105,7 +109,7 @@ describe('commitChanges', () => {
     expect(mockExeca).toHaveBeenCalledWith(
       'git',
       ['reset', 'HEAD', '--', '.'],
-      { cwd: '/tmp/wt', reject: false },
+      expect.objectContaining({ cwd: '/tmp/wt', reject: false, extendEnv: false }),
     )
   })
 
@@ -128,7 +132,11 @@ describe('commitChanges', () => {
     expect(result.committed).toBe(false)
     expect(result.blockRun).toBe(true)
     expect(result.reason).toContain('Planning-only guard')
-    expect(mockExeca).toHaveBeenCalledWith('git', ['diff', '--cached', '--name-only'], { cwd: '/tmp/wt' })
+    expect(mockExeca).toHaveBeenCalledWith(
+      'git',
+      ['diff', '--cached', '--name-only'],
+      expect.objectContaining({ cwd: '/tmp/wt', extendEnv: false }),
+    )
   })
 
   it('allows planning-only commit when only the expected PRD file is staged', async () => {

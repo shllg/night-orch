@@ -5,7 +5,7 @@ import type Database from 'better-sqlite3'
 import { resolveMentions } from './resolver.js'
 import { MentionTracker } from './tracker.js'
 import { logger } from '../utils/logger.js'
-import { execa } from 'execa'
+import { runGit } from '../git/process.js'
 
 export class PRMentionManager {
   private tracker: MentionTracker
@@ -30,7 +30,7 @@ export class PRMentionManager {
     // Get current commit SHA
     let commitSha: string
     try {
-      const { stdout } = await execa('git', ['rev-parse', 'HEAD'], { cwd: ctx.worktreePath })
+      const { stdout } = await runGit(['rev-parse', 'HEAD'], { cwd: ctx.worktreePath })
       commitSha = stdout.trim()
     } catch {
       logger.warn({ worktreePath: ctx.worktreePath }, 'Could not get commit SHA — skipping mentions')

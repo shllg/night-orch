@@ -1,4 +1,4 @@
-import { execa } from 'execa'
+import { runGit } from '../git/process.js'
 import { logger } from '../utils/logger.js'
 
 export interface RebaseTarget {
@@ -28,14 +28,14 @@ export async function autoRebase(
 
   try {
     // Fetch latest remote state
-    await execa('git', ['fetch', 'origin'], {
+    await runGit(['fetch', 'origin'], {
       cwd: repoLocalPath,
       timeout: 60_000,
     })
 
     // Check if base branch is already an ancestor of HEAD (i.e., no rebase needed)
     try {
-      await execa('git', ['merge-base', '--is-ancestor', `origin/${baseBranch}`, 'HEAD'], {
+      await runGit(['merge-base', '--is-ancestor', `origin/${baseBranch}`, 'HEAD'], {
         cwd: worktreePath,
         timeout: 30_000,
       })
@@ -49,7 +49,7 @@ export async function autoRebase(
 
     // Attempt rebase
     try {
-      await execa('git', ['rebase', `origin/${baseBranch}`], {
+      await runGit(['rebase', `origin/${baseBranch}`], {
         cwd: worktreePath,
         timeout: 120_000,
       })
@@ -58,7 +58,7 @@ export async function autoRebase(
       if (stderr.includes('CONFLICT') || stderr.includes('could not apply')) {
         log.warn({ baseBranch }, 'Rebase conflict — aborting')
         try {
-          await execa('git', ['rebase', '--abort'], { cwd: worktreePath, timeout: 30_000 })
+          await runGit(['rebase', '--abort'], { cwd: worktreePath, timeout: 30_000 })
         } catch {
           // Abort itself failed — worktree may be in bad state
           log.error('Failed to abort rebase')
@@ -69,7 +69,7 @@ export async function autoRebase(
     }
 
     // Push with --force-with-lease
-    await execa('git', ['push', '--force-with-lease', 'origin', branchName], {
+    await runGit(['push', '--force-with-lease', 'origin', branchName], {
       cwd: worktreePath,
       timeout: 60_000,
     })

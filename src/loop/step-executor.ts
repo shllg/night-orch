@@ -264,17 +264,30 @@ export function getWorkerProfile(
 export function resolveContinueSession(ctx: RunContext, step: WorkerStep): string | null {
   if (!step.continueFrom) return null
 
-  // If continuing from a specific step ID, look up that step's role session
+  // continueFrom references a workflow step ID.
   const sessionId = ctx.sessionIds[step.continueFrom]
   if (sessionId) return sessionId
 
-  // On iteration 2+, also try the current role's own prior session
+  // Backward-compatibility: older checkpoints keyed by default role names.
+  const legacyRoleAlias = STEP_ID_TO_DEFAULT_ROLE[step.continueFrom]
+  if (legacyRoleAlias) {
+    const legacySession = ctx.sessionIds[legacyRoleAlias]
+    if (legacySession) return legacySession
+  }
+
+  // On iteration 2+, also try this step's own prior session.
   if (ctx.iteration > 1) {
-    const ownSession = ctx.sessionIds[step.role]
+    const ownSession = ctx.sessionIds[step.id] ?? ctx.sessionIds[step.role]
     if (ownSession) return ownSession
   }
 
   return null
+}
+
+const STEP_ID_TO_DEFAULT_ROLE: Record<string, string> = {
+  plan: 'planner',
+  code: 'coder',
+  review: 'reviewer',
 }
 
 /**
@@ -289,7 +302,7 @@ function buildWorkerCtxPatch(
   const basePatch: Partial<RunContext> = {
     totalAgentPasses: ctx.totalAgentPasses + 1,
     sessionIds: result.sessionId
-      ? { ...ctx.sessionIds, [step.role]: result.sessionId }
+      ? { ...ctx.sessionIds, [step.id]: result.sessionId, [step.role]: result.sessionId }
       : ctx.sessionIds,
     stepOutputs: { ...ctx.stepOutputs, [step.id]: result.parsed },
   }

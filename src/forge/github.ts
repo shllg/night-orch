@@ -135,6 +135,21 @@ export class GitHubForgeAdapter implements ForgeAdapter {
     return { user: data.login, scopes }
   }
 
+  async isCollaborator(repo: string, username: string): Promise<boolean> {
+    const { owner, repo: repoName } = splitRepo(repo)
+    try {
+      await this.octokit.rest.repos.getCollaboratorPermissionLevel({
+        owner,
+        repo: repoName,
+        username,
+      })
+      return true
+    } catch (err: unknown) {
+      if (isOctokitError(err) && err.status === 404) return false
+      throw err
+    }
+  }
+
   // --- PR methods ---
 
   async createPR(repo: string, params: PRParams): Promise<ForgePR> {
@@ -385,7 +400,7 @@ export class GitHubForgeAdapter implements ForgeAdapter {
       body: string | null
       state: string
       merged: boolean
-      head: { ref: string }
+      head: { ref: string; sha?: string }
       base: { ref: string }
       html_url: string
     }
@@ -398,6 +413,7 @@ export class GitHubForgeAdapter implements ForgeAdapter {
       body: d.body ?? '',
       state,
       headBranch: d.head.ref,
+      headSha: d.head.sha ?? '',
       baseBranch: d.base.ref,
       url: d.html_url,
     }

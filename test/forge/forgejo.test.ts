@@ -47,7 +47,7 @@ function makeForgejoPR(overrides: Record<string, unknown> = {}) {
     body: 'PR body',
     state: 'open',
     merged: false,
-    head: { ref: 'feature-branch' },
+    head: { ref: 'feature-branch', sha: 'sha-feature-branch' },
     base: { ref: 'main' },
     html_url: 'https://forgejo.example.com/org/repo/pulls/10',
     ...overrides,
@@ -298,6 +298,21 @@ describe('ForgejoForgeAdapter', () => {
     })
   })
 
+  describe('isCollaborator', () => {
+    it('returns true when permission endpoint returns a permission', async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ permission: 'write' }))
+
+      await expect(adapter.isCollaborator('org/repo', 'alice')).resolves.toBe(true)
+      const calledUrl = mockFetch.mock.calls[0]![0] as string
+      expect(calledUrl).toContain('/repos/org/repo/collaborators/alice/permission')
+    })
+
+    it('returns false on 404 from permission endpoint', async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ message: 'Not Found' }, 404))
+      await expect(adapter.isCollaborator('org/repo', 'outsider')).resolves.toBe(false)
+    })
+  })
+
   describe('createPR', () => {
     it('creates a PR and maps the response', async () => {
       mockFetch.mockResolvedValue(jsonResponse(makeForgejoPR()))
@@ -312,6 +327,7 @@ describe('ForgejoForgeAdapter', () => {
       expect(pr.number).toBe(10)
       expect(pr.state).toBe('open')
       expect(pr.headBranch).toBe('feature-branch')
+      expect(pr.headSha).toBe('sha-feature-branch')
       expect(pr.baseBranch).toBe('main')
 
       const body = JSON.parse(mockFetch.mock.calls[0]![1]!.body as string) as Record<string, string>

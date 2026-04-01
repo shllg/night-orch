@@ -1,4 +1,3 @@
-import { execa } from 'execa'
 import { existsSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
@@ -10,6 +9,7 @@ import {
   createBranch,
   createTrackingBranch,
 } from './repo.js'
+import { runGit } from './process.js'
 
 export interface WorktreeInfo {
   path: string
@@ -99,7 +99,7 @@ export function createWorktreeManager(): WorktreeManager {
 
       if (branchName) {
         try {
-          await execa('git', ['branch', '-D', branchName], { cwd: repoPath })
+          await runGit(['branch', '-D', branchName], { cwd: repoPath })
           logger.info({ branchName }, 'Deleted branch')
         } catch (err) {
           logger.warn({ branchName, err }, 'Failed to delete branch')
@@ -108,7 +108,7 @@ export function createWorktreeManager(): WorktreeManager {
     },
 
     async list(repoLocalPath: string, worktreeRoot: string): Promise<WorktreeInfo[]> {
-      const { stdout } = await execa('git', ['worktree', 'list', '--porcelain'], {
+      const { stdout } = await runGit(['worktree', 'list', '--porcelain'], {
         cwd: repoLocalPath,
       })
 
@@ -149,12 +149,12 @@ async function createFreshWorktree(
   worktreePath: string,
 ): Promise<WorktreeInfo> {
   // Prune stale worktree registrations (directory deleted but still tracked by git)
-  await execa('git', ['worktree', 'prune'], { cwd: repoLocalPath, reject: false })
+  await runGit(['worktree', 'prune'], { cwd: repoLocalPath, reject: false })
 
   await mkdir(dirname(worktreePath), { recursive: true })
 
   logger.info({ worktreePath, branchName }, 'Creating worktree')
-  await execa('git', ['worktree', 'add', worktreePath, branchName], {
+  await runGit(['worktree', 'add', worktreePath, branchName], {
     cwd: repoLocalPath,
   })
 
@@ -179,12 +179,12 @@ async function validateWorktree(worktreePath: string, expectedBranch: string): P
 }
 
 async function getCurrentBranch(repoPath: string): Promise<string> {
-  const { stdout } = await execa('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoPath })
+  const { stdout } = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoPath })
   return stdout.trim()
 }
 
 async function getMainRepoPath(worktreePath: string): Promise<string> {
-  const { stdout } = await execa('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
+  const { stdout } = await runGit(['rev-parse', '--path-format=absolute', '--git-common-dir'], {
     cwd: worktreePath,
   })
   // git-common-dir returns the .git dir of the main repo
@@ -192,7 +192,7 @@ async function getMainRepoPath(worktreePath: string): Promise<string> {
 }
 
 async function isWorktreeClean(worktreePath: string): Promise<boolean> {
-  const { stdout } = await execa('git', ['status', '--porcelain'], { cwd: worktreePath })
+  const { stdout } = await runGit(['status', '--porcelain'], { cwd: worktreePath })
   return stdout.trim() === ''
 }
 
@@ -202,8 +202,8 @@ async function isWorktreeClean(worktreePath: string): Promise<boolean> {
  */
 async function resetWorktree(worktreePath: string): Promise<void> {
   try {
-    await execa('git', ['checkout', '.'], { cwd: worktreePath })
-    await execa('git', ['clean', '-fd'], { cwd: worktreePath })
+    await runGit(['checkout', '.'], { cwd: worktreePath })
+    await runGit(['clean', '-fd'], { cwd: worktreePath })
     logger.debug({ worktreePath }, 'Reset worktree to clean state')
   } catch (err) {
     logger.warn({ worktreePath, err }, 'Failed to reset worktree — continuing anyway')
@@ -215,8 +215,8 @@ async function resetWorktree(worktreePath: string): Promise<void> {
  * Used when a prior run produced tainted work that should not be preserved.
  */
 async function hardResetToBase(worktreePath: string, baseBranch: string): Promise<void> {
-  await execa('git', ['reset', '--hard', `origin/${baseBranch}`], { cwd: worktreePath })
-  await execa('git', ['clean', '-fd'], { cwd: worktreePath })
+  await runGit(['reset', '--hard', `origin/${baseBranch}`], { cwd: worktreePath })
+  await runGit(['clean', '-fd'], { cwd: worktreePath })
 }
 
 /**
@@ -225,13 +225,13 @@ async function hardResetToBase(worktreePath: string, baseBranch: string): Promis
  */
 async function rebaseOnto(worktreePath: string, baseBranch: string): Promise<boolean> {
   try {
-    await execa('git', ['rebase', `origin/${baseBranch}`], { cwd: worktreePath })
+    await runGit(['rebase', `origin/${baseBranch}`], { cwd: worktreePath })
     logger.debug({ worktreePath, baseBranch }, 'Rebased onto base branch')
     return true
   } catch {
     logger.warn({ worktreePath, baseBranch }, 'Rebase conflict with base branch')
     try {
-      await execa('git', ['rebase', '--abort'], { cwd: worktreePath })
+      await runGit(['rebase', '--abort'], { cwd: worktreePath })
     } catch (abortErr) {
       logger.debug({ worktreePath, err: abortErr }, 'Failed to abort rebase')
     }
@@ -241,9 +241,9 @@ async function rebaseOnto(worktreePath: string, baseBranch: string): Promise<boo
 
 async function removeWorktree(repoPath: string, worktreePath: string): Promise<void> {
   try {
-    await execa('git', ['worktree', 'remove', worktreePath, '--force'], { cwd: repoPath })
+    await runGit(['worktree', 'remove', worktreePath, '--force'], { cwd: repoPath })
   } catch {
     // Fallback: prune
-    await execa('git', ['worktree', 'prune'], { cwd: repoPath })
+    await runGit(['worktree', 'prune'], { cwd: repoPath })
   }
 }

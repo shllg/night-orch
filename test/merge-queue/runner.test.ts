@@ -40,7 +40,7 @@ function makeForge(overrides: Partial<ForgeAdapter> = {}): ForgeAdapter {
     mergePR: vi.fn(), closePR: vi.fn(),
     getPRCheckStatus: vi.fn().mockResolvedValue({ overall: 'success', checks: [] }),
     getRefCheckStatus: vi.fn().mockResolvedValue({ overall: 'success', checks: [] }),
-    getPR: vi.fn().mockResolvedValue({ number: 1, headBranch: 'fix', baseBranch: 'main', title: '', body: '', state: 'open', url: '' }),
+    getPR: vi.fn().mockResolvedValue({ number: 1, headBranch: 'fix', headSha: 'sha-fix', baseBranch: 'main', title: '', body: '', state: 'open', url: '' }),
     ...overrides,
   } as unknown as ForgeAdapter
 }
@@ -94,5 +94,29 @@ describe('processMergeQueue', () => {
 
     const batch = db.prepare("SELECT * FROM merge_batches WHERE repo = 'org/repo'").get()
     expect(batch).toBeUndefined()
+  })
+
+  it('quarantines culprit PR when single-item batch fails CI', async () => {
+    db.prepare(
+      "INSERT INTO runs (id, repo, issue_number, status, pr_number) VALUES ('r1', 'org/repo', 1, 'review_ready', 100)",
+    ).run()
+    db.prepare(
+      `INSERT INTO merge_batches (id, repo, base_branch, base_sha, status, staging_branch, staging_sha, pr_numbers, approved_shas, retry_count)
+       VALUES ('b1', 'org/repo', 'main', 'abc123', 'testing', 'orch/staging/123', 'staging-sha-123', '[100]', '["sha-100"]', 1)`,
+    ).run()
+
+    const forge = makeForge({
+      getRefCheckStatus: vi.fn().mockResolvedValue({ overall: 'failure', checks: [] }),
+      addLabels: vi.fn().mockResolvedValue(undefined),
+      removeLabels: vi.fn().mockResolvedValue(undefined),
+    })
+
+    await processMergeQueue(db, forge, makeRepoConfig())
+
+    const row = db.prepare("SELECT status, block_reason FROM runs WHERE id = 'r1'").get() as { status: string; block_reason: string | null }
+    expect(row.status).toBe('blocked')
+    expect(row.block_reason).toBe('merge_conflict')
+    expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 100, ['orch:merge-failed'])
+    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 100, ['orch:merge-queued', 'orch:merging'])
   })
 })

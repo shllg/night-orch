@@ -30,7 +30,7 @@ import { logger } from '../utils/logger.js'
 import type { RunContext } from '../loop/types.js'
 import type { NotificationPayload } from '../notify/types.js'
 import { postPlanSummaryComment } from '../loop/plan-summary-comment.js'
-import { executeRebase } from '../ops/rebase-and-check.js'
+import { executeRebase, queueRebase } from '../ops/rebase-and-check.js'
 import { markerTag, upsertBotComment } from '../forge/bot-comment.js'
 import { formatStatusComment } from '../forge/status-comment.js'
 import { scanForReactions } from '../reactions/scanner.js'
@@ -41,6 +41,12 @@ import { decomposeIssue, shouldAttemptDecompose } from '../discovery/decomposer.
 import { executeParallelSubtasks } from '../loop/parallel.js'
 import { buildWorkerEnv } from '../workers/env.js'
 import { isPlanningIssue } from '../planning/mode.js'
+import {
+  isCommandProcessed,
+  markCommandProcessed,
+  parseOrchCommands,
+  type OrchCommand,
+} from '../discovery/commands.js'
 import {
   AgentObservability,
   setActiveAgentObservability,
@@ -132,6 +138,22 @@ export async function pollOnce(
           await processMergeQueue(db, forge, repoConfig)
         } catch (err) {
           logger.warn({ repo: repoConfig.repo, err }, 'Merge queue processing failed — continuing')
+        }
+
+        // --- Comment commands: /orch retry|rebase|continue|cancel ---
+        try {
+          await processCommentCommands({
+            config,
+            db,
+            forge,
+            runManager,
+            leaseManager,
+            repoConfig,
+            labelConfig,
+            botUser,
+          })
+        } catch (err) {
+          logger.warn({ repo: repoConfig.repo, err }, 'Comment command processing failed — continuing')
         }
 
         const discoveredAll = await discoverEligibleIssues(repoConfig, forge, leaseManager)
@@ -817,6 +839,343 @@ function makePayload(
     timestamp: new Date().toISOString(),
     ...extra,
   }
+}
+
+interface ProcessCommentCommandsParams {
+  config: Config
+  db: Database.Database
+  forge: ReturnType<typeof createForgeAdapter>
+  runManager: RunManager
+  leaseManager: LeaseManager
+  repoConfig: Config['repos'][0]
+  labelConfig: ReturnType<typeof buildLabelConfig>
+  botUser: string
+}
+
+interface CommandIssueRow {
+  issue_number: number
+}
+
+async function processCommentCommands(params: ProcessCommentCommandsParams): Promise<void> {
+  const {
+    config,
+    db,
+    forge,
+    runManager,
+    leaseManager,
+    repoConfig,
+    labelConfig,
+    botUser,
+  } = params
+
+  const commandSettings = config.commentCommands ?? { enabled: true, requireCollaborator: false }
+  if (!commandSettings.enabled) return
+
+  const issueRows = db
+    .prepare(
+      `SELECT DISTINCT issue_number
+       FROM runs
+       WHERE repo = ? AND status IN ('queued', 'running', 'blocked', 'review_ready', 'error')
+       ORDER BY issue_number`,
+    )
+    .all(repoConfig.repo) as CommandIssueRow[]
+
+  if (issueRows.length === 0) return
+
+  const collaboratorCache = new Map<string, boolean>()
+
+  for (const row of issueRows) {
+    const comments = await forge.listIssueComments(repoConfig.repo, row.issue_number)
+    const parsed = parseOrchCommands(comments, '1970-01-01T00:00:00Z')
+
+    for (const item of parsed) {
+      if (isCommandProcessed(db, repoConfig.repo, row.issue_number, item.commentId)) continue
+
+      let commandStatus = 'applied'
+      try {
+        const allowed = await canExecuteCommentCommand({
+          forge,
+          repo: repoConfig.repo,
+          user: item.user,
+          requireCollaborator: commandSettings.requireCollaborator,
+          cache: collaboratorCache,
+        })
+
+        if (!allowed) {
+          commandStatus = 'denied'
+          logger.info(
+            { repo: repoConfig.repo, issueNumber: row.issue_number, user: item.user, commentId: item.commentId },
+            'Ignoring comment command from non-collaborator',
+          )
+          continue
+        }
+
+        const result = await executeCommentCommand({
+          command: item.command,
+          db,
+          forge,
+          runManager,
+          leaseManager,
+          repoConfig,
+          labelConfig,
+          issueNumber: row.issue_number,
+          botUser,
+          user: item.user,
+        })
+
+        if (!result.ok) {
+          commandStatus = 'rejected'
+          logger.info(
+            { repo: repoConfig.repo, issueNumber: row.issue_number, command: item.command.type, reason: result.reason },
+            'Comment command rejected',
+          )
+        } else {
+          logger.info(
+            { repo: repoConfig.repo, issueNumber: row.issue_number, command: item.command.type, user: item.user },
+            'Comment command applied',
+          )
+        }
+      } catch (err) {
+        commandStatus = 'failed'
+        logger.warn(
+          { repo: repoConfig.repo, issueNumber: row.issue_number, commentId: item.commentId, command: item.command.type, err },
+          'Comment command failed',
+        )
+      } finally {
+        markCommandProcessed(
+          db,
+          repoConfig.repo,
+          row.issue_number,
+          item.commentId,
+          `${item.command.type}:${commandStatus}`,
+        )
+      }
+    }
+  }
+}
+
+interface CanExecuteCommentCommandParams {
+  forge: ReturnType<typeof createForgeAdapter>
+  repo: string
+  user: string
+  requireCollaborator: boolean
+  cache: Map<string, boolean>
+}
+
+async function canExecuteCommentCommand(params: CanExecuteCommentCommandParams): Promise<boolean> {
+  const { forge, repo, user, requireCollaborator, cache } = params
+  if (!requireCollaborator) return true
+  if (!user) return false
+
+  const cached = cache.get(user)
+  if (cached !== undefined) return cached
+
+  if (!forge.isCollaborator) {
+    logger.warn({ repo, user }, 'requireCollaborator=true but forge adapter has no isCollaborator() implementation')
+    cache.set(user, false)
+    return false
+  }
+
+  try {
+    const allowed = await forge.isCollaborator(repo, user)
+    cache.set(user, allowed)
+    return allowed
+  } catch (err) {
+    logger.warn({ repo, user, err }, 'Failed collaborator check for comment command user')
+    cache.set(user, false)
+    return false
+  }
+}
+
+interface ExecuteCommentCommandParams {
+  command: OrchCommand
+  db: Database.Database
+  forge: ReturnType<typeof createForgeAdapter>
+  runManager: RunManager
+  leaseManager: LeaseManager
+  repoConfig: Config['repos'][0]
+  labelConfig: ReturnType<typeof buildLabelConfig>
+  issueNumber: number
+  botUser: string
+  user: string
+}
+
+type CommandExecutionResult = { ok: true } | { ok: false; reason: string }
+
+async function executeCommentCommand(params: ExecuteCommentCommandParams): Promise<CommandExecutionResult> {
+  const {
+    command,
+    db,
+    forge,
+    runManager,
+    leaseManager,
+    repoConfig,
+    labelConfig,
+    issueNumber,
+    botUser,
+    user,
+  } = params
+
+  switch (command.type) {
+    case 'retry':
+      return queueRetryFromComment({
+        runManager,
+        leaseManager,
+        forge,
+        repoConfig,
+        labelConfig,
+        issueNumber,
+        resetPlan: command.resetPlan,
+      })
+    case 'continue':
+      return queueContinueFromComment({
+        runManager,
+        leaseManager,
+        forge,
+        repoConfig,
+        labelConfig,
+        issueNumber,
+      })
+    case 'rebase': {
+      // queueRebase currently always verifies after rebase; keep behavior stable.
+      const result = await queueRebase(db, forge, repoConfig, issueNumber, botUser)
+      return result.queued ? { ok: true } : { ok: false, reason: result.reason }
+    }
+    case 'cancel':
+      return cancelRunFromComment({
+        runManager,
+        leaseManager,
+        forge,
+        repoConfig,
+        labelConfig,
+        issueNumber,
+        user,
+      })
+    default: {
+      const exhaustive: never = command
+      return { ok: false, reason: `Unsupported command: ${String(exhaustive)}` }
+    }
+  }
+}
+
+interface QueueRetryFromCommentParams {
+  runManager: RunManager
+  leaseManager: LeaseManager
+  forge: ReturnType<typeof createForgeAdapter>
+  repoConfig: Config['repos'][0]
+  labelConfig: ReturnType<typeof buildLabelConfig>
+  issueNumber: number
+  resetPlan: boolean
+}
+
+async function queueRetryFromComment(params: QueueRetryFromCommentParams): Promise<CommandExecutionResult> {
+  const { runManager, leaseManager, forge, repoConfig, labelConfig, issueNumber, resetPlan } = params
+  const run = runManager.getByRepoAndIssue(repoConfig.repo, issueNumber)
+  if (!run) return { ok: false, reason: 'No run found for issue' }
+  if (run.status === 'running') return { ok: false, reason: 'Run is currently running' }
+  if (!['blocked', 'error', 'review_ready'].includes(run.status)) {
+    return { ok: false, reason: `Retry not allowed from status ${run.status}` }
+  }
+
+  runManager.update(run.id, {
+    status: 'queued',
+    currentPhase: null,
+    endedAt: null,
+    lastError: null,
+    phaseData: resetPlan ? null : run.phaseData,
+    blockReason: null,
+  })
+  leaseManager.release(repoConfig.repo, issueNumber)
+
+  const issue = await forge.getIssue(repoConfig.repo, issueNumber)
+  await transitionLabels(
+    forge,
+    repoConfig.repo,
+    issueNumber,
+    issue.labels,
+    run.status,
+    'queued',
+    labelConfig,
+  )
+  return { ok: true }
+}
+
+interface QueueContinueFromCommentParams {
+  runManager: RunManager
+  leaseManager: LeaseManager
+  forge: ReturnType<typeof createForgeAdapter>
+  repoConfig: Config['repos'][0]
+  labelConfig: ReturnType<typeof buildLabelConfig>
+  issueNumber: number
+}
+
+async function queueContinueFromComment(params: QueueContinueFromCommentParams): Promise<CommandExecutionResult> {
+  const { runManager, leaseManager, forge, repoConfig, labelConfig, issueNumber } = params
+  const run = runManager.getByRepoAndIssue(repoConfig.repo, issueNumber)
+  if (!run) return { ok: false, reason: 'No run found for issue' }
+  if (run.status !== 'blocked') {
+    return { ok: false, reason: `Continue only supports blocked runs (current: ${run.status})` }
+  }
+
+  runManager.update(run.id, {
+    status: 'queued',
+    currentPhase: null,
+    endedAt: null,
+    lastError: null,
+    blockReason: null,
+  })
+  leaseManager.release(repoConfig.repo, issueNumber)
+
+  const issue = await forge.getIssue(repoConfig.repo, issueNumber)
+  await transitionLabels(
+    forge,
+    repoConfig.repo,
+    issueNumber,
+    issue.labels,
+    'blocked',
+    'queued',
+    labelConfig,
+  )
+  return { ok: true }
+}
+
+interface CancelRunFromCommentParams {
+  runManager: RunManager
+  leaseManager: LeaseManager
+  forge: ReturnType<typeof createForgeAdapter>
+  repoConfig: Config['repos'][0]
+  labelConfig: ReturnType<typeof buildLabelConfig>
+  issueNumber: number
+  user: string
+}
+
+async function cancelRunFromComment(params: CancelRunFromCommentParams): Promise<CommandExecutionResult> {
+  const { runManager, leaseManager, forge, repoConfig, labelConfig, issueNumber, user } = params
+  const run = runManager.getByRepoAndIssue(repoConfig.repo, issueNumber)
+  if (!run) return { ok: false, reason: 'No run found for issue' }
+  if (run.status !== 'running' && run.status !== 'queued') {
+    return { ok: false, reason: `Cancel only supports running/queued runs (current: ${run.status})` }
+  }
+
+  runManager.update(run.id, {
+    status: 'blocked',
+    endedAt: new Date().toISOString(),
+    lastError: `Cancelled by @${user} via comment command`,
+    blockReason: null,
+  })
+  leaseManager.release(repoConfig.repo, issueNumber)
+
+  const issue = await forge.getIssue(repoConfig.repo, issueNumber)
+  await transitionLabels(
+    forge,
+    repoConfig.repo,
+    issueNumber,
+    issue.labels,
+    run.status,
+    'blocked',
+    labelConfig,
+  )
+  return { ok: true }
 }
 
 /**

@@ -325,5 +325,31 @@ describe('MergeBatchManager', () => {
       const unchanged = manager.getById(batch.id)
       expect(unchanged?.status).toBe('pending')
     })
+
+    it('throws on unknown update field keys', () => {
+      const batch = manager.create({
+        repo: 'org/repo',
+        baseBranch: 'main',
+        baseSha: 'abc123',
+        prNumbers: [1],
+        approvedShas: [],
+      })
+
+      expect(() => manager.update(batch.id, { unknownField: 'x' } as unknown as Parameters<typeof manager.update>[1]))
+        .toThrow('Unknown merge batch field: unknownField')
+    })
+  })
+
+  describe('JSON parsing', () => {
+    it('handles malformed JSON arrays safely', () => {
+      db.prepare(
+        `INSERT INTO merge_batches (id, repo, base_branch, base_sha, status, pr_numbers, approved_shas)
+         VALUES ('batch-bad-json', 'org/repo', 'main', 'abc123', 'pending', '{bad', '{also-bad')`,
+      ).run()
+
+      const batch = manager.getById('batch-bad-json')
+      expect(batch?.prNumbers).toEqual([])
+      expect(batch?.approvedShas).toEqual([])
+    })
   })
 })

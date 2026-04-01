@@ -32,6 +32,7 @@ function makePR(overrides: Partial<ForgePR> = {}): ForgePR {
     body: 'body',
     state: 'open',
     headBranch: 'orch/1-fix',
+    headSha: 'sha-pr-10',
     baseBranch: 'main',
     url: 'https://github.com/org/repo/pull/10',
     ...overrides,

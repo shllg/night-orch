@@ -3,6 +3,13 @@ import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 import { logger } from '../../utils/logger.js'
 
+class HostPolicyError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'HostPolicyError'
+  }
+}
+
 export class WebhookChannel implements NotificationChannel {
   readonly type = 'webhook'
 
@@ -19,6 +26,11 @@ export class WebhookChannel implements NotificationChannel {
     }
 
     const attempt = async (): Promise<Response> => {
+      const hostPolicy = await resolveAndValidatePublicHost(normalized.hostname)
+      if (!hostPolicy.ok) {
+        throw new HostPolicyError(hostPolicy.reason)
+      }
+
       return fetch(normalized.url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -43,6 +55,10 @@ export class WebhookChannel implements NotificationChannel {
         logger.warn({ status: response.status, url: redactedUrl }, 'Webhook notification failed')
         return false
       } catch (err) {
+        if (err instanceof HostPolicyError) {
+          logger.warn({ url: redactedUrl, err }, 'Webhook host policy check failed')
+          return false
+        }
         lastError = err
         if (i === 0) {
           logger.warn({ url: redactedUrl, err }, 'Webhook request error — retrying once')
@@ -60,17 +76,11 @@ export class WebhookChannel implements NotificationChannel {
       return { valid: false, error: parsed.reason }
     }
 
-    try {
-      const resolved = await lookup(parsed.hostname, { all: true })
-      for (const entry of resolved) {
-        if (isPrivateAddress(entry.address)) {
-          return { valid: false, error: `Webhook host resolves to private address: ${entry.address}` }
-        }
-      }
-      return { valid: true, error: null }
-    } catch {
-      return { valid: false, error: `Invalid or unresolvable webhook URL: ${redactUrl(parsed.url)}` }
+    const hostPolicy = await resolveAndValidatePublicHost(parsed.hostname)
+    if (!hostPolicy.ok) {
+      return { valid: false, error: hostPolicy.reason }
     }
+    return { valid: true, error: null }
   }
 }
 
@@ -95,6 +105,22 @@ function parseAndValidateWebhookUrl(raw: string): { ok: true; url: string; hostn
   }
 
   return { ok: true, url: parsed.toString(), hostname: parsed.hostname }
+}
+
+async function resolveAndValidatePublicHost(
+  hostname: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  try {
+    const resolved = await lookup(hostname, { all: true })
+    for (const entry of resolved) {
+      if (isPrivateAddress(entry.address)) {
+        return { ok: false, reason: `Webhook host resolves to private address: ${entry.address}` }
+      }
+    }
+    return { ok: true }
+  } catch {
+    return { ok: false, reason: `Invalid or unresolvable webhook hostname: ${hostname}` }
+  }
 }
 
 function isPrivateHostname(hostname: string): boolean {

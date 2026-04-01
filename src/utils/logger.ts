@@ -13,7 +13,7 @@ export function createLogger(
     return pino({
       level,
       redact: {
-        paths: ['*.token', '*.apiKey', '*.secret', '*.password', 'headers.authorization'],
+        paths: ['**.token', '**.apiKey', '**.secret', '**.password', 'headers.authorization'],
         censor: '[REDACTED]',
       },
       transport: { target: 'pino-pretty', options: { colorize: true, destination: fd } },
@@ -24,7 +24,7 @@ export function createLogger(
     {
       level,
       redact: {
-        paths: ['*.token', '*.apiKey', '*.secret', '*.password', 'headers.authorization'],
+        paths: ['**.token', '**.apiKey', '**.secret', '**.password', 'headers.authorization'],
         censor: '[REDACTED]',
       },
     },

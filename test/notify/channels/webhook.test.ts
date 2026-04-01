@@ -57,9 +57,22 @@ describe('WebhookChannel', () => {
         headers: { 'Content-Type': 'application/json' },
       }),
     )
+    expect(mockLookup).toHaveBeenCalledWith('hooks.example.com', { all: true })
     const body = JSON.parse(mockFetch.mock.calls[0]![1].body)
     expect(body.event).toBe('pr_ready')
     expect(body.repo).toBe('org/repo')
+  })
+
+  it('blocks send when hostname resolves to private IP at send-time', async () => {
+    mockLookup.mockResolvedValueOnce([{ address: '10.0.0.5', family: 4 }] as never)
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+    globalThis.fetch = mockFetch
+
+    const channel = new WebhookChannel('https://hooks.example.com/notify')
+    const result = await channel.send(makePayload())
+
+    expect(result).toBe(false)
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 
   it('returns false on 4xx (no retry)', async () => {

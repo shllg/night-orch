@@ -8,20 +8,24 @@ export class LeaseManager {
    * Uses INSERT OR IGNORE + check for atomicity.
    */
   acquire(repo: string, issueNumber: number, owner: string, durationSeconds: number): boolean {
-    // First, clean this specific lease if expired
-    this.db
-      .prepare('DELETE FROM leases WHERE repo = ? AND issue_number = ? AND leased_until < datetime(?)')
-      .run(repo, issueNumber, new Date().toISOString())
+    const now = new Date().toISOString()
+    const acquireTx = this.db.transaction(
+      (txRepo: string, txIssueNumber: number, txOwner: string, txNow: string, txDurationSeconds: number): boolean => {
+        this.db
+          .prepare('DELETE FROM leases WHERE repo = ? AND issue_number = ? AND leased_until < datetime(?)')
+          .run(txRepo, txIssueNumber, txNow)
 
-    // Try to insert
-    const result = this.db
-      .prepare(
-        `INSERT OR IGNORE INTO leases (repo, issue_number, lease_owner, leased_until)
-         VALUES (?, ?, ?, datetime(?, '+' || ? || ' seconds'))`,
-      )
-      .run(repo, issueNumber, owner, new Date().toISOString(), durationSeconds)
+        const result = this.db
+          .prepare(
+            `INSERT OR IGNORE INTO leases (repo, issue_number, lease_owner, leased_until)
+             VALUES (?, ?, ?, datetime(?, '+' || ? || ' seconds'))`,
+          )
+          .run(txRepo, txIssueNumber, txOwner, txNow, txDurationSeconds)
 
-    return result.changes > 0
+        return result.changes > 0
+      },
+    )
+    return acquireTx(repo, issueNumber, owner, now, durationSeconds)
   }
 
   /** Release a lease. Idempotent. */

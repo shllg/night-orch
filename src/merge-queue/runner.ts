@@ -1,7 +1,7 @@
-import { execa } from 'execa'
 import type Database from 'better-sqlite3'
 import type { ForgeAdapter } from '../forge/types.js'
 import type { RepoConfig } from '../config/schema.js'
+import { runGit } from '../git/process.js'
 import { MergeBatchManager } from './batch.js'
 import { findMergeEligiblePRs } from './eligibility.js'
 import { buildStagingBranch } from './staging.js'
@@ -36,7 +36,7 @@ export async function processMergeQueue(
 }
 
 async function handleActiveBatch(
-  _db: Database.Database,
+  db: Database.Database,
   forge: ForgeAdapter,
   repoConfig: RepoConfig,
   batchManager: MergeBatchManager,
@@ -86,7 +86,7 @@ async function handleActiveBatch(
         // Single PR failed — it's the culprit
         const culprit = batch.prNumbers[0]!
         logger.warn({ repo: repoConfig.repo, prNumber: culprit }, 'Merge culprit identified')
-        // TODO: label the culprit PR, remove from queue
+        await quarantineCulpritPR(db, forge, repoConfig, culprit)
       } else {
         const [left, right] = bisectBatch(batch.prNumbers)
         const mid = left.length
@@ -142,7 +142,7 @@ async function formNewBatch(
   logger.info({ repo: repoConfig.repo, prNumbers }, 'Forming new merge batch')
 
   // Get current base SHA
-  const baseResult = await execa('git', ['rev-parse', `origin/${repoConfig.baseBranch}`], { cwd: repoConfig.localPath })
+  const baseResult = await runGit(['rev-parse', `origin/${repoConfig.baseBranch}`], { cwd: repoConfig.localPath })
   const baseSha = baseResult.stdout.trim()
 
   // Create batch record
@@ -177,4 +177,38 @@ async function formNewBatch(
   }
 
   logger.info({ repo: repoConfig.repo, batchId: batch.id, merged: staging.merged.length, testing: true }, 'Merge batch staged and pushed')
+}
+
+async function quarantineCulpritPR(
+  db: Database.Database,
+  forge: ForgeAdapter,
+  repoConfig: RepoConfig,
+  prNumber: number,
+): Promise<void> {
+  try {
+    await forge.addLabels(repoConfig.repo, prNumber, [repoConfig.labels.mergeFailed])
+  } catch (err) {
+    logger.warn({ repo: repoConfig.repo, prNumber, err }, 'Failed to add merge-failed label to culprit PR')
+  }
+
+  try {
+    await forge.removeLabels(
+      repoConfig.repo,
+      prNumber,
+      [repoConfig.labels.mergeQueued, repoConfig.labels.merging],
+    )
+  } catch (err) {
+    logger.warn({ repo: repoConfig.repo, prNumber, err }, 'Failed to clear merge queue labels from culprit PR')
+  }
+
+  db.prepare(
+    `UPDATE runs
+     SET status = 'blocked',
+         block_reason = 'merge_conflict',
+         ended_at = COALESCE(ended_at, datetime('now')),
+         updated_at = datetime('now')
+     WHERE repo = ?
+       AND pr_number = ?
+       AND status = 'review_ready'`,
+  ).run(repoConfig.repo, prNumber)
 }

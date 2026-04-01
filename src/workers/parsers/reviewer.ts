@@ -82,9 +82,14 @@ function buildTextFallback(raw: string): { result: ReviewerOutput | null; error:
  */
 function inferVerdictFromText(text: string): ReviewVerdict | null {
   const upper = text.toUpperCase()
+  const hasApprovedWord = /\bAPPROVED\b/.test(upper)
+  const hasNegatedApproved = /\bNOT\s+APPROVED\b/.test(upper)
+    || /\bNOT\s+YET\s+APPROVED\b/.test(upper)
+    || /\bNO[T]?\s+APPROVAL\b/.test(upper)
+    || /\bUNAPPROVED\b/.test(upper)
 
   // Exact keyword match (strongest signal)
-  if (upper.includes('APPROVED') && !upper.includes('NOT APPROVED')) return 'APPROVED'
+  if (hasApprovedWord && !hasNegatedApproved) return 'APPROVED'
   if (upper.includes('CHANGES_REQUIRED') || upper.includes('CHANGES REQUIRED')) return 'CHANGES_REQUIRED'
   if (upper.includes('BLOCKED')) return 'BLOCKED'
 

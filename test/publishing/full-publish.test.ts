@@ -43,6 +43,7 @@ function makePR(num: number): ForgePR {
     body: 'body',
     state: 'open',
     headBranch: 'orch/1-fix',
+    headSha: `sha-${num}`,
     baseBranch: 'main',
     url: `https://github.com/org/repo/pull/${num}`,
   }

@@ -59,9 +59,6 @@ export async function queueRebase(
     },
   })
 
-  // Update run_mode in DB directly since RunManager.update doesn't support it yet
-  db.prepare("UPDATE runs SET status = 'queued', updated_at = datetime('now') WHERE id = ?").run(run.id)
-
   // Transition labels
   try {
     const issue = await forge.getIssue(repoConfig.repo, issueNumber)

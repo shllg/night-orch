@@ -14,6 +14,8 @@ vi.mock('../../src/utils/logger.js', () => ({
 
 const mockDiscoverEligibleIssues = vi.fn().mockResolvedValue([])
 const mockCommentOnIssue = vi.fn().mockResolvedValue(undefined)
+const mockListIssueComments = vi.fn().mockResolvedValue([])
+const mockIsCollaborator = vi.fn().mockResolvedValue(true)
 vi.mock('../../src/discovery/discover.js', () => ({
   discoverEligibleIssues: (...args: unknown[]) => mockDiscoverEligibleIssues(...args),
 }))
@@ -36,6 +38,8 @@ vi.mock('../../src/forge/factory.js', () => ({
     addLabels: vi.fn().mockResolvedValue(undefined),
     removeLabels: vi.fn().mockResolvedValue(undefined),
     commentOnIssue: (...args: unknown[]) => mockCommentOnIssue(...args),
+    listIssueComments: (...args: unknown[]) => mockListIssueComments(...args),
+    isCollaborator: (...args: unknown[]) => mockIsCollaborator(...args),
     validateAuth: vi.fn(),
     createPR: vi.fn(),
     updatePR: vi.fn(),
@@ -119,6 +123,7 @@ function makeConfig(dbPath: string): Config {
     loop: { maxReviewIterations: 4, maxTotalAgentPasses: 10, stopOnPlannerFailure: true, requireVerificationPass: true, reviewApprovalKeyword: 'APPROVED', reviewNeedsChangesKeyword: 'CHANGES_REQUIRED', blockOnAmbiguousReview: true },
     security: { maxChangedFiles: 50, maxChangedLines: 5000, maxDailyCostUsd: 50, maxCostPerRunUsd: 10 },
     metrics: { enabled: false, port: 9090, host: '127.0.0.1' },
+    commentCommands: { enabled: true, requireCollaborator: false },
     repos: [{
       repo: 'org/repo', forge: 'github', localPath: '/tmp/repo', maxConcurrentRuns: 1, baseBranch: 'main',
       branchPrefix: 'orch', labels: { ready: ['orch:ready'], running: 'orch:running', blocked: ['orch:blocked'], reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry', planning: 'orch:planning' },
@@ -239,6 +244,90 @@ describe('pollOnce', () => {
     const rows = db.prepare('SELECT id FROM runs WHERE repo = ? AND issue_number = ?').all('org/repo', 1) as Array<{ id: string }>
     expect(rows).toHaveLength(1)
     expect(rows[0]!.id).toBe(existing.id)
+  })
+
+  it('denies /orch retry from non-collaborator when requireCollaborator=true', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([])
+    mockListIssueComments.mockResolvedValue([
+      {
+        id: 5001,
+        body: '/orch retry',
+        user: 'external-user',
+        createdAt: '2026-01-02T00:00:00Z',
+        updatedAt: '2026-01-02T00:00:00Z',
+      },
+    ])
+    mockIsCollaborator.mockResolvedValue(false)
+
+    const runManager = new RunManager(db)
+    const run = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 1,
+      issueNodeId: '',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(run.id, {
+      status: 'blocked',
+      endedAt: new Date().toISOString(),
+      lastError: 'failed verify',
+    })
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    config.commentCommands = { enabled: true, requireCollaborator: true }
+    await pollOnce(config, db, false)
+
+    const row = db.prepare("SELECT status FROM runs WHERE id = ?").get(run.id) as { status: string }
+    expect(row.status).toBe('blocked')
+    expect(mockIsCollaborator).toHaveBeenCalledWith('org/repo', 'external-user')
+
+    const commandRow = db
+      .prepare('SELECT command FROM command_tracking WHERE repo = ? AND issue_number = ? AND comment_id = ?')
+      .get('org/repo', 1, 5001) as { command: string } | undefined
+    expect(commandRow?.command).toBe('retry:denied')
+  })
+
+  it('applies /orch retry from collaborator when requireCollaborator=true', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([])
+    mockListIssueComments.mockResolvedValue([
+      {
+        id: 5002,
+        body: '/orch retry',
+        user: 'collaborator-user',
+        createdAt: '2026-01-02T00:00:00Z',
+        updatedAt: '2026-01-02T00:00:00Z',
+      },
+    ])
+    mockIsCollaborator.mockResolvedValue(true)
+
+    const runManager = new RunManager(db)
+    const run = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 2,
+      issueNodeId: '',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(run.id, {
+      status: 'blocked',
+      endedAt: new Date().toISOString(),
+      lastError: 'failed verify',
+    })
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    config.commentCommands = { enabled: true, requireCollaborator: true }
+    await pollOnce(config, db, false)
+
+    const row = db.prepare("SELECT status FROM runs WHERE id = ?").get(run.id) as { status: string }
+    expect(row.status).toBe('queued')
+    expect(mockIsCollaborator).toHaveBeenCalledWith('org/repo', 'collaborator-user')
+
+    const commandRow = db
+      .prepare('SELECT command FROM command_tracking WHERE repo = ? AND issue_number = ? AND comment_id = ?')
+      .get('org/repo', 2, 5002) as { command: string } | undefined
+    expect(commandRow?.command).toBe('retry:applied')
   })
 
   it('returns error when publish fails', async () => {

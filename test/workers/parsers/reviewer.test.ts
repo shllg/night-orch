@@ -54,6 +54,12 @@ describe('parseReviewerOutput', () => {
     expect(error).toContain('could not infer verdict')
   })
 
+  it('does not infer APPROVED from negated approval text', () => {
+    const { result, error } = parseReviewerOutput('The change is not yet approved; more review is needed.')
+    expect(result).toBeNull()
+    expect(error).toContain('could not infer verdict')
+  })
+
   it('infers verdict from JSON with wrong verdict value', () => {
     const raw = '```json\n{"verdict":"MAYBE","summary":"unsure but looks fine"}\n```'
     const { result, error } = parseReviewerOutput(raw)

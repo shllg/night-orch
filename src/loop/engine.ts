@@ -163,7 +163,6 @@ export async function executeLoop(
         case 'iterate': {
           ctx = updateContext(ctx, {
             iteration: ctx.iteration + 1,
-            totalAgentPasses: ctx.totalAgentPasses + 1,
             reviewFindings: [...ctx.reviewFindings, ...decision.findings],
             reviewResult: null,
             verifyResults: [],

@@ -70,7 +70,7 @@ describe('compilePrompt', () => {
 
     const { systemPrompt } = compilePrompt(templatePath, 'default', makeContext())
 
-    expect(systemPrompt).toBe('Custom: Fix login timeout on main')
+    expect(systemPrompt).toBe('Custom: <issue_title>Fix login timeout</issue_title> on main')
   })
 
   it('falls back to default when template file not found', () => {
@@ -97,7 +97,7 @@ describe('compilePrompt', () => {
     const { systemPrompt } = compilePrompt(null, template, makeContext())
 
     expect(systemPrompt).toContain('Role: planner')
-    expect(systemPrompt).toContain('Issue: #42 Fix login timeout')
+    expect(systemPrompt).toContain('Issue: #42 <issue_title>Fix login timeout</issue_title>')
     expect(systemPrompt).toContain('Labels: bug, orch:ready')
     expect(systemPrompt).toContain('Repo: org/repo (main)')
     expect(systemPrompt).toContain('Iteration: 1/4')
@@ -113,8 +113,10 @@ describe('compilePrompt', () => {
   it('builds user prompt with issue details', () => {
     const { userPrompt } = compilePrompt(null, '', makeContext())
 
-    expect(userPrompt).toContain('## Issue #42: Fix login timeout')
-    expect(userPrompt).toContain('The login page times out after 10 seconds.')
+    expect(userPrompt).toContain('## Issue Context')
+    expect(userPrompt).toContain('<untrusted_issue>')
+    expect(userPrompt).toContain('<title>Fix login timeout</title>')
+    expect(userPrompt).toContain('<body>The login page times out after 10 seconds.</body>')
   })
 
   it('includes plan in user prompt when available', () => {
@@ -177,7 +179,7 @@ describe('compilePrompt', () => {
     const { userPrompt } = compilePrompt(null, '', ctx)
 
     expect(userPrompt).not.toContain('<script>')
-    expect(userPrompt).toContain('Hello alert("xss") world')
+    expect(userPrompt).toContain('Hello alert(&quot;xss&quot;) world')
   })
 
   it('sanitizes HTML comments from issue body', () => {
@@ -192,8 +194,7 @@ describe('compilePrompt', () => {
     const { userPrompt } = compilePrompt(null, '', ctx)
 
     expect(userPrompt).not.toContain('IGNORE THIS')
-    expect(userPrompt).toContain('Before')
-    expect(userPrompt).toContain('After')
+    expect(userPrompt).toContain('<body>Before After</body>')
   })
 
   it('truncates excessively long issue bodies', () => {
@@ -206,5 +207,21 @@ describe('compilePrompt', () => {
     expect(userPrompt).toContain('[... truncated ...]')
     // Body should be capped at ~4000 chars + truncation notice
     expect(userPrompt.length).toBeLessThan(longBody.length)
+  })
+
+  it('strips markdown links and images from issue body', () => {
+    const ctx = makeContext({
+      issue: {
+        number: 1,
+        title: 'Test',
+        body: 'See [details](https://example.com) and ![img](https://example.com/a.png)',
+        labels: [],
+      },
+    })
+    const { userPrompt } = compilePrompt(null, '', ctx)
+
+    expect(userPrompt).toContain('details [link removed]')
+    expect(userPrompt).toContain('[image removed]')
+    expect(userPrompt).not.toContain('https://example.com')
   })
 })

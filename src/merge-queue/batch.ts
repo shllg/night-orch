@@ -66,6 +66,7 @@ export class MergeBatchManager {
     >,
   ): void {
     const columnMap: Record<string, string> = {
+      status: 'status',
       stagingBranch: 'staging_branch',
       stagingSha: 'staging_sha',
       retryCount: 'retry_count',
@@ -76,7 +77,10 @@ export class MergeBatchManager {
     const values: unknown[] = []
 
     for (const [key, val] of Object.entries(fields)) {
-      const col = columnMap[key] ?? key
+      const col = columnMap[key]
+      if (!col) {
+        throw new Error(`Unknown merge batch field: ${key}`)
+      }
       setClauses.push(`${col} = ?`)
       values.push(val)
     }
@@ -101,12 +105,21 @@ function mapRow(row: RawBatchRow): MergeBatchRecord {
     status: row.status as MergeBatchStatus,
     stagingBranch: row.staging_branch ?? null,
     stagingSha: row.staging_sha ?? null,
-    prNumbers: JSON.parse(row.pr_numbers) as number[],
-    approvedShas: JSON.parse(row.approved_shas) as string[],
+    prNumbers: parseJsonArray<number>(row.pr_numbers),
+    approvedShas: parseJsonArray<string>(row.approved_shas),
     retryCount: row.retry_count ?? 0,
     parentBatchId: row.parent_batch_id ?? null,
     createdAt: row.created_at ?? '',
     updatedAt: row.updated_at ?? '',
+  }
+}
+
+function parseJsonArray<T>(raw: string): T[] {
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed) ? parsed as T[] : []
+  } catch {
+    return []
   }
 }
 

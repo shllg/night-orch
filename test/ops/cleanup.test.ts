@@ -45,6 +45,7 @@ function makeMockForge(prState: 'open' | 'closed' | 'merged'): ForgeAdapter {
       body: '',
       state: prState,
       headBranch: 'orch/1-fix',
+      headSha: 'sha-11',
       baseBranch: 'main',
       url: 'https://example.test/pr/11',
     }),
@@ -240,7 +241,11 @@ describe('CleanupEngine', () => {
     const result = await engine.run({ mergedBranches: true })
 
     expect(result.removedBranches).toContain('orch/1-fix')
-    expect(execa).toHaveBeenCalledWith('git', ['branch', '-D', 'orch/1-fix'], { cwd: '/tmp/repo' })
+    expect(execa).toHaveBeenCalledWith(
+      'git',
+      ['branch', '-D', 'orch/1-fix'],
+      expect.objectContaining({ cwd: '/tmp/repo', extendEnv: false }),
+    )
   })
 
   it('skips branch deletion when PR is closed but not merged', async () => {

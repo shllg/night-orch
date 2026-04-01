@@ -41,7 +41,7 @@ function makeGitHubPR(overrides: Record<string, unknown> = {}) {
     body: 'PR body',
     state: 'open',
     merged: false,
-    head: { ref: 'feature-branch' },
+    head: { ref: 'feature-branch', sha: 'sha-feature-branch' },
     base: { ref: 'main' },
     html_url: 'https://github.com/org/repo/pull/10',
     ...overrides,
@@ -94,6 +94,7 @@ const mockPullsUpdate = vi.fn()
 const mockPullsList = vi.fn()
 const mockPullsGet = vi.fn()
 const mockRateLimitGet = vi.fn()
+const mockReposGetCollaboratorPermissionLevel = vi.fn()
 
 vi.mock('@octokit/rest', () => {
   return {
@@ -115,6 +116,9 @@ vi.mock('@octokit/rest', () => {
           update: mockPullsUpdate,
           list: mockPullsList,
           get: mockPullsGet,
+        },
+        repos: {
+          getCollaboratorPermissionLevel: mockReposGetCollaboratorPermissionLevel,
         },
         rateLimit: {
           get: mockRateLimitGet,
@@ -256,6 +260,26 @@ describe('GitHubForgeAdapter', () => {
     })
   })
 
+  describe('isCollaborator', () => {
+    it('returns true for collaborators', async () => {
+      mockReposGetCollaboratorPermissionLevel.mockResolvedValue({
+        data: { permission: 'write' },
+      })
+
+      await expect(adapter.isCollaborator('org/repo', 'alice')).resolves.toBe(true)
+      expect(mockReposGetCollaboratorPermissionLevel).toHaveBeenCalledWith({
+        owner: 'org',
+        repo: 'repo',
+        username: 'alice',
+      })
+    })
+
+    it('returns false for non-collaborators (404)', async () => {
+      mockReposGetCollaboratorPermissionLevel.mockRejectedValue({ status: 404 })
+      await expect(adapter.isCollaborator('org/repo', 'outsider')).resolves.toBe(false)
+    })
+  })
+
   describe('addLabels', () => {
     it('calls the API with correct params', async () => {
       mockIssuesAddLabels.mockResolvedValue({})
@@ -366,6 +390,7 @@ describe('GitHubForgeAdapter', () => {
       expect(pr.number).toBe(10)
       expect(pr.state).toBe('open')
       expect(pr.headBranch).toBe('feature-branch')
+      expect(pr.headSha).toBe('sha-feature-branch')
     })
 
     it('passes draft flag', async () => {

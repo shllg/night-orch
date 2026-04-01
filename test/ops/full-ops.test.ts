@@ -154,7 +154,7 @@ describe('Full ops integration', () => {
 
   it('sync + cleanup pipeline', async () => {
     const forge = makeMockForge({
-      findPRByBranch: vi.fn().mockResolvedValue({ number: 10, state: 'merged', title: 'Fix', body: '', headBranch: 'orch/1-fix', baseBranch: 'main', url: '' }),
+      findPRByBranch: vi.fn().mockResolvedValue({ number: 10, state: 'merged', title: 'Fix', body: '', headBranch: 'orch/1-fix', headSha: 'sha-10', baseBranch: 'main', url: '' }),
     })
     const config = makeConfig()
 

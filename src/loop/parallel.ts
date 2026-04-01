@@ -22,33 +22,42 @@ export interface SubTaskResult {
 export function topologicalWaves(subtasks: SubTask[]): number[][] {
   if (subtasks.length === 0) return []
 
-  const depths = new Array<number>(subtasks.length).fill(0)
+  const waves: number[][] = []
+  const indegree = new Array<number>(subtasks.length).fill(0)
+  const dependents = Array.from({ length: subtasks.length }, (): number[] => [])
 
-  let changed = true
-  while (changed) {
-    changed = false
-    for (let i = 0; i < subtasks.length; i++) {
-      const task = subtasks[i]!
-      for (const dep of task.dependencies) {
-        if (dep >= 0 && dep < subtasks.length) {
-          const newDepth = (depths[dep] ?? 0) + 1
-          if (newDepth > (depths[i] ?? 0)) {
-            depths[i] = newDepth
-            changed = true
-          }
-        }
-      }
+  for (let i = 0; i < subtasks.length; i++) {
+    const task = subtasks[i]!
+    for (const dep of task.dependencies) {
+      if (dep < 0 || dep >= subtasks.length) continue
+      indegree[i] = (indegree[i] ?? 0) + 1
+      dependents[dep]!.push(i)
     }
   }
 
-  const maxDepth = Math.max(...depths)
-  const waves: number[][] = []
-  for (let d = 0; d <= maxDepth; d++) {
-    const wave: number[] = []
-    for (let i = 0; i < depths.length; i++) {
-      if (depths[i] === d) wave.push(i)
+  let frontier: number[] = []
+  for (let i = 0; i < indegree.length; i++) {
+    if (indegree[i] === 0) frontier.push(i)
+  }
+
+  let visitedCount = 0
+  while (frontier.length > 0) {
+    const wave = frontier
+    waves.push(wave)
+    visitedCount += wave.length
+
+    const nextFrontier: number[] = []
+    for (const node of wave) {
+      for (const child of dependents[node]!) {
+        indegree[child] = (indegree[child] ?? 0) - 1
+        if (indegree[child] === 0) nextFrontier.push(child)
+      }
     }
-    if (wave.length > 0) waves.push(wave)
+    frontier = nextFrontier
+  }
+
+  if (visitedCount !== subtasks.length) {
+    throw new Error('Cyclic subtask dependencies detected')
   }
 
   return waves

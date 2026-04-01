@@ -1,12 +1,12 @@
-import { execa } from 'execa'
 import { logger } from '../utils/logger.js'
+import { runGit } from './process.js'
 
 /**
  * Fetch all refs from origin.
  */
 export async function fetchOrigin(repoPath: string): Promise<void> {
   logger.debug({ repoPath }, 'Fetching from origin')
-  await execa('git', ['fetch', 'origin'], { cwd: repoPath })
+  await runGit(['fetch', 'origin'], { cwd: repoPath })
 }
 
 /**
@@ -14,7 +14,7 @@ export async function fetchOrigin(repoPath: string): Promise<void> {
  */
 export async function branchExistsLocally(repoPath: string, branch: string): Promise<boolean> {
   try {
-    await execa('git', ['rev-parse', '--verify', `refs/heads/${branch}`], { cwd: repoPath })
+    await runGit(['rev-parse', '--verify', `refs/heads/${branch}`], { cwd: repoPath })
     return true
   } catch {
     return false
@@ -26,7 +26,7 @@ export async function branchExistsLocally(repoPath: string, branch: string): Pro
  */
 export async function branchExistsRemotely(repoPath: string, branch: string): Promise<boolean> {
   try {
-    await execa('git', ['rev-parse', '--verify', `refs/remotes/origin/${branch}`], {
+    await runGit(['rev-parse', '--verify', `refs/remotes/origin/${branch}`], {
       cwd: repoPath,
     })
     return true
@@ -43,14 +43,14 @@ export async function createBranch(
   branch: string,
   startPoint: string,
 ): Promise<void> {
-  await execa('git', ['branch', branch, startPoint], { cwd: repoPath })
+  await runGit(['branch', branch, startPoint], { cwd: repoPath })
 }
 
 /**
  * Create a local tracking branch from a remote branch.
  */
 export async function createTrackingBranch(repoPath: string, branch: string): Promise<void> {
-  await execa('git', ['branch', branch, `origin/${branch}`], { cwd: repoPath })
+  await runGit(['branch', branch, `origin/${branch}`], { cwd: repoPath })
 }
 
 /**
@@ -58,7 +58,7 @@ export async function createTrackingBranch(repoPath: string, branch: string): Pr
  */
 export async function isGitRepo(path: string): Promise<boolean> {
   try {
-    await execa('git', ['rev-parse', '--is-inside-work-tree'], { cwd: path })
+    await runGit(['rev-parse', '--is-inside-work-tree'], { cwd: path })
     return true
   } catch {
     return false
@@ -82,16 +82,15 @@ export async function getDiffAgainstBranch(
 ): Promise<string> {
   try {
     // Stage everything so untracked files appear in the diff
-    await execa('git', ['add', '-A'], { cwd: worktreePath })
+    await runGit(['add', '-A'], { cwd: worktreePath })
 
-    const { stdout } = await execa(
-      'git',
+    const { stdout } = await runGit(
       ['diff', '--staged', `origin/${baseBranch}`],
       { cwd: worktreePath },
     )
 
     // Unstage — the commit step will re-stage later
-    await execa('git', ['reset', 'HEAD', '--', '.'], { cwd: worktreePath, reject: false })
+    await runGit(['reset', 'HEAD', '--', '.'], { cwd: worktreePath, reject: false })
 
     if (!stdout || stdout.trim() === '') {
       logger.warn({ worktreePath, baseBranch }, 'Diff against base branch is empty')
@@ -102,7 +101,7 @@ export async function getDiffAgainstBranch(
     return stdout.slice(0, MAX_DIFF_LENGTH) + '\n\n[... diff truncated at 50KB ...]'
   } catch (err) {
     // Always unstage on error
-    await execa('git', ['reset', 'HEAD', '--', '.'], { cwd: worktreePath, reject: false })
+    await runGit(['reset', 'HEAD', '--', '.'], { cwd: worktreePath, reject: false })
     logger.warn({ worktreePath, baseBranch, err }, 'Failed to get diff against base branch')
     return ''
   }
@@ -112,7 +111,7 @@ export async function getDiffAgainstBranch(
  * Get the HEAD commit SHA for a worktree.
  */
 export async function getHeadSha(worktreePath: string): Promise<string> {
-  const result = await execa('git', ['rev-parse', 'HEAD'], { cwd: worktreePath })
+  const result = await runGit(['rev-parse', 'HEAD'], { cwd: worktreePath })
   return result.stdout.trim()
 }
 
@@ -125,7 +124,7 @@ export async function mergeNoFF(
   branch: string,
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    await execa('git', ['merge', '--no-ff', branch, '-m', `Merge ${branch}`], { cwd: worktreePath })
+    await runGit(['merge', '--no-ff', branch, '-m', `Merge ${branch}`], { cwd: worktreePath })
     return { success: true }
   } catch (err) {
     return { success: false, error: String(err) }
@@ -141,10 +140,10 @@ export async function cherryPick(
   sha: string,
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    await execa('git', ['cherry-pick', sha], { cwd: worktreePath })
+    await runGit(['cherry-pick', sha], { cwd: worktreePath })
     return { success: true }
   } catch (err) {
-    try { await execa('git', ['cherry-pick', '--abort'], { cwd: worktreePath }) } catch { /* ignore */ }
+    try { await runGit(['cherry-pick', '--abort'], { cwd: worktreePath }) } catch { /* ignore */ }
     return { success: false, error: String(err) }
   }
 }
@@ -153,7 +152,7 @@ export async function cherryPick(
  * Abort an in-progress merge. No-op if there is nothing to abort.
  */
 export async function abortMerge(worktreePath: string): Promise<void> {
-  try { await execa('git', ['merge', '--abort'], { cwd: worktreePath }) } catch { /* ignore */ }
+  try { await runGit(['merge', '--abort'], { cwd: worktreePath }) } catch { /* ignore */ }
 }
 
 /**
@@ -166,20 +165,19 @@ export async function getChangedFilesAgainstBranch(
 ): Promise<string[]> {
   try {
     // Stage everything to capture untracked files
-    await execa('git', ['add', '-A'], { cwd: worktreePath })
+    await runGit(['add', '-A'], { cwd: worktreePath })
 
-    const { stdout } = await execa(
-      'git',
+    const { stdout } = await runGit(
       ['diff', '--staged', '--name-only', `origin/${baseBranch}`],
       { cwd: worktreePath },
     )
 
     // Unstage
-    await execa('git', ['reset', 'HEAD', '--', '.'], { cwd: worktreePath, reject: false })
+    await runGit(['reset', 'HEAD', '--', '.'], { cwd: worktreePath, reject: false })
 
     return stdout.trim().split('\n').filter(Boolean)
   } catch (err) {
-    await execa('git', ['reset', 'HEAD', '--', '.'], { cwd: worktreePath, reject: false })
+    await runGit(['reset', 'HEAD', '--', '.'], { cwd: worktreePath, reject: false })
     logger.warn({ worktreePath, baseBranch, err }, 'Failed to get changed files against base branch')
     return []
   }

@@ -1,4 +1,4 @@
-import { execa } from 'execa'
+import { runGit } from '../git/process.js'
 
 export interface DiffStats {
   changedFiles: number
@@ -20,12 +20,9 @@ export async function checkDiffSize(
     ? ['diff', '--cached', '--stat', '--stat-width=300']
     : ['diff', '--stat', '--stat-width=300', 'HEAD']
 
-  const { stdout } = await execa('git', args, {
+  const { stdout } = await runGit(args, {
     cwd: worktreePath,
-    env: {
-      ...process.env,
-      LC_ALL: 'C',
-    },
+    env: { LC_ALL: 'C' },
     reject: false,
   })
 

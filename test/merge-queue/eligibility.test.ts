@@ -124,11 +124,22 @@ describe('findMergeEligiblePRs', () => {
       listPRReviews: vi.fn<() => Promise<ForgePRReview[]>>().mockResolvedValue([
         { id: 1, user: 'human', state: 'approved', body: '', submittedAt: '' },
       ]),
+      getPR: vi.fn().mockResolvedValue({
+        number: 100,
+        title: 'PR 100',
+        body: '',
+        state: 'open',
+        headBranch: 'orch/100-fix',
+        headSha: 'sha-100',
+        baseBranch: 'main',
+        url: 'https://example.test/pr/100',
+      }),
     })
 
     const candidates = await findMergeEligiblePRs(db, forge, makeRepoConfig())
     expect(candidates).toHaveLength(1)
     expect(candidates[0]!.prNumber).toBe(100)
+    expect(candidates[0]!.headSha).toBe('sha-100')
     expect(candidates[0]!.issueNumber).toBe(1)
     expect(candidates[0]!.runId).toBe('r1')
   })

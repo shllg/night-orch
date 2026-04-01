@@ -3,6 +3,7 @@ import type { Config } from '../config/schema.js'
 import type { ForgeAdapter } from '../forge/types.js'
 import { createForgeAdapter } from '../forge/factory.js'
 import { createWorktreeManager } from '../git/worktree.js'
+import { runGit } from '../git/process.js'
 import { LeaseManager } from '../state/leases.js'
 import { statSync, readdirSync, renameSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
@@ -124,8 +125,7 @@ export class CleanupEngine {
               logger.info({ branch: row.branch_name }, '[dry-run] Would delete branch')
             } else {
               try {
-                const { execa } = await import('execa')
-                await execa('git', ['branch', '-D', row.branch_name], { cwd: repoConfig.localPath })
+                await runGit(['branch', '-D', row.branch_name], { cwd: repoConfig.localPath })
                 logger.info({ branch: row.branch_name }, 'Deleted merged branch')
               } catch (err) {
                 logger.warn({ branch: row.branch_name, err }, 'Failed to delete branch')

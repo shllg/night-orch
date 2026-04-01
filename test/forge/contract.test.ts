@@ -450,6 +450,7 @@ for (const { name, create, setupMocks } of adapters) {
         expect(pr).toHaveProperty('body')
         expect(pr).toHaveProperty('state')
         expect(pr).toHaveProperty('headBranch')
+        expect(pr).toHaveProperty('headSha')
         expect(pr).toHaveProperty('baseBranch')
         expect(pr).toHaveProperty('url')
 

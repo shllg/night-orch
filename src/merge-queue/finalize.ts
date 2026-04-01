@@ -1,5 +1,5 @@
-import { execa } from 'execa'
 import type { ForgeAdapter } from '../forge/types.js'
+import { runGit } from '../git/process.js'
 import { logger } from '../utils/logger.js'
 
 /**
@@ -20,11 +20,9 @@ export async function finalizeMerge(
     await forge.updateRef(repo, `refs/heads/${baseBranch}`, stagingSha)
     logger.info({ repo, baseBranch, stagingSha }, 'Fast-forwarded base branch via API')
   } else {
-    // Fallback: local push
-    await execa('git', ['checkout', baseBranch], { cwd: repoLocalPath })
-    await execa('git', ['merge', '--ff-only', stagingSha], { cwd: repoLocalPath })
-    await execa('git', ['push', 'origin', baseBranch], { cwd: repoLocalPath })
-    logger.info({ repo, baseBranch, stagingSha }, 'Fast-forwarded base branch via local push')
+    // Fallback: push SHA directly to base ref without mutating local HEAD.
+    await runGit(['push', 'origin', `${stagingSha}:refs/heads/${baseBranch}`], { cwd: repoLocalPath })
+    logger.info({ repo, baseBranch, stagingSha }, 'Fast-forwarded base branch via direct ref push')
   }
 
   // Close merged PRs
@@ -39,7 +37,7 @@ export async function finalizeMerge(
 
   // Clean up staging branch
   try {
-    await execa('git', ['push', 'origin', '--delete', stagingBranch], { cwd: repoLocalPath })
+    await runGit(['push', 'origin', '--delete', stagingBranch], { cwd: repoLocalPath })
   } catch {
     logger.debug({ repo, stagingBranch }, 'Could not delete staging branch')
   }

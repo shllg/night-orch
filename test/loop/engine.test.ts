@@ -299,6 +299,7 @@ describe('executeLoop', () => {
     expect(result.currentPhase).toBe('publish')
     expect(result.terminalStatus).toBe('publish')
     expect(result.iteration).toBe(2) // bounced once
+    expect(result.totalAgentPasses).toBe(5)
   })
 
   it('max iterations → blocked', async () => {

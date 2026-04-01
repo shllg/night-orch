@@ -228,6 +228,7 @@ describe('executeWorkerStep', () => {
     expect(result.ctx.plan).not.toBeNull()
     expect(result.ctx.plan!.objective).toBe('Build the feature')
     expect(result.ctx.totalAgentPasses).toBe(1)
+    expect(result.ctx.sessionIds['plan']).toBe('sess-planner-1')
     expect(result.ctx.sessionIds['planner']).toBe('sess-planner-1')
     expect(result.ctx.stepOutputs['plan']).not.toBeUndefined()
   })
@@ -240,6 +241,7 @@ describe('executeWorkerStep', () => {
     expect(result.ctx.codeResult).not.toBeNull()
     expect(result.ctx.codeResult!.summary).toBe('Fixed the bug')
     expect(result.ctx.totalAgentPasses).toBe(1)
+    expect(result.ctx.sessionIds['code']).toBe('sess-coder-1')
     expect(result.ctx.sessionIds['coder']).toBe('sess-coder-1')
   })
 
@@ -512,6 +514,18 @@ describe('resolveContinueSession', () => {
   })
 
   it('returns session from continueFrom step', () => {
+    const step: WorkerStep = { type: 'worker', id: 'code', role: 'coder', continueFrom: 'plan' }
+    const ctx = makeCtx({ sessionIds: { plan: 'sess-plan-1' } })
+    expect(resolveContinueSession(ctx, step)).toBe('sess-plan-1')
+  })
+
+  it('supports legacy role-keyed planner sessions', () => {
+    const step: WorkerStep = { type: 'worker', id: 'code', role: 'coder', continueFrom: 'plan' }
+    const ctx = makeCtx({ sessionIds: { planner: 'sess-planner-legacy' } })
+    expect(resolveContinueSession(ctx, step)).toBe('sess-planner-legacy')
+  })
+
+  it('supports legacy continueFrom values keyed by role name', () => {
     const step: WorkerStep = { type: 'worker', id: 'code', role: 'coder', continueFrom: 'planner' }
     const ctx = makeCtx({ sessionIds: { planner: 'sess-planner-1' } })
     expect(resolveContinueSession(ctx, step)).toBe('sess-planner-1')

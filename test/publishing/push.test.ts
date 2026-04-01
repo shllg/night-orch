@@ -31,7 +31,7 @@ describe('pushBranch', () => {
     expect(mockExeca).toHaveBeenCalledWith(
       'git',
       ['push', '--force-with-lease', '-u', 'origin', 'orch/1-fix'],
-      { cwd: '/tmp/wt', timeout: 60_000 },
+      expect.objectContaining({ cwd: '/tmp/wt', timeout: 60_000, extendEnv: false }),
     )
   })
 

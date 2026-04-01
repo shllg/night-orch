@@ -42,4 +42,12 @@ describe('topologicalWaves', () => {
   it('handles empty input', () => {
     expect(topologicalWaves([])).toEqual([])
   })
+
+  it('throws on cyclic dependencies', () => {
+    const tasks: SubTask[] = [
+      { title: 'A', description: '', dependencies: [1], estimatedComplexity: 'standard' },
+      { title: 'B', description: '', dependencies: [0], estimatedComplexity: 'standard' },
+    ]
+    expect(() => topologicalWaves(tasks)).toThrow('Cyclic subtask dependencies detected')
+  })
 })

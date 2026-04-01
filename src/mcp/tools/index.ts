@@ -1,5 +1,6 @@
 import type { MCPDependencies } from '../server.js'
 import type { ForgeIssue } from '../../forge/types.js'
+import { createHash, timingSafeEqual } from 'node:crypto'
 import { RunManager } from '../../state/runs.js'
 import { CostTracker } from '../../loop/cost.js'
 import { SyncEngine } from '../../ops/sync.js'
@@ -512,7 +513,13 @@ function assertMcpMutationAuth(providedToken: string | undefined, deps: MCPDepen
   if (!expectedToken) {
     throw new Error(`MCP auth token env var ${tokenEnv} is configured but not set`)
   }
-  if (!providedToken || providedToken !== expectedToken) {
+  if (!providedToken || !isMatchingMcpToken(providedToken, expectedToken)) {
     throw new Error('Unauthorized: missing or invalid MCP auth token')
   }
+}
+
+function isMatchingMcpToken(providedToken: string, expectedToken: string): boolean {
+  const providedHash = createHash('sha256').update(providedToken).digest()
+  const expectedHash = createHash('sha256').update(expectedToken).digest()
+  return timingSafeEqual(providedHash, expectedHash)
 }

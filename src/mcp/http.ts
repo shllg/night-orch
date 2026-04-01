@@ -14,6 +14,10 @@ export function startMCPHttpServer(
   host: string,
   port: number,
 ): Promise<Server> {
+  if (!isLoopbackHost(host)) {
+    return Promise.reject(new Error(`MCP HTTP/SSE server must bind to a loopback host, got: ${host}`))
+  }
+
   const transports = new Map<string, SSEServerTransport>()
 
   const httpServer = createServer(async (req, res) => {
@@ -60,4 +64,8 @@ export function startMCPHttpServer(
       resolve(httpServer)
     })
   })
+}
+
+function isLoopbackHost(host: string): boolean {
+  return host === '127.0.0.1' || host === '::1' || host === 'localhost'
 }

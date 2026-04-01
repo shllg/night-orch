@@ -1,8 +1,8 @@
-import { execa } from 'execa'
 import { checkDiffSize } from './diff-guard.js'
 import type { Config } from '../config/schema.js'
 import { logger } from '../utils/logger.js'
 import { normalizeRepoRelativePath } from '../planning/mode.js'
+import { runGit } from '../git/process.js'
 
 export interface CommitChangesOptions {
   planningOnlyPrdPath?: string
@@ -31,7 +31,7 @@ export async function commitChanges(
     : null
 
   // Check if there are any changes to commit
-  const { stdout: statusOutput } = await execa('git', ['status', '--porcelain'], {
+  const { stdout: statusOutput } = await runGit(['status', '--porcelain'], {
     cwd: worktreePath,
   })
   if (statusOutput.trim() === '') {
@@ -46,12 +46,12 @@ export async function commitChanges(
   }
 
   // Stage before diff-size guard so new files are included in checks.
-  await execa('git', ['add', '-A'], { cwd: worktreePath })
+  await runGit(['add', '-A'], { cwd: worktreePath })
 
   // Diff-size guard on staged changes.
   const diffCheck = await checkDiffSize(worktreePath, securityConfig, { staged: true })
   if (!diffCheck.ok) {
-    await execa('git', ['reset', 'HEAD', '--', '.'], { cwd: worktreePath, reject: false })
+    await runGit(['reset', 'HEAD', '--', '.'], { cwd: worktreePath, reject: false })
     logger.warn(
       { stats: diffCheck.stats, reason: diffCheck.reason },
       'Diff-size guard triggered — skipping commit',
@@ -65,7 +65,7 @@ export async function commitChanges(
     const isOnlyExpected = normalizedFiles.length === 1 && normalizedFiles[0] === expectedPlanningPath
 
     if (!isOnlyExpected) {
-      await execa('git', ['reset', 'HEAD', '--', '.'], { cwd: worktreePath, reject: false })
+      await runGit(['reset', 'HEAD', '--', '.'], { cwd: worktreePath, reject: false })
       return {
         committed: false,
         reason: `Planning-only guard: expected only "${expectedPlanningPath}" but found [${normalizedFiles.join(', ') || '(none)'}]`,
@@ -75,7 +75,7 @@ export async function commitChanges(
   }
 
   const message = `night-orch: implement #${issueNumber} ${sanitizeCommitTitle(issueTitle)}`
-  await execa('git', ['commit', '-m', message], { cwd: worktreePath })
+  await runGit(['commit', '-m', message], { cwd: worktreePath })
 
   logger.info(
     { issueNumber, files: diffCheck.stats.changedFiles, lines: diffCheck.stats.totalChangedLines },
@@ -98,7 +98,7 @@ function normalizeGitPath(path: string): string {
 }
 
 async function getStagedChangedFiles(worktreePath: string): Promise<string[]> {
-  const { stdout } = await execa('git', ['diff', '--cached', '--name-only'], { cwd: worktreePath })
+  const { stdout } = await runGit(['diff', '--cached', '--name-only'], { cwd: worktreePath })
   return stdout
     .split('\n')
     .map((line) => line.trim())

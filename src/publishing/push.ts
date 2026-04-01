@@ -1,4 +1,4 @@
-import { execa } from 'execa'
+import { runGit } from '../git/process.js'
 import { logger } from '../utils/logger.js'
 
 export class MergeConflictError extends Error {
@@ -18,7 +18,7 @@ export class MergeConflictError extends Error {
 export async function pushBranch(worktreePath: string, branchName: string): Promise<void> {
   logger.info({ branchName }, 'Pushing branch to remote')
   try {
-    await execa('git', ['push', '--force-with-lease', '-u', 'origin', branchName], {
+    await runGit(['push', '--force-with-lease', '-u', 'origin', branchName], {
       cwd: worktreePath,
       timeout: 60_000,
     })
@@ -29,11 +29,11 @@ export async function pushBranch(worktreePath: string, branchName: string): Prom
     if (stderr.includes('rejected') || stderr.includes('non-fast-forward') || stderr.includes('stale info')) {
       logger.warn({ branchName }, 'Push rejected — attempting rebase')
       try {
-        await execa('git', ['pull', '--rebase', 'origin', branchName], {
+        await runGit(['pull', '--rebase', 'origin', branchName], {
           cwd: worktreePath,
           timeout: 60_000,
         })
-        await execa('git', ['push', '--force-with-lease', '-u', 'origin', branchName], {
+        await runGit(['push', '--force-with-lease', '-u', 'origin', branchName], {
           cwd: worktreePath,
           timeout: 60_000,
         })
@@ -43,7 +43,7 @@ export async function pushBranch(worktreePath: string, branchName: string): Prom
         if (rebaseStderr.includes('CONFLICT') || rebaseStderr.includes('could not apply')) {
           // Abort the failed rebase to leave worktree in a clean state
           try {
-            await execa('git', ['rebase', '--abort'], { cwd: worktreePath, timeout: 30_000 })
+            await runGit(['rebase', '--abort'], { cwd: worktreePath, timeout: 30_000 })
           } catch { /* best-effort abort */ }
           throw new MergeConflictError(branchName, rebaseStderr)
         }

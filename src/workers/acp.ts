@@ -36,6 +36,7 @@ export class AcpWorkerAdapter implements WorkerAdapter {
           const result = await runtime.sendSessionDirect({
             sessionId: input.continueSessionId,
             prompt: input.prompt,
+            env: input.env,
             permissionMode: 'approve-all',
             onSessionUpdate,
             timeoutMs: input.timeoutSeconds * 1000,
@@ -49,6 +50,7 @@ export class AcpWorkerAdapter implements WorkerAdapter {
             agentCommand: input.profile.command,
             cwd: input.worktreePath,
             prompt: input.prompt,
+            env: input.env,
             permissionMode: 'approve-all',
             nonInteractivePermissions: 'deny',
             timeoutMs: input.timeoutSeconds * 1000,
@@ -63,6 +65,7 @@ export class AcpWorkerAdapter implements WorkerAdapter {
           agentCommand: input.profile.command,
           cwd: input.worktreePath,
           prompt: input.prompt,
+          env: input.env,
           permissionMode: 'approve-all',
           nonInteractivePermissions: 'deny',
           timeoutMs: input.timeoutSeconds * 1000,

@@ -75,4 +75,26 @@ describe('decomposeIssue', () => {
 
     expect(result.shouldDecompose).toBe(false)
   })
+
+  it('sanitizes and wraps issue content in decomposition prompt', async () => {
+    const adapter = makeAdapter()
+    const issue = makeIssue({
+      title: 'Bad <script>alert(1)</script> title',
+      body: 'Read [this](https://example.com)\n\n```sh\nrm -rf /\n```',
+    })
+
+    await decomposeIssue(
+      issue, adapter,
+      { type: 'claude', command: 'claude', args: [], workerTimeoutSeconds: 60, minimalEnv: true, runtimeWrapper: null, env: {} },
+      { PATH: '/usr/bin' }, '/tmp/wt', 5,
+    )
+
+    const runTask = adapter.runTask as ReturnType<typeof vi.fn>
+    const prompt = runTask.mock.calls[0]?.[0]?.prompt as string
+    expect(prompt).toContain('<untrusted_issue>')
+    expect(prompt).toContain('<title>Bad alert(1) title</title>')
+    expect(prompt).toContain('[link removed]')
+    expect(prompt).not.toContain('https://example.com')
+    expect(prompt).not.toContain('rm -rf /')
+  })
 })

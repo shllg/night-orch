@@ -48,6 +48,7 @@ export interface ForgePR {
   body: string
   state: 'open' | 'closed' | 'merged'
   headBranch: string
+  headSha: string
   baseBranch: string
   url: string
   diff?: string
@@ -84,6 +85,9 @@ export interface ForgeAdapter {
 
   /** Validate auth — used by `doctor`. */
   validateAuth(): Promise<ForgeAuthInfo>
+
+  /** Check whether a user is a repository collaborator. */
+  isCollaborator?(repo: string, username: string): Promise<boolean>
 
   // PR methods (Phase 6 — stubs for now)
 

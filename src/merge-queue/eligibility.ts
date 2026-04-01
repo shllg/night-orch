@@ -66,7 +66,7 @@ export async function findMergeEligiblePRs(
       let headSha = ''
       if (forge.getPR) {
         const pr = await forge.getPR(repoConfig.repo, row.pr_number)
-        headSha = (pr as unknown as Record<string, unknown>)['headSha'] as string | undefined ?? ''
+        headSha = pr.headSha
       }
 
       candidates.push({

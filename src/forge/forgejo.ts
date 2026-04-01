@@ -56,7 +56,7 @@ interface ForgejoPRData {
   body: string | null
   state: string
   merged: boolean
-  head: { ref: string }
+  head: { ref: string; sha?: string }
   base: { ref: string }
   html_url: string
   diff_url?: string
@@ -173,6 +173,19 @@ export class ForgejoForgeAdapter implements ForgeAdapter {
   async validateAuth(): Promise<ForgeAuthInfo> {
     const data = await this.client.get<{ login: string }>('/user')
     return { user: data.login, scopes: [] }
+  }
+
+  async isCollaborator(repo: string, username: string): Promise<boolean> {
+    const { owner, repo: repoName } = splitRepo(repo)
+    try {
+      const data = await this.client.get<{ permission?: string }>(
+        `/repos/${owner}/${repoName}/collaborators/${username}/permission`,
+      )
+      return Boolean(data.permission)
+    } catch (err: unknown) {
+      if (err instanceof ForgejoApiError && err.status === 404) return false
+      throw err
+    }
   }
 
   // --- PR methods ---
@@ -335,6 +348,7 @@ export class ForgejoForgeAdapter implements ForgeAdapter {
       body: data.body ?? '',
       state,
       headBranch: data.head.ref,
+      headSha: data.head.sha ?? '',
       baseBranch: data.base.ref,
       url: data.html_url,
     }

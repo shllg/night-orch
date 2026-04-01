@@ -56,6 +56,7 @@ describe('AcpWorkerAdapter', () => {
     const result = await adapter.runTask(makeInput())
 
     expect(mockRunOnce).toHaveBeenCalledTimes(1)
+    expect(mockRunOnce).toHaveBeenCalledWith(expect.objectContaining({ env: { PATH: '/usr/bin' } }))
     expect(result.exitCode).toBe(0)
     expect(result.sessionId).toBe('ses-123')
   })
@@ -72,6 +73,7 @@ describe('AcpWorkerAdapter', () => {
     const result = await adapter.runTask(makeInput({ continueSessionId: 'ses-123' }))
 
     expect(mockSendSessionDirect).toHaveBeenCalledTimes(1)
+    expect(mockSendSessionDirect).toHaveBeenCalledWith(expect.objectContaining({ env: { PATH: '/usr/bin' } }))
     expect(mockRunOnce).not.toHaveBeenCalled()
   })
 
@@ -87,6 +89,7 @@ describe('AcpWorkerAdapter', () => {
 
     expect(mockSendSessionDirect).toHaveBeenCalledTimes(1)
     expect(mockRunOnce).toHaveBeenCalledTimes(1)
+    expect(mockRunOnce).toHaveBeenCalledWith(expect.objectContaining({ env: { PATH: '/usr/bin' } }))
     expect(result.sessionId).toBe('ses-new')
   })
 
