@@ -33,6 +33,13 @@ export interface IssueRunPointerRow {
   issue_number: number
 }
 
+export interface DiscoveredIssueRow {
+  repo: string
+  issueNumber: number
+  issueNodeId: string | null
+  issueTitle: string | null
+}
+
 const ACTIVE_STATUSES = new Set<IssueStatus>(['queued', 'running', 'blocked', 'review_ready', 'error'])
 
 interface RawLatestRunRow {
@@ -115,6 +122,46 @@ export class IssueManager {
       .get(runId) as IssueRunPointerRow | undefined
     if (!run) return
     this.syncFromIssue(run.repo, run.issue_number)
+  }
+
+  upsertDiscovered(rows: readonly DiscoveredIssueRow[]): void {
+    if (rows.length === 0) return
+
+    const stmt = this.db.prepare(
+      `INSERT INTO issues (
+         repo,
+         issue_number,
+         issue_node_id,
+         issue_title,
+         status,
+         iteration_count,
+         estimated_cost_usd,
+         run_count,
+         created_at,
+         updated_at
+       ) VALUES (?, ?, ?, ?, 'queued', 0, 0, 0, datetime('now'), datetime('now'))
+       ON CONFLICT(repo, issue_number) DO UPDATE SET
+         issue_node_id = COALESCE(excluded.issue_node_id, issues.issue_node_id),
+         issue_title = COALESCE(excluded.issue_title, issues.issue_title),
+         status = CASE
+           WHEN issues.current_run_id IS NULL THEN 'queued'
+           ELSE issues.status
+         END,
+         updated_at = datetime('now')`,
+    )
+
+    const tx = this.db.transaction((items: readonly DiscoveredIssueRow[]) => {
+      for (const row of items) {
+        stmt.run(
+          row.repo,
+          row.issueNumber,
+          row.issueNodeId,
+          row.issueTitle,
+        )
+      }
+    })
+
+    tx(rows)
   }
 
   syncFromIssue(repo: string, issueNumber: number): void {

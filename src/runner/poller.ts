@@ -4,6 +4,7 @@ import type { MetricsService } from '../metrics/service.js'
 import { createForgeAdapter } from '../forge/factory.js'
 import { LeaseManager } from '../state/leases.js'
 import { RunManager } from '../state/runs.js'
+import { IssueManager } from '../state/issues.js'
 import { discoverEligibleIssues, type DiscoveredIssue } from '../discovery/discover.js'
 import { resolveRoles, type ResolvedRoles } from '../discovery/roles.js'
 import { adjustLimitsForTriage } from '../discovery/triage.js'
@@ -81,6 +82,7 @@ export async function pollOnce(
 ): Promise<PollResult> {
   const leaseManager = new LeaseManager(db)
   const runManager = new RunManager(db)
+  const issueManager = new IssueManager(db)
   const worktreeManager = createWorktreeManager()
   const costTracker = new CostTracker(db)
 
@@ -164,6 +166,15 @@ export async function pollOnce(
                 return d.issue.number === targetIssue.issueNumber && issueRepo === targetIssue.repo
               })
             : prioritizeDiscoveredIssues(runManager, repoConfig.repo, discoveredAll)
+
+          issueManager.upsertDiscovered(
+            discovered.map((d) => ({
+              repo: d.issueRepo || d.issue.repo || repoConfig.repo,
+              issueNumber: d.issue.number,
+              issueNodeId: d.issue.nodeId,
+              issueTitle: d.issue.title,
+            })),
+          )
           try { metrics?.setEligibleIssues(repoConfig.repo, discovered.length) } catch { /* best-effort */ }
 
           if (discovered.length === 0) {

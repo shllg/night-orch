@@ -269,4 +269,85 @@ describe('loadRuns', () => {
     const issue = issues.find((row) => row.repo === 'org/repo' && row.issue_number === 55)
     expect(issue?.status).toBe('blocked')
   })
+
+  it('includes unresolved issues that have no run rows yet', () => {
+    db.prepare(
+      `INSERT INTO issues (
+        repo, issue_number, issue_node_id, issue_title, status, iteration_count, estimated_cost_usd,
+        run_count, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'org/repo',
+      72,
+      'node-72',
+      'Queued from discovery',
+      'queued',
+      0,
+      0,
+      0,
+      '2026-04-01T12:00:00.000Z',
+      '2026-04-01T12:00:00.000Z',
+    )
+
+    const rows = loadRuns(db)
+    const issueRow = rows.find((row) => row.repo === 'org/repo' && row.issue_number === 72)
+    expect(issueRow).toBeDefined()
+    expect(issueRow?.status).toBe('queued')
+    expect(issueRow?.id.startsWith('issue:')).toBe(true)
+
+    const issues = buildIssueList(rows)
+    const issue = issues.find((row) => row.repo === 'org/repo' && row.issue_number === 72)
+    expect(issue?.status).toBe('queued')
+  })
+
+  it('includes unresolved issue aggregates even when prior runs are completed', () => {
+    db.prepare(
+      `INSERT INTO runs (
+        id, repo, issue_number, issue_title, status, current_phase, iteration_count, estimated_cost_usd,
+        pr_number, pr_title, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'issue-88-old-completed',
+      'org/repo',
+      88,
+      'Issue 88',
+      'completed',
+      'publish',
+      1,
+      0.2,
+      null,
+      null,
+      '2026-04-01T08:00:00.000Z',
+      '2026-04-01T08:00:00.000Z',
+    )
+
+    db.prepare(
+      `INSERT INTO issues (
+        repo, issue_number, issue_node_id, issue_title, status, current_phase, iteration_count,
+        estimated_cost_usd, current_run_id, last_run_id, run_count, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'org/repo',
+      88,
+      'node-88',
+      'Issue 88',
+      'queued',
+      null,
+      0,
+      0,
+      null,
+      'issue-88-old-completed',
+      1,
+      '2026-04-01T08:00:00.000Z',
+      '2026-04-01T12:00:00.000Z',
+    )
+
+    const rows = loadRuns(db)
+    const issues = buildIssueList(rows)
+    const issue = issues.find((row) => row.repo === 'org/repo' && row.issue_number === 88)
+
+    expect(issue).toBeDefined()
+    expect(issue?.status).toBe('queued')
+    expect(issue?.runs.some((run) => run.id === 'issue-88-old-completed')).toBe(true)
+  })
 })
