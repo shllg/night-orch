@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { buildSparkline, isActiveRunStatus, partitionRowsByActivity, sliceWindow } from '../../../src/cli/tui/view-model.js'
+import {
+  buildSparkline,
+  colorForHigherIsBetter,
+  colorForLowerIsBetter,
+  colorForPresence,
+  colorForRatioToBaseline,
+  isActiveRunStatus,
+  partitionRowsByActivity,
+  sliceWindow,
+} from '../../../src/cli/tui/view-model.js'
 
 describe('tui view model helpers', () => {
   it('centers a selected index in a bounded window', () => {
@@ -78,5 +87,31 @@ describe('tui view model helpers', () => {
     expect(partitioned.recent).toEqual([
       { id: 'b', status: 'completed' },
     ])
+  })
+
+  it('selects colors for higher-is-better metrics', () => {
+    expect(colorForHigherIsBetter(90, 80, 60)).toBe('green')
+    expect(colorForHigherIsBetter(70, 80, 60)).toBe('yellow')
+    expect(colorForHigherIsBetter(40, 80, 60)).toBe('red')
+  })
+
+  it('selects colors for lower-is-better metrics', () => {
+    expect(colorForLowerIsBetter(8, 10, 25)).toBe('green')
+    expect(colorForLowerIsBetter(15, 10, 25)).toBe('yellow')
+    expect(colorForLowerIsBetter(30, 10, 25)).toBe('red')
+  })
+
+  it('selects colors for presence counts', () => {
+    expect(colorForPresence(0)).toBe('green')
+    expect(colorForPresence(1)).toBe('yellow')
+    expect(colorForPresence(3)).toBe('red')
+  })
+
+  it('selects colors for values relative to a baseline', () => {
+    expect(colorForRatioToBaseline(100, 100, 1.05, 1.35)).toBe('green')
+    expect(colorForRatioToBaseline(120, 100, 1.05, 1.35)).toBe('yellow')
+    expect(colorForRatioToBaseline(150, 100, 1.05, 1.35)).toBe('red')
+    expect(colorForRatioToBaseline(0, 0, 1.05, 1.35)).toBe('green')
+    expect(colorForRatioToBaseline(10, 0, 1.05, 1.35)).toBe('yellow')
   })
 })
