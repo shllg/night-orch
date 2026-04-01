@@ -8,6 +8,7 @@ import { transitionLabels } from '../labels/manager.js'
 import { buildLabelConfig } from '../labels/config.js'
 import { computeLabelMutation } from '../labels/transitions.js'
 import { createWorktreeManager } from '../git/worktree.js'
+import { resolveIssueRepo } from '../utils/issue-repo.js'
 import { logger } from '../utils/logger.js'
 
 export interface SyncAction {
@@ -41,6 +42,7 @@ interface ActiveRunRow {
   pr_number: number | null
   branch_name: string | null
   worktree_path: string | null
+  phase_data: string | null
 }
 
 export class SyncEngine {
@@ -75,7 +77,9 @@ export class SyncEngine {
     for (const run of activeRuns) {
       if (run.status === 'running') {
         // Running runs require an active lease; if lease expired, reconcile.
-        const leased = this.leaseManager.isLeased(run.repo, run.issue_number)
+        const issueRepo = resolveIssueRepoFromRun(run)
+        const leased = this.leaseManager.isLeased(issueRepo, run.issue_number)
+          || (issueRepo !== run.repo && this.leaseManager.isLeased(run.repo, run.issue_number))
         if (!leased) {
           const action = await this.reconcileStaleRun(run, dryRun)
           if (action) {
@@ -195,16 +199,17 @@ export class SyncEngine {
 
   private async resolveIssueState(
     forge: ForgeAdapter,
-    run: Pick<ActiveRunRow, 'repo' | 'issue_number'>,
+    run: Pick<ActiveRunRow, 'repo' | 'issue_number' | 'phase_data'>,
   ): Promise<'open' | 'closed' | 'missing' | 'unknown'> {
+    const issueRepo = resolveIssueRepoFromRun(run)
     try {
-      const issue = await forge.getIssue(run.repo, run.issue_number)
+      const issue = await forge.getIssue(issueRepo, run.issue_number)
       return issue.state === 'closed' ? 'closed' : 'open'
     } catch (err) {
       if (isNotFoundError(err)) {
         return 'missing'
       }
-      logger.warn({ repo: run.repo, issue: run.issue_number, err }, 'Failed to check issue state')
+      logger.warn({ repo: issueRepo, issue: run.issue_number, err }, 'Failed to check issue state')
       return 'unknown'
     }
   }
@@ -261,7 +266,11 @@ export class SyncEngine {
         status: 'completed',
         endedAt: new Date().toISOString(),
       })
-      this.leaseManager.release(run.repo, run.issue_number)
+      const issueRepo = resolveIssueRepoFromRun(run)
+      this.leaseManager.release(issueRepo, run.issue_number)
+      if (issueRepo !== run.repo) {
+        this.leaseManager.release(run.repo, run.issue_number)
+      }
       this.updateLabels(forge, run, 'completed').catch((err) => {
         logger.debug({ repo: run.repo, issue: run.issue_number, err }, 'Label update failed while marking run completed')
       })
@@ -276,7 +285,11 @@ export class SyncEngine {
         status: 'completed',
         endedAt: new Date().toISOString(),
       })
-      this.leaseManager.release(run.repo, run.issue_number)
+      const issueRepo = resolveIssueRepoFromRun(run)
+      this.leaseManager.release(issueRepo, run.issue_number)
+      if (issueRepo !== run.repo) {
+        this.leaseManager.release(run.repo, run.issue_number)
+      }
       this.updateLabels(forge, run, 'completed').catch((err) => {
         logger.debug({ repo: run.repo, issue: run.issue_number, err }, 'Label update failed while marking run closed')
       })
@@ -290,7 +303,11 @@ export class SyncEngine {
       this.runManager.update(run.id, {
         status: 'review_ready',
       })
-      this.leaseManager.release(run.repo, run.issue_number)
+      const issueRepo = resolveIssueRepoFromRun(run)
+      this.leaseManager.release(issueRepo, run.issue_number)
+      if (issueRepo !== run.repo) {
+        this.leaseManager.release(run.repo, run.issue_number)
+      }
       this.updateLabels(forge, run, 'review_ready').catch((err) => {
         logger.debug({ repo: run.repo, issue: run.issue_number, err }, 'Label update failed while marking run review_ready')
       })
@@ -306,16 +323,20 @@ export class SyncEngine {
         currentPhase: null,
         lastError: reason,
       })
-      this.leaseManager.release(run.repo, run.issue_number)
+      const issueRepo = resolveIssueRepoFromRun(run)
+      this.leaseManager.release(issueRepo, run.issue_number)
+      if (issueRepo !== run.repo) {
+        this.leaseManager.release(run.repo, run.issue_number)
+      }
 
       // Transition labels back to queued (ready) so the poller picks it up
       const repoConfig = this.config.repos.find((r) => r.repo === run.repo)
       if (repoConfig) {
         try {
           const forge = this.forgeFactory(run.repo)
-          const issue = await forge.getIssue(run.repo, run.issue_number)
-          const labelConfig = buildLabelConfig(repoConfig)
-          await transitionLabels(forge, run.repo, run.issue_number, issue.labels, 'running', 'queued', labelConfig)
+          const issue = await forge.getIssue(issueRepo, run.issue_number)
+          const labelConfig = buildLabelConfig(repoConfig, issue.labels)
+          await transitionLabels(forge, issueRepo, run.issue_number, issue.labels, 'running', 'queued', labelConfig)
         } catch (err) {
           logger.warn({ repo: run.repo, issue: run.issue_number, err }, 'Failed to transition labels during stale run recovery')
         }
@@ -330,10 +351,11 @@ export class SyncEngine {
     if (!repoConfig) return
 
     try {
-      const issue = await forge.getIssue(run.repo, run.issue_number)
-      const labelConfig = buildLabelConfig(repoConfig)
+      const issueRepo = resolveIssueRepoFromRun(run)
+      const issue = await forge.getIssue(issueRepo, run.issue_number)
+      const labelConfig = buildLabelConfig(repoConfig, issue.labels)
       const fromStatus = this.toRunStatus(run.status) ?? 'running'
-      await transitionLabels(forge, run.repo, run.issue_number, issue.labels, fromStatus, targetStatus, labelConfig)
+      await transitionLabels(forge, issueRepo, run.issue_number, issue.labels, fromStatus, targetStatus, labelConfig)
     } catch (err) {
       logger.warn({ repo: run.repo, issue: run.issue_number, err }, 'Failed to update labels during sync')
     }
@@ -354,8 +376,9 @@ export class SyncEngine {
       }
 
       try {
-        const issue = await forge.getIssue(run.repo, run.issue_number)
-        const labelConfig = buildLabelConfig(repoConfig)
+        const issueRepo = resolveIssueRepoFromRun(run)
+        const issue = await forge.getIssue(issueRepo, run.issue_number)
+        const labelConfig = buildLabelConfig(repoConfig, issue.labels)
 
         const targetStatus = this.toRunStatus(run.status)
         if (!targetStatus) continue
@@ -370,10 +393,10 @@ export class SyncEngine {
           }
           if (!dryRun) {
             if (mutation.remove.length > 0) {
-              await forge.removeLabels(run.repo, run.issue_number, mutation.remove)
+              await forge.removeLabels(issueRepo, run.issue_number, mutation.remove)
             }
             if (mutation.add.length > 0) {
-              await forge.addLabels(run.repo, run.issue_number, mutation.add)
+              await forge.addLabels(issueRepo, run.issue_number, mutation.add)
             }
           }
           corrections.push(correction)
@@ -396,7 +419,7 @@ export class SyncEngine {
   private loadActiveRuns(): ActiveRunRow[] {
     return this.db
       .prepare(
-        `WITH canonical_active AS (
+         `WITH canonical_active AS (
            SELECT
              i.current_run_id AS id,
              i.repo,
@@ -404,8 +427,10 @@ export class SyncEngine {
              i.status,
              i.pr_number,
              i.branch_name,
-             i.worktree_path
+             i.worktree_path,
+             r.phase_data
            FROM issues i
+           LEFT JOIN runs r ON r.id = i.current_run_id
            WHERE i.status IN ('running', 'queued', 'blocked', 'review_ready', 'error')
              AND i.current_run_id IS NOT NULL
          ),
@@ -417,7 +442,8 @@ export class SyncEngine {
              r.status,
              r.pr_number,
              r.branch_name,
-             r.worktree_path
+             r.worktree_path,
+             r.phase_data
            FROM runs r
            WHERE r.status IN ('running', 'queued', 'blocked', 'review_ready', 'error')
              AND NOT EXISTS (
@@ -429,10 +455,10 @@ export class SyncEngine {
                  AND i.status = r.status
              )
          )
-         SELECT id, repo, issue_number, status, pr_number, branch_name, worktree_path
+         SELECT id, repo, issue_number, status, pr_number, branch_name, worktree_path, phase_data
          FROM canonical_active
          UNION ALL
-         SELECT id, repo, issue_number, status, pr_number, branch_name, worktree_path
+         SELECT id, repo, issue_number, status, pr_number, branch_name, worktree_path, phase_data
          FROM fallback_active`,
       )
       .all() as ActiveRunRow[]
@@ -472,4 +498,15 @@ function getHttpStatus(err: unknown): number | null {
 
 function isNotFoundError(err: unknown): boolean {
   return getHttpStatus(err) === 404
+}
+
+function resolveIssueRepoFromRun(run: Pick<ActiveRunRow, 'repo' | 'phase_data'>): string {
+  if (!run.phase_data) return run.repo
+  try {
+    const phaseData = JSON.parse(run.phase_data) as Record<string, unknown>
+    return resolveIssueRepo(phaseData, run.repo)
+  } catch {
+    // Ignore malformed phase data and fall back to run repo.
+  }
+  return run.repo
 }

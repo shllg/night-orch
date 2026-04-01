@@ -12,6 +12,9 @@ describe('buildLabelBootstrapDefinitions', () => {
         error: 'orch:error',
         retry: 'orch:retry',
         planning: 'orch:planning',
+        mergeQueued: 'orch:merge-queued',
+        merging: 'orch:merging',
+        mergeFailed: 'orch:merge-failed',
       },
       labelConfig: {},
     })
@@ -25,6 +28,9 @@ describe('buildLabelBootstrapDefinitions', () => {
       'orch:error',
       'orch:retry',
       'orch:planning',
+      'orch:merge-queued',
+      'orch:merging',
+      'orch:merge-failed',
     ])
     expect(result.find((l) => l.name === 'orch:ready')).toEqual({
       name: 'orch:ready',
@@ -43,6 +49,9 @@ describe('buildLabelBootstrapDefinitions', () => {
         error: 'team:error',
         retry: 'team:retry',
         planning: 'team:planning',
+        mergeQueued: 'team:merge-queued',
+        merging: 'team:merging',
+        mergeFailed: 'team:merge-failed',
       },
       labelConfig: {
         'team:triage': { color: 'abcdef', description: 'Ready in team workflow' },
@@ -72,11 +81,64 @@ describe('buildLabelBootstrapDefinitions', () => {
         error: 'orch:shared',
         retry: 'orch:shared',
         planning: 'orch:shared',
+        mergeQueued: 'orch:shared',
+        merging: 'orch:shared',
+        mergeFailed: 'orch:shared',
       },
       labelConfig: {},
     })
 
     expect(result).toHaveLength(1)
     expect(result[0]?.name).toBe('orch:shared')
+  })
+
+  it('includes kanban trigger and kanban state labels when configured', () => {
+    const result = buildLabelBootstrapDefinitions({
+      labels: {
+        ready: ['orch:ready'],
+        running: 'orch:running',
+        blocked: ['orch:blocked'],
+        needsHuman: 'orch:needs-human',
+        reviewReady: 'orch:review-ready',
+        error: 'orch:error',
+        retry: 'orch:retry',
+        planning: 'orch:planning',
+        mergeQueued: 'orch:merge-queued',
+        merging: 'orch:merging',
+        mergeFailed: 'orch:merge-failed',
+      },
+      kanban: {
+        triggerLabel: 'flow:kanban',
+        labels: {
+          ready: ['kanban:todo'],
+          running: 'kanban:doing',
+          blocked: 'kanban:blocked',
+          needsHuman: 'kanban:needs-human',
+          reviewReady: 'kanban:review',
+          error: 'kanban:error',
+          retry: 'kanban:retry',
+          planning: 'kanban:planning',
+          mergeQueued: 'kanban:merge-queued',
+          merging: 'kanban:merging',
+          mergeFailed: 'kanban:merge-failed',
+        },
+      },
+      labelConfig: {},
+    })
+
+    expect(result.map((l) => l.name)).toEqual(expect.arrayContaining([
+      'flow:kanban',
+      'kanban:todo',
+      'kanban:doing',
+      'kanban:blocked',
+      'kanban:needs-human',
+      'kanban:review',
+      'kanban:error',
+      'kanban:retry',
+      'kanban:planning',
+      'kanban:merge-queued',
+      'kanban:merging',
+      'kanban:merge-failed',
+    ]))
   })
 })

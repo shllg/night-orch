@@ -189,4 +189,40 @@ describe('ConfigSchema', () => {
     const result = ConfigSchema.safeParse(raw)
     expect(result.success).toBe(false)
   })
+
+  it('accepts linkedProjects and kanban label flow config', () => {
+    const raw = loadExampleConfig()
+    raw.repos[0].linkedProjects = ['org/tracker', 'org/platform-triage']
+    raw.repos[0].kanban = {
+      triggerLabel: 'flow:kanban',
+      labels: {
+        ready: ['kanban:todo'],
+        running: 'kanban:doing',
+        blocked: 'kanban:blocked',
+        needsHuman: 'kanban:needs-human',
+        reviewReady: 'kanban:review',
+        error: 'kanban:error',
+        retry: 'kanban:retry',
+        planning: 'kanban:planning',
+        mergeQueued: 'kanban:merge-queued',
+        merging: 'kanban:merging',
+        mergeFailed: 'kanban:merge-failed',
+      },
+    }
+
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.repos[0]?.linkedProjects).toEqual(['org/tracker', 'org/platform-triage'])
+      expect(result.data.repos[0]?.kanban?.triggerLabel).toBe('flow:kanban')
+      expect(result.data.repos[0]?.kanban?.labels.ready).toEqual(['kanban:todo'])
+    }
+  })
+
+  it('rejects invalid linkedProjects format', () => {
+    const raw = loadExampleConfig()
+    raw.repos[0].linkedProjects = ['invalid-project-slug']
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(false)
+  })
 })

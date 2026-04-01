@@ -6,7 +6,7 @@ import { CostTracker } from '../../loop/cost.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { CleanupEngine } from '../../ops/cleanup.js'
 import { RetryEngine } from '../../ops/retry.js'
-import { filterEligible } from '../../discovery/selector.js'
+import { isIssueEligibleForRepo } from '../../discovery/discover.js'
 import { pollOnce } from '../../runner/poller.js'
 import { flushActiveAgentObservability } from '../../events/observability.js'
 import { createForgeAdapter } from '../../forge/factory.js'
@@ -386,10 +386,8 @@ async function handleListIssues(
     throw new Error(`Repo not found in config: ${args.repo}`)
   }
 
-  const issues: ForgeIssue[] = filterEligible(
-    await adapter.listEligibleIssues(repoConfig),
-    repoConfig.selectors,
-  )
+  const issues: ForgeIssue[] = (await adapter.listEligibleIssues(repoConfig))
+    .filter((issue) => isIssueEligibleForRepo(issue, repoConfig))
   const runManager = new RunManager(deps.db)
   const filter = args.filter ?? 'all'
 

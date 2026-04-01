@@ -32,6 +32,8 @@ export type MergeMethod = 'merge' | 'squash' | 'rebase'
 export interface ForgeIssue {
   number: number
   nodeId: string | null
+  /** Canonical owner/name source repo for this issue (can differ from run repo). */
+  repo?: string
   title: string
   body: string
   labels: string[]

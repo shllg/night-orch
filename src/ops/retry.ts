@@ -7,6 +7,7 @@ import { transitionLabels } from '../labels/manager.js'
 import { LeaseManager } from '../state/leases.js'
 import { RunManager, type RunStatus } from '../state/runs.js'
 import { pollOnce } from '../runner/poller.js'
+import { resolveIssueRepo } from '../utils/issue-repo.js'
 import { logger } from '../utils/logger.js'
 
 export interface RetryOptions {
@@ -57,6 +58,7 @@ export class RetryEngine {
     }
 
     logger.info({ runId: run.id, repo, issue: issueNumber, status: run.status, opts }, 'Retrying run')
+    const issueRepo = resolveIssueRepo(run.phaseData, repo)
 
     if (opts.dryRun) {
       logger.info({ runId: run.id }, '[dry-run] Would reset run to queued')
@@ -84,20 +86,23 @@ export class RetryEngine {
 
     // Release any lease
     this.leaseManager.release(repo, issueNumber)
+    if (issueRepo !== repo) {
+      this.leaseManager.release(issueRepo, issueNumber)
+    }
 
     // Apply label mutations
-    await this.updateLabels(repo, issueNumber, run.status)
+    await this.updateLabels(repo, issueRepo, issueNumber, run.status)
 
     logger.info({ runId: run.id, repo, issue: issueNumber }, 'Run reset to queued for retry')
 
       // If --immediate, start processing right away
     if (opts.immediate) {
       logger.info({ runId: run.id }, 'Starting immediate retry')
-      await pollOnce(this.config, this.db, false, undefined, { repo, issueNumber })
+      await pollOnce(this.config, this.db, false, undefined, { repo: issueRepo, issueNumber })
     }
   }
 
-  private async updateLabels(repo: string, issueNumber: number, fromStatus: RunStatus): Promise<void> {
+  private async updateLabels(repo: string, issueRepo: string, issueNumber: number, fromStatus: RunStatus): Promise<void> {
     const repoConfig = this.config.repos.find((r) => r.repo === repo)
     if (!repoConfig) return
 
@@ -110,11 +115,11 @@ export class RetryEngine {
     }
 
     try {
-      const issue = await forge.getIssue(repo, issueNumber)
-      const labelConfig = buildLabelConfig(repoConfig)
-      await transitionLabels(forge, repo, issueNumber, issue.labels, fromStatus, 'queued', labelConfig)
+      const issue = await forge.getIssue(issueRepo, issueNumber)
+      const labelConfig = buildLabelConfig(repoConfig, issue.labels)
+      await transitionLabels(forge, issueRepo, issueNumber, issue.labels, fromStatus, 'queued', labelConfig)
     } catch (err) {
-      logger.warn({ repo, issue: issueNumber, err }, 'Failed to update labels during retry')
+      logger.warn({ repo: issueRepo, issue: issueNumber, err }, 'Failed to update labels during retry')
     }
   }
 }

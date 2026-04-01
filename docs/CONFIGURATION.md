@@ -284,6 +284,7 @@ Reference a workflow in `repos[].workflow` by name.
 | --- | --- | --- | --- | --- |
 | `repo` | `owner/name` string | yes | none | Repository slug. |
 | `forge` | `github` or `forgejo` | no | `github` | Forge implementation selector. |
+| `linkedProjects` | `owner/name` string[] | no | `[]` | Additional issue-source repos to discover from using this repo's selectors/flow. |
 | `apiBaseUrl` | URL string | no | none | Required for `forgejo`; optional override for `github`. |
 | `tokenEnv` | string | no | none | Token env override per repo. |
 | `maxConcurrentRuns` | int 1-20 | no | `1` | Max issues processed concurrently for this repo per poll cycle. |
@@ -291,6 +292,7 @@ Reference a workflow in `repos[].workflow` by name.
 | `baseBranch` | string | no | `main` | PR target branch. |
 | `branchPrefix` | string | no | `orch` | Work branch prefix. |
 | `labels` | object | no | object with defaults | Orchestration label names. |
+| `kanban` | object | no | none | Optional alternate state-label flow activated by a trigger label. |
 | `labelConfig` | record | no | `{}` | Label metadata overrides for `labels-init`. |
 | `defaults` | object | no | object with defaults | Default roles + mention settings. |
 | `planning` | object | no | object with defaults | Planning-only mode settings (PRD path). |
@@ -321,6 +323,45 @@ Poll execution model:
 | `mergeQueued` | string | `orch:merge-queued` | Set when PR enters the merge queue. |
 | `merging` | string | `orch:merging` | Set while staging branch CI is running. |
 | `mergeFailed` | string | `orch:merge-failed` | Set when the merge queue identifies this PR as the culprit. |
+
+### `repos[].linkedProjects`
+
+List of additional repositories to use as issue sources for the repo.
+
+Example:
+
+```yaml
+repos:
+  - repo: myorg/app
+    linkedProjects:
+      - myorg/tracker
+      - myorg/platform-triage
+```
+
+Each entry must use `owner/name` format.
+
+### `repos[].kanban`
+
+Optional alternate state flow. When `triggerLabel` is present on an issue, night-orch uses `kanban.labels` for status transitions (queued/running/blocked/review/error/retry) instead of `repos[].labels`.
+
+```yaml
+repos:
+  - repo: myorg/myrepo
+    kanban:
+      triggerLabel: flow:kanban
+      labels:
+        ready: [kanban:todo]
+        running: kanban:doing
+        blocked: kanban:blocked
+        needsHuman: kanban:needs-human
+        reviewReady: kanban:review
+        error: kanban:error
+        retry: kanban:retry
+        planning: kanban:planning
+        mergeQueued: kanban:merge-queued
+        merging: kanban:merging
+        mergeFailed: kanban:merge-failed
+```
 
 ### `repos[].labelConfig`
 

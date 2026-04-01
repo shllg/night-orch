@@ -28,6 +28,7 @@ export interface PhaseRecord {
 export interface RunContext {
   readonly runId: string
   readonly repo: string
+  readonly issueRepo?: string
   readonly issueNumber: number
   readonly issue: ForgeIssue
   readonly repoConfig: RepoConfig

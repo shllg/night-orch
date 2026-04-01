@@ -24,25 +24,27 @@ async function transitionToError(
   ctx: RunContext,
   errorMessage: string,
 ): Promise<void> {
+  const issueRepo = ctx.issueRepo ?? ctx.repo
+
   try {
-    const issue = await forge.getIssue(ctx.repo, ctx.issueNumber)
+    const issue = await forge.getIssue(issueRepo, ctx.issueNumber)
     await transitionLabels(
       forge,
-      ctx.repo,
+      issueRepo,
       ctx.issueNumber,
       issue.labels,
       'running',
       'error',
-      buildLabelConfig(ctx.repoConfig),
+      buildLabelConfig(ctx.repoConfig, issue.labels),
     )
   } catch (labelErr) {
-    logger.warn({ repo: ctx.repo, issue: ctx.issueNumber, err: labelErr }, 'Failed to transition labels to error during publish failure')
+    logger.warn({ repo: issueRepo, issue: ctx.issueNumber, err: labelErr }, 'Failed to transition labels to error during publish failure')
   }
 
   try {
-    await forge.commentOnIssue(ctx.repo, ctx.issueNumber, `Publishing failed: ${errorMessage}`)
+    await forge.commentOnIssue(issueRepo, ctx.issueNumber, `Publishing failed: ${errorMessage}`)
   } catch (commentErr) {
-    logger.warn({ repo: ctx.repo, issue: ctx.issueNumber, err: commentErr }, 'Failed to comment on issue during publish failure')
+    logger.warn({ repo: issueRepo, issue: ctx.issueNumber, err: commentErr }, 'Failed to comment on issue during publish failure')
   }
 }
 

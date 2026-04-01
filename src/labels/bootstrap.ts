@@ -7,6 +7,7 @@ export interface LabelBootstrapDefinition {
 }
 
 type LabelRole = 'ready' | 'running' | 'blocked' | 'reviewReady' | 'error' | 'retry' | 'planning' | 'mergeQueued' | 'merging' | 'mergeFailed'
+  | 'kanbanTrigger'
 
 const DEFAULT_LABEL_PRESENTATION: Record<LabelRole, { color: string; description: string }> = {
   ready: {
@@ -49,6 +50,10 @@ const DEFAULT_LABEL_PRESENTATION: Record<LabelRole, { color: string; description
     color: 'E4E669',
     description: 'Merge attempt failed; manual action required',
   },
+  kanbanTrigger: {
+    color: '5319E7',
+    description: 'Use kanban state flow instead of default orchestration labels',
+  },
 }
 
 /**
@@ -56,7 +61,7 @@ const DEFAULT_LABEL_PRESENTATION: Record<LabelRole, { color: string; description
  * optional per-label overrides from repo.labelConfig.
  */
 export function buildLabelBootstrapDefinitions(
-  repoConfig: Pick<RepoConfig, 'labels' | 'labelConfig'>,
+  repoConfig: Pick<RepoConfig, 'labels' | 'labelConfig' | 'kanban'>,
 ): LabelBootstrapDefinition[] {
   const definitions: LabelBootstrapDefinition[] = []
   const seen = new Set<string>()
@@ -75,9 +80,9 @@ export function buildLabelBootstrapDefinitions(
     })
   }
 
-  for (const label of repoConfig.labels.ready) add(label, 'ready')
+  for (const label of asLabelArray(repoConfig.labels.ready)) add(label, 'ready')
   add(repoConfig.labels.running, 'running')
-  for (const label of repoConfig.labels.blocked) add(label, 'blocked')
+  for (const label of asLabelArray(repoConfig.labels.blocked)) add(label, 'blocked')
   add(repoConfig.labels.reviewReady, 'reviewReady')
   add(repoConfig.labels.error, 'error')
   add(repoConfig.labels.retry, 'retry')
@@ -86,5 +91,27 @@ export function buildLabelBootstrapDefinitions(
   add(repoConfig.labels.merging, 'merging')
   add(repoConfig.labels.mergeFailed, 'mergeFailed')
 
+  if (repoConfig.kanban) {
+    add(repoConfig.kanban.triggerLabel, 'kanbanTrigger')
+    for (const label of asLabelArray(repoConfig.kanban.labels.ready)) add(label, 'ready')
+    add(repoConfig.kanban.labels.running, 'running')
+    add(repoConfig.kanban.labels.blocked, 'blocked')
+    add(repoConfig.kanban.labels.needsHuman, 'blocked')
+    add(repoConfig.kanban.labels.reviewReady, 'reviewReady')
+    add(repoConfig.kanban.labels.error, 'error')
+    add(repoConfig.kanban.labels.retry, 'retry')
+    add(repoConfig.kanban.labels.planning, 'planning')
+    add(repoConfig.kanban.labels.mergeQueued, 'mergeQueued')
+    add(repoConfig.kanban.labels.merging, 'merging')
+    add(repoConfig.kanban.labels.mergeFailed, 'mergeFailed')
+  }
+
   return definitions
+}
+
+function asLabelArray(value: string | readonly string[]): string[] {
+  if (typeof value === 'string') {
+    return [value]
+  }
+  return [...value]
 }

@@ -154,6 +154,7 @@ describe('GitHubForgeAdapter', () => {
       expect(issue).toEqual({
         number: 1,
         nodeId: 'MDU6SXNzdWUx',
+        repo: 'org/repo',
         title: 'Test issue',
         body: 'Test body',
         labels: ['bug'],
@@ -255,6 +256,32 @@ describe('GitHubForgeAdapter', () => {
           repo: 'repo',
           state: 'open',
           per_page: 100,
+        }),
+      )
+    })
+
+    it('discovers issues from linkedProjects', async () => {
+      mockPaginate
+        .mockResolvedValueOnce([makeGitHubIssue({ number: 1, html_url: 'https://github.com/org/repo/issues/1' })])
+        .mockResolvedValueOnce([makeGitHubIssue({ number: 2, html_url: 'https://github.com/org/tracker/issues/2' })])
+
+      const config = makeRepoConfig({
+        linkedProjects: ['org/tracker'],
+        selectors: {
+          includeLabelsAny: [],
+          excludeLabelsAny: [],
+        },
+      })
+
+      const issues = await adapter.listEligibleIssues(config)
+      expect(issues).toHaveLength(2)
+      expect(issues.map((i) => i.repo)).toEqual(['org/repo', 'org/tracker'])
+      expect(mockPaginate).toHaveBeenNthCalledWith(
+        2,
+        mockIssuesListForRepo,
+        expect.objectContaining({
+          owner: 'org',
+          repo: 'tracker',
         }),
       )
     })
