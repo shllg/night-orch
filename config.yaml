@@ -110,7 +110,7 @@ repos:
     defaults:
       planner: claude
       coder: codex
-      reviewer: claude
+      reviewer: codex
       doneMode: pr-ready
     selectors:
       includeLabelsAny:
@@ -128,6 +128,100 @@ repos:
       - pnpm typecheck
       - pnpm lint
       - pnpm test
+    agents:
+      claude: claude
+      codex: codex
+  - repo: shllg/dailywerk
+    forge: github
+    localPath: ~/src/dailywerk/dailywerk
+    maxConcurrentRuns: 2
+    baseBranch: master
+    branchPrefix: orch
+    labels:
+      ready:
+        - orch:ready
+      running: orch:running
+      blocked: orch:blocked
+      needsHuman: orch:needs-human
+      reviewReady: orch:review-ready
+      error: orch:error
+      retry: orch:retry
+      planning: orch:planning
+    planning:
+      prdDirectory: docs/prd
+    defaults:
+      planner: claude
+      coder: codex
+      reviewer: codex
+      doneMode: pr-ready
+    selectors:
+      includeLabelsAny:
+        - orch:ready
+      excludeLabelsAny:
+        - orch:blocked
+        - orch:error
+        - orch:needs-human
+    environment:
+      defaultMode: shared
+      bootstrap:
+        - command:
+            - docker
+            - compose
+            - -p
+            - dailywerk
+            - up
+            - -d
+            - --wait
+          when: shared
+        - command:
+            - docker
+            - compose
+            - -p
+            - dailywerk
+            - --profile
+            - setup
+            - run
+            - --rm
+            - rustfs-setup
+          when: shared
+        - command:
+            - bundle
+            - install
+        - command:
+            - pnpm
+            - -C
+            - frontend
+            - install
+            - --frozen-lockfile
+        - command:
+            - bundle
+            - exec
+            - rails
+            - db:prepare
+    verify:
+      - - bundle
+        - exec
+        - rails
+        - test
+      - - bundle
+        - exec
+        - rubocop
+      - - bundle
+        - exec
+        - brakeman
+        - --quiet
+      - - pnpm
+        - -C
+        - frontend
+        - lint
+      - - pnpm
+        - -C
+        - frontend
+        - test
+      - - pnpm
+        - -C
+        - frontend
+        - build
     agents:
       claude: claude
       codex: codex

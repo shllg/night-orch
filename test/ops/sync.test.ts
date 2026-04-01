@@ -139,6 +139,26 @@ describe('SyncEngine', () => {
     expect(row.status).toBe('completed')
   })
 
+  it('queued run + issue closed → completed', async () => {
+    const forge = makeMockForge({
+      getIssue: vi.fn().mockResolvedValue({
+        number: 1, nodeId: '', title: 'Test', body: '', labels: [],
+        assignees: [], state: 'closed', createdAt: '', updatedAt: '', url: '',
+      }),
+    })
+    const runId = insertRun(db, { status: 'queued' })
+
+    const engine = new SyncEngine(db, config, () => forge)
+    const result = await engine.reconcile(false)
+
+    expect(result.reconciledRuns).toHaveLength(1)
+    expect(result.reconciledRuns[0]!.action).toBe('closed')
+    expect(result.reconciledRuns[0]!.reason).toContain('queued')
+
+    const row = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as { status: string }
+    expect(row.status).toBe('completed')
+  })
+
   it('running run + expired lease + no PR → queued (retry)', async () => {
     const forge = makeMockForge()
     const runId = insertRun(db)

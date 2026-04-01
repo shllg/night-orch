@@ -177,12 +177,13 @@ describe('pollOnce', () => {
     expect(result.errors).toBe(0)
   })
 
-  it('error in discovery → propagates as rejection', async () => {
+  it('error in discovery → records repo error and continues', async () => {
     mockDiscoverEligibleIssues.mockRejectedValueOnce(new Error('API error'))
 
     const config = makeConfig(join(tmpDir, 'test.db'))
-    // Discovery errors propagate — caller (run command) handles them
-    await expect(pollOnce(config, db, false)).rejects.toThrow('API error')
+    const result = await pollOnce(config, db, false)
+    expect(result.processed).toBe(0)
+    expect(result.errors).toBe(1)
   })
 
   it('returns PollResult shape', async () => {
@@ -555,6 +556,47 @@ describe('pollOnce', () => {
       mockExecuteLoop.mock.calls.map((call) => (call[0] as { repo: string }).repo),
     )
     expect(reposStarted).toEqual(new Set(['org/repo-a', 'org/repo-b']))
+  })
+
+  it('continues processing healthy repos when one repo discovery fails', async () => {
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    config.repos = [
+      {
+        ...config.repos[0]!,
+        repo: 'org/repo-a',
+        localPath: '/tmp/repo-a',
+      },
+      {
+        ...config.repos[0]!,
+        repo: 'org/repo-b',
+        localPath: '/tmp/repo-b',
+      },
+    ]
+
+    mockDiscoverEligibleIssues.mockImplementation(async (repoConfig: { repo: string }) => {
+      if (repoConfig.repo === 'org/repo-a') {
+        throw new Error('repo-a unavailable')
+      }
+      return [{
+        issue: { number: 2, nodeId: '', title: 'B', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        triage: { level: 'standard', reason: '' },
+      }]
+    })
+    mockExecuteLoop.mockResolvedValue({
+      currentPhase: 'publish',
+      terminalStatus: 'blocked',
+    })
+
+    const result = await pollOnce(config, db, false)
+    expect(result.processed).toBe(1)
+    expect(result.errors).toBe(1)
+    expect(mockExecuteLoop).toHaveBeenCalledTimes(1)
+    const run = db
+      .prepare('SELECT repo, issue_number, status FROM runs ORDER BY created_at DESC LIMIT 1')
+      .get() as { repo: string; issue_number: number; status: string }
+    expect(run.repo).toBe('org/repo-b')
+    expect(run.issue_number).toBe(2)
+    expect(run.status).toBe('blocked')
   })
 
   it('respects repos[].maxConcurrentRuns for per-repo parallelism', async () => {

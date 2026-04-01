@@ -108,104 +108,104 @@ export async function pollOnce(
       reposToProcess.map(async (repoConfig): Promise<PollResult> => {
         let repoProcessed = 0
         let repoErrors = 0
-
-        const forge = createForgeAdapter(repoConfig, config)
-        const channels = createChannels(config.notifications, forge)
-        const notifier = new NotificationDispatcher(channels, config.notifications.events)
-
-        // Resolve bot user for comment upserts (best-effort, fallback to empty string)
-        let botUser = ''
         try {
-          const authInfo = await forge.validateAuth()
-          botUser = authInfo.user
-        } catch {
-          logger.debug({ repo: repoConfig.repo }, 'Could not resolve bot user for comment upserts')
-        }
+          const forge = createForgeAdapter(repoConfig, config)
+          const channels = createChannels(config.notifications, forge)
+          const notifier = new NotificationDispatcher(channels, config.notifications.events)
 
-        const labelConfig = buildLabelConfig(repoConfig)
-
-        // --- Reaction scan: check review_ready PRs for CI failures or human reviews ---
-        try {
-          await scanAndHandleReactions({
-            db, forge, runManager, repoConfig, labelConfig, botUser,
-          })
-        } catch (err) {
-          logger.warn({ repo: repoConfig.repo, err }, 'Reaction scan failed — continuing with issue discovery')
-        }
-
-        // --- Merge queue: process pending merges before discovering new work ---
-        try {
-          await processMergeQueue(db, forge, repoConfig)
-        } catch (err) {
-          logger.warn({ repo: repoConfig.repo, err }, 'Merge queue processing failed — continuing')
-        }
-
-        // --- Comment commands: /orch retry|rebase|continue|cancel ---
-        try {
-          await processCommentCommands({
-            config,
-            db,
-            forge,
-            runManager,
-            leaseManager,
-            repoConfig,
-            labelConfig,
-            botUser,
-          })
-        } catch (err) {
-          logger.warn({ repo: repoConfig.repo, err }, 'Comment command processing failed — continuing')
-        }
-
-        const discoveredAll = await discoverEligibleIssues(repoConfig, forge, leaseManager)
-        const discovered = targetIssue
-          ? discoveredAll.filter((d) => d.issue.number === targetIssue.issueNumber)
-          : discoveredAll
-        try { metrics?.setEligibleIssues(repoConfig.repo, discovered.length) } catch { /* best-effort */ }
-
-        if (discovered.length === 0) {
-          logger.info({ repo: repoConfig.repo }, 'No eligible issues')
-          return { processed: repoProcessed, errors: repoErrors }
-        }
-
-        if (dryRun) {
-          for (const d of discovered) {
-            logger.info({ issue: d.issue.number, triage: d.triage.level, title: d.issue.title }, '[dry-run] Discovered issue')
+          // Resolve bot user for comment upserts (best-effort, fallback to empty string)
+          let botUser = ''
+          try {
+            const authInfo = await forge.validateAuth()
+            botUser = authInfo.user
+          } catch {
+            logger.debug({ repo: repoConfig.repo }, 'Could not resolve bot user for comment upserts')
           }
-          return { processed: repoProcessed, errors: repoErrors }
-        }
 
-        const maxConcurrentRuns = targetIssue ? 1 : (repoConfig.maxConcurrentRuns ?? 1)
-        const discoveredQueue = [...discovered]
-        const workerCount = Math.min(maxConcurrentRuns, discoveredQueue.length)
+          const labelConfig = buildLabelConfig(repoConfig)
 
-        await Promise.all(
-          Array.from({ length: workerCount }, async () => {
-            while (true) {
-              const discoveredIssue = discoveredQueue.shift()
-              if (!discoveredIssue) {
-                break
-              }
+          // --- Reaction scan: check review_ready PRs for CI failures or human reviews ---
+          try {
+            await scanAndHandleReactions({
+              db, forge, runManager, repoConfig, labelConfig, botUser,
+            })
+          } catch (err) {
+            logger.warn({ repo: repoConfig.repo, err }, 'Reaction scan failed — continuing with issue discovery')
+          }
 
-              if (discoveredIssue.triage.level === 'architectural') {
-                await forge.addLabels(repoConfig.repo, discoveredIssue.issue.number, ['orch:needs-human'])
-                const archBody = formatStatusComment({ blockReason: 'This issue is classified as architectural and requires human guidance.' })
-                if (botUser) {
-                  await upsertBotComment(forge, repoConfig.repo, discoveredIssue.issue.number, STATUS_MARKER, archBody, botUser)
-                } else {
-                  await forge.commentOnIssue(repoConfig.repo, discoveredIssue.issue.number, `🏗️ **night-orch**: This issue is classified as architectural and requires human guidance.`)
+          // --- Merge queue: process pending merges before discovering new work ---
+          try {
+            await processMergeQueue(db, forge, repoConfig)
+          } catch (err) {
+            logger.warn({ repo: repoConfig.repo, err }, 'Merge queue processing failed — continuing')
+          }
+
+          // --- Comment commands: /orch retry|rebase|continue|cancel ---
+          try {
+            await processCommentCommands({
+              config,
+              db,
+              forge,
+              runManager,
+              leaseManager,
+              repoConfig,
+              labelConfig,
+              botUser,
+            })
+          } catch (err) {
+            logger.warn({ repo: repoConfig.repo, err }, 'Comment command processing failed — continuing')
+          }
+
+          const discoveredAll = await discoverEligibleIssues(repoConfig, forge, leaseManager)
+          const discovered = targetIssue
+            ? discoveredAll.filter((d) => d.issue.number === targetIssue.issueNumber)
+            : discoveredAll
+          try { metrics?.setEligibleIssues(repoConfig.repo, discovered.length) } catch { /* best-effort */ }
+
+          if (discovered.length === 0) {
+            logger.info({ repo: repoConfig.repo }, 'No eligible issues')
+            return { processed: repoProcessed, errors: repoErrors }
+          }
+
+          if (dryRun) {
+            for (const d of discovered) {
+              logger.info({ issue: d.issue.number, triage: d.triage.level, title: d.issue.title }, '[dry-run] Discovered issue')
+            }
+            return { processed: repoProcessed, errors: repoErrors }
+          }
+
+          const maxConcurrentRuns = targetIssue ? 1 : (repoConfig.maxConcurrentRuns ?? 1)
+          const discoveredQueue = [...discovered]
+          const workerCount = Math.min(maxConcurrentRuns, discoveredQueue.length)
+
+          await Promise.all(
+            Array.from({ length: workerCount }, async () => {
+              while (true) {
+                const discoveredIssue = discoveredQueue.shift()
+                if (!discoveredIssue) {
+                  break
                 }
-                continue
-              }
 
-              if (!leaseManager.acquire(repoConfig.repo, discoveredIssue.issue.number, 'poller', 7200)) {
-                continue
-              }
+                if (discoveredIssue.triage.level === 'architectural') {
+                  await forge.addLabels(repoConfig.repo, discoveredIssue.issue.number, ['orch:needs-human'])
+                  const archBody = formatStatusComment({ blockReason: 'This issue is classified as architectural and requires human guidance.' })
+                  if (botUser) {
+                    await upsertBotComment(forge, repoConfig.repo, discoveredIssue.issue.number, STATUS_MARKER, archBody, botUser)
+                  } else {
+                    await forge.commentOnIssue(repoConfig.repo, discoveredIssue.issue.number, `🏗️ **night-orch**: This issue is classified as architectural and requires human guidance.`)
+                  }
+                  continue
+                }
 
-              let runId: string | null = null
-              let envSetup: EnvSetupResult | null = null
-              let activeWorktreePath: string | null = null
+                if (!leaseManager.acquire(repoConfig.repo, discoveredIssue.issue.number, 'poller', 7200)) {
+                  continue
+                }
 
-              try {
+                let runId: string | null = null
+                let envSetup: EnvSetupResult | null = null
+                let activeWorktreePath: string | null = null
+
+                try {
                 const resolvedRoles = resolveRoles(discoveredIssue.issue.labels, repoConfig.defaults)
                 const queuedRun = runManager.getLatestQueuedByIssue(repoConfig.repo, discoveredIssue.issue.number)
                 const roles = queuedRun
@@ -510,84 +510,88 @@ export async function pollOnce(
 
                 if (outcome === 'processed') repoProcessed++
                 else repoErrors++
-              } catch (err) {
-                logger.error({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err }, 'Failed to process issue')
-                if (runId) {
-                  const recentErrors = runManager.countRecentErrors(repoConfig.repo, discoveredIssue.issue.number)
-                  const maxRetries = config.loop.maxAutoRetries
-                  const canAutoRetry = recentErrors < maxRetries
+                } catch (err) {
+                  logger.error({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err }, 'Failed to process issue')
+                  if (runId) {
+                    const recentErrors = runManager.countRecentErrors(repoConfig.repo, discoveredIssue.issue.number)
+                    const maxRetries = config.loop.maxAutoRetries
+                    const canAutoRetry = recentErrors < maxRetries
 
-                  runManager.update(runId, {
-                    status: 'error',
-                    lastError: String(err),
-                    endedAt: new Date().toISOString(),
-                  })
-
-                  if (canAutoRetry) {
-                    // Auto-retry: transition back to queued so the next poll picks it up
-                    logger.info(
-                      { repo: repoConfig.repo, issue: discoveredIssue.issue.number, recentErrors, maxRetries },
-                      'Infra error — auto-retrying (transitioning back to ready)',
-                    )
-                    try {
-                      const latestIssue = await forge.getIssue(repoConfig.repo, discoveredIssue.issue.number)
-                      await transitionLabels(forge, repoConfig.repo, discoveredIssue.issue.number, latestIssue.labels, 'running', 'queued', labelConfig)
-                    } catch (labelErr) {
-                      logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: labelErr }, 'Failed to transition labels for auto-retry')
-                    }
-                  } else {
-                    // Retries exhausted: mark as error, require human
-                    logger.warn(
-                      { repo: repoConfig.repo, issue: discoveredIssue.issue.number, recentErrors, maxRetries },
-                      'Auto-retry limit reached — marking as error',
-                    )
-                    try {
-                      const latestIssue = await forge.getIssue(repoConfig.repo, discoveredIssue.issue.number)
-                      await transitionLabels(forge, repoConfig.repo, discoveredIssue.issue.number, latestIssue.labels, 'running', 'error', labelConfig)
-                      const errorBody = formatStatusComment({
-                        error: `Failed after ${recentErrors + 1} attempts. Last error: ${(err as Error).message}`,
-                        retryCount: recentErrors + 1,
-                        maxRetries: maxRetries,
-                      })
-                      if (botUser) {
-                        await upsertBotComment(forge, repoConfig.repo, discoveredIssue.issue.number, STATUS_MARKER, errorBody, botUser)
-                      } else {
-                        await forge.commentOnIssue(repoConfig.repo, discoveredIssue.issue.number, `⚠️ **night-orch**: Failed after ${recentErrors + 1} attempts. Last error: ${(err as Error).message}\n\nRemove \`orch:error\` and add \`orch:ready\` to retry.`)
-                      }
-                    } catch (labelErr) {
-                      logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: labelErr }, 'Failed to transition labels after retry exhaustion')
-                    }
-                    try {
-                      await notifier.dispatch(makePayload('retry_exhausted', repoConfig.repo, discoveredIssue.issue, {
-                        summary: `Failed after ${recentErrors + 1} attempts: ${(err as Error).message}`,
-                      }))
-                    } catch (notifyErr) {
-                      logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: notifyErr }, 'Failed to send retry exhaustion notification')
-                    }
-                  }
-                }
-                repoErrors++
-              } finally {
-                if (envSetup && activeWorktreePath) {
-                  try {
-                    await teardownEnvironment({
-                      worktreePath: activeWorktreePath,
-                      issueNumber: discoveredIssue.issue.number,
-                      repoConfig,
-                      mode: envSetup.mode,
-                      composeProjectName: envSetup.composeProjectName,
+                    runManager.update(runId, {
+                      status: 'error',
+                      lastError: String(err),
+                      endedAt: new Date().toISOString(),
                     })
-                  } catch (envErr) {
-                    logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: envErr }, 'Failed to tear down environment')
-                  }
-                }
-                leaseManager.release(repoConfig.repo, discoveredIssue.issue.number)
-              }
-            }
-          }),
-        )
 
-        return { processed: repoProcessed, errors: repoErrors }
+                    if (canAutoRetry) {
+                      // Auto-retry: transition back to queued so the next poll picks it up
+                      logger.info(
+                        { repo: repoConfig.repo, issue: discoveredIssue.issue.number, recentErrors, maxRetries },
+                        'Infra error — auto-retrying (transitioning back to ready)',
+                      )
+                      try {
+                        const latestIssue = await forge.getIssue(repoConfig.repo, discoveredIssue.issue.number)
+                        await transitionLabels(forge, repoConfig.repo, discoveredIssue.issue.number, latestIssue.labels, 'running', 'queued', labelConfig)
+                      } catch (labelErr) {
+                        logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: labelErr }, 'Failed to transition labels for auto-retry')
+                      }
+                    } else {
+                      // Retries exhausted: mark as error, require human
+                      logger.warn(
+                        { repo: repoConfig.repo, issue: discoveredIssue.issue.number, recentErrors, maxRetries },
+                        'Auto-retry limit reached — marking as error',
+                      )
+                      try {
+                        const latestIssue = await forge.getIssue(repoConfig.repo, discoveredIssue.issue.number)
+                        await transitionLabels(forge, repoConfig.repo, discoveredIssue.issue.number, latestIssue.labels, 'running', 'error', labelConfig)
+                        const errorBody = formatStatusComment({
+                          error: `Failed after ${recentErrors + 1} attempts. Last error: ${(err as Error).message}`,
+                          retryCount: recentErrors + 1,
+                          maxRetries: maxRetries,
+                        })
+                        if (botUser) {
+                          await upsertBotComment(forge, repoConfig.repo, discoveredIssue.issue.number, STATUS_MARKER, errorBody, botUser)
+                        } else {
+                          await forge.commentOnIssue(repoConfig.repo, discoveredIssue.issue.number, `⚠️ **night-orch**: Failed after ${recentErrors + 1} attempts. Last error: ${(err as Error).message}\n\nRemove \`orch:error\` and add \`orch:ready\` to retry.`)
+                        }
+                      } catch (labelErr) {
+                        logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: labelErr }, 'Failed to transition labels after retry exhaustion')
+                      }
+                      try {
+                        await notifier.dispatch(makePayload('retry_exhausted', repoConfig.repo, discoveredIssue.issue, {
+                          summary: `Failed after ${recentErrors + 1} attempts: ${(err as Error).message}`,
+                        }))
+                      } catch (notifyErr) {
+                        logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: notifyErr }, 'Failed to send retry exhaustion notification')
+                      }
+                    }
+                  }
+                  repoErrors++
+                } finally {
+                  if (envSetup && activeWorktreePath) {
+                    try {
+                      await teardownEnvironment({
+                        worktreePath: activeWorktreePath,
+                        issueNumber: discoveredIssue.issue.number,
+                        repoConfig,
+                        mode: envSetup.mode,
+                        composeProjectName: envSetup.composeProjectName,
+                      })
+                    } catch (envErr) {
+                      logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: envErr }, 'Failed to tear down environment')
+                    }
+                  }
+                  leaseManager.release(repoConfig.repo, discoveredIssue.issue.number)
+                }
+              }
+            }),
+          )
+
+          return { processed: repoProcessed, errors: repoErrors }
+        } catch (err) {
+          logger.error({ repo: repoConfig.repo, err }, 'Repository poll failed')
+          return { processed: repoProcessed, errors: repoErrors + 1 }
+        }
       }),
     )
 

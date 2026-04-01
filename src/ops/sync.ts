@@ -33,7 +33,7 @@ export interface SyncResult {
   labelCorrections: LabelCorrection[]
 }
 
-interface RunningRunRow {
+interface ActiveRunRow {
   id: string
   repo: string
   issue_number: number
@@ -66,18 +66,23 @@ export class SyncEngine {
       labelCorrections: [],
     }
 
-    // 1. Find all runs with status 'running'
-    const runningRuns = this.db
-      .prepare("SELECT id, repo, issue_number, status, pr_number, branch_name, worktree_path FROM runs WHERE status = 'running'")
-      .all() as RunningRunRow[]
+    // 1. Find all active runs that can drift (running/queued)
+    const activeRuns = this.db
+      .prepare("SELECT id, repo, issue_number, status, pr_number, branch_name, worktree_path FROM runs WHERE status IN ('running', 'queued')")
+      .all() as ActiveRunRow[]
 
-    for (const run of runningRuns) {
-      // Check if lease is still active
-      const leased = this.leaseManager.isLeased(run.repo, run.issue_number)
-
-      if (!leased) {
-        // Lease expired — check GitHub state to decide what to do
-        const action = await this.reconcileStaleRun(run, dryRun)
+    for (const run of activeRuns) {
+      if (run.status === 'running') {
+        // Running runs require an active lease; if lease expired, reconcile.
+        const leased = this.leaseManager.isLeased(run.repo, run.issue_number)
+        if (!leased) {
+          const action = await this.reconcileStaleRun(run, dryRun)
+          if (action) {
+            result.reconciledRuns.push(action)
+          }
+        }
+      } else if (run.status === 'queued') {
+        const action = await this.reconcileQueuedRun(run, dryRun)
         if (action) {
           result.reconciledRuns.push(action)
         }
@@ -105,7 +110,7 @@ export class SyncEngine {
     return result
   }
 
-  private async reconcileStaleRun(run: RunningRunRow, dryRun: boolean): Promise<SyncAction | null> {
+  private async reconcileStaleRun(run: ActiveRunRow, dryRun: boolean): Promise<SyncAction | null> {
     let forge: ForgeAdapter
     try {
       forge = this.forgeFactory(run.repo)
@@ -144,7 +149,29 @@ export class SyncEngine {
     return await this.markStale(run, dryRun, 'Lease expired, no PR found — requeueing')
   }
 
-  private markCompleted(run: RunningRunRow, dryRun: boolean, reason: string, forge: ForgeAdapter): SyncAction {
+  private async reconcileQueuedRun(run: ActiveRunRow, dryRun: boolean): Promise<SyncAction | null> {
+    let forge: ForgeAdapter
+    try {
+      forge = this.forgeFactory(run.repo)
+    } catch {
+      logger.warn({ repo: run.repo }, 'Cannot create forge adapter for queued run reconciliation')
+      return null
+    }
+
+    // Queued runs should not remain active if the issue has already been closed externally.
+    try {
+      const issue = await forge.getIssue(run.repo, run.issue_number)
+      if (issue.state === 'closed') {
+        return this.markClosed(run, dryRun, 'Issue closed while queued', forge)
+      }
+    } catch (err) {
+      logger.warn({ repo: run.repo, issue: run.issue_number, err }, 'Failed to check queued issue state')
+    }
+
+    return null
+  }
+
+  private markCompleted(run: ActiveRunRow, dryRun: boolean, reason: string, forge: ForgeAdapter): SyncAction {
     if (!dryRun) {
       this.db.prepare("UPDATE runs SET status = 'completed', ended_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(run.id)
       this.leaseManager.release(run.repo, run.issue_number)
@@ -156,7 +183,7 @@ export class SyncEngine {
     return { repo: run.repo, issueNumber: run.issue_number, action: 'completed', reason, prNumber: run.pr_number }
   }
 
-  private markClosed(run: RunningRunRow, dryRun: boolean, reason: string, forge: ForgeAdapter): SyncAction {
+  private markClosed(run: ActiveRunRow, dryRun: boolean, reason: string, forge: ForgeAdapter): SyncAction {
     if (!dryRun) {
       this.db.prepare("UPDATE runs SET status = 'completed', ended_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(run.id)
       this.leaseManager.release(run.repo, run.issue_number)
@@ -168,7 +195,7 @@ export class SyncEngine {
     return { repo: run.repo, issueNumber: run.issue_number, action: 'closed', reason, prNumber: run.pr_number }
   }
 
-  private markReviewReady(run: RunningRunRow, dryRun: boolean, reason: string, forge: ForgeAdapter): SyncAction {
+  private markReviewReady(run: ActiveRunRow, dryRun: boolean, reason: string, forge: ForgeAdapter): SyncAction {
     if (!dryRun) {
       this.db.prepare("UPDATE runs SET status = 'review_ready', updated_at = datetime('now') WHERE id = ?").run(run.id)
       this.leaseManager.release(run.repo, run.issue_number)
@@ -180,7 +207,7 @@ export class SyncEngine {
     return { repo: run.repo, issueNumber: run.issue_number, action: 'label_corrected', reason, prNumber: run.pr_number }
   }
 
-  private async markStale(run: RunningRunRow, dryRun: boolean, reason: string): Promise<SyncAction> {
+  private async markStale(run: ActiveRunRow, dryRun: boolean, reason: string): Promise<SyncAction> {
     if (!dryRun) {
       this.db.prepare("UPDATE runs SET status = 'queued', current_phase = NULL, last_error = ?, updated_at = datetime('now') WHERE id = ?").run(reason, run.id)
       this.leaseManager.release(run.repo, run.issue_number)
@@ -202,7 +229,7 @@ export class SyncEngine {
     return { repo: run.repo, issueNumber: run.issue_number, action: 'stale_cleared', reason, prNumber: null }
   }
 
-  private async updateLabels(forge: ForgeAdapter, run: RunningRunRow, targetStatus: 'completed' | 'review_ready'): Promise<void> {
+  private async updateLabels(forge: ForgeAdapter, run: ActiveRunRow, targetStatus: 'completed' | 'review_ready'): Promise<void> {
     const repoConfig = this.config.repos.find((r) => r.repo === run.repo)
     if (!repoConfig) return
 

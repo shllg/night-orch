@@ -1,6 +1,7 @@
 import { loadConfig, resolveConfigPath, ConfigError } from '../../config/loader.js'
 import { initDatabase } from '../../state/db.js'
 import { pollOnce } from '../../runner/poller.js'
+import { SyncEngine } from '../../ops/sync.js'
 import { logger } from '../../utils/logger.js'
 
 interface GlobalOpts {
@@ -33,6 +34,27 @@ export async function runOnceCommand(globalOpts?: GlobalOpts): Promise<void> {
   const db = initDatabase(config.storage.dbPath)
 
   try {
+    // Crash recovery: release orphaned leases and reconcile stale runs.
+    try {
+      const { LeaseManager } = await import('../../state/leases.js')
+      const leaseManager = new LeaseManager(db)
+      const releasedLeases = leaseManager.releaseAll()
+      if (releasedLeases > 0) {
+        logger.info({ releasedLeases }, 'Released orphaned leases from previous run')
+      }
+
+      const syncEngine = new SyncEngine(db, config)
+      const syncResult = await syncEngine.reconcile(dryRun)
+      if (syncResult.reconciledRuns.length > 0 || syncResult.expiredLeases > 0) {
+        logger.info(
+          { reconciled: syncResult.reconciledRuns.length, expiredLeases: syncResult.expiredLeases },
+          'Startup sync complete',
+        )
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Startup sync failed — continuing')
+    }
+
     const result = await pollOnce(config, db, dryRun)
     logger.info({ processed: result.processed, errors: result.errors }, 'Run-once complete')
 

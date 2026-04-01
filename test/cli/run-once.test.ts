@@ -1,9 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-const mockLoadConfig = vi.fn()
-const mockResolveConfigPath = vi.fn().mockReturnValue('/tmp/config.yml')
-const mockInitDatabase = vi.fn()
-const mockPollOnce = vi.fn()
+const {
+  mockLoadConfig,
+  mockResolveConfigPath,
+  mockInitDatabase,
+  mockPollOnce,
+  mockReleaseAll,
+  mockSyncReconcile,
+} = vi.hoisted(() => ({
+  mockLoadConfig: vi.fn(),
+  mockResolveConfigPath: vi.fn().mockReturnValue('/tmp/config.yml'),
+  mockInitDatabase: vi.fn(),
+  mockPollOnce: vi.fn(),
+  mockReleaseAll: vi.fn(),
+  mockSyncReconcile: vi.fn(),
+}))
 
 vi.mock('../../src/config/loader.js', () => ({
   loadConfig: (...args: unknown[]) => mockLoadConfig(...args),
@@ -21,6 +32,22 @@ vi.mock('../../src/runner/poller.js', () => ({
   pollOnce: (...args: unknown[]) => mockPollOnce(...args),
 }))
 
+vi.mock('../../src/state/leases.js', () => ({
+  LeaseManager: class LeaseManager {
+    releaseAll(...args: unknown[]) {
+      return mockReleaseAll(...args)
+    }
+  },
+}))
+
+vi.mock('../../src/ops/sync.js', () => ({
+  SyncEngine: class SyncEngine {
+    reconcile(...args: unknown[]) {
+      return mockSyncReconcile(...args)
+    }
+  },
+}))
+
 vi.mock('../../src/utils/logger.js', () => ({
   logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }))
@@ -35,6 +62,8 @@ describe('runOnceCommand', () => {
       storage: { dbPath: '/tmp/state.db' },
     })
     mockInitDatabase.mockReturnValue({ close: vi.fn() })
+    mockReleaseAll.mockReturnValue(0)
+    mockSyncReconcile.mockResolvedValue({ reconciledRuns: [], expiredLeases: 0, orphanedWorktrees: [], labelCorrections: [] })
   })
 
   it('sets exit code to 1 when poller reports errors', async () => {
@@ -51,5 +80,14 @@ describe('runOnceCommand', () => {
     await runOnceCommand()
 
     expect(process.exitCode).not.toBe(1)
+  })
+
+  it('runs startup recovery before polling', async () => {
+    mockPollOnce.mockResolvedValue({ processed: 0, errors: 0 })
+
+    await runOnceCommand()
+
+    expect(mockReleaseAll).toHaveBeenCalledWith()
+    expect(mockSyncReconcile).toHaveBeenCalledWith(false)
   })
 })
