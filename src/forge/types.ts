@@ -47,6 +47,8 @@ export interface ForgePR {
   title: string
   body: string
   state: 'open' | 'closed' | 'merged'
+  /** Null/undefined means unknown; false indicates merge conflicts with base. */
+  mergeable?: boolean | null
   headBranch: string
   headSha: string
   baseBranch: string

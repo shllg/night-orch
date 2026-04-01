@@ -68,6 +68,20 @@ vi.mock('../../src/loop/engine.js', () => ({
   executeLoop: (...args: unknown[]) => mockExecuteLoop(...args),
 }))
 
+const mockExecuteRebase = vi.fn().mockResolvedValue({
+  rebased: false,
+  verifyPassed: true,
+  conflict: false,
+})
+const mockQueueRebase = vi.fn().mockResolvedValue({
+  queued: true,
+  reason: 'queued',
+})
+vi.mock('../../src/ops/rebase-and-check.js', () => ({
+  executeRebase: (...args: unknown[]) => mockExecuteRebase(...args),
+  queueRebase: (...args: unknown[]) => mockQueueRebase(...args),
+}))
+
 const mockPublishPR = vi.fn()
 vi.mock('../../src/publishing/publisher.js', () => ({
   publishPR: (...args: unknown[]) => mockPublishPR(...args),
@@ -396,6 +410,38 @@ describe('pollOnce', () => {
     expect(commandRow?.command).toBe('retry:applied')
   })
 
+  it('memoizes missing issues after 404 and skips repeated comment scans', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([])
+    mockListIssueComments.mockImplementation(async (_repo: string, issueNumber: number) => {
+      if (issueNumber === 4040) {
+        throw Object.assign(new Error('Not Found'), { status: 404 })
+      }
+      return []
+    })
+
+    const runManager = new RunManager(db)
+    const staleRun = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 4040,
+      issueNodeId: '',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(staleRun.id, {
+      status: 'blocked',
+      endedAt: new Date().toISOString(),
+      lastError: 'failed verify',
+    })
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    await pollOnce(config, db, false)
+    await pollOnce(config, db, false)
+
+    const callsForIssue = mockListIssueComments.mock.calls.filter((call) => call[1] === 4040)
+    expect(callsForIssue).toHaveLength(1)
+  })
+
   it('returns error when publish fails', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([{
       issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
@@ -497,6 +543,51 @@ describe('pollOnce', () => {
       { issue_number: 1, status: 'blocked' },
       { issue_number: 2, status: 'blocked' },
     ])
+  })
+
+  it('prioritizes queued merge-conflict follow-ups before fresh ready issues', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([
+      {
+        issue: { number: 41, nodeId: '', title: 'Fresh', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        triage: { level: 'standard', reason: '' },
+      },
+      {
+        issue: { number: 13, nodeId: '', title: 'Follow-up', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        triage: { level: 'standard', reason: '' },
+      },
+    ])
+    mockExecuteLoop.mockResolvedValue({
+      currentPhase: 'publish',
+      terminalStatus: 'blocked',
+    })
+
+    const runManager = new RunManager(db)
+    const existing = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 13,
+      issueNodeId: '',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(existing.id, {
+      status: 'queued',
+      phaseData: {
+        reactionType: 'merge_conflict',
+      },
+    })
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    const result = await pollOnce(config, db, false)
+
+    expect(result.processed).toBe(2)
+    expect(result.errors).toBe(0)
+    expect(mockExecuteRebase).toHaveBeenCalledTimes(1)
+    const rebaseIssueNumber = mockExecuteRebase.mock.calls[0]?.[5] as number | undefined
+    expect(rebaseIssueNumber).toBe(13)
+    expect(mockExecuteLoop).toHaveBeenCalledTimes(1)
+    const loopCtx = mockExecuteLoop.mock.calls[0]?.[0] as { issueNumber: number }
+    expect(loopCtx.issueNumber).toBe(41)
   })
 
   it('processes one issue per repo in parallel by default', async () => {

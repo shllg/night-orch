@@ -4,7 +4,7 @@ import type { MetricsService } from '../metrics/service.js'
 import { createForgeAdapter } from '../forge/factory.js'
 import { LeaseManager } from '../state/leases.js'
 import { RunManager } from '../state/runs.js'
-import { discoverEligibleIssues } from '../discovery/discover.js'
+import { discoverEligibleIssues, type DiscoveredIssue } from '../discovery/discover.js'
 import { resolveRoles, type ResolvedRoles } from '../discovery/roles.js'
 import { adjustLimitsForTriage } from '../discovery/triage.js'
 import { getOrPinSlug, buildWorktreePath } from '../git/slug.js'
@@ -159,7 +159,7 @@ export async function pollOnce(
           const discoveredAll = await discoverEligibleIssues(repoConfig, forge, leaseManager)
           const discovered = targetIssue
             ? discoveredAll.filter((d) => d.issue.number === targetIssue.issueNumber)
-            : discoveredAll
+            : prioritizeDiscoveredIssues(runManager, repoConfig.repo, discoveredAll)
           try { metrics?.setEligibleIssues(repoConfig.repo, discovered.length) } catch { /* best-effort */ }
 
           if (discovered.length === 0) {
@@ -260,7 +260,8 @@ export async function pollOnce(
 
                 // Detect rebase mode from queued run's phaseData
                 // If force-resetting, ignore stale rebase context — we're starting fresh
-                const isRebaseRun = !forceReset && queuedRun?.phaseData?.reactionType === 'rebase'
+                const reactionType = queuedRun?.phaseData?.reactionType
+                const isRebaseRun = !forceReset && (reactionType === 'rebase' || reactionType === 'merge_conflict')
 
                 // Check if prior run left tainted work that should be discarded
                 // Never reset to base for rebase runs — we need the existing branch
@@ -860,6 +861,9 @@ interface CommandIssueRow {
   issue_number: number
 }
 
+/** Issues that returned 404 during comment scan in this process lifecycle. */
+const missingCommentCommandIssues = new Set<string>()
+
 function getHttpStatus(err: unknown): number | null {
   if (typeof err !== 'object' || err === null) return null
   const e = err as { status?: unknown; response?: { status?: unknown } }
@@ -897,11 +901,17 @@ async function processCommentCommands(params: ProcessCommentCommandsParams): Pro
   const collaboratorCache = new Map<string, boolean>()
 
   for (const row of issueRows) {
+    const issueKey = `${repoConfig.repo}#${row.issue_number}`
+    if (missingCommentCommandIssues.has(issueKey)) {
+      continue
+    }
+
     let comments: Awaited<ReturnType<typeof forge.listIssueComments>>
     try {
       comments = await forge.listIssueComments(repoConfig.repo, row.issue_number)
     } catch (err) {
       if (getHttpStatus(err) === 404) {
+        missingCommentCommandIssues.add(issueKey)
         logger.debug(
           { repo: repoConfig.repo, issueNumber: row.issue_number },
           'Skipping comment command scan for missing or inaccessible issue',
@@ -1262,6 +1272,39 @@ async function scanAndHandleReactions(params: ScanAndHandleReactionsParams): Pro
       }
     }
   }
+}
+
+/**
+ * Prioritize follow-up work over fresh issues so reactive runs (especially
+ * merge conflict rebases) are handled promptly and don't starve behind newer
+ * ready issues.
+ */
+function prioritizeDiscoveredIssues(
+  runManager: RunManager,
+  repo: string,
+  discovered: DiscoveredIssue[],
+): DiscoveredIssue[] {
+  const ranked = discovered.map((item) => ({
+    item,
+    rank: getIssueQueuePriority(runManager, repo, item.issue.number),
+  }))
+
+  ranked.sort((a, b) => a.rank - b.rank)
+  return ranked.map((entry) => entry.item)
+}
+
+function getIssueQueuePriority(
+  runManager: RunManager,
+  repo: string,
+  issueNumber: number,
+): number {
+  const queuedRun = runManager.getLatestQueuedByIssue(repo, issueNumber)
+  if (!queuedRun) return 3
+
+  const reactionType = queuedRun.phaseData?.reactionType
+  if (reactionType === 'merge_conflict' || reactionType === 'rebase') return 0
+  if (typeof reactionType === 'string' && reactionType.length > 0) return 1
+  return 2
 }
 
 function shouldResetBranch(

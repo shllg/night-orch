@@ -131,4 +131,26 @@ describe('scanForReactions', () => {
     const result = await scanForReactions(forge, 'org/repo', 1, 42, 'bot', emptyCursor)
     expect(result.reactions).toHaveLength(0)
   })
+
+  it('detects merge conflicts when PR is not mergeable', async () => {
+    const forge = makeForge({
+      getPR: vi.fn().mockResolvedValue({
+        number: 1,
+        title: 'Test PR',
+        body: '',
+        state: 'open',
+        mergeable: false,
+        headBranch: 'feature',
+        headSha: 'abc123',
+        baseBranch: 'main',
+        url: 'https://example.invalid/pr/1',
+      }),
+    })
+
+    const result = await scanForReactions(forge, 'org/repo', 1, 42, 'bot', emptyCursor)
+
+    const conflictReaction = result.reactions.find((r) => r.type === 'merge_conflict')
+    expect(conflictReaction).toBeDefined()
+    expect(conflictReaction?.summary).toContain('merge conflicts')
+  })
 })

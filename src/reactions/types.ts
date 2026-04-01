@@ -1,6 +1,6 @@
 import type { PRCheckStatus, ForgePRReview, ForgePRReviewComment } from '../forge/types.js'
 
-export type ReactionType = 'ci_failure' | 'human_review' | 'review_comment'
+export type ReactionType = 'ci_failure' | 'human_review' | 'review_comment' | 'merge_conflict'
 
 export interface Reaction {
   type: ReactionType

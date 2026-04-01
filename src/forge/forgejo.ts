@@ -56,6 +56,7 @@ interface ForgejoPRData {
   body: string | null
   state: string
   merged: boolean
+  mergeable?: boolean | null
   head: { ref: string; sha?: string }
   base: { ref: string }
   html_url: string
@@ -347,6 +348,7 @@ export class ForgejoForgeAdapter implements ForgeAdapter {
       title: data.title,
       body: data.body ?? '',
       state,
+      mergeable: typeof data.mergeable === 'boolean' ? data.mergeable : null,
       headBranch: data.head.ref,
       headSha: data.head.sha ?? '',
       baseBranch: data.base.ref,

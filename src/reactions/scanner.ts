@@ -29,6 +29,26 @@ export async function scanForReactions(
   const newCursor: ReactionCursor = { ...cursor }
   const now = new Date().toISOString()
 
+  // 0. Check mergeability (conflicting PRs should trigger rebase flow).
+  if (forge.getPR) {
+    try {
+      const pr = await forge.getPR(repo, prNumber)
+      if (pr.state === 'open' && pr.mergeable === false) {
+        reactions.push({
+          type: 'merge_conflict',
+          repo,
+          prNumber,
+          issueNumber,
+          summary: 'PR has merge conflicts with base branch',
+          context: 'PR cannot be merged cleanly. Rebase onto the latest base branch, resolve conflicts, then rerun verify.',
+          detectedAt: now,
+        })
+      }
+    } catch (err) {
+      logger.debug({ repo, prNumber, err }, 'Failed to check mergeability for reaction scan')
+    }
+  }
+
   // 1. Check CI status
   if (forge.getPRCheckStatus) {
     try {
