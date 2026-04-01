@@ -5,7 +5,6 @@ const {
   mockResolveConfigPath,
   mockInitDatabase,
   mockRender,
-  mockReleaseAll,
   mockClose,
   mockLogger,
 } = vi.hoisted(() => ({
@@ -13,7 +12,6 @@ const {
   mockResolveConfigPath: vi.fn().mockReturnValue('/tmp/config.yml'),
   mockInitDatabase: vi.fn(),
   mockRender: vi.fn(),
-  mockReleaseAll: vi.fn(),
   mockClose: vi.fn(),
   mockLogger: { level: 'info' },
 }))
@@ -28,14 +26,6 @@ vi.mock('../../src/config/loader.js', () => ({
 
 vi.mock('../../src/state/db.js', () => ({
   initDatabase: (...args: unknown[]) => mockInitDatabase(...args),
-}))
-
-vi.mock('../../src/state/leases.js', () => ({
-  LeaseManager: class LeaseManager {
-    releaseAll(...args: unknown[]) {
-      return mockReleaseAll(...args)
-    }
-  },
 }))
 
 vi.mock('ink', () => ({
@@ -83,13 +73,15 @@ describe('runWatch', () => {
 
     const runPromise = runWatch()
     expect(mockLogger.level).toBe('silent')
+    expect(mockRender).toHaveBeenCalledTimes(1)
+    const element = mockRender.mock.calls[0]?.[0] as { props?: Record<string, unknown> } | undefined
+    expect(element?.props?.enableBackgroundPoller).toBe(false)
 
     wait.resolve()
     await runPromise
 
     expect(mockLogger.level).toBe('info')
     expect(mockClose).toHaveBeenCalled()
-    expect(mockReleaseAll).toHaveBeenCalledWith('poller')
   })
 
   it('restores logger level when waitUntilExit throws', async () => {

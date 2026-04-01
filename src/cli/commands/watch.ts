@@ -2,7 +2,6 @@ import React from 'react'
 import { render } from 'ink'
 import { App } from '../tui/app.js'
 import { initDatabase } from '../../state/db.js'
-import { LeaseManager } from '../../state/leases.js'
 import { resolveConfigPath, loadConfig, ConfigError } from '../../config/loader.js'
 import { logger } from '../../utils/logger.js'
 
@@ -48,7 +47,7 @@ export async function runWatch(globalOpts?: GlobalOpts): Promise<void> {
         config,
         pollIntervalMs,
         dryRun: globalOpts?.dryRun ?? false,
-        enableBackgroundPoller: true,
+        enableBackgroundPoller: false,
       }),
       {
         exitOnCtrlC: false,
@@ -58,14 +57,6 @@ export async function runWatch(globalOpts?: GlobalOpts): Promise<void> {
     await waitUntilExit()
   } finally {
     logger.level = previousLoggerLevel
-
-    // Release any leases held by this process before closing DB
-    try {
-      const leaseManager = new LeaseManager(db)
-      leaseManager.releaseAll('poller')
-    } catch {
-      // DB may already be closed
-    }
 
     if (useAltScreen) {
       process.stdout.write('\u001B[?25h')

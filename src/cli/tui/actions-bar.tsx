@@ -7,6 +7,7 @@ interface ActionsBarProps {
   busy: boolean
   runFocused: boolean
   autoRefresh: boolean
+  controlsEnabled?: boolean
 }
 
 interface ActionHints {
@@ -27,6 +28,8 @@ function globalNavGroup(options: { includePoll: boolean; closeLabel?: '[q]quit' 
 const EXTRA_TAB_NAV_GROUP = '[4]logs [h/l]tabs'
 
 export function buildActionHints(props: ActionsBarProps): ActionHints {
+  const controlsEnabled = props.controlsEnabled ?? true
+
   if (props.activeTab === 'runs') {
     if (props.runFocused) {
       return {
@@ -39,13 +42,15 @@ export function buildActionHints(props: ActionsBarProps): ActionHints {
       }
     }
 
-    const actionHints = props.busy
+    const actionHints = !controlsEnabled
+      ? 'standalone monitor mode (actions run via `night-orch` CLI)'
+      : props.busy
       ? 'actions locked while task is running'
       : '[r]etry [R]etry fresh [b]rebase [s]ync [c]leanup'
 
     return {
       line1: joinHintGroups(
-        globalNavGroup({ includePoll: !props.busy }),
+        globalNavGroup({ includePoll: controlsEnabled && !props.busy }),
         '[j/k]select issue [o/enter]open',
         EXTRA_TAB_NAV_GROUP,
       ),

@@ -102,7 +102,7 @@ program
 
 program
   .command('tui')
-  .description('Interactive monitoring and control TUI with integrated poller and logs')
+  .description('Interactive monitoring TUI (run `night-orch run` in a separate process)')
   .action((_opts, cmd) => runWatch(cmd.parent?.opts()))
 
 program.parse()

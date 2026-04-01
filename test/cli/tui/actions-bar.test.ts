@@ -18,6 +18,20 @@ describe('buildActionHints', () => {
     expect(hints.line2).toContain('[b]rebase')
   })
 
+  it('hides run mutating controls in standalone monitor mode', () => {
+    const hints = buildActionHints({
+      activeTab: 'runs',
+      busy: false,
+      runFocused: false,
+      autoRefresh: true,
+      controlsEnabled: false,
+    })
+
+    expect(hints.line1).not.toContain('[p]poll')
+    expect(hints.line2).toContain('standalone monitor mode')
+    expect(hints.line2).not.toContain('[r]etry')
+  })
+
   it('shows focused run controls when detail view is open', () => {
     const hints = buildActionHints({
       activeTab: 'runs',

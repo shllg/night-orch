@@ -87,11 +87,41 @@ mcp:
   enabled: true
   httpPort: 3100
 
+workflows:
+  dailywerk-hardened:
+    steps:
+      - type: worker
+        id: plan
+        role: planner
+        skipWhen: trivial
+      - type: worker
+        id: code
+        role: coder
+        continueFrom: plan
+      - type: verify
+        id: verify
+      - type: worker
+        id: security
+        role: reviewer
+        prompt: /home/sascha/src/tools/ai-project-runner/.night-orch/prompts/dailywerk-security-review.md
+      - type: worker
+        id: performance
+        role: reviewer
+        continueFrom: security
+        prompt: /home/sascha/src/tools/ai-project-runner/.night-orch/prompts/dailywerk-performance-review.md
+      - type: worker
+        id: review
+        role: reviewer
+        continueFrom: performance
+      - type: decide
+        id: decide
+        onIterate: code
+
 repos:
   - repo: shllg/night-orch
     forge: github
     localPath: ~/src/tools/ai-project-runner
-    maxConcurrentRuns: 1
+    maxConcurrentRuns: 2
     baseBranch: master
     branchPrefix: orch
     labels:
@@ -222,6 +252,7 @@ repos:
         - -C
         - frontend
         - build
+    workflow: dailywerk-hardened
     agents:
       claude: claude
       codex: codex

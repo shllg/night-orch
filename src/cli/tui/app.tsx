@@ -37,6 +37,7 @@ const MAX_LOG_LINES = 500
 const FOCUSED_EVENT_WINDOW_SIZE = 18
 const MIN_LOG_WINDOW_SIZE = 4
 const LOG_WINDOW_RESERVED_ROWS = 17
+const EXIT_GRACE_TIMEOUT_MS = 15_000
 
 export function resolveTabHotkey(input: string): TabId | null {
   if (input === '1') return 'runs'
@@ -151,7 +152,9 @@ export function App({
   const logSequence = useRef(1)
   const pollInFlight = useRef(false)
   const pollPromise = useRef<Promise<unknown> | null>(null)
+  const actionPromise = useRef<Promise<unknown> | null>(null)
   const shuttingDown = useRef(false)
+  const exitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     const onResize = () => setTermRows(stdout.rows ?? 24)
@@ -477,8 +480,10 @@ export function App({
     setActionState({ busy: true, action: actionName })
     setStatusLine(`Running ${actionName}...`)
     appendLog('info', `action ${actionName}: start`)
+    const actionTask = actionFn()
+    actionPromise.current = actionTask
     try {
-      const result = await actionFn()
+      const result = await actionTask
       setStatusLine(`${actionName}: ${result}`)
       appendLog('info', `action ${actionName}: ${result}`)
     } catch (err) {
@@ -486,6 +491,9 @@ export function App({
       setStatusLine(`${actionName} failed: ${message}`)
       appendLog('error', `action ${actionName} failed: ${message}`)
     } finally {
+      if (actionPromise.current === actionTask) {
+        actionPromise.current = null
+      }
       setActionState({ busy: false, action: null })
       setTick((t) => t + 1)
     }
@@ -554,22 +562,49 @@ export function App({
   }, [config, db, issues, runAction, selectedIssue])
 
   const gracefulExit = useCallback(() => {
-    if (shuttingDown.current) return
+    if (shuttingDown.current) {
+      if (exitTimer.current) {
+        clearTimeout(exitTimer.current)
+        exitTimer.current = null
+      }
+      setStatusLine('Forced shutdown')
+      exit()
+      return
+    }
     shuttingDown.current = true
 
-    if (!pollInFlight.current) {
+    const pendingTasks = [pollPromise.current, actionPromise.current].filter(
+      (task): task is Promise<unknown> => task !== null,
+    )
+
+    if (pendingTasks.length === 0) {
       exit()
       return
     }
 
-    setStatusLine('Shutting down — waiting for current operation to finish...')
-    const pending = pollPromise.current
-    if (pending) {
-      void pending.finally(() => exit())
-    } else {
+    setStatusLine('Shutting down — waiting for current operation to finish (press q/Ctrl+C again to force)...')
+    exitTimer.current = setTimeout(() => {
+      setStatusLine('Shutdown timeout reached — forcing exit')
       exit()
-    }
+    }, EXIT_GRACE_TIMEOUT_MS)
+
+    void Promise.allSettled(pendingTasks).finally(() => {
+      if (exitTimer.current) {
+        clearTimeout(exitTimer.current)
+        exitTimer.current = null
+      }
+      exit()
+    })
   }, [exit])
+
+  useEffect(() => {
+    return () => {
+      if (exitTimer.current) {
+        clearTimeout(exitTimer.current)
+        exitTimer.current = null
+      }
+    }
+  }, [])
 
   useInput((input, key) => {
     if (key.ctrl && input === 'c') {
@@ -687,6 +722,13 @@ export function App({
       return
     }
 
+    if (!enableBackgroundPoller) {
+      if (input === 'r' || input === 'R' || input === 'b' || input === 's' || input === 'c' || input === 'p') {
+        setStatusLine('Standalone monitor mode: run actions via `night-orch` CLI')
+      }
+      return
+    }
+
     if (input === 'r') {
       void runRetry()
       return
@@ -780,6 +822,7 @@ export function App({
         busy={actionState.busy}
         runFocused={runsViewMode === 'focus'}
         autoRefresh={autoRefresh}
+        controlsEnabled={enableBackgroundPoller}
       />
     </Box>
   )
