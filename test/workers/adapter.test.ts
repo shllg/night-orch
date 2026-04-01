@@ -280,6 +280,51 @@ describe('CodexWorkerAdapter', () => {
     expect(result.parseError).toBeNull()
     expect((result.parsed as { objective: string }).objective).toBe('Codex plan')
   })
+
+  it('uses `exec resume <sessionId>` when continueSessionId is provided', async () => {
+    mockStreamingExec.mockResolvedValue({
+      stdout: '```json\n{"objective": "Resume plan"}\n```',
+      stderr: '',
+      exitCode: 0,
+      timedOut: false,
+      durationMs: 5000,
+    })
+
+    const codexProfile = {
+      ...baseProfile,
+      type: 'codex' as const,
+      command: 'codex',
+      args: ['exec', '--json'],
+    }
+    await adapter.runTask(makeTaskInput({ profile: codexProfile, continueSessionId: 'session-123' }))
+
+    const call = mockStreamingExec.mock.calls[0]?.[0]
+    expect(call?.args).toEqual(expect.arrayContaining(['exec', 'resume', 'session-123', '--json']))
+    expect(call?.args).not.toContain('--resume')
+  })
+
+  it('skips resume when codex profile args do not include exec', async () => {
+    mockStreamingExec.mockResolvedValue({
+      stdout: '```json\n{"objective": "No resume fallback"}\n```',
+      stderr: '',
+      exitCode: 0,
+      timedOut: false,
+      durationMs: 5000,
+    })
+
+    const codexProfile = {
+      ...baseProfile,
+      type: 'codex' as const,
+      command: 'codex',
+      args: ['--json'],
+    }
+    await adapter.runTask(makeTaskInput({ profile: codexProfile, continueSessionId: 'session-123' }))
+
+    const call = mockStreamingExec.mock.calls[0]?.[0]
+    expect(call?.args).toEqual(expect.arrayContaining(['--json', '--output-last-message']))
+    expect(call?.args).not.toContain('resume')
+    expect(call?.args).not.toContain('--resume')
+  })
 })
 
 describe('createWorkerAdapter (factory)', () => {

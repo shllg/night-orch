@@ -23,10 +23,19 @@ export class CodexWorkerAdapter implements WorkerAdapter {
 
     const taskArgs = [...input.profile.args, '--output-last-message', outputFile]
 
-    // Resume a prior session if available
+    // Resume a prior session if available.
+    // Newer Codex CLI expects: `codex exec resume <sessionId>`.
     if (input.continueSessionId) {
-      taskArgs.push('--resume', input.continueSessionId)
-      logger.info({ role: input.role, sessionId: input.continueSessionId }, 'Resuming Codex session')
+      const execIndex = taskArgs.indexOf('exec')
+      if (execIndex >= 0) {
+        taskArgs.splice(execIndex + 1, 0, 'resume', input.continueSessionId)
+        logger.info({ role: input.role, sessionId: input.continueSessionId }, 'Resuming Codex session')
+      } else {
+        logger.warn(
+          { role: input.role, sessionId: input.continueSessionId, args: input.profile.args },
+          'Codex profile args missing "exec"; running without session resume',
+        )
+      }
     }
     const { command, args } = buildWorkerCommand(input.profile, taskArgs)
 
