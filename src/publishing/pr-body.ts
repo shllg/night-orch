@@ -15,10 +15,37 @@ export interface PRBodyContext {
 }
 
 const MAX_PR_BODY_CHARS = 60_000
+const MAX_PR_TITLE_CHARS = 256
 
-export function compilePRTitle(issueNumber: number, issueTitle: string): string {
-  const base = `[night-orch] #${issueNumber} ${sanitizeTitle(issueTitle)}`
-  return base.length > 256 ? base.slice(0, 253) + '...' : base
+const PREFIX_RULES: Array<{ prefix: string; keywords: string[] }> = [
+  { prefix: 'FIX', keywords: ['bug', 'fix', 'bugfix', 'hotfix', 'regression'] },
+  { prefix: 'FEAT', keywords: ['feat', 'feature', 'enhancement'] },
+  { prefix: 'DOCS', keywords: ['doc', 'docs', 'documentation'] },
+  { prefix: 'REFACTOR', keywords: ['refactor', 'cleanup'] },
+  { prefix: 'PERF', keywords: ['perf', 'performance', 'optimization'] },
+  { prefix: 'TEST', keywords: ['test', 'tests', 'testing'] },
+  { prefix: 'BUILD', keywords: ['build', 'deps', 'dependencies', 'dependency'] },
+  { prefix: 'CI', keywords: ['ci', 'pipeline'] },
+  { prefix: 'STYLE', keywords: ['style', 'format', 'formatting'] },
+  { prefix: 'CHORE', keywords: ['chore', 'maintenance'] },
+]
+
+export function compilePRTitle(issueNumber: number, issueTitle: string, issueLabels: string[] = []): string {
+  const prefix = deriveConventionalPrefix(issueLabels)
+  const suffix = ` (night-orch / #${issueNumber})`
+  const rawTitle = sanitizeTitle(issueTitle)
+  const fixedLength = `[${prefix}] `.length + suffix.length
+
+  if (fixedLength >= MAX_PR_TITLE_CHARS) {
+    return `[${prefix}]${suffix}`.slice(0, MAX_PR_TITLE_CHARS)
+  }
+
+  const maxTitleLength = MAX_PR_TITLE_CHARS - fixedLength
+  const title = rawTitle.length > maxTitleLength
+    ? rawTitle.slice(0, Math.max(0, maxTitleLength - 3)).trimEnd() + '...'
+    : rawTitle
+
+  return `[${prefix}] ${title}${suffix}`
 }
 
 export function compilePRBody(ctx: PRBodyContext): string {
@@ -103,4 +130,25 @@ function sanitizeTitle(title: string): string {
     .replace(/[\r\n]+/g, ' ')
     .replace(/[ \t]{2,}/g, ' ')
     .trim()
+}
+
+function deriveConventionalPrefix(issueLabels: string[]): string {
+  const tokens = new Set(
+    issueLabels.flatMap((label) => tokenizeLabel(label)),
+  )
+
+  for (const rule of PREFIX_RULES) {
+    if (rule.keywords.some((keyword) => tokens.has(keyword))) {
+      return rule.prefix
+    }
+  }
+
+  return 'CHORE'
+}
+
+function tokenizeLabel(label: string): string[] {
+  return label
+    .toLowerCase()
+    .split(/[^a-z0-9]+/g)
+    .filter(Boolean)
 }

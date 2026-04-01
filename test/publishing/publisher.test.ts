@@ -205,7 +205,7 @@ describe('publishPR', () => {
     await publishPR(makeCtx(), forge, db)
 
     expect(forge.createPR).toHaveBeenCalledWith('org/repo', expect.objectContaining({
-      title: '[night-orch] #1 Fix bug',
+      title: '[CHORE] Fix bug (night-orch / #1)',
     }))
   })
 
