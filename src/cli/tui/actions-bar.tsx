@@ -79,10 +79,10 @@ export function buildActionHints(props: ActionsBarProps): ActionHints {
   return {
     line1: joinHintGroups(
       globalNavGroup({ includePoll: false }),
-      '[j/k]scroll logs [f]refresh',
+      '[j/k]select log [J/K]scroll raw [f]refresh',
       EXTRA_TAB_NAV_GROUP,
     ),
-    line2: '',
+    line2: 'inspect full payload in the raw log pane',
   }
 }
 

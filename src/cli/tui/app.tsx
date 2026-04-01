@@ -35,7 +35,8 @@ interface ActionState {
 
 const MAX_LOG_LINES = 500
 const FOCUSED_EVENT_WINDOW_SIZE = 18
-const LOG_WINDOW_SIZE = 18
+const MIN_LOG_WINDOW_SIZE = 4
+const LOG_WINDOW_RESERVED_ROWS = 17
 
 export function resolveTabHotkey(input: string): TabId | null {
   if (input === '1') return 'runs'
@@ -48,6 +49,71 @@ export function resolveTabHotkey(input: string): TabId | null {
 export function moveProjectSelection(current: number, direction: -1 | 1, projectCount: number): number {
   const maxProjectIndex = Math.max(0, projectCount - 1)
   return Math.max(0, Math.min(maxProjectIndex, current + direction))
+}
+
+export function resolveSelectedLogIndex(logs: TuiLogLine[], selectedLogId: number | null): number {
+  if (logs.length === 0) return -1
+  if (selectedLogId === null) return -1
+  return logs.findIndex((line) => line.id === selectedLogId)
+}
+
+interface LogSelectionSnapshot {
+  selectedLogId: number | null
+  selectedLogIndex: number
+  logCount: number
+}
+
+export function reconcileSelectedLogId(
+  logs: TuiLogLine[],
+  selectedLogId: number | null,
+  previousSelectedIndex: number,
+  previousLogCount: number,
+): number | null {
+  if (logs.length === 0) return null
+
+  const previousTailIndex = previousLogCount > 0 ? previousLogCount - 1 : -1
+  const wasAtTail = previousSelectedIndex >= 0 && previousSelectedIndex >= previousTailIndex
+  const selectedIndex = resolveSelectedLogIndex(logs, selectedLogId)
+
+  if (selectedIndex >= 0) {
+    if (wasAtTail && selectedIndex !== logs.length - 1) {
+      return logs[logs.length - 1]!.id
+    }
+    return selectedLogId
+  }
+
+  if (wasAtTail || selectedLogId === null) {
+    return logs[logs.length - 1]!.id
+  }
+
+  const fallbackIndex = Math.max(0, Math.min(logs.length - 1, previousSelectedIndex))
+  return logs[fallbackIndex]!.id
+}
+
+export function moveLogSelection(logs: TuiLogLine[], selectedLogId: number | null, direction: -1 | 1): number | null {
+  if (logs.length === 0) return null
+  const currentIndex = resolveSelectedLogIndex(logs, selectedLogId)
+  const safeIndex = currentIndex >= 0 ? currentIndex : logs.length - 1
+  const nextIndex = Math.max(0, Math.min(logs.length - 1, safeIndex + direction))
+  return logs[nextIndex]!.id
+}
+
+export function reconcileLogSelectionSnapshot(
+  logs: TuiLogLine[],
+  selectedLogId: number | null,
+  previousSelectedIndex: number,
+  previousLogCount: number,
+): LogSelectionSnapshot {
+  const nextSelectedLogId = reconcileSelectedLogId(logs, selectedLogId, previousSelectedIndex, previousLogCount)
+  return {
+    selectedLogId: nextSelectedLogId,
+    selectedLogIndex: resolveSelectedLogIndex(logs, nextSelectedLogId),
+    logCount: logs.length,
+  }
+}
+
+export function resolveLogWindowSize(termRows: number): number {
+  return Math.max(MIN_LOG_WINDOW_SIZE, termRows - LOG_WINDOW_RESERVED_ROWS)
 }
 
 export function App({
@@ -72,13 +138,16 @@ export function App({
   const [lastRefreshAt, setLastRefreshAt] = useState(new Date().toISOString())
   const [titleLookup, setTitleLookup] = useState<TitleLookup>({ issues: {}, prs: {} })
   const [runEventScrollOffset, setRunEventScrollOffset] = useState(0)
-  const [logScrollOffset, setLogScrollOffset] = useState(0)
+  const [selectedLogId, setSelectedLogId] = useState<number | null>(null)
+  const [logDetailScrollOffset, setLogDetailScrollOffset] = useState(0)
   const [logLines, setLogLines] = useState<TuiLogLine[]>([])
   const [startupReady, setStartupReady] = useState(!enableBackgroundPoller)
 
   const attemptedIssueKeys = useRef<Set<string>>(new Set())
   const attemptedPrKeys = useRef<Set<string>>(new Set())
   const lastHydrationAt = useRef(0)
+  const lastLogCount = useRef(0)
+  const selectedLogIndexRef = useRef(-1)
   const logSequence = useRef(1)
   const pollInFlight = useRef(false)
   const pollPromise = useRef<Promise<unknown> | null>(null)
@@ -105,11 +174,6 @@ export function App({
       return next.slice(next.length - MAX_LOG_LINES)
     })
   }, [])
-
-  useEffect(() => {
-    const maxOffset = Math.max(0, logLines.length - LOG_WINDOW_SIZE)
-    setLogScrollOffset((current) => Math.min(current, maxOffset))
-  }, [logLines.length])
 
   const forgeByRepo = useMemo(() => {
     const map = new Map<string, ReturnType<typeof createForgeAdapter>>()
@@ -180,6 +244,24 @@ export function App({
   )
   const mergeBatches = useMemo(() => loadMergeBatches(db), [db, tick])
   const stats = useMemo(() => loadTuiStats(db), [db, tick])
+  const logWindowSize = useMemo(() => resolveLogWindowSize(termRows), [termRows])
+  const selectedLogIndex = useMemo(() => resolveSelectedLogIndex(logLines, selectedLogId), [logLines, selectedLogId])
+
+  useEffect(() => {
+    const snapshot = reconcileLogSelectionSnapshot(
+      logLines,
+      selectedLogId,
+      selectedLogIndexRef.current,
+      lastLogCount.current,
+    )
+    setSelectedLogId(snapshot.selectedLogId)
+    selectedLogIndexRef.current = snapshot.selectedLogIndex
+    lastLogCount.current = snapshot.logCount
+  }, [logLines, selectedLogId])
+
+  useEffect(() => {
+    setLogDetailScrollOffset(0)
+  }, [selectedLogId])
 
   useEffect(() => {
     const maxOffset = Math.max(0, selectedRunEvents.length - FOCUSED_EVENT_WINDOW_SIZE)
@@ -561,11 +643,23 @@ export function App({
 
     if (activeTab === 'logs') {
       if (key.downArrow || input === 'j') {
-        setLogScrollOffset((current) => current + 1)
+        const nextId = moveLogSelection(logLines, selectedLogId, 1)
+        setSelectedLogId(nextId)
+        selectedLogIndexRef.current = resolveSelectedLogIndex(logLines, nextId)
         return
       }
       if (key.upArrow || input === 'k') {
-        setLogScrollOffset((current) => Math.max(0, current - 1))
+        const nextId = moveLogSelection(logLines, selectedLogId, -1)
+        setSelectedLogId(nextId)
+        selectedLogIndexRef.current = resolveSelectedLogIndex(logLines, nextId)
+        return
+      }
+      if (input === 'J') {
+        setLogDetailScrollOffset((current) => current + 1)
+        return
+      }
+      if (input === 'K') {
+        setLogDetailScrollOffset((current) => Math.max(0, current - 1))
         return
       }
     }
@@ -671,11 +765,14 @@ export function App({
         />
       )}
       {activeTab === 'logs' && (
-        <LogsView
-          logs={logLines}
-          scrollOffset={logScrollOffset}
-          windowSize={LOG_WINDOW_SIZE}
-        />
+        <Box flexGrow={1} minHeight={0}>
+          <LogsView
+            logs={logLines}
+            selectedIndex={selectedLogIndex}
+            windowSize={logWindowSize}
+            detailScrollOffset={logDetailScrollOffset}
+          />
+        </Box>
       )}
 
       <ActionsBar

@@ -67,8 +67,8 @@ describe('buildActionHints', () => {
       autoRefresh: false,
     })
 
-    expect(hints.line1).toContain('[j/k]scroll logs [f]refresh')
+    expect(hints.line1).toContain('[j/k]select log [J/K]scroll raw [f]refresh')
     expect(hints.line1).toContain('[1]issues [2]projects [3]stats [q]quit')
-    expect(hints.line2).toBe('')
+    expect(hints.line2).toContain('raw log pane')
   })
 })
