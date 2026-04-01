@@ -8,6 +8,8 @@ export interface PartitionedRows<T> {
   recent: T[]
 }
 
+export type MetricColor = 'white' | 'gray' | 'green' | 'yellow' | 'red' | 'cyan' | 'magenta'
+
 export function sliceWindow<T>(rows: T[], selectedIndex: number, windowSize: number): WindowedSlice<T> {
   if (rows.length === 0) return { start: 0, rows: [] }
   const safeWindow = Math.max(1, windowSize)
@@ -58,4 +60,37 @@ export function buildSparkline(values: number[]): string {
       return bars[index] ?? '▁'
     })
     .join('')
+}
+
+export function colorForHigherIsBetter(value: number, greenAt: number, yellowAt: number): MetricColor {
+  if (value >= greenAt) return 'green'
+  if (value >= yellowAt) return 'yellow'
+  return 'red'
+}
+
+export function colorForLowerIsBetter(value: number, greenAt: number, yellowAt: number): MetricColor {
+  if (value <= greenAt) return 'green'
+  if (value <= yellowAt) return 'yellow'
+  return 'red'
+}
+
+export function colorForPresence(value: number, yellowAt = 1, redAt = 3): MetricColor {
+  if (value < yellowAt) return 'green'
+  if (value < redAt) return 'yellow'
+  return 'red'
+}
+
+export function colorForRatioToBaseline(
+  value: number,
+  baseline: number,
+  greenAtRatio: number,
+  yellowAtRatio: number,
+): MetricColor {
+  if (baseline <= 0) {
+    return value <= 0 ? 'green' : 'yellow'
+  }
+  const ratio = value / baseline
+  if (ratio <= greenAtRatio) return 'green'
+  if (ratio <= yellowAtRatio) return 'yellow'
+  return 'red'
 }

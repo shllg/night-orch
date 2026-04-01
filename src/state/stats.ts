@@ -32,6 +32,11 @@ export interface DailyCostAggregate {
   runCount: number
 }
 
+export interface ErrorPatternAggregate {
+  pattern: string
+  count: number
+}
+
 export interface TuiStatsSnapshot {
   readonly updatedAt: string
   readonly overview: {
@@ -57,6 +62,11 @@ export interface TuiStatsSnapshot {
     avgDurationMinutes7d: number
     avgIterations7d: number
   }
+  readonly reliability: {
+    failureCount7d: number
+    failureRate7d: number
+    topErrorPatterns7d: ErrorPatternAggregate[]
+  }
   readonly cost: {
     todayCostUsd: number
     todayRunCount: number
@@ -64,6 +74,28 @@ export interface TuiStatsSnapshot {
     cost30d: number
     avgDailyCost7d: number
     dailyHistory: DailyCostAggregate[]
+  }
+  readonly efficiency: {
+    totalCostUsd7d: number
+    avgCostPerRun7d: number
+    avgCostPerSuccess7d: number
+    avgCostPerIteration7d: number
+    completedPerDollar7d: number
+  }
+  readonly resources: {
+    activeLeases: number
+    expiringLeases: number
+    expiredLeases: number
+    leasedRepos: number
+    activeWorktrees: number
+    missingWorktrees: number
+    staleWorktrees: number
+  }
+  readonly timing: {
+    sampleSize30d: number
+    p50Minutes: number
+    p90Minutes: number
+    p99Minutes: number
   }
   readonly queue: {
     activeBatches: number
@@ -147,6 +179,18 @@ export function loadTuiStats(db: Database.Database): TuiStatsSnapshot {
     )
     .get() as ThroughputRow | undefined
 
+  const efficiencyRow = db
+    .prepare(
+      `SELECT
+         COUNT(*) AS runs_7d,
+         SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed_7d,
+         SUM(COALESCE(estimated_cost_usd, 0)) AS total_cost_usd_7d,
+         SUM(COALESCE(iteration_count, 0)) AS total_iterations_7d
+       FROM runs
+       WHERE datetime(created_at) >= datetime('now', '-7 days')`,
+    )
+    .get() as EfficiencyRow | undefined
+
   const costRow = db
     .prepare(
       `SELECT
@@ -167,6 +211,82 @@ export function loadTuiStats(db: Database.Database): TuiStatsSnapshot {
        ORDER BY date DESC`,
     )
     .all() as DailyCostRow[]
+
+  const errorMessages = db
+    .prepare(
+      `SELECT COALESCE(NULLIF(TRIM(block_reason), ''), NULLIF(TRIM(last_error), '')) AS message
+       FROM runs
+       WHERE datetime(created_at) >= datetime('now', '-7 days')
+         AND status IN ('blocked', 'error')
+         AND COALESCE(NULLIF(TRIM(block_reason), ''), NULLIF(TRIM(last_error), '')) IS NOT NULL
+       ORDER BY datetime(updated_at) DESC
+       LIMIT 200`,
+    )
+    .all() as ErrorMessageRow[]
+
+  const leaseHealthRow = db
+    .prepare(
+      `SELECT
+         SUM(CASE WHEN datetime(leased_until) >= datetime('now') THEN 1 ELSE 0 END) AS active_leases,
+         SUM(
+           CASE
+             WHEN datetime(leased_until) >= datetime('now')
+               AND datetime(leased_until) <= datetime('now', '+30 minutes')
+             THEN 1
+             ELSE 0
+           END
+         ) AS expiring_leases,
+         SUM(CASE WHEN datetime(leased_until) < datetime('now') THEN 1 ELSE 0 END) AS expired_leases,
+         COUNT(DISTINCT CASE WHEN datetime(leased_until) >= datetime('now') THEN repo ELSE NULL END) AS leased_repos
+       FROM leases`,
+    )
+    .get() as LeaseHealthRow | undefined
+
+  const worktreeHealthRow = db
+    .prepare(
+      `SELECT
+         COUNT(
+           DISTINCT CASE
+             WHEN status IN ('queued', 'running', 'blocked', 'review_ready', 'error')
+               AND worktree_path IS NOT NULL
+               AND TRIM(worktree_path) != ''
+             THEN worktree_path
+             ELSE NULL
+           END
+         ) AS active_worktrees,
+         SUM(
+           CASE
+             WHEN status IN ('queued', 'running', 'blocked', 'review_ready', 'error')
+               AND (worktree_path IS NULL OR TRIM(worktree_path) = '')
+             THEN 1
+             ELSE 0
+           END
+         ) AS missing_worktrees,
+         COUNT(
+           DISTINCT CASE
+             WHEN status = 'completed'
+               AND worktree_path IS NOT NULL
+               AND TRIM(worktree_path) != ''
+               AND datetime(COALESCE(ended_at, updated_at, created_at)) < datetime('now', '-24 hours')
+             THEN worktree_path
+             ELSE NULL
+           END
+         ) AS stale_worktrees
+       FROM runs`,
+    )
+    .get() as WorktreeHealthRow | undefined
+
+  const durationRows = db
+    .prepare(
+      `SELECT (julianday(ended_at) - julianday(started_at)) * 24 * 60 AS duration_minutes
+       FROM runs
+       WHERE datetime(created_at) >= datetime('now', '-30 days')
+         AND status IN ('completed', 'blocked', 'error')
+         AND started_at IS NOT NULL
+         AND ended_at IS NOT NULL
+       ORDER BY duration_minutes ASC`,
+    )
+    .all() as DurationRow[]
 
   const queueStatuses = db
     .prepare(
@@ -234,8 +354,27 @@ export function loadTuiStats(db: Database.Database): TuiStatsSnapshot {
   const completed7d = toNumber(throughputRow?.completed_7d)
   const blocked7d = toNumber(throughputRow?.blocked_7d)
   const error7d = toNumber(throughputRow?.error_7d)
+  const runs7d = toNumber(throughputRow?.runs_7d)
   const terminal7d = completed7d + blocked7d + error7d
   const successRate7d = terminal7d > 0 ? (completed7d / terminal7d) * 100 : 0
+  const failureCount7d = blocked7d + error7d
+  const failureRate7d = terminal7d > 0 ? (failureCount7d / terminal7d) * 100 : 0
+  const topErrorPatterns7d = summarizeErrorPatterns(errorMessages.map((row) => row.message))
+
+  const totalCostUsd7d = toNumber(efficiencyRow?.total_cost_usd_7d)
+  const completedRunsForEfficiency = toNumber(efficiencyRow?.completed_7d)
+  const totalIterations7d = toNumber(efficiencyRow?.total_iterations_7d)
+  const runsForEfficiency = toNumber(efficiencyRow?.runs_7d)
+
+  const avgCostPerRun7d = runsForEfficiency > 0 ? totalCostUsd7d / runsForEfficiency : 0
+  const avgCostPerSuccess7d = completedRunsForEfficiency > 0 ? totalCostUsd7d / completedRunsForEfficiency : 0
+  const avgCostPerIteration7d = totalIterations7d > 0 ? totalCostUsd7d / totalIterations7d : 0
+  const completedPerDollar7d = totalCostUsd7d > 0 ? completedRunsForEfficiency / totalCostUsd7d : 0
+
+  const durations = durationRows
+    .map((row) => toNumber(row.duration_minutes))
+    .filter((duration) => duration > 0)
+    .sort((a, b) => a - b)
 
   return {
     updatedAt: new Date().toISOString(),
@@ -259,7 +398,7 @@ export function loadTuiStats(db: Database.Database): TuiStatsSnapshot {
     })),
     throughput: {
       runs24h: toNumber(throughputRow?.runs_24h),
-      runs7d: toNumber(throughputRow?.runs_7d),
+      runs7d,
       runs30d: toNumber(throughputRow?.runs_30d),
       completed7d,
       blocked7d,
@@ -267,6 +406,11 @@ export function loadTuiStats(db: Database.Database): TuiStatsSnapshot {
       successRate7d,
       avgDurationMinutes7d: toNumber(throughputRow?.avg_duration_min_7d),
       avgIterations7d: toNumber(throughputRow?.avg_iterations_7d),
+    },
+    reliability: {
+      failureCount7d,
+      failureRate7d,
+      topErrorPatterns7d,
     },
     cost: {
       todayCostUsd: toNumber(costRow?.today_cost_usd),
@@ -279,6 +423,28 @@ export function loadTuiStats(db: Database.Database): TuiStatsSnapshot {
         totalCostUsd: toNumber(row.total_cost_usd),
         runCount: toNumber(row.run_count),
       })),
+    },
+    efficiency: {
+      totalCostUsd7d,
+      avgCostPerRun7d,
+      avgCostPerSuccess7d,
+      avgCostPerIteration7d,
+      completedPerDollar7d,
+    },
+    resources: {
+      activeLeases: toNumber(leaseHealthRow?.active_leases),
+      expiringLeases: toNumber(leaseHealthRow?.expiring_leases),
+      expiredLeases: toNumber(leaseHealthRow?.expired_leases),
+      leasedRepos: toNumber(leaseHealthRow?.leased_repos),
+      activeWorktrees: toNumber(worktreeHealthRow?.active_worktrees),
+      missingWorktrees: toNumber(worktreeHealthRow?.missing_worktrees),
+      staleWorktrees: toNumber(worktreeHealthRow?.stale_worktrees),
+    },
+    timing: {
+      sampleSize30d: durations.length,
+      p50Minutes: calculatePercentile(durations, 0.5),
+      p90Minutes: calculatePercentile(durations, 0.9),
+      p99Minutes: calculatePercentile(durations, 0.99),
     },
     queue: {
       activeBatches: toNumber(queueActive?.count),
@@ -322,6 +488,67 @@ function toNumber(value: number | bigint | string | null | undefined): number {
   return 0
 }
 
+function calculatePercentile(sortedValues: number[], percentile: number): number {
+  if (sortedValues.length === 0) return 0
+  const clamped = Math.min(1, Math.max(0, percentile))
+  const position = clamped * (sortedValues.length - 1)
+  const lowerIndex = Math.floor(position)
+  const upperIndex = Math.ceil(position)
+
+  const lowerValue = sortedValues[lowerIndex] ?? 0
+  const upperValue = sortedValues[upperIndex] ?? lowerValue
+  if (lowerIndex === upperIndex) return lowerValue
+
+  const weight = position - lowerIndex
+  return lowerValue + ((upperValue - lowerValue) * weight)
+}
+
+function summarizeErrorPatterns(messages: Array<string | null | undefined>): ErrorPatternAggregate[] {
+  const patterns = new Map<string, { count: number; pattern: string }>()
+
+  for (const message of messages) {
+    if (typeof message !== 'string') continue
+    const normalizedWhitespace = message.replace(/\s+/g, ' ').trim()
+    if (!normalizedWhitespace) continue
+
+    const key = normalizeErrorPattern(normalizedWhitespace)
+    const existing = patterns.get(key)
+    if (existing) {
+      existing.count += 1
+      continue
+    }
+    patterns.set(key, {
+      count: 1,
+      pattern: truncateErrorPattern(normalizedWhitespace, 80),
+    })
+  }
+
+  return [...patterns.values()]
+    .sort((a, b) => b.count - a.count || a.pattern.localeCompare(b.pattern))
+    .slice(0, 4)
+    .map((entry) => ({
+      pattern: entry.pattern,
+      count: entry.count,
+    }))
+}
+
+function normalizeErrorPattern(message: string): string {
+  return message
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, '<url>')
+    .replace(/0x[0-9a-f]+/gi, '<hex>')
+    .replace(/\b[0-9a-f]{7,40}\b/gi, '<id>')
+    .replace(/#[0-9]+\b/g, '#<n>')
+    .replace(/\b\d+(\.\d+)?\b/g, '<n>')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function truncateErrorPattern(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value
+  return `${value.slice(0, maxLength - 3)}...`
+}
+
 interface OverviewRow {
   total_runs: number | null
   active_runs: number | null
@@ -342,6 +569,13 @@ interface ThroughputRow {
   error_7d: number | null
   avg_duration_min_7d: number | null
   avg_iterations_7d: number | null
+}
+
+interface EfficiencyRow {
+  runs_7d: number | null
+  completed_7d: number | null
+  total_cost_usd_7d: number | null
+  total_iterations_7d: number | null
 }
 
 interface CostRow {
@@ -365,6 +599,10 @@ interface DailyCostRow {
   date: string
   total_cost_usd: number | null
   run_count: number | null
+}
+
+interface ErrorMessageRow {
+  message: string | null
 }
 
 interface StatusCountRow {
@@ -395,4 +633,21 @@ interface RepoRow {
 
 interface CountRow {
   count: number | null
+}
+
+interface LeaseHealthRow {
+  active_leases: number | null
+  expiring_leases: number | null
+  expired_leases: number | null
+  leased_repos: number | null
+}
+
+interface WorktreeHealthRow {
+  active_worktrees: number | null
+  missing_worktrees: number | null
+  stale_worktrees: number | null
+}
+
+interface DurationRow {
+  duration_minutes: number | null
 }
