@@ -77,7 +77,7 @@ export function RunsView({
                   {'  '}
                   <Text>{truncate(issueTitle, 58)}</Text>
                 </Text>
-                <Text color="gray">
+                <Text dimColor>
                   {'    '}
                   <Text>{run.pr_number !== null ? `PR #${run.pr_number} ${truncate(prTitle ?? '(title unavailable)', 40)}` : 'No PR yet'}</Text>
                   {'  '}
@@ -106,7 +106,7 @@ export function RunsView({
               <Text color={STATUS_COLORS[selectedRun.status] ?? 'white'}>{selectedRun.status}</Text>
               <Text>{truncate(resolveIssueTitle(selectedRun, titleLookup) ?? '(title unavailable)', 46)}</Text>
               {selectedRun.pr_number !== null && (
-                <Text color="gray">PR #{selectedRun.pr_number}: {truncate(resolvePrTitle(selectedRun, titleLookup) ?? '(title unavailable)', 36)}</Text>
+                <Text dimColor>PR #{selectedRun.pr_number}: {truncate(resolvePrTitle(selectedRun, titleLookup) ?? '(title unavailable)', 36)}</Text>
               )}
 
               <Box marginTop={1} flexDirection="column">
@@ -134,7 +134,7 @@ export function RunsView({
 
       <Box marginBottom={1} flexDirection="column">
         <Text bold>System Snapshot</Text>
-        <Text color="gray">
+        <Text dimColor>
           {'  '}active {stats.overview.activeRuns}  running {stats.overview.runningRuns}  queued {stats.overview.queuedRuns}  merge queue {mergeBatches.length}
         </Text>
         {mergeBatches.slice(0, 3).map((batch) => (
@@ -188,16 +188,16 @@ function FocusedRunView({
               <Text color={STATUS_COLORS[selectedRun.status] ?? 'white'}>{selectedRun.status}</Text>
               <Text>{resolveIssueTitle(selectedRun, titleLookup) ?? '(title unavailable)'}</Text>
               {selectedRun.pr_number !== null && (
-                <Text color="gray">PR #{selectedRun.pr_number}: {resolvePrTitle(selectedRun, titleLookup) ?? '(title unavailable)'}</Text>
+                <Text dimColor>PR #{selectedRun.pr_number}: {resolvePrTitle(selectedRun, titleLookup) ?? '(title unavailable)'}</Text>
               )}
-              <Text color="gray">phase {selectedRun.current_phase ?? '-'}</Text>
-              <Text color="gray">iter {selectedRun.iteration_count ?? 0}  cost ${(selectedRun.estimated_cost_usd ?? 0).toFixed(2)}</Text>
-              <Text color="gray">updated {formatTime(selectedRun.updated_at)}</Text>
+              <Text>phase {selectedRun.current_phase ?? '-'}</Text>
+              <Text>iter {selectedRun.iteration_count ?? 0}  cost ${(selectedRun.estimated_cost_usd ?? 0).toFixed(2)}</Text>
+              <Text dimColor>updated {formatTime(selectedRun.updated_at)}</Text>
               {selectedRun.last_error && <Text color="red">error: {truncate(selectedRun.last_error, 90)}</Text>}
               <Box marginTop={1} flexDirection="column">
                 <Text bold>System</Text>
-                <Text color="gray">active runs {stats.overview.activeRuns}</Text>
-                <Text color="gray">merge queue {mergeBatches.length}</Text>
+                <Text>active runs {stats.overview.activeRuns}</Text>
+                <Text>merge queue {mergeBatches.length}</Text>
               </Box>
             </Box>
 

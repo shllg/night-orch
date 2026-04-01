@@ -4,9 +4,21 @@ export function createLogger(
   level = 'info',
   options: { destination?: 'stdout' | 'stderr'; pretty?: boolean } = {},
 ): pino.Logger {
-  const destination = options.destination ?? 'stdout'
+  const dest = options.destination ?? 'stderr'
   const pretty = options.pretty ?? true
-  const stream = destination === 'stderr' ? pino.destination(2) : undefined
+  const fd = dest === 'stderr' ? 2 : 1
+  const isTTY = dest === 'stderr' ? process.stderr.isTTY : process.stdout.isTTY
+
+  if (pretty && isTTY) {
+    return pino({
+      level,
+      redact: {
+        paths: ['*.token', '*.apiKey', '*.secret', '*.password', 'headers.authorization'],
+        censor: '[REDACTED]',
+      },
+      transport: { target: 'pino-pretty', options: { colorize: true, destination: fd } },
+    })
+  }
 
   return pino(
     {
@@ -15,12 +27,8 @@ export function createLogger(
         paths: ['*.token', '*.apiKey', '*.secret', '*.password', 'headers.authorization'],
         censor: '[REDACTED]',
       },
-      transport:
-        !stream && pretty && process.stdout.isTTY
-          ? { target: 'pino-pretty', options: { colorize: true } }
-          : undefined,
     },
-    stream,
+    pino.destination(fd),
   )
 }
 

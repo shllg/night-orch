@@ -29,6 +29,7 @@ import { logger } from '../utils/logger.js'
 import type { RunContext } from '../loop/types.js'
 import type { NotificationPayload } from '../notify/types.js'
 import { postPlanSummaryComment } from '../loop/plan-summary-comment.js'
+import { executeRebase } from '../ops/rebase-and-check.js'
 import { markerTag, upsertBotComment } from '../forge/bot-comment.js'
 import { formatStatusComment } from '../forge/status-comment.js'
 import { scanForReactions } from '../reactions/scanner.js'
@@ -216,9 +217,13 @@ export async function pollOnce(
         // Notify
         await notifier.dispatch(makePayload('run_started', repoConfig.repo, discoveredIssue.issue))
 
+        // Detect rebase mode from queued run's phaseData
+        const isRebaseRun = queuedRun?.phaseData?.reactionType === 'rebase'
+
         // Check if prior run left tainted work that should be discarded
+        // Never reset to base for rebase runs — we need the existing branch
         const planningMode = isPlanningIssue(discoveredIssue.issue.labels, repoConfig)
-        const resetToBase = planningMode || shouldResetBranch(runManager, repoConfig.repo, discoveredIssue.issue.number, run.id)
+        const resetToBase = !isRebaseRun && (planningMode || shouldResetBranch(runManager, repoConfig.repo, discoveredIssue.issue.number, run.id))
 
         // Create worktree
         await worktreeManager.ensure({
@@ -228,6 +233,76 @@ export async function pollOnce(
           worktreePath,
           resetToBase,
         })
+
+        // Execute rebase if this is a rebase-queued run
+        if (isRebaseRun) {
+          logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, runId: run.id }, 'Executing rebase for queued rebase run')
+          const verifyCommands = repoConfig.verify ?? []
+          const rebaseResult = await executeRebase(
+            repoConfig.localPath,
+            worktreePath,
+            branch,
+            repoConfig.baseBranch,
+            repoConfig.repo,
+            discoveredIssue.issue.number,
+            verifyCommands,
+          )
+
+          if (rebaseResult.conflict) {
+            // Rebase had conflicts — block the run, needs human intervention
+            runManager.update(run.id, {
+              status: 'blocked',
+              lastError: 'Rebase failed due to merge conflicts — requires manual resolution',
+              endedAt: new Date().toISOString(),
+            })
+            const latestIssue = await forge.getIssue(repoConfig.repo, discoveredIssue.issue.number)
+            await transitionLabels(forge, repoConfig.repo, discoveredIssue.issue.number, latestIssue.labels, 'running', 'blocked', labelConfig)
+            await notifier.dispatch(makePayload('blocked', repoConfig.repo, discoveredIssue.issue, {
+              summary: 'Rebase failed due to merge conflicts',
+              blockingReason: 'merge_conflict',
+            }))
+            leaseManager.release(repoConfig.repo, discoveredIssue.issue.number)
+            errors++
+            continue
+          }
+
+          if (rebaseResult.rebased && rebaseResult.verifyPassed) {
+            // Rebase succeeded and verify passes — done, transition back to review_ready
+            logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number }, 'Rebase succeeded, verify passed — returning to review_ready')
+            runManager.update(run.id, {
+              status: 'review_ready',
+              endedAt: new Date().toISOString(),
+              lastError: null,
+            })
+            const latestIssue = await forge.getIssue(repoConfig.repo, discoveredIssue.issue.number)
+            await transitionLabels(forge, repoConfig.repo, discoveredIssue.issue.number, latestIssue.labels, 'running', 'review_ready', labelConfig)
+            await notifier.dispatch(makePayload('pr_ready', repoConfig.repo, discoveredIssue.issue, {
+              summary: 'Rebased successfully, verify passed',
+            }))
+            leaseManager.release(repoConfig.repo, discoveredIssue.issue.number)
+            processed++
+            continue
+          }
+
+          if (!rebaseResult.rebased && rebaseResult.verifyPassed) {
+            // Already up-to-date and verify passes — nothing to do
+            logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number }, 'Branch already up to date — returning to review_ready')
+            runManager.update(run.id, {
+              status: 'review_ready',
+              endedAt: new Date().toISOString(),
+              lastError: null,
+            })
+            const latestIssue = await forge.getIssue(repoConfig.repo, discoveredIssue.issue.number)
+            await transitionLabels(forge, repoConfig.repo, discoveredIssue.issue.number, latestIssue.labels, 'running', 'review_ready', labelConfig)
+            leaseManager.release(repoConfig.repo, discoveredIssue.issue.number)
+            processed++
+            continue
+          }
+
+          // Rebase succeeded but verify failed — fall through to the loop engine
+          // so the coder can fix the issues introduced by upstream changes
+          logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number }, 'Rebase done but verify failed — entering code loop to fix')
+        }
 
         if (repoConfig.environment) {
           const mode = resolveEnvironmentMode(discoveredIssue.issue.labels, repoConfig)
@@ -279,7 +354,7 @@ export async function pollOnce(
           terminalStatus: 'running',
           phaseHistory: [],
           dryRun: false,
-          runMode: 'fresh',
+          runMode: isRebaseRun ? 'rebase' : 'fresh',
           blockReason: null,
           prReviewFeedback: null,
           sessionIds: {},

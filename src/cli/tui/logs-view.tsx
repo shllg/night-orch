@@ -17,13 +17,13 @@ export function LogsView({ logs, scrollOffset, windowSize }: LogsViewProps): Rea
   return (
     <Box flexDirection="column" marginBottom={1}>
       <Text bold>Logs</Text>
-      <Text color="gray">Integrated poller output and control actions</Text>
+      <Text dimColor>Integrated poller output and control actions</Text>
       <Box marginTop={1} flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
         {rows.length === 0 && <Text color="gray">No logs yet</Text>}
         {rows.map((line) => (
           <Text
             key={line.id}
-            color={line.level === 'error' ? 'red' : line.level === 'warn' ? 'yellow' : 'gray'}
+            color={line.level === 'error' ? 'red' : line.level === 'warn' ? 'yellow' : 'white'}
           >
             {formatLogLine(line, 200)}
           </Text>

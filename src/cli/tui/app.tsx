@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { Box, Text, useApp, useInput } from 'ink'
+import { Box, Text, useApp, useInput, useStdout } from 'ink'
 import type { Config } from '../../config/schema.js'
 import { RetryEngine } from '../../ops/retry.js'
 import { SyncEngine } from '../../ops/sync.js'
@@ -44,7 +44,9 @@ export function App({
   enableBackgroundPoller = true,
 }: AppProps): React.ReactElement {
   const { exit } = useApp()
+  const { stdout } = useStdout()
 
+  const [termRows, setTermRows] = useState(stdout.rows ?? 24)
   const [tick, setTick] = useState(0)
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [statusLine, setStatusLine] = useState('Ready')
@@ -64,6 +66,14 @@ export function App({
   const lastHydrationAt = useRef(0)
   const logSequence = useRef(1)
   const pollInFlight = useRef(false)
+  const pollPromise = useRef<Promise<unknown> | null>(null)
+  const shuttingDown = useRef(false)
+
+  useEffect(() => {
+    const onResize = () => setTermRows(stdout.rows ?? 24)
+    stdout.on('resize', onResize)
+    return () => { stdout.off('resize', onResize) }
+  }, [stdout])
 
   const appendLog = useCallback((level: TuiLogLine['level'], message: string) => {
     setLogLines((current) => {
@@ -265,7 +275,7 @@ export function App({
       return 'poll already in progress'
     }
     pollInFlight.current = true
-    try {
+    const p = (async () => {
       const targetIssue = trigger === 'manual' && targetRun
         ? { repo: targetRun.repo, issueNumber: targetRun.issue_number }
         : undefined
@@ -274,11 +284,16 @@ export function App({
       const summary = `${result.processed} processed, ${result.errors} error(s)${targetSuffix}${dryRun ? ' (dry-run)' : ''}`
       appendLog('info', `${trigger} poll: ${summary}`)
       return summary
+    })()
+    pollPromise.current = p
+    try {
+      return await p
     } catch (err) {
       appendLog('error', `${trigger} poll failed: ${(err as Error).message}`)
       throw err
     } finally {
       pollInFlight.current = false
+      pollPromise.current = null
       setTick((t) => t + 1)
     }
   }, [appendLog, config, db, dryRun])
@@ -288,7 +303,7 @@ export function App({
     let stopped = false
 
     const cycle = async () => {
-      if (stopped) return
+      if (stopped || shuttingDown.current) return
       try {
         const summary = await runPollCycle('auto')
         setStatusLine(`poll: ${summary}`)
@@ -414,9 +429,27 @@ export function App({
     })
   }, [config, db, runAction, runs, selectedRun])
 
+  const gracefulExit = useCallback(() => {
+    if (shuttingDown.current) return
+    shuttingDown.current = true
+
+    if (!pollInFlight.current) {
+      exit()
+      return
+    }
+
+    setStatusLine('Shutting down — waiting for current operation to finish...')
+    const pending = pollPromise.current
+    if (pending) {
+      void pending.finally(() => exit())
+    } else {
+      exit()
+    }
+  }, [exit])
+
   useInput((input, key) => {
     if (key.ctrl && input === 'c') {
-      exit()
+      gracefulExit()
       return
     }
 
@@ -437,7 +470,7 @@ export function App({
     }
 
     if (input === 'q') {
-      exit()
+      gracefulExit()
       return
     }
 
@@ -538,7 +571,7 @@ export function App({
   const runsVisible = runsViewMode === 'focus' ? 8 : 10
 
   return (
-    <Box flexDirection="column" height="100%">
+    <Box flexDirection="column" height={termRows}>
       <Header
         activeTab={activeTab}
         pollIntervalMs={pollIntervalMs}

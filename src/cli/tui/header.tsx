@@ -23,9 +23,9 @@ export function Header({
   lastRefreshAt,
 }: HeaderProps): React.ReactElement {
   return (
-    <Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="cyan" paddingX={1}>
+    <Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="blue" paddingX={1}>
       <Box>
-        <Text bold color="cyan">NIGHT-ORCH CONTROL ROOM</Text>
+        <Text bold color="white">NIGHT-ORCH CONTROL ROOM</Text>
         <Text color="gray">  refresh {pollIntervalMs / 1000}s</Text>
         {dryRun && <Text color="yellow">  [dry-run]</Text>}
         <Text color={autoRefresh ? 'green' : 'yellow'}>  {autoRefresh ? '● live' : '○ paused'}</Text>
@@ -34,13 +34,13 @@ export function Header({
       <Box>
         {TABS.map((tab) => (
           <Box key={tab.id} marginRight={2}>
-            <Text color={activeTab === tab.id ? 'cyan' : 'gray'}>
+            <Text bold={activeTab === tab.id} color={activeTab === tab.id ? 'white' : 'gray'}>
               {activeTab === tab.id ? '▸' : ' '}[{tab.hotkey}] {tab.label}
             </Text>
           </Box>
         ))}
       </Box>
-      <Text color="gray">
+      <Text dimColor>
         runs {status.overview.totalRuns}  active {status.overview.activeRuns}  queued {status.overview.queuedRuns}  running {status.overview.runningRuns}  cost today ${status.cost.todayCostUsd.toFixed(2)}
       </Text>
     </Box>

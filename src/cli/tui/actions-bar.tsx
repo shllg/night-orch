@@ -45,8 +45,8 @@ export function ActionsBar(props: ActionsBarProps): React.ReactElement {
 
   return (
     <Box marginTop={1} flexDirection="column">
-      <Text color="gray">{hints.line1}</Text>
-      <Text color="gray">{hints.line2}</Text>
+      <Text dimColor>{hints.line1}</Text>
+      <Text dimColor>{hints.line2}</Text>
     </Box>
   )
 }
