@@ -286,6 +286,7 @@ Reference a workflow in `repos[].workflow` by name.
 | `forge` | `github` or `forgejo` | no | `github` | Forge implementation selector. |
 | `apiBaseUrl` | URL string | no | none | Required for `forgejo`; optional override for `github`. |
 | `tokenEnv` | string | no | none | Token env override per repo. |
+| `maxConcurrentRuns` | int 1-20 | no | `1` | Max issues processed concurrently for this repo per poll cycle. |
 | `localPath` | string path | yes | none | Local repo checkout path. |
 | `baseBranch` | string | no | `main` | PR target branch. |
 | `branchPrefix` | string | no | `orch` | Work branch prefix. |
@@ -300,6 +301,10 @@ Reference a workflow in `repos[].workflow` by name.
 | `agents` | record | no | `{}` | Maps agent names to worker profile names. |
 | `workflow` | string | no | none | Name of a workflow from `workflows` section. Uses default pipeline if omitted. |
 | `mergeQueue` | object | no | object with defaults | Merge queue configuration. |
+
+Poll execution model:
+- Repos are polled in parallel.
+- Each repo runs up to `maxConcurrentRuns` issues at once (default `1`).
 
 ### `repos[].labels`
 

@@ -89,6 +89,27 @@ vi.mock('../../src/state/leases.js', () => {
   return actual
 })
 
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
+async function waitForCondition(
+  condition: () => boolean,
+  timeoutMs = 2000,
+): Promise<void> {
+  const start = Date.now()
+  while (!condition()) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error('Timed out waiting for condition')
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 10))
+  }
+}
+
 function makeConfig(dbPath: string): Config {
   return {
     version: 1,
@@ -99,7 +120,7 @@ function makeConfig(dbPath: string): Config {
     security: { maxChangedFiles: 50, maxChangedLines: 5000, maxDailyCostUsd: 50, maxCostPerRunUsd: 10 },
     metrics: { enabled: false, port: 9090, host: '127.0.0.1' },
     repos: [{
-      repo: 'org/repo', forge: 'github', localPath: '/tmp/repo', baseBranch: 'main',
+      repo: 'org/repo', forge: 'github', localPath: '/tmp/repo', maxConcurrentRuns: 1, baseBranch: 'main',
       branchPrefix: 'orch', labels: { ready: ['orch:ready'], running: 'orch:running', blocked: ['orch:blocked'], reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry', planning: 'orch:planning' },
       defaults: { planner: 'claude', coder: 'claude', reviewer: 'claude', doneMode: 'pr-ready', notifyPriority: 'normal', prMentions: [] },
       planning: { prdDirectory: 'docs/prd' },
@@ -321,6 +342,119 @@ describe('pollOnce', () => {
       { issue_number: 1, status: 'blocked' },
       { issue_number: 2, status: 'blocked' },
     ])
+  })
+
+  it('processes one issue per repo in parallel by default', async () => {
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    config.repos = [
+      {
+        ...config.repos[0]!,
+        repo: 'org/repo-a',
+        localPath: '/tmp/repo-a',
+      },
+      {
+        ...config.repos[0]!,
+        repo: 'org/repo-b',
+        localPath: '/tmp/repo-b',
+      },
+    ]
+
+    mockDiscoverEligibleIssues.mockImplementation(async (repoConfig: { repo: string }) => {
+      if (repoConfig.repo === 'org/repo-a') {
+        return [{
+          issue: { number: 1, nodeId: '', title: 'A', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+          triage: { level: 'standard', reason: '' },
+        }]
+      }
+      return [{
+        issue: { number: 2, nodeId: '', title: 'B', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        triage: { level: 'standard', reason: '' },
+      }]
+    })
+
+    const issue1Gate = deferred<void>()
+    const issue2Gate = deferred<void>()
+    mockExecuteLoop.mockImplementation(async (ctx: { issueNumber: number }) => {
+      if (ctx.issueNumber === 1) {
+        await issue1Gate.promise
+      } else if (ctx.issueNumber === 2) {
+        await issue2Gate.promise
+      }
+      return {
+        currentPhase: 'publish',
+        terminalStatus: 'blocked',
+      }
+    })
+
+    const pollPromise = pollOnce(config, db, false)
+    await waitForCondition(() => mockExecuteLoop.mock.calls.length === 2)
+
+    issue1Gate.resolve()
+    issue2Gate.resolve()
+
+    const result = await pollPromise
+    expect(result.processed).toBe(2)
+    expect(result.errors).toBe(0)
+    expect(mockExecuteLoop).toHaveBeenCalledTimes(2)
+
+    const reposStarted = new Set(
+      mockExecuteLoop.mock.calls.map((call) => (call[0] as { repo: string }).repo),
+    )
+    expect(reposStarted).toEqual(new Set(['org/repo-a', 'org/repo-b']))
+  })
+
+  it('respects repos[].maxConcurrentRuns for per-repo parallelism', async () => {
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    config.repos[0]!.maxConcurrentRuns = 2
+
+    mockDiscoverEligibleIssues.mockResolvedValue([
+      {
+        issue: { number: 1, nodeId: '', title: 'First', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        triage: { level: 'standard', reason: '' },
+      },
+      {
+        issue: { number: 2, nodeId: '', title: 'Second', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        triage: { level: 'standard', reason: '' },
+      },
+      {
+        issue: { number: 3, nodeId: '', title: 'Third', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        triage: { level: 'standard', reason: '' },
+      },
+    ])
+
+    const gate1 = deferred<void>()
+    const gate2 = deferred<void>()
+    const gate3 = deferred<void>()
+    mockExecuteLoop.mockImplementation(async (ctx: { issueNumber: number }) => {
+      if (ctx.issueNumber === 1) await gate1.promise
+      if (ctx.issueNumber === 2) await gate2.promise
+      if (ctx.issueNumber === 3) await gate3.promise
+      return {
+        currentPhase: 'publish',
+        terminalStatus: 'blocked',
+      }
+    })
+
+    const pollPromise = pollOnce(config, db, false)
+
+    await waitForCondition(() => mockExecuteLoop.mock.calls.length === 2)
+    const firstWaveIssues = mockExecuteLoop.mock.calls
+      .slice(0, 2)
+      .map((call) => (call[0] as { issueNumber: number }).issueNumber)
+    expect(firstWaveIssues.sort((a, b) => a - b)).toEqual([1, 2])
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 50))
+    expect(mockExecuteLoop).toHaveBeenCalledTimes(2)
+
+    gate1.resolve()
+    await waitForCondition(() => mockExecuteLoop.mock.calls.length === 3)
+
+    gate2.resolve()
+    gate3.resolve()
+
+    const result = await pollPromise
+    expect(result.processed).toBe(3)
+    expect(result.errors).toBe(0)
   })
 
   it('processes only the targeted issue when targetIssue is provided', async () => {

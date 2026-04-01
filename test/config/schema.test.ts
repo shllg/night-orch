@@ -96,9 +96,17 @@ describe('ConfigSchema', () => {
       expect(result.data.github.pollIntervalSeconds).toBe(300)
       expect(result.data.loop.maxReviewIterations).toBe(4)
       expect(result.data.security.maxDailyCostUsd).toBe(50)
+      expect(result.data.repos[0]?.maxConcurrentRuns).toBe(1)
       expect(result.data.repos[0]?.baseBranch).toBe('main')
       expect(result.data.repos[0]?.branchPrefix).toBe('orch')
     }
+  })
+
+  it('validates repos[].maxConcurrentRuns range', () => {
+    const raw = loadExampleConfig()
+    raw.repos[0].maxConcurrentRuns = 0
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(false)
   })
 
   it('normalizes ready labels from string to array', () => {

@@ -114,6 +114,7 @@ repos:
   - repo: myorg/myrepo
     forge: github
     localPath: ~/code/myrepo
+    maxConcurrentRuns: 1
     baseBranch: main
     branchPrefix: orch
     labels:

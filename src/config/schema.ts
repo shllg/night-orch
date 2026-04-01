@@ -197,6 +197,7 @@ const RepoConfigSchema = z.object({
   forge: z.enum(['github', 'forgejo']).default('github'),
   apiBaseUrl: z.string().url().optional(),
   tokenEnv: z.string().optional(),
+  maxConcurrentRuns: z.number().int().min(1).max(20).default(1),
   localPath: z.string(),
   baseBranch: z.string().default('main'),
   branchPrefix: z.string().default('orch'),
