@@ -10,10 +10,10 @@ describe('buildActionHints', () => {
       autoRefresh: true,
     })
 
-    expect(hints.line1).toContain('[j/k]select')
-    expect(hints.line1).toContain('[1]issues')
-    expect(hints.line1).toContain('[o/enter]open')
-    expect(hints.line1).toContain('[4]logs')
+    expect(hints.line1).toContain('[1]issues [2]projects [3]stats [q]quit [p]poll')
+    expect(hints.line1).toContain('[j/k]select issue [o/enter]open')
+    expect(hints.line1).toContain('[4]logs [h/l]tabs')
+    expect(hints.line1).toContain(' | ')
     expect(hints.line2).toContain('[r]etry')
     expect(hints.line2).toContain('[b]rebase')
   })
@@ -26,8 +26,9 @@ describe('buildActionHints', () => {
       autoRefresh: true,
     })
 
-    expect(hints.line1).toContain('[j/k]scroll')
-    expect(hints.line1).toContain('[esc/q]close')
+    expect(hints.line1).toContain('[1]issues [2]projects [3]stats [q/esc]close')
+    expect(hints.line1).toContain('[j/k]scroll run')
+    expect(hints.line2).toContain('focused run detail')
   })
 
   it('shows stats polling controls on stats tab without retry/rebase', () => {
@@ -39,6 +40,7 @@ describe('buildActionHints', () => {
     })
 
     expect(hints.line1).toContain('[a]toggle auto-refresh')
+    expect(hints.line1).toContain('[1]issues [2]projects [3]stats [q]quit')
     expect(hints.line2).toContain('polling paused')
     expect(hints.line2).not.toContain('retry')
     expect(hints.line2).not.toContain('rebase')
@@ -52,7 +54,7 @@ describe('buildActionHints', () => {
       autoRefresh: true,
     })
 
-    expect(hints.line1).toContain('[j/k]select project')
+    expect(hints.line1).toContain('[j/k]select project [f]refresh')
     expect(hints.line1).toContain('[2]projects')
     expect(hints.line2).toContain('labels')
   })
@@ -65,7 +67,8 @@ describe('buildActionHints', () => {
       autoRefresh: false,
     })
 
-    expect(hints.line1).toContain('[j/k]scroll logs')
-    expect(hints.line2).toContain('[q]quit')
+    expect(hints.line1).toContain('[j/k]scroll logs [f]refresh')
+    expect(hints.line1).toContain('[1]issues [2]projects [3]stats [q]quit')
+    expect(hints.line2).toBe('')
   })
 })
