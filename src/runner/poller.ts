@@ -19,6 +19,7 @@ import { createWorkerAdapter } from '../workers/factory.js'
 import { executeLoop } from '../loop/engine.js'
 import { resolveWorkflow } from '../loop/workflow.js'
 import { publishPR } from '../publishing/publisher.js'
+import { MergeConflictError } from '../publishing/push.js'
 import { transitionLabels } from '../labels/manager.js'
 import { buildLabelConfig } from '../labels/config.js'
 import { NotificationDispatcher } from '../notify/dispatcher.js'
@@ -249,10 +250,11 @@ export async function pollOnce(
           )
 
           if (rebaseResult.conflict) {
-            // Rebase had conflicts — block the run, needs human intervention
+            // Rebase had conflicts — block the run; retry will reset the branch and re-implement
             runManager.update(run.id, {
               status: 'blocked',
-              lastError: 'Rebase failed due to merge conflicts — requires manual resolution',
+              blockReason: 'merge_conflict',
+              lastError: 'Rebase failed due to merge conflicts — retry will reset the branch and re-implement from scratch',
               endedAt: new Date().toISOString(),
             })
             const latestIssue = await forge.getIssue(repoConfig.repo, discoveredIssue.issue.number)
@@ -623,6 +625,24 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
       return 'processed'
     } catch (err) {
       logger.error({ err }, 'Failed to publish PR')
+
+      // Merge conflicts during push get structured block reason so retry resets the branch
+      if (err instanceof MergeConflictError) {
+        runManager.update(runId, {
+          status: 'blocked',
+          blockReason: 'merge_conflict',
+          lastError: err.message,
+          endedAt: new Date().toISOString(),
+        })
+        const latestIssue = await forge.getIssue(repo, issueNumber)
+        await transitionLabels(forge, repo, issueNumber, latestIssue.labels, 'running', 'blocked', labelConfig)
+        try {
+          metrics?.incRunsTotal('blocked')
+          metrics?.observeRunDuration(runDurationSec)
+        } catch { /* best-effort */ }
+        return 'error'
+      }
+
       runManager.update(runId, { status: 'error', lastError: String(err), endedAt: new Date().toISOString() })
       const recentErrors = new RunManager(db).countRecentErrors(repo, issueNumber)
       const latestIssue = await forge.getIssue(repo, issueNumber)
@@ -776,7 +796,7 @@ function makePayload(
  * (reviewer_blocked, iteration_limit, ambiguous_review, verify_config)
  * preserve the branch so existing work can be continued.
  */
-const TAINTED_BLOCK_REASONS = new Set(['agent_pass_limit', 'cost_limit'])
+const TAINTED_BLOCK_REASONS = new Set(['agent_pass_limit', 'cost_limit', 'merge_conflict'])
 
 // --- Reaction scanning ---
 

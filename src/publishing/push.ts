@@ -1,10 +1,19 @@
 import { execa } from 'execa'
 import { logger } from '../utils/logger.js'
 
+export class MergeConflictError extends Error {
+  readonly code = 'MERGE_CONFLICT' as const
+  constructor(branchName: string, detail: string) {
+    super(`Push failed for ${branchName} due to merge conflicts: ${detail}`)
+  }
+}
+
 /**
  * Push a branch to origin using --force-with-lease to prevent overwriting
  * commits pushed by others (e.g., reviewer-pushed fixes).
  * On rejection (branch diverged), attempts a single rebase then retries.
+ *
+ * @throws {MergeConflictError} when rebase after rejected push encounters conflicts.
  */
 export async function pushBranch(worktreePath: string, branchName: string): Promise<void> {
   logger.info({ branchName }, 'Pushing branch to remote')
@@ -31,6 +40,13 @@ export async function pushBranch(worktreePath: string, branchName: string): Prom
         return
       } catch (rebaseErr: unknown) {
         const rebaseStderr = (rebaseErr as { stderr?: string }).stderr ?? String(rebaseErr)
+        if (rebaseStderr.includes('CONFLICT') || rebaseStderr.includes('could not apply')) {
+          // Abort the failed rebase to leave worktree in a clean state
+          try {
+            await execa('git', ['rebase', '--abort'], { cwd: worktreePath, timeout: 30_000 })
+          } catch { /* best-effort abort */ }
+          throw new MergeConflictError(branchName, rebaseStderr)
+        }
         throw new Error(`Push failed for ${branchName} after rebase attempt: ${rebaseStderr}`)
       }
     }

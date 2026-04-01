@@ -11,6 +11,7 @@ export type BlockReason =
   | 'reviewer_blocked'
   | 'ambiguous_review'
   | 'verify_config'
+  | 'merge_conflict'
 
 export type RunMode = 'fresh' | 'followup' | 'rebase'
 

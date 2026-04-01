@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { pushBranch } from '../../src/publishing/push.js'
+import { pushBranch, MergeConflictError } from '../../src/publishing/push.js'
 
 vi.mock('execa', () => ({
   execa: vi.fn(),
@@ -72,11 +72,25 @@ describe('pushBranch', () => {
     )
   })
 
-  it('throws after rebase attempt fails', async () => {
+  it('throws MergeConflictError after rebase attempt hits conflicts', async () => {
     // First push fails with rejected
     mockExeca.mockRejectedValueOnce({ stderr: '! [rejected] non-fast-forward' })
-    // Rebase fails
+    // Rebase fails with CONFLICT
     mockExeca.mockRejectedValueOnce({ stderr: 'CONFLICT: merge conflict in src/a.ts' })
+    // rebase --abort succeeds
+    mockExeca.mockResolvedValueOnce({ exitCode: 0 } as never)
+
+    const err = await pushBranch('/tmp/wt', 'orch/1-fix').catch((e: unknown) => e) as MergeConflictError
+    expect(err).toBeInstanceOf(MergeConflictError)
+    expect(err.code).toBe('MERGE_CONFLICT')
+    expect(err.message).toMatch(/merge conflicts/)
+  })
+
+  it('throws generic error after rebase attempt fails without conflicts', async () => {
+    // First push fails with rejected
+    mockExeca.mockRejectedValueOnce({ stderr: '! [rejected] non-fast-forward' })
+    // Rebase fails with non-conflict error
+    mockExeca.mockRejectedValueOnce({ stderr: 'fatal: cannot rebase' })
 
     await expect(pushBranch('/tmp/wt', 'orch/1-fix')).rejects.toThrow(
       /Push failed for orch\/1-fix after rebase attempt/,
