@@ -82,3 +82,5 @@ When changing config schema, config loading behavior, or config-dependent runtim
 ## Extended Rules
 
 Domain-specific rules are in `.claude/rules/` — architecture, security, TypeScript, loop engine, testing, specs, and operational patterns. These are loaded automatically when relevant.
+
+React TUI-specific rules live in `.claude/rules/08-react-tui.md` and should be applied for terminal UI components and keybinding logic.

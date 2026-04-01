@@ -2,7 +2,7 @@ import React from 'react'
 import { Box, Text } from 'ink'
 
 interface ActionsBarProps {
-  activeTab: 'runs' | 'stats'
+  activeTab: 'runs' | 'stats' | 'logs'
   busy: boolean
   runFocused: boolean
   autoRefresh: boolean
@@ -14,22 +14,29 @@ interface ActionHints {
 }
 
 export function buildActionHints(props: ActionsBarProps): ActionHints {
-  const tabHints = '[1]runs  [2]stats  [h/l]tabs'
+  const tabHints = '[1]runs  [2]stats  [3]logs  [h/l]tabs'
   if (props.activeTab === 'runs') {
-    const focusHint = props.runFocused ? '[esc]close' : '[o/enter]open'
+    const navHint = props.runFocused ? '[j/k]scroll  [esc/q]close' : '[j/k]select  [o/enter]open'
     const actionHints = props.busy
       ? 'actions locked while task is running'
       : '[r]etry  [b]rebase  [p]oll  [s]ync  [c]leanup'
     return {
-      line1: `${tabHints}  [j/k]select  ${focusHint}`,
+      line1: `${tabHints}  ${navHint}`,
       line2: `${actionHints}  [f]refresh  [q]quit`,
     }
   }
 
-  const polling = props.autoRefresh ? 'polling live' : 'polling paused'
+  if (props.activeTab === 'stats') {
+    const polling = props.autoRefresh ? 'polling live' : 'polling paused'
+    return {
+      line1: `${tabHints}  [f]refresh now  [a]toggle auto-refresh`,
+      line2: `${polling}  [q]quit`,
+    }
+  }
+
   return {
-    line1: `${tabHints}  [f]refresh now  [a]toggle auto-refresh`,
-    line2: `${polling}  [q]quit`,
+    line1: `${tabHints}  [j/k]scroll logs  [f]refresh`,
+    line2: '[q]quit',
   }
 }
 
