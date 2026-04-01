@@ -13,6 +13,7 @@ import { ActionsBar } from './actions-bar.js'
 import { loadRuns, loadAgentEvents, loadMergeBatches, type RunListRow } from './data.js'
 import { Header } from './header.js'
 import { LogsView } from './logs-view.js'
+import { ProjectsView } from './projects-view.js'
 import { RunsView } from './runs-view.js'
 import { StatsView } from './stats-view.js'
 import { collectMissingTitleTargets, hasReadableTitle, type TitleLookup } from './titles.js'
@@ -36,6 +37,19 @@ const MAX_LOG_LINES = 500
 const FOCUSED_EVENT_WINDOW_SIZE = 18
 const LOG_WINDOW_SIZE = 18
 
+export function resolveTabHotkey(input: string): TabId | null {
+  if (input === '1') return 'runs'
+  if (input === '2') return 'projects'
+  if (input === '3') return 'stats'
+  if (input === '4') return 'logs'
+  return null
+}
+
+export function moveProjectSelection(current: number, direction: -1 | 1, projectCount: number): number {
+  const maxProjectIndex = Math.max(0, projectCount - 1)
+  return Math.max(0, Math.min(maxProjectIndex, current + direction))
+}
+
 export function App({
   db,
   config,
@@ -53,6 +67,7 @@ export function App({
   const [actionState, setActionState] = useState<ActionState>({ busy: false, action: null })
   const [activeTab, setActiveTab] = useState<TabId>('runs')
   const [runsViewMode, setRunsViewMode] = useState<RunsViewMode>('list')
+  const [selectedProjectIndex, setSelectedProjectIndex] = useState(0)
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [lastRefreshAt, setLastRefreshAt] = useState(new Date().toISOString())
   const [titleLookup, setTitleLookup] = useState<TitleLookup>({ issues: {}, prs: {} })
@@ -178,6 +193,11 @@ export function App({
       setSelectedRunId(runs[0]!.id)
     }
   }, [runs, selectedRunId])
+
+  useEffect(() => {
+    const maxIndex = Math.max(0, config.repos.length - 1)
+    setSelectedProjectIndex((current) => Math.max(0, Math.min(current, maxIndex)))
+  }, [config.repos])
 
   useEffect(() => {
     const now = Date.now()
@@ -477,16 +497,9 @@ export function App({
       return
     }
 
-    if (input === '1') {
-      setActiveTab('runs')
-      return
-    }
-    if (input === '2') {
-      setActiveTab('stats')
-      return
-    }
-    if (input === '3') {
-      setActiveTab('logs')
+    const tabFromHotkey = resolveTabHotkey(input)
+    if (tabFromHotkey) {
+      setActiveTab(tabFromHotkey)
       return
     }
     if (key.rightArrow || input === 'l') {
@@ -512,6 +525,17 @@ export function App({
           setRunsViewMode('focus')
           setRunEventScrollOffset(0)
         }
+        return
+      }
+    }
+
+    if (activeTab === 'projects') {
+      if (key.downArrow || input === 'j') {
+        setSelectedProjectIndex((current) => moveProjectSelection(current, 1, config.repos.length))
+        return
+      }
+      if (key.upArrow || input === 'k') {
+        setSelectedProjectIndex((current) => moveProjectSelection(current, -1, config.repos.length))
         return
       }
     }
@@ -615,6 +639,15 @@ export function App({
           autoRefresh={autoRefresh}
           pollIntervalMs={pollIntervalMs}
           lastRefreshAt={lastRefreshAt}
+        />
+      )}
+      {activeTab === 'projects' && (
+        <ProjectsView
+          repos={config.repos}
+          selectedIndex={selectedProjectIndex}
+          workerProfiles={config.workerProfiles}
+          globalGithubTokenEnv={config.github.tokenEnv}
+          globalGithubApiBaseUrl={config.github.apiBaseUrl}
         />
       )}
       {activeTab === 'logs' && (

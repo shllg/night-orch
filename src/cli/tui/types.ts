@@ -1,4 +1,4 @@
-export type TabId = 'runs' | 'stats' | 'logs'
+export type TabId = 'runs' | 'projects' | 'stats' | 'logs'
 
 export type RunsViewMode = 'list' | 'focus'
 

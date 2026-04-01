@@ -1,8 +1,9 @@
 import React from 'react'
 import { Box, Text } from 'ink'
+import type { TabId } from './types.js'
 
 interface ActionsBarProps {
-  activeTab: 'runs' | 'stats' | 'logs'
+  activeTab: TabId
   busy: boolean
   runFocused: boolean
   autoRefresh: boolean
@@ -14,7 +15,7 @@ interface ActionHints {
 }
 
 export function buildActionHints(props: ActionsBarProps): ActionHints {
-  const tabHints = '[1]runs  [2]stats  [3]logs  [h/l]tabs'
+  const tabHints = '[1]runs  [2]projects  [3]stats  [4]logs  [h/l]tabs'
   if (props.activeTab === 'runs') {
     const navHint = props.runFocused ? '[j/k]scroll  [esc/q]close' : '[j/k]select  [o/enter]open'
     const actionHints = props.busy
@@ -31,6 +32,13 @@ export function buildActionHints(props: ActionsBarProps): ActionHints {
     return {
       line1: `${tabHints}  [f]refresh now  [a]toggle auto-refresh`,
       line2: `${polling}  [q]quit`,
+    }
+  }
+
+  if (props.activeTab === 'projects') {
+    return {
+      line1: `${tabHints}  [j/k]select project  [f]refresh`,
+      line2: 'view labels, lanes, tools, and environment config  [q]quit',
     }
   }
 
