@@ -111,6 +111,7 @@ describe('ForgejoForgeAdapter', () => {
       expect(issue).toEqual({
         number: 1,
         nodeId: null,
+        repo: 'org/repo',
         title: 'Test issue',
         body: 'Test body',
         labels: ['orch:ready'],
@@ -196,6 +197,26 @@ describe('ForgejoForgeAdapter', () => {
       expect(issues).toHaveLength(1)
       const calledUrl = mockFetch.mock.calls[0]![0] as string
       expect(calledUrl).toContain('/repos/org/repo/issues')
+    })
+
+    it('discovers issues from linkedProjects', async () => {
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse([makeForgejoIssue({ number: 1, html_url: 'https://forgejo.example.com/org/repo/issues/1' })]))
+        .mockResolvedValueOnce(jsonResponse([makeForgejoIssue({ number: 2, html_url: 'https://forgejo.example.com/org/tracker/issues/2' })]))
+
+      const config = makeRepoConfig({
+        linkedProjects: ['org/tracker'],
+        selectors: {
+          includeLabelsAny: [],
+          excludeLabelsAny: [],
+        },
+      })
+
+      const issues = await adapter.listEligibleIssues(config)
+      expect(issues).toHaveLength(2)
+      expect(issues.map((i) => i.repo)).toEqual(['org/repo', 'org/tracker'])
+      const secondCalledUrl = mockFetch.mock.calls[1]![0] as string
+      expect(secondCalledUrl).toContain('/repos/org/tracker/issues')
     })
   })
 

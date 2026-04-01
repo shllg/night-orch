@@ -113,6 +113,8 @@ commentCommands:
 repos:
   - repo: myorg/myrepo
     forge: github
+    # linkedProjects:
+    #   - myorg/tracker
     localPath: ~/code/myrepo
     maxConcurrentRuns: 1
     baseBranch: main
@@ -131,6 +133,22 @@ repos:
       # mergeQueued: orch:merge-queued
       # merging: orch:merging
       # mergeFailed: orch:merge-failed
+    # Optional kanban-state flow. If triggerLabel is present on an issue,
+    # these labels are used for state transitions instead of labels above.
+    # kanban:
+    #   triggerLabel: flow:kanban
+    #   labels:
+    #     ready: [kanban:todo]
+    #     running: kanban:doing
+    #     blocked: kanban:blocked
+    #     needsHuman: kanban:needs-human
+    #     reviewReady: kanban:review
+    #     error: kanban:error
+    #     retry: kanban:retry
+    #     planning: kanban:planning
+    #     mergeQueued: kanban:merge-queued
+    #     merging: kanban:merging
+    #     mergeFailed: kanban:merge-failed
     planning:
       prdDirectory: docs/prd
     # Optional per-label metadata overrides used by `night-orch labels-init`

@@ -115,6 +115,15 @@ const LabelsSchema = z.object({
   mergeFailed: z.string().default('orch:merge-failed'),
 })
 
+const LinkedProjectSchema = z
+  .string()
+  .regex(/^[^/]+\/[^/]+$/, 'Must be in format owner/name')
+
+const KanbanSchema = z.object({
+  triggerLabel: z.string().min(1, 'triggerLabel must not be empty'),
+  labels: LabelsSchema,
+})
+
 const LabelPresentationSchema = z.object({
   color: z.string().regex(/^[0-9A-Fa-f]{6}$/, 'Color must be a 6-character hex value').optional(),
   description: z.string().max(100, 'Description must be 100 characters or fewer').optional(),
@@ -195,6 +204,7 @@ const MergeQueueSchema = z.object({
 const RepoConfigSchema = z.object({
   repo: z.string().regex(/^[^/]+\/[^/]+$/, 'Must be in format owner/name'),
   forge: z.enum(['github', 'forgejo']).default('github'),
+  linkedProjects: z.array(LinkedProjectSchema).default([]),
   apiBaseUrl: z.string().url().optional(),
   tokenEnv: z.string().optional(),
   maxConcurrentRuns: z.number().int().min(1).max(20).default(1),
@@ -202,6 +212,7 @@ const RepoConfigSchema = z.object({
   baseBranch: z.string().default('main'),
   branchPrefix: z.string().default('orch'),
   labels: LabelsSchema.default({ ready: ['orch:ready'] }),
+  kanban: KanbanSchema.optional(),
   labelConfig: z.record(LabelPresentationSchema).default({}),
   defaults: DefaultsSchema.default({}),
   environment: EnvironmentConfigSchema.optional(),

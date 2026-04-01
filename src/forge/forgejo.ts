@@ -3,6 +3,7 @@ import type {
   ForgeAdapter, ForgeIssue, ForgePR, PRParams, ForgeAuthInfo,
   ForgeComment, ForgePRReview, ForgePRReviewComment, PRReviewState, MergeMethod,
 } from './types.js'
+import { getDiscoveryIncludeLabels } from '../labels/config.js'
 import { ForgejoClient, ForgejoApiError } from './forgejo-client.js'
 import { LabelCache } from './forgejo-labels.js'
 
@@ -79,37 +80,43 @@ export class ForgejoForgeAdapter implements ForgeAdapter {
   }
 
   async listEligibleIssues(repoConfig: RepoConfig): Promise<ForgeIssue[]> {
-    const { owner, repo } = splitRepo(repoConfig.repo)
-    const includeLabels = repoConfig.selectors.includeLabelsAny
+    const includeLabels = getDiscoveryIncludeLabels(repoConfig)
+    const discoveryRepos = [...new Set([repoConfig.repo, ...(repoConfig.linkedProjects ?? [])])]
 
-    const seenNumbers = new Set<number>()
+    const seenKeys = new Set<string>()
     const allIssues: ForgeIssue[] = []
 
-    if (includeLabels.length === 0) {
-      const issues = await this.client.getPaginated<ForgejoIssueData>(
-        `/repos/${owner}/${repo}/issues`,
-        { state: 'open', type: 'issues' },
-      )
-      for (const issue of issues) {
-        if (issue.pull_request) continue
-        if (seenNumbers.has(issue.number)) continue
-        seenNumbers.add(issue.number)
-        allIssues.push(this.mapIssue(issue, repoConfig.repo))
+    for (const targetRepo of discoveryRepos) {
+      const { owner, repo } = splitRepo(targetRepo)
+
+      if (includeLabels.length === 0) {
+        const issues = await this.client.getPaginated<ForgejoIssueData>(
+          `/repos/${owner}/${repo}/issues`,
+          { state: 'open', type: 'issues' },
+        )
+        for (const issue of issues) {
+          if (issue.pull_request) continue
+          const key = `${targetRepo}#${issue.number}`
+          if (seenKeys.has(key)) continue
+          seenKeys.add(key)
+          allIssues.push(this.mapIssue(issue, targetRepo))
+        }
+        continue
       }
-      return allIssues
-    }
 
-    for (const label of includeLabels) {
-      const issues = await this.client.getPaginated<ForgejoIssueData>(
-        `/repos/${owner}/${repo}/issues`,
-        { state: 'open', labels: label, type: 'issues' },
-      )
+      for (const label of includeLabels) {
+        const issues = await this.client.getPaginated<ForgejoIssueData>(
+          `/repos/${owner}/${repo}/issues`,
+          { state: 'open', labels: label, type: 'issues' },
+        )
 
-      for (const issue of issues) {
-        if (issue.pull_request) continue
-        if (seenNumbers.has(issue.number)) continue
-        seenNumbers.add(issue.number)
-        allIssues.push(this.mapIssue(issue, repoConfig.repo))
+        for (const issue of issues) {
+          if (issue.pull_request) continue
+          const key = `${targetRepo}#${issue.number}`
+          if (seenKeys.has(key)) continue
+          seenKeys.add(key)
+          allIssues.push(this.mapIssue(issue, targetRepo))
+        }
       }
     }
 
@@ -324,10 +331,11 @@ export class ForgejoForgeAdapter implements ForgeAdapter {
 
   // --- Internal mapping ---
 
-  private mapIssue(data: ForgejoIssueData, _repoSlug: string): ForgeIssue {
+  private mapIssue(data: ForgejoIssueData, repoSlug: string): ForgeIssue {
     return {
       number: data.number,
       nodeId: null,
+      repo: repoSlug,
       title: data.title,
       body: data.body ?? '',
       labels: data.labels.map((l) => l.name).filter(Boolean),

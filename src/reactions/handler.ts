@@ -3,14 +3,16 @@ import type { ForgeAdapter } from '../forge/types.js'
 import type { RunManager } from '../state/runs.js'
 import type Database from 'better-sqlite3'
 import { transitionLabels } from '../labels/manager.js'
-import type { buildLabelConfig } from '../labels/config.js'
+import { buildLabelConfig } from '../labels/config.js'
+import type { RepoConfig } from '../config/schema.js'
+import { resolveIssueRepo } from '../utils/issue-repo.js'
 import { logger } from '../utils/logger.js'
 
 export interface ReactionHandlerDeps {
   db: Database.Database
   forge: ForgeAdapter
   runManager: RunManager
-  labelConfig: ReturnType<typeof buildLabelConfig>
+  repoConfig: Pick<RepoConfig, 'labels' | 'kanban'>
 }
 
 /**
@@ -24,7 +26,7 @@ export async function handleReaction(
   reaction: Reaction,
   deps: ReactionHandlerDeps,
 ): Promise<void> {
-  const { forge, runManager, labelConfig } = deps
+  const { forge, runManager, repoConfig } = deps
 
   logger.info(
     { repo: reaction.repo, prNumber: reaction.prNumber, issueNumber: reaction.issueNumber, type: reaction.type },
@@ -63,15 +65,16 @@ export async function handleReaction(
 
   // Transition labels back to ready so the poller picks it up
   try {
-    const issue = await forge.getIssue(reaction.repo, reaction.issueNumber)
+    const issueRepo = resolveIssueRepo(run.phaseData, reaction.repo)
+    const issue = await forge.getIssue(issueRepo, reaction.issueNumber)
     await transitionLabels(
       forge,
-      reaction.repo,
+      issueRepo,
       reaction.issueNumber,
       issue.labels,
       'review_ready',
       'queued',
-      labelConfig,
+      buildLabelConfig(repoConfig, issue.labels),
     )
   } catch (err) {
     logger.warn(

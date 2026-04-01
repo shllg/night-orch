@@ -5,6 +5,7 @@ import type {
   ForgeComment, ForgePRReview, ForgePRReviewComment, PRReviewState, MergeMethod,
   PRCheckStatus, PRCheckRun, CheckConclusion,
 } from './types.js'
+import { getDiscoveryIncludeLabels } from '../labels/config.js'
 import { logger } from '../utils/logger.js'
 
 function splitRepo(repo: string): { owner: string; repo: string } {
@@ -24,57 +25,63 @@ export class GitHubForgeAdapter implements ForgeAdapter {
   }
 
   async listEligibleIssues(repoConfig: RepoConfig): Promise<ForgeIssue[]> {
-    const { owner, repo } = splitRepo(repoConfig.repo)
-    const includeLabels = repoConfig.selectors.includeLabelsAny
+    const includeLabels = getDiscoveryIncludeLabels(repoConfig)
+    const discoveryRepos = [...new Set([repoConfig.repo, ...(repoConfig.linkedProjects ?? [])])]
 
     // GitHub API filters by labels (AND), so we fetch with each include label
     // and deduplicate. For OR semantics with few labels, this is efficient enough.
-    const seenNumbers = new Set<number>()
+    const seenKeys = new Set<string>()
     const allIssues: ForgeIssue[] = []
 
-    if (includeLabels.length === 0) {
-      const issues = await this.octokit.paginate(
-        this.octokit.rest.issues.listForRepo,
-        {
-          owner,
-          repo,
-          state: 'open',
-          per_page: 100,
-        },
-      )
-      for (const issue of issues) {
-        if (issue.pull_request) continue
-        if (seenNumbers.has(issue.number)) continue
-        seenNumbers.add(issue.number)
-        allIssues.push(this.mapIssue(issue, repoConfig.repo))
-      }
-      await this.checkRateLimit()
-      return allIssues
-    }
+    for (const targetRepo of discoveryRepos) {
+      const { owner, repo } = splitRepo(targetRepo)
 
-    for (const label of includeLabels) {
-      const issues = await this.octokit.paginate(
-        this.octokit.rest.issues.listForRepo,
-        {
-          owner,
-          repo,
-          state: 'open',
-          labels: label,
-          per_page: 100,
-        },
-      )
-
-      for (const issue of issues) {
-        // Skip pull requests (GitHub API includes them in issues)
-        if (issue.pull_request) continue
-        if (seenNumbers.has(issue.number)) continue
-        seenNumbers.add(issue.number)
-
-        allIssues.push(this.mapIssue(issue, repoConfig.repo))
+      if (includeLabels.length === 0) {
+        const issues = await this.octokit.paginate(
+          this.octokit.rest.issues.listForRepo,
+          {
+            owner,
+            repo,
+            state: 'open',
+            per_page: 100,
+          },
+        )
+        for (const issue of issues) {
+          if (issue.pull_request) continue
+          const key = `${targetRepo}#${issue.number}`
+          if (seenKeys.has(key)) continue
+          seenKeys.add(key)
+          allIssues.push(this.mapIssue(issue, targetRepo))
+        }
+        await this.checkRateLimit()
+        continue
       }
 
-      // Check rate limit
-      await this.checkRateLimit()
+      for (const label of includeLabels) {
+        const issues = await this.octokit.paginate(
+          this.octokit.rest.issues.listForRepo,
+          {
+            owner,
+            repo,
+            state: 'open',
+            labels: label,
+            per_page: 100,
+          },
+        )
+
+        for (const issue of issues) {
+          // Skip pull requests (GitHub API includes them in issues)
+          if (issue.pull_request) continue
+          const key = `${targetRepo}#${issue.number}`
+          if (seenKeys.has(key)) continue
+          seenKeys.add(key)
+
+          allIssues.push(this.mapIssue(issue, targetRepo))
+        }
+
+        // Check rate limit
+        await this.checkRateLimit()
+      }
     }
 
     return allIssues
@@ -423,7 +430,7 @@ export class GitHubForgeAdapter implements ForgeAdapter {
 
   // --- Internals ---
 
-  private mapIssue(data: Record<string, unknown>, _repoSlug: string): ForgeIssue {
+  private mapIssue(data: Record<string, unknown>, repoSlug: string): ForgeIssue {
     const d = data as {
       number: number
       node_id: string
@@ -439,6 +446,7 @@ export class GitHubForgeAdapter implements ForgeAdapter {
     return {
       number: d.number,
       nodeId: d.node_id,
+      repo: repoSlug,
       title: d.title,
       body: d.body ?? '',
       labels: d.labels.map((l) => (typeof l === 'string' ? l : l.name ?? '')).filter(Boolean),

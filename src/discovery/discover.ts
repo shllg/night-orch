@@ -1,12 +1,14 @@
 import type { RepoConfig } from '../config/schema.js'
 import type { ForgeAdapter, ForgeIssue } from '../forge/types.js'
 import type { LeaseManager } from '../state/leases.js'
-import { filterEligible } from './selector.js'
+import { isEligible, type IssueSelector } from './selector.js'
 import { triageIssue, type TriageResult } from './triage.js'
 import { logger } from '../utils/logger.js'
+import { isKanbanIssue } from '../labels/config.js'
 
 export interface DiscoveredIssue {
   issue: ForgeIssue
+  issueRepo: string
   triage: TriageResult
   repoConfig: RepoConfig
 }
@@ -31,13 +33,14 @@ export async function discoverEligibleIssues(
   logger.debug({ repo: repoConfig.repo, count: rawIssues.length }, 'Fetched issues from forge')
 
   // 2. Local filter
-  const eligible = filterEligible(rawIssues, repoConfig.selectors)
+  const eligible = rawIssues.filter((issue) => isIssueEligibleForRepo(issue, repoConfig))
   logger.debug({ repo: repoConfig.repo, count: eligible.length }, 'Issues after selector filter')
 
   // 3. Exclude leased
   const unleased = eligible.filter((issue) => {
-    if (leaseManager.isLeased(repoConfig.repo, issue.number)) {
-      logger.debug({ repo: repoConfig.repo, issue: issue.number }, 'Skipping leased issue')
+    const issueRepo = resolveIssueRepo(issue, repoConfig.repo)
+    if (leaseManager.isLeased(issueRepo, issue.number)) {
+      logger.debug({ repo: issueRepo, issue: issue.number }, 'Skipping leased issue')
       return false
     }
     return true
@@ -46,6 +49,7 @@ export async function discoverEligibleIssues(
   // 4. Triage
   const discovered: DiscoveredIssue[] = unleased.map((issue) => ({
     issue,
+    issueRepo: resolveIssueRepo(issue, repoConfig.repo),
     triage: triageIssue(issue),
     repoConfig,
   }))
@@ -70,4 +74,58 @@ export async function discoverEligibleIssues(
   )
 
   return discovered
+}
+
+export function isIssueEligibleForRepo(issue: ForgeIssue, repoConfig: RepoConfig): boolean {
+  return isEligible(issue, buildSelectorForIssue(repoConfig, issue))
+}
+
+function buildSelectorForIssue(repoConfig: RepoConfig, issue: ForgeIssue): IssueSelector {
+  if (!repoConfig.kanban || !isKanbanIssue(issue.labels, repoConfig)) {
+    return repoConfig.selectors
+  }
+
+  const kanbanReady = Array.isArray(repoConfig.kanban.labels.ready)
+    ? [...repoConfig.kanban.labels.ready]
+    : [repoConfig.kanban.labels.ready]
+
+  return {
+    includeLabelsAny: kanbanReady,
+    excludeLabelsAny: [
+      repoConfig.kanban.labels.running,
+      repoConfig.kanban.labels.blocked,
+      repoConfig.kanban.labels.needsHuman,
+      repoConfig.kanban.labels.reviewReady,
+      repoConfig.kanban.labels.error,
+      repoConfig.kanban.labels.retry,
+    ],
+  }
+}
+
+function resolveIssueRepo(
+  issue: Pick<ForgeIssue, 'repo' | 'url'>,
+  fallbackRepo: string,
+): string {
+  if (typeof issue.repo === 'string' && issue.repo.length > 0) {
+    return issue.repo
+  }
+
+  try {
+    const pathSegments = new URL(issue.url).pathname.split('/').filter(Boolean)
+    const issuesIndex = pathSegments.lastIndexOf('issues')
+
+    if (issuesIndex >= 2) {
+      const owner = pathSegments[issuesIndex - 2]
+      const repo = pathSegments[issuesIndex - 1]
+      if (owner && repo) return `${owner}/${repo}`
+    }
+
+    const owner = pathSegments[0]
+    const repo = pathSegments[1]
+    if (owner && repo) return `${owner}/${repo}`
+  } catch {
+    // Ignore parse errors and use fallback.
+  }
+
+  return fallbackRepo
 }

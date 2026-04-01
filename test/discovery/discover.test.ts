@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { discoverEligibleIssues, type DiscoveredIssue } from '../../src/discovery/discover.js'
+import { discoverEligibleIssues, isIssueEligibleForRepo, type DiscoveredIssue } from '../../src/discovery/discover.js'
 import type { ForgeAdapter, ForgeIssue } from '../../src/forge/types.js'
 import type { LeaseManager } from '../../src/state/leases.js'
 import type { RepoConfig } from '../../src/config/schema.js'
@@ -24,6 +24,7 @@ function makeIssue(overrides: Partial<ForgeIssue> = {}): ForgeIssue {
   return {
     number: 1,
     nodeId: 'MDU6SXNzdWUx',
+    repo: 'org/repo',
     title: 'Test issue',
     body: 'Fix the thing',
     labels: ['orch:ready'],
@@ -47,9 +48,14 @@ function makeRepoConfig(overrides: Partial<RepoConfig> = {}): RepoConfig {
       ready: ['orch:ready'],
       running: 'orch:running',
       blocked: ['orch:blocked', 'orch:needs-human'],
+      needsHuman: 'orch:needs-human',
       reviewReady: 'orch:review-ready',
       error: 'orch:error',
       retry: 'orch:retry',
+      planning: 'orch:planning',
+      mergeQueued: 'orch:merge-queued',
+      merging: 'orch:merging',
+      mergeFailed: 'orch:merge-failed',
     },
     defaults: {
       planner: 'claude',
@@ -65,6 +71,7 @@ function makeRepoConfig(overrides: Partial<RepoConfig> = {}): RepoConfig {
       excludeLabelsAny: ['orch:blocked'],
     },
     agents: {},
+    linkedProjects: [],
     ...overrides,
   } as RepoConfig
 }
@@ -201,6 +208,53 @@ describe('discoverEligibleIssues', () => {
 
     expect(leaseManager.isLeased).toHaveBeenCalledWith('org/repo', 1)
     expect(leaseManager.isLeased).toHaveBeenCalledWith('org/repo', 2)
+  })
+
+  it('uses issue.repo when checking leases and storing issueRepo', async () => {
+    const issue = makeIssue({
+      number: 7,
+      repo: 'org/tracker',
+      url: 'https://github.com/org/tracker/issues/7',
+      labels: ['orch:ready'],
+    })
+    const forge = makeMockForge([issue])
+    const leaseManager = makeMockLeaseManager()
+
+    const result = await discoverEligibleIssues(makeRepoConfig(), forge, leaseManager)
+
+    expect(leaseManager.isLeased).toHaveBeenCalledWith('org/tracker', 7)
+    expect(result[0]?.issueRepo).toBe('org/tracker')
+  })
+
+  it('applies kanban selectors when trigger label is present', () => {
+    const repoConfig = makeRepoConfig({
+      selectors: {
+        includeLabelsAny: ['orch:ready'],
+        excludeLabelsAny: ['orch:blocked'],
+      },
+      kanban: {
+        triggerLabel: 'flow:kanban',
+        labels: {
+          ready: ['kanban:todo'],
+          running: 'kanban:doing',
+          blocked: 'kanban:blocked',
+          needsHuman: 'kanban:needs-human',
+          reviewReady: 'kanban:review',
+          error: 'kanban:error',
+          retry: 'kanban:retry',
+          planning: 'kanban:planning',
+          mergeQueued: 'kanban:merge-queued',
+          merging: 'kanban:merging',
+          mergeFailed: 'kanban:merge-failed',
+        },
+      },
+    })
+
+    const kanbanEligible = makeIssue({ labels: ['flow:kanban', 'kanban:todo'] })
+    const nonKanbanReady = makeIssue({ labels: ['flow:kanban', 'orch:ready'] })
+
+    expect(isIssueEligibleForRepo(kanbanEligible, repoConfig)).toBe(true)
+    expect(isIssueEligibleForRepo(nonKanbanReady, repoConfig)).toBe(false)
   })
 
   it('handles all issues being leased', async () => {

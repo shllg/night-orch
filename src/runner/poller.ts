@@ -41,6 +41,7 @@ import { decomposeIssue, shouldAttemptDecompose } from '../discovery/decomposer.
 import { executeParallelSubtasks } from '../loop/parallel.js'
 import { buildWorkerEnv } from '../workers/env.js'
 import { isPlanningIssue } from '../planning/mode.js'
+import { resolveIssueRepo } from '../utils/issue-repo.js'
 import {
   isCommandProcessed,
   markCommandProcessed,
@@ -100,7 +101,10 @@ export async function pollOnce(
     leaseManager.cleanExpired()
 
     const reposToProcess = targetIssue
-      ? config.repos.filter((repoConfig) => repoConfig.repo === targetIssue.repo)
+      ? config.repos.filter((repoConfig) => {
+          const issueRepos = new Set([repoConfig.repo, ...(repoConfig.linkedProjects ?? [])])
+          return issueRepos.has(targetIssue.repo)
+        })
       : config.repos
     const usedPortsInPass: number[] = []
 
@@ -122,12 +126,10 @@ export async function pollOnce(
             logger.debug({ repo: repoConfig.repo }, 'Could not resolve bot user for comment upserts')
           }
 
-          const labelConfig = buildLabelConfig(repoConfig)
-
           // --- Reaction scan: check review_ready PRs for CI failures or human reviews ---
           try {
             await scanAndHandleReactions({
-              db, forge, runManager, repoConfig, labelConfig, botUser,
+              db, forge, runManager, repoConfig, botUser,
             })
           } catch (err) {
             logger.warn({ repo: repoConfig.repo, err }, 'Reaction scan failed — continuing with issue discovery')
@@ -149,7 +151,6 @@ export async function pollOnce(
               runManager,
               leaseManager,
               repoConfig,
-              labelConfig,
               botUser,
             })
           } catch (err) {
@@ -158,7 +159,10 @@ export async function pollOnce(
 
           const discoveredAll = await discoverEligibleIssues(repoConfig, forge, leaseManager)
           const discovered = targetIssue
-            ? discoveredAll.filter((d) => d.issue.number === targetIssue.issueNumber)
+            ? discoveredAll.filter((d) => {
+                const issueRepo = d.issueRepo || d.issue.repo || repoConfig.repo
+                return d.issue.number === targetIssue.issueNumber && issueRepo === targetIssue.repo
+              })
             : prioritizeDiscoveredIssues(runManager, repoConfig.repo, discoveredAll)
           try { metrics?.setEligibleIssues(repoConfig.repo, discovered.length) } catch { /* best-effort */ }
 
@@ -185,19 +189,21 @@ export async function pollOnce(
                 if (!discoveredIssue) {
                   break
                 }
+                const issueRepo = discoveredIssue.issueRepo || discoveredIssue.issue.repo || repoConfig.repo
 
                 if (discoveredIssue.triage.level === 'architectural') {
-                  await forge.addLabels(repoConfig.repo, discoveredIssue.issue.number, ['orch:needs-human'])
+                  const labelConfig = buildLabelConfig(repoConfig, discoveredIssue.issue.labels)
+                  await forge.addLabels(issueRepo, discoveredIssue.issue.number, [labelConfig.needsHuman])
                   const archBody = formatStatusComment({ blockReason: 'This issue is classified as architectural and requires human guidance.' })
                   if (botUser) {
-                    await upsertBotComment(forge, repoConfig.repo, discoveredIssue.issue.number, STATUS_MARKER, archBody, botUser)
+                    await upsertBotComment(forge, issueRepo, discoveredIssue.issue.number, STATUS_MARKER, archBody, botUser)
                   } else {
-                    await forge.commentOnIssue(repoConfig.repo, discoveredIssue.issue.number, `🏗️ **night-orch**: This issue is classified as architectural and requires human guidance.`)
+                    await forge.commentOnIssue(issueRepo, discoveredIssue.issue.number, `🏗️ **night-orch**: This issue is classified as architectural and requires human guidance.`)
                   }
                   continue
                 }
 
-                if (!leaseManager.acquire(repoConfig.repo, discoveredIssue.issue.number, 'poller', 7200)) {
+                if (!leaseManager.acquire(issueRepo, discoveredIssue.issue.number, 'poller', 7200)) {
                   continue
                 }
 
@@ -236,6 +242,10 @@ export async function pollOnce(
                   branchName: branch,
                   branchSlug: slug,
                   worktreePath,
+                  phaseData: {
+                    ...(run.phaseData ?? {}),
+                    issueRepo,
+                  },
                   endedAt: null,
                   lastError: null,
                   blockReason: null,
@@ -244,12 +254,12 @@ export async function pollOnce(
                 // Label transition
                 await transitionLabels(
                   forge,
-                  repoConfig.repo,
+                  issueRepo,
                   discoveredIssue.issue.number,
                   discoveredIssue.issue.labels,
                   'queued',
                   'running',
-                  labelConfig,
+                  buildLabelConfig(repoConfig, discoveredIssue.issue.labels),
                 )
 
                 // Notify
@@ -286,7 +296,7 @@ export async function pollOnce(
                     worktreePath,
                     branch,
                     repoConfig.baseBranch,
-                    repoConfig.repo,
+                    issueRepo,
                     discoveredIssue.issue.number,
                     verifyCommands,
                   )
@@ -299,13 +309,21 @@ export async function pollOnce(
                       lastError: 'Rebase failed due to merge conflicts — retry will reset the branch and re-implement from scratch',
                       endedAt: new Date().toISOString(),
                     })
-                    const latestIssue = await forge.getIssue(repoConfig.repo, discoveredIssue.issue.number)
-                    await transitionLabels(forge, repoConfig.repo, discoveredIssue.issue.number, latestIssue.labels, 'running', 'blocked', labelConfig)
+                    const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
+                    await transitionLabels(
+                      forge,
+                      issueRepo,
+                      discoveredIssue.issue.number,
+                      latestIssue.labels,
+                      'running',
+                      'blocked',
+                      buildLabelConfig(repoConfig, latestIssue.labels),
+                    )
                     await notifier.dispatch(makePayload('blocked', repoConfig.repo, discoveredIssue.issue, {
                       summary: 'Rebase failed due to merge conflicts',
                       blockingReason: 'merge_conflict',
                     }))
-                    leaseManager.release(repoConfig.repo, discoveredIssue.issue.number)
+                    leaseManager.release(issueRepo, discoveredIssue.issue.number)
                     repoErrors++
                     continue
                   }
@@ -318,12 +336,20 @@ export async function pollOnce(
                       endedAt: new Date().toISOString(),
                       lastError: null,
                     })
-                    const latestIssue = await forge.getIssue(repoConfig.repo, discoveredIssue.issue.number)
-                    await transitionLabels(forge, repoConfig.repo, discoveredIssue.issue.number, latestIssue.labels, 'running', 'review_ready', labelConfig)
+                    const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
+                    await transitionLabels(
+                      forge,
+                      issueRepo,
+                      discoveredIssue.issue.number,
+                      latestIssue.labels,
+                      'running',
+                      'review_ready',
+                      buildLabelConfig(repoConfig, latestIssue.labels),
+                    )
                     await notifier.dispatch(makePayload('pr_ready', repoConfig.repo, discoveredIssue.issue, {
                       summary: 'Rebased successfully, verify passed',
                     }))
-                    leaseManager.release(repoConfig.repo, discoveredIssue.issue.number)
+                    leaseManager.release(issueRepo, discoveredIssue.issue.number)
                     repoProcessed++
                     continue
                   }
@@ -336,9 +362,17 @@ export async function pollOnce(
                       endedAt: new Date().toISOString(),
                       lastError: null,
                     })
-                    const latestIssue = await forge.getIssue(repoConfig.repo, discoveredIssue.issue.number)
-                    await transitionLabels(forge, repoConfig.repo, discoveredIssue.issue.number, latestIssue.labels, 'running', 'review_ready', labelConfig)
-                    leaseManager.release(repoConfig.repo, discoveredIssue.issue.number)
+                    const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
+                    await transitionLabels(
+                      forge,
+                      issueRepo,
+                      discoveredIssue.issue.number,
+                      latestIssue.labels,
+                      'running',
+                      'review_ready',
+                      buildLabelConfig(repoConfig, latestIssue.labels),
+                    )
+                    leaseManager.release(issueRepo, discoveredIssue.issue.number)
                     repoProcessed++
                     continue
                   }
@@ -377,6 +411,7 @@ export async function pollOnce(
                 const initialCtx: RunContext = {
                   runId: run.id,
                   repo: repoConfig.repo,
+                  issueRepo,
                   issueNumber: discoveredIssue.issue.number,
                   issue: discoveredIssue.issue,
                   repoConfig,
@@ -451,8 +486,16 @@ export async function pollOnce(
                     const allSucceeded = subResults.every((r) => r.success)
                     if (allSucceeded) {
                       runManager.update(run.id, { status: 'review_ready', endedAt: new Date().toISOString() })
-                      const latestIssue = await forge.getIssue(repoConfig.repo, discoveredIssue.issue.number)
-                      await transitionLabels(forge, repoConfig.repo, discoveredIssue.issue.number, latestIssue.labels, 'running', 'review_ready', labelConfig)
+                      const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
+                      await transitionLabels(
+                        forge,
+                        issueRepo,
+                        discoveredIssue.issue.number,
+                        latestIssue.labels,
+                        'running',
+                        'review_ready',
+                        buildLabelConfig(repoConfig, latestIssue.labels),
+                      )
                       await notifier.dispatch(makePayload('pr_ready', repoConfig.repo, discoveredIssue.issue, {
                         summary: `Decomposed into ${decomposition.subtasks.length} sub-tasks, all completed`,
                       }))
@@ -464,8 +507,16 @@ export async function pollOnce(
                         lastError: `${failed}/${decomposition.subtasks.length} sub-tasks failed`,
                         endedAt: new Date().toISOString(),
                       })
-                      const latestIssue = await forge.getIssue(repoConfig.repo, discoveredIssue.issue.number)
-                      await transitionLabels(forge, repoConfig.repo, discoveredIssue.issue.number, latestIssue.labels, 'running', 'blocked', labelConfig)
+                      const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
+                      await transitionLabels(
+                        forge,
+                        issueRepo,
+                        discoveredIssue.issue.number,
+                        latestIssue.labels,
+                        'running',
+                        'blocked',
+                        buildLabelConfig(repoConfig, latestIssue.labels),
+                      )
                       repoErrors++
                     }
                     continue
@@ -487,7 +538,7 @@ export async function pollOnce(
                   metrics,
                   onAgentEvent: (event) => observability.record(event),
                   onPlanReady: async (ctx) => {
-                    await postPlanSummaryComment(forge, ctx.repo, ctx.issueNumber, ctx.plan, botUser)
+                    await postPlanSummaryComment(forge, ctx.issueRepo ?? ctx.repo, ctx.issueNumber, ctx.plan, botUser)
                   },
                 })
 
@@ -498,8 +549,9 @@ export async function pollOnce(
                   issue: discoveredIssue.issue,
                   runDurationSec,
                   repo: repoConfig.repo,
+                  repoConfig,
+                  issueRepo,
                   issueNumber: discoveredIssue.issue.number,
-                  labelConfig,
                   db,
                   forge,
                   runManager,
@@ -531,8 +583,16 @@ export async function pollOnce(
                         'Infra error — auto-retrying (transitioning back to ready)',
                       )
                       try {
-                        const latestIssue = await forge.getIssue(repoConfig.repo, discoveredIssue.issue.number)
-                        await transitionLabels(forge, repoConfig.repo, discoveredIssue.issue.number, latestIssue.labels, 'running', 'queued', labelConfig)
+                        const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
+                        await transitionLabels(
+                          forge,
+                          issueRepo,
+                          discoveredIssue.issue.number,
+                          latestIssue.labels,
+                          'running',
+                          'queued',
+                          buildLabelConfig(repoConfig, latestIssue.labels),
+                        )
                       } catch (labelErr) {
                         logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: labelErr }, 'Failed to transition labels for auto-retry')
                       }
@@ -543,17 +603,25 @@ export async function pollOnce(
                         'Auto-retry limit reached — marking as error',
                       )
                       try {
-                        const latestIssue = await forge.getIssue(repoConfig.repo, discoveredIssue.issue.number)
-                        await transitionLabels(forge, repoConfig.repo, discoveredIssue.issue.number, latestIssue.labels, 'running', 'error', labelConfig)
+                        const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
+                        await transitionLabels(
+                          forge,
+                          issueRepo,
+                          discoveredIssue.issue.number,
+                          latestIssue.labels,
+                          'running',
+                          'error',
+                          buildLabelConfig(repoConfig, latestIssue.labels),
+                        )
                         const errorBody = formatStatusComment({
                           error: `Failed after ${recentErrors + 1} attempts. Last error: ${(err as Error).message}`,
                           retryCount: recentErrors + 1,
                           maxRetries: maxRetries,
                         })
                         if (botUser) {
-                          await upsertBotComment(forge, repoConfig.repo, discoveredIssue.issue.number, STATUS_MARKER, errorBody, botUser)
+                          await upsertBotComment(forge, issueRepo, discoveredIssue.issue.number, STATUS_MARKER, errorBody, botUser)
                         } else {
-                          await forge.commentOnIssue(repoConfig.repo, discoveredIssue.issue.number, `⚠️ **night-orch**: Failed after ${recentErrors + 1} attempts. Last error: ${(err as Error).message}\n\nRemove \`orch:error\` and add \`orch:ready\` to retry.`)
+                          await forge.commentOnIssue(issueRepo, discoveredIssue.issue.number, `⚠️ **night-orch**: Failed after ${recentErrors + 1} attempts. Last error: ${(err as Error).message}\n\nRemove \`orch:error\` and add \`orch:ready\` to retry.`)
                         }
                       } catch (labelErr) {
                         logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: labelErr }, 'Failed to transition labels after retry exhaustion')
@@ -582,7 +650,7 @@ export async function pollOnce(
                       logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: envErr }, 'Failed to tear down environment')
                     }
                   }
-                  leaseManager.release(repoConfig.repo, discoveredIssue.issue.number)
+                  leaseManager.release(issueRepo, discoveredIssue.issue.number)
                 }
               }
             }),
@@ -617,8 +685,9 @@ interface FinalizeRunOutcomeParams {
   }
   runDurationSec: number
   repo: string
+  repoConfig: Config['repos'][0]
+  issueRepo: string
   issueNumber: number
-  labelConfig: ReturnType<typeof buildLabelConfig>
   db: Database.Database
   forge: ReturnType<typeof createForgeAdapter>
   runManager: RunManager
@@ -635,8 +704,9 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
     issue,
     runDurationSec,
     repo,
+    repoConfig,
+    issueRepo,
     issueNumber,
-    labelConfig,
     db,
     forge,
     runManager,
@@ -655,15 +725,15 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
         prTitle: publishResult.prTitle,
         endedAt: new Date().toISOString(),
       })
-      const latestIssue = await forge.getIssue(repo, issueNumber)
+      const latestIssue = await forge.getIssue(issueRepo, issueNumber)
       await transitionLabels(
         forge,
-        repo,
+        issueRepo,
         issueNumber,
         latestIssue.labels,
         'running',
         'review_ready',
-        labelConfig,
+        buildLabelConfig(repoConfig, latestIssue.labels),
       )
       const notifyResult = await notifier.dispatch(makePayload('pr_ready', repo, issue, {
         prUrl: publishResult.prUrl,
@@ -690,8 +760,16 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
           lastError: err.message,
           endedAt: new Date().toISOString(),
         })
-        const latestIssue = await forge.getIssue(repo, issueNumber)
-        await transitionLabels(forge, repo, issueNumber, latestIssue.labels, 'running', 'blocked', labelConfig)
+        const latestIssue = await forge.getIssue(issueRepo, issueNumber)
+        await transitionLabels(
+          forge,
+          issueRepo,
+          issueNumber,
+          latestIssue.labels,
+          'running',
+          'blocked',
+          buildLabelConfig(repoConfig, latestIssue.labels),
+        )
         try {
           metrics?.incRunsTotal('blocked')
           metrics?.observeRunDuration(runDurationSec)
@@ -701,12 +779,28 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
 
       runManager.update(runId, { status: 'error', lastError: String(err), endedAt: new Date().toISOString() })
       const recentErrors = new RunManager(db).countRecentErrors(repo, issueNumber)
-      const latestIssue = await forge.getIssue(repo, issueNumber)
+      const latestIssue = await forge.getIssue(issueRepo, issueNumber)
       if (recentErrors < maxAutoRetries) {
-        await transitionLabels(forge, repo, issueNumber, latestIssue.labels, 'running', 'queued', labelConfig)
+        await transitionLabels(
+          forge,
+          issueRepo,
+          issueNumber,
+          latestIssue.labels,
+          'running',
+          'queued',
+          buildLabelConfig(repoConfig, latestIssue.labels),
+        )
         logger.info({ repo, issueNumber, recentErrors }, 'Publish failed — auto-retrying')
       } else {
-        await transitionLabels(forge, repo, issueNumber, latestIssue.labels, 'running', 'error', labelConfig)
+        await transitionLabels(
+          forge,
+          issueRepo,
+          issueNumber,
+          latestIssue.labels,
+          'running',
+          'error',
+          buildLabelConfig(repoConfig, latestIssue.labels),
+        )
       }
       try {
         metrics?.incRunsTotal('error')
@@ -719,15 +813,15 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
   if (finalCtx.terminalStatus === 'blocked') {
     const blockReason = buildBlockReason(finalCtx)
     runManager.update(runId, { status: 'blocked', lastError: blockReason, blockReason: finalCtx.blockReason, endedAt: new Date().toISOString() })
-    const latestIssue = await forge.getIssue(repo, issueNumber)
+    const latestIssue = await forge.getIssue(issueRepo, issueNumber)
     await transitionLabels(
       forge,
-      repo,
+      issueRepo,
       issueNumber,
       latestIssue.labels,
       'running',
       'blocked',
-      labelConfig,
+      buildLabelConfig(repoConfig, latestIssue.labels),
     )
 
     // Upsert status comment with block reason
@@ -739,9 +833,9 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
         cost: finalCtx.estimatedCostUsd,
       })
       if (botUser) {
-        await upsertBotComment(forge, repo, issueNumber, STATUS_MARKER, statusBody, botUser)
+        await upsertBotComment(forge, issueRepo, issueNumber, STATUS_MARKER, statusBody, botUser)
       } else {
-        await forge.commentOnIssue(repo, issueNumber, formatBlockComment(blockReason, finalCtx))
+        await forge.commentOnIssue(issueRepo, issueNumber, formatBlockComment(blockReason, finalCtx))
       }
     } catch (commentErr) {
       logger.warn({ repo, issueNumber, err: commentErr }, 'Failed to post block reason comment')
@@ -765,18 +859,34 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
   const unexpectedError = `Loop ended in unexpected state: ${finalCtx.terminalStatus}/${finalCtx.currentPhase}`
   runManager.update(runId, { status: 'error', lastError: unexpectedError, endedAt: new Date().toISOString() })
   const recentErrors = new RunManager(db).countRecentErrors(repo, issueNumber)
-  const latestIssue = await forge.getIssue(repo, issueNumber)
+  const latestIssue = await forge.getIssue(issueRepo, issueNumber)
   if (recentErrors < maxAutoRetries) {
-    await transitionLabels(forge, repo, issueNumber, latestIssue.labels, 'running', 'queued', labelConfig)
+    await transitionLabels(
+      forge,
+      issueRepo,
+      issueNumber,
+      latestIssue.labels,
+      'running',
+      'queued',
+      buildLabelConfig(repoConfig, latestIssue.labels),
+    )
     logger.info({ repo, issueNumber, recentErrors }, 'Unexpected state — auto-retrying')
   } else {
-    await transitionLabels(forge, repo, issueNumber, latestIssue.labels, 'running', 'error', labelConfig)
+    await transitionLabels(
+      forge,
+      issueRepo,
+      issueNumber,
+      latestIssue.labels,
+      'running',
+      'error',
+      buildLabelConfig(repoConfig, latestIssue.labels),
+    )
     try {
       const unexpectedBody = formatStatusComment({ error: `Failed after ${recentErrors + 1} attempts. Last error: ${unexpectedError}` })
       if (botUser) {
-        await upsertBotComment(forge, repo, issueNumber, STATUS_MARKER, unexpectedBody, botUser)
+        await upsertBotComment(forge, issueRepo, issueNumber, STATUS_MARKER, unexpectedBody, botUser)
       } else {
-        await forge.commentOnIssue(repo, issueNumber, `⚠️ **night-orch**: Failed after ${recentErrors + 1} attempts. Last error: ${unexpectedError}`)
+        await forge.commentOnIssue(issueRepo, issueNumber, `⚠️ **night-orch**: Failed after ${recentErrors + 1} attempts. Last error: ${unexpectedError}`)
       }
     } catch { /* best-effort */ }
   }
@@ -853,7 +963,6 @@ interface ProcessCommentCommandsParams {
   runManager: RunManager
   leaseManager: LeaseManager
   repoConfig: Config['repos'][0]
-  labelConfig: ReturnType<typeof buildLabelConfig>
   botUser: string
 }
 
@@ -876,42 +985,42 @@ async function processCommentCommands(params: ProcessCommentCommandsParams): Pro
     runManager,
     leaseManager,
     repoConfig,
-    labelConfig,
     botUser,
   } = params
 
   const commandSettings = config.commentCommands ?? { enabled: true, requireCollaborator: false }
   if (!commandSettings.enabled) return
 
-  const activeIssueNumbers = new Set(
-    runManager
-      .getActive()
-      .filter((run) => run.repo === repoConfig.repo)
-      .map((run) => run.issueNumber),
-  )
+  const activeRuns = runManager
+    .getActive()
+    .filter((run) => run.repo === repoConfig.repo)
 
-  const issueRows = [...activeIssueNumbers]
-    .sort((a, b) => a - b)
-    .map((issue_number) => ({ issue_number }))
+  const issueRows = [...new Map(
+    activeRuns.map((run) => {
+      const issueRepo = resolveIssueRepo(run.phaseData, repoConfig.repo)
+      return [`${issueRepo}#${run.issueNumber}`, { issue_number: run.issueNumber, issue_repo: issueRepo }] as const
+    }),
+  ).values()]
+    .sort((a, b) => a.issue_repo.localeCompare(b.issue_repo) || a.issue_number - b.issue_number)
 
   if (issueRows.length === 0) return
 
   const collaboratorCache = new Map<string, boolean>()
 
   for (const row of issueRows) {
-    const issueKey = `${repoConfig.repo}#${row.issue_number}`
+    const issueKey = `${row.issue_repo}#${row.issue_number}`
     if (missingCommentCommandIssues.has(issueKey)) {
       continue
     }
 
     let comments: Awaited<ReturnType<typeof forge.listIssueComments>>
     try {
-      comments = await forge.listIssueComments(repoConfig.repo, row.issue_number)
+      comments = await forge.listIssueComments(row.issue_repo, row.issue_number)
     } catch (err) {
       if (getHttpStatus(err) === 404) {
         missingCommentCommandIssues.add(issueKey)
         logger.debug(
-          { repo: repoConfig.repo, issueNumber: row.issue_number },
+          { repo: row.issue_repo, issueNumber: row.issue_number },
           'Skipping comment command scan for missing or inaccessible issue',
         )
         continue
@@ -921,13 +1030,13 @@ async function processCommentCommands(params: ProcessCommentCommandsParams): Pro
     const parsed = parseOrchCommands(comments, '1970-01-01T00:00:00Z')
 
     for (const item of parsed) {
-      if (isCommandProcessed(db, repoConfig.repo, row.issue_number, item.commentId)) continue
+      if (isCommandProcessed(db, row.issue_repo, row.issue_number, item.commentId)) continue
 
       let commandStatus = 'applied'
       try {
         const allowed = await canExecuteCommentCommand({
           forge,
-          repo: repoConfig.repo,
+          repo: row.issue_repo,
           user: item.user,
           requireCollaborator: commandSettings.requireCollaborator,
           cache: collaboratorCache,
@@ -949,7 +1058,7 @@ async function processCommentCommands(params: ProcessCommentCommandsParams): Pro
           runManager,
           leaseManager,
           repoConfig,
-          labelConfig,
+          issueRepo: row.issue_repo,
           issueNumber: row.issue_number,
           botUser,
           user: item.user,
@@ -976,7 +1085,7 @@ async function processCommentCommands(params: ProcessCommentCommandsParams): Pro
       } finally {
         markCommandProcessed(
           db,
-          repoConfig.repo,
+          row.issue_repo,
           row.issue_number,
           item.commentId,
           `${item.command.type}:${commandStatus}`,
@@ -1026,7 +1135,7 @@ interface ExecuteCommentCommandParams {
   runManager: RunManager
   leaseManager: LeaseManager
   repoConfig: Config['repos'][0]
-  labelConfig: ReturnType<typeof buildLabelConfig>
+  issueRepo: string
   issueNumber: number
   botUser: string
   user: string
@@ -1042,7 +1151,7 @@ async function executeCommentCommand(params: ExecuteCommentCommandParams): Promi
     runManager,
     leaseManager,
     repoConfig,
-    labelConfig,
+    issueRepo,
     issueNumber,
     botUser,
     user,
@@ -1055,7 +1164,7 @@ async function executeCommentCommand(params: ExecuteCommentCommandParams): Promi
         leaseManager,
         forge,
         repoConfig,
-        labelConfig,
+        issueRepo,
         issueNumber,
         resetPlan: command.resetPlan,
       })
@@ -1065,7 +1174,7 @@ async function executeCommentCommand(params: ExecuteCommentCommandParams): Promi
         leaseManager,
         forge,
         repoConfig,
-        labelConfig,
+        issueRepo,
         issueNumber,
       })
     case 'rebase': {
@@ -1079,7 +1188,7 @@ async function executeCommentCommand(params: ExecuteCommentCommandParams): Promi
         leaseManager,
         forge,
         repoConfig,
-        labelConfig,
+        issueRepo,
         issueNumber,
         user,
       })
@@ -1095,13 +1204,13 @@ interface QueueRetryFromCommentParams {
   leaseManager: LeaseManager
   forge: ReturnType<typeof createForgeAdapter>
   repoConfig: Config['repos'][0]
-  labelConfig: ReturnType<typeof buildLabelConfig>
+  issueRepo: string
   issueNumber: number
   resetPlan: boolean
 }
 
 async function queueRetryFromComment(params: QueueRetryFromCommentParams): Promise<CommandExecutionResult> {
-  const { runManager, leaseManager, forge, repoConfig, labelConfig, issueNumber, resetPlan } = params
+  const { runManager, leaseManager, forge, repoConfig, issueRepo, issueNumber, resetPlan } = params
   const run = runManager.getByRepoAndIssue(repoConfig.repo, issueNumber)
   if (!run) return { ok: false, reason: 'No run found for issue' }
   if (run.status === 'running') return { ok: false, reason: 'Run is currently running' }
@@ -1117,17 +1226,20 @@ async function queueRetryFromComment(params: QueueRetryFromCommentParams): Promi
     phaseData: resetPlan ? null : run.phaseData,
     blockReason: null,
   })
-  leaseManager.release(repoConfig.repo, issueNumber)
+  leaseManager.release(issueRepo, issueNumber)
+  if (issueRepo !== repoConfig.repo) {
+    leaseManager.release(repoConfig.repo, issueNumber)
+  }
 
-  const issue = await forge.getIssue(repoConfig.repo, issueNumber)
+  const issue = await forge.getIssue(issueRepo, issueNumber)
   await transitionLabels(
     forge,
-    repoConfig.repo,
+    issueRepo,
     issueNumber,
     issue.labels,
     run.status,
     'queued',
-    labelConfig,
+    buildLabelConfig(repoConfig, issue.labels),
   )
   return { ok: true }
 }
@@ -1137,12 +1249,12 @@ interface QueueContinueFromCommentParams {
   leaseManager: LeaseManager
   forge: ReturnType<typeof createForgeAdapter>
   repoConfig: Config['repos'][0]
-  labelConfig: ReturnType<typeof buildLabelConfig>
+  issueRepo: string
   issueNumber: number
 }
 
 async function queueContinueFromComment(params: QueueContinueFromCommentParams): Promise<CommandExecutionResult> {
-  const { runManager, leaseManager, forge, repoConfig, labelConfig, issueNumber } = params
+  const { runManager, leaseManager, forge, repoConfig, issueRepo, issueNumber } = params
   const run = runManager.getByRepoAndIssue(repoConfig.repo, issueNumber)
   if (!run) return { ok: false, reason: 'No run found for issue' }
   if (run.status !== 'blocked') {
@@ -1156,17 +1268,20 @@ async function queueContinueFromComment(params: QueueContinueFromCommentParams):
     lastError: null,
     blockReason: null,
   })
-  leaseManager.release(repoConfig.repo, issueNumber)
+  leaseManager.release(issueRepo, issueNumber)
+  if (issueRepo !== repoConfig.repo) {
+    leaseManager.release(repoConfig.repo, issueNumber)
+  }
 
-  const issue = await forge.getIssue(repoConfig.repo, issueNumber)
+  const issue = await forge.getIssue(issueRepo, issueNumber)
   await transitionLabels(
     forge,
-    repoConfig.repo,
+    issueRepo,
     issueNumber,
     issue.labels,
     'blocked',
     'queued',
-    labelConfig,
+    buildLabelConfig(repoConfig, issue.labels),
   )
   return { ok: true }
 }
@@ -1176,13 +1291,13 @@ interface CancelRunFromCommentParams {
   leaseManager: LeaseManager
   forge: ReturnType<typeof createForgeAdapter>
   repoConfig: Config['repos'][0]
-  labelConfig: ReturnType<typeof buildLabelConfig>
+  issueRepo: string
   issueNumber: number
   user: string
 }
 
 async function cancelRunFromComment(params: CancelRunFromCommentParams): Promise<CommandExecutionResult> {
-  const { runManager, leaseManager, forge, repoConfig, labelConfig, issueNumber, user } = params
+  const { runManager, leaseManager, forge, repoConfig, issueRepo, issueNumber, user } = params
   const run = runManager.getByRepoAndIssue(repoConfig.repo, issueNumber)
   if (!run) return { ok: false, reason: 'No run found for issue' }
   if (run.status !== 'running' && run.status !== 'queued') {
@@ -1195,17 +1310,20 @@ async function cancelRunFromComment(params: CancelRunFromCommentParams): Promise
     lastError: `Cancelled by @${user} via comment command`,
     blockReason: null,
   })
-  leaseManager.release(repoConfig.repo, issueNumber)
+  leaseManager.release(issueRepo, issueNumber)
+  if (issueRepo !== repoConfig.repo) {
+    leaseManager.release(repoConfig.repo, issueNumber)
+  }
 
-  const issue = await forge.getIssue(repoConfig.repo, issueNumber)
+  const issue = await forge.getIssue(issueRepo, issueNumber)
   await transitionLabels(
     forge,
-    repoConfig.repo,
+    issueRepo,
     issueNumber,
     issue.labels,
     run.status,
     'blocked',
-    labelConfig,
+    buildLabelConfig(repoConfig, issue.labels),
   )
   return { ok: true }
 }
@@ -1228,12 +1346,11 @@ interface ScanAndHandleReactionsParams {
   forge: ReturnType<typeof createForgeAdapter>
   runManager: RunManager
   repoConfig: Config['repos'][0]
-  labelConfig: ReturnType<typeof buildLabelConfig>
   botUser: string
 }
 
 async function scanAndHandleReactions(params: ScanAndHandleReactionsParams): Promise<void> {
-  const { db, forge, runManager, repoConfig, labelConfig, botUser } = params
+  const { db, forge, runManager, repoConfig, botUser } = params
 
   // Find review_ready issues with PRs for this repo.
   const rows = runManager
@@ -1265,7 +1382,7 @@ async function scanAndHandleReactions(params: ScanAndHandleReactionsParams): Pro
     // Handle each reaction
     for (const reaction of result.reactions) {
       try {
-        await handleReaction(reaction, { db, forge, runManager, labelConfig })
+        await handleReaction(reaction, { db, forge, runManager, repoConfig })
       } catch (err) {
         logger.warn(
           { repo: row.repo, issueNumber: row.issue_number, reactionType: reaction.type, err },

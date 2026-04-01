@@ -8,6 +8,7 @@ import { RunManager } from '../state/runs.js'
 import { transitionLabels } from '../labels/manager.js'
 import { buildLabelConfig } from '../labels/config.js'
 import { upsertBotComment, markerTag } from '../forge/bot-comment.js'
+import { resolveIssueRepo } from '../utils/issue-repo.js'
 import { logger } from '../utils/logger.js'
 
 const STATUS_MARKER = markerTag('status')
@@ -33,7 +34,6 @@ export async function queueRebase(
   botUser: string,
 ): Promise<{ queued: boolean; reason: string }> {
   const runManager = new RunManager(db)
-  const labelConfig = buildLabelConfig(repoConfig)
 
   // Find the latest run with a branch for this issue
   const run = runManager.getByRepoAndIssue(repoConfig.repo, issueNumber)
@@ -45,6 +45,8 @@ export async function queueRebase(
     return { queued: false, reason: `Run is already ${run.status}` }
   }
 
+  const issueRepo = resolveIssueRepo(run.phaseData, repoConfig.repo)
+
   // Store rebase context and transition to queued
   const existingPhaseData = run.phaseData ?? {}
   runManager.update(run.id, {
@@ -53,6 +55,7 @@ export async function queueRebase(
     endedAt: null,
     phaseData: {
       ...existingPhaseData,
+      issueRepo,
       reactionContext: 'Rebase requested. Rebase onto latest base branch, run verify, and fix any issues introduced by upstream changes.',
       reactionType: 'rebase',
       reactionSummary: 'Rebase and re-evaluate',
@@ -61,21 +64,21 @@ export async function queueRebase(
 
   // Transition labels
   try {
-    const issue = await forge.getIssue(repoConfig.repo, issueNumber)
+    const issue = await forge.getIssue(issueRepo, issueNumber)
     const fromState = run.status === 'review_ready' ? 'review_ready' : run.status === 'blocked' ? 'blocked' : 'error'
     await transitionLabels(
-      forge, repoConfig.repo, issueNumber, issue.labels,
-      fromState, 'queued', labelConfig,
+      forge, issueRepo, issueNumber, issue.labels,
+      fromState, 'queued', buildLabelConfig(repoConfig, issue.labels),
     )
   } catch (err) {
-    logger.warn({ repo: repoConfig.repo, issueNumber, err }, 'Failed to transition labels for rebase queue')
+    logger.warn({ repo: issueRepo, issueNumber, err }, 'Failed to transition labels for rebase queue')
   }
 
   // Post status comment
-  await commentStatus(forge, repoConfig.repo, issueNumber, botUser,
+  await commentStatus(forge, issueRepo, issueNumber, botUser,
     'Queued for rebase and re-evaluation. The branch will be rebased onto the latest base, verified, and if anything breaks the coder will fix it.')
 
-  logger.info({ repo: repoConfig.repo, issueNumber, runId: run.id }, 'Queued issue for rebase-and-re-evaluate')
+  logger.info({ repo: issueRepo, issueNumber, runId: run.id }, 'Queued issue for rebase-and-re-evaluate')
   return { queued: true, reason: 'Queued for rebase and re-evaluation on next poll cycle' }
 }
 
