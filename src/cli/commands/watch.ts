@@ -4,6 +4,7 @@ import { App } from '../tui/app.js'
 import { initDatabase } from '../../state/db.js'
 import { LeaseManager } from '../../state/leases.js'
 import { resolveConfigPath, loadConfig, ConfigError } from '../../config/loader.js'
+import { logger } from '../../utils/logger.js'
 
 interface GlobalOpts {
   config?: string
@@ -37,6 +38,9 @@ export async function runWatch(globalOpts?: GlobalOpts): Promise<void> {
     process.stdout.write('\u001B[?25l')
   }
 
+  const previousLoggerLevel = logger.level
+  logger.level = 'silent'
+
   try {
     const { waitUntilExit } = render(
       React.createElement(App, {
@@ -53,6 +57,8 @@ export async function runWatch(globalOpts?: GlobalOpts): Promise<void> {
 
     await waitUntilExit()
   } finally {
+    logger.level = previousLoggerLevel
+
     // Release any leases held by this process before closing DB
     try {
       const leaseManager = new LeaseManager(db)
