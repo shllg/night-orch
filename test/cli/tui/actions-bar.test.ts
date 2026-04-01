@@ -12,7 +12,7 @@ describe('buildActionHints', () => {
 
     expect(hints.line1).toContain('[j/k]select')
     expect(hints.line1).toContain('[o/enter]open')
-    expect(hints.line1).toContain('[3]logs')
+    expect(hints.line1).toContain('[4]logs')
     expect(hints.line2).toContain('[r]etry')
     expect(hints.line2).toContain('[b]rebase')
   })
@@ -41,6 +41,19 @@ describe('buildActionHints', () => {
     expect(hints.line2).toContain('polling paused')
     expect(hints.line2).not.toContain('retry')
     expect(hints.line2).not.toContain('rebase')
+  })
+
+  it('shows project selection controls on projects tab', () => {
+    const hints = buildActionHints({
+      activeTab: 'projects',
+      busy: false,
+      runFocused: false,
+      autoRefresh: true,
+    })
+
+    expect(hints.line1).toContain('[j/k]select project')
+    expect(hints.line1).toContain('[2]projects')
+    expect(hints.line2).toContain('labels')
   })
 
   it('shows log navigation controls on logs tab', () => {

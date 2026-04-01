@@ -2,8 +2,9 @@ import type { TabId } from './types.js'
 
 export const TABS: Array<{ id: TabId; hotkey: string; label: string }> = [
   { id: 'runs', hotkey: '1', label: 'Runs' },
-  { id: 'stats', hotkey: '2', label: 'Stats' },
-  { id: 'logs', hotkey: '3', label: 'Logs' },
+  { id: 'projects', hotkey: '2', label: 'Projects' },
+  { id: 'stats', hotkey: '3', label: 'Stats' },
+  { id: 'logs', hotkey: '4', label: 'Logs' },
 ]
 
 export const STATUS_COLORS: Record<string, 'white' | 'yellow' | 'cyan' | 'magenta' | 'green' | 'red'> = {
