@@ -36,15 +36,24 @@ function makeContext(overrides: Partial<PRBodyContext> = {}): PRBodyContext {
 }
 
 describe('compilePRTitle', () => {
-  it('follows format', () => {
-    expect(compilePRTitle(42, 'Fix login')).toBe('[night-orch] #42 Fix login')
+  it('follows format with label-derived prefix', () => {
+    expect(compilePRTitle(42, 'Enable issues in projects', ['enhancement'])).toBe(
+      '[FEAT] Enable issues in projects (night-orch / #42)',
+    )
+  })
+
+  it('falls back to CHORE when no conventional label is present', () => {
+    expect(compilePRTitle(42, 'Adjust queue handling', ['orch:running'])).toBe(
+      '[CHORE] Adjust queue handling (night-orch / #42)',
+    )
   })
 
   it('truncates at 256 chars', () => {
     const longTitle = 'A'.repeat(300)
-    const title = compilePRTitle(1, longTitle)
+    const title = compilePRTitle(1, longTitle, ['bug'])
     expect(title.length).toBeLessThanOrEqual(256)
-    expect(title).toMatch(/\.\.\.$/)
+    expect(title).toContain('(night-orch / #1)')
+    expect(title).toMatch(/^\[FIX\] /)
   })
 })
 

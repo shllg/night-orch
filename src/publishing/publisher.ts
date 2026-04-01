@@ -99,7 +99,7 @@ export async function publishPR(
     }
   }
 
-  const title = compilePRTitle(ctx.issueNumber, ctx.issue.title)
+  const title = compilePRTitle(ctx.issueNumber, ctx.issue.title, ctx.issue.labels)
   const body = compilePRBody({
     issue: { number: ctx.issueNumber, title: ctx.issue.title, url: ctx.issue.url },
     plan: ctx.plan,
