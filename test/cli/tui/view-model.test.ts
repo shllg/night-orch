@@ -17,10 +17,12 @@ describe('tui view model helpers', () => {
     expect(sparkline).not.toBe('----')
   })
 
-  it('treats only queued and running statuses as active', () => {
+  it('treats all non-completed run statuses as active', () => {
     expect(isActiveRunStatus('queued')).toBe(true)
     expect(isActiveRunStatus('running')).toBe(true)
-    expect(isActiveRunStatus('review_ready')).toBe(false)
+    expect(isActiveRunStatus('blocked')).toBe(true)
+    expect(isActiveRunStatus('review_ready')).toBe(true)
+    expect(isActiveRunStatus('error')).toBe(true)
     expect(isActiveRunStatus('completed')).toBe(false)
   })
 
@@ -37,11 +39,10 @@ describe('tui view model helpers', () => {
     expect(partitioned.active).toEqual([
       { id: 'a', status: 'running' },
       { id: 'b', status: 'queued' },
-    ])
-    expect(partitioned.recent).toEqual([
       { id: 'c', status: 'review_ready' },
       { id: 'd', status: 'error' },
     ])
+    expect(partitioned.recent).toEqual([])
   })
 
   it('returns empty active and recent arrays for empty input', () => {
@@ -63,18 +64,19 @@ describe('tui view model helpers', () => {
     expect(partitioned.recent).toEqual([])
   })
 
-  it('returns empty active when all rows are recent', () => {
+  it('keeps only completed rows in recent', () => {
     const partitioned = partitionRowsByActivity([
       { id: 'a', status: 'review_ready' },
       { id: 'b', status: 'completed' },
       { id: 'c', status: 'error' },
     ])
 
-    expect(partitioned.active).toEqual([])
-    expect(partitioned.recent).toEqual([
+    expect(partitioned.active).toEqual([
       { id: 'a', status: 'review_ready' },
-      { id: 'b', status: 'completed' },
       { id: 'c', status: 'error' },
+    ])
+    expect(partitioned.recent).toEqual([
+      { id: 'b', status: 'completed' },
     ])
   })
 })

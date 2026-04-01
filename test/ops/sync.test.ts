@@ -159,6 +159,111 @@ describe('SyncEngine', () => {
     expect(row.status).toBe('completed')
   })
 
+  it('review_ready run + merged PR → completed', async () => {
+    const forge = makeMockForge({
+      getPR: vi.fn().mockResolvedValue({
+        number: 10,
+        title: 'Fix',
+        body: '',
+        state: 'merged',
+        headBranch: 'orch/1-fix',
+        headSha: 'sha-10',
+        baseBranch: 'main',
+        url: '',
+      }),
+    })
+    const runId = insertRun(db, { status: 'review_ready', pr_number: 10, branch_name: 'orch/1-fix' })
+
+    const engine = new SyncEngine(db, config, () => forge)
+    const result = await engine.reconcile(false)
+
+    expect(result.reconciledRuns).toHaveLength(1)
+    expect(result.reconciledRuns[0]!.action).toBe('completed')
+    expect(result.reconciledRuns[0]!.reason).toContain('review_ready')
+
+    const row = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as { status: string }
+    expect(row.status).toBe('completed')
+  })
+
+  it('running run + stale pr_number + open branch PR → review_ready (no requeue)', async () => {
+    const notFound = Object.assign(new Error('Not found'), { status: 404 })
+    const forge = makeMockForge({
+      getPR: vi.fn().mockRejectedValue(notFound),
+      findPRByBranch: vi.fn().mockResolvedValue({
+        number: 11,
+        title: 'Fix',
+        body: '',
+        state: 'open',
+        headBranch: 'orch/1-fix',
+        headSha: 'sha-11',
+        baseBranch: 'main',
+        url: '',
+      }),
+    })
+    const runId = insertRun(db, { status: 'running', pr_number: 10, branch_name: 'orch/1-fix' })
+
+    const engine = new SyncEngine(db, config, () => forge)
+    const result = await engine.reconcile(false)
+
+    expect(result.reconciledRuns).toHaveLength(1)
+    expect(result.reconciledRuns[0]!.action).toBe('label_corrected')
+    expect(result.reconciledRuns[0]!.reason).toContain('PR open but run stale')
+
+    const row = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as { status: string }
+    expect(row.status).toBe('review_ready')
+  })
+
+  it('blocked run + issue closed → completed', async () => {
+    const forge = makeMockForge({
+      getIssue: vi.fn().mockResolvedValue({
+        number: 1, nodeId: '', title: 'Test', body: '', labels: [],
+        assignees: [], state: 'closed', createdAt: '', updatedAt: '', url: '',
+      }),
+    })
+    const runId = insertRun(db, { status: 'blocked' })
+
+    const engine = new SyncEngine(db, config, () => forge)
+    const result = await engine.reconcile(false)
+
+    expect(result.reconciledRuns).toHaveLength(1)
+    expect(result.reconciledRuns[0]!.action).toBe('closed')
+    expect(result.reconciledRuns[0]!.reason).toContain('blocked')
+
+    const row = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as { status: string }
+    expect(row.status).toBe('completed')
+  })
+
+  it('error run + deleted issue (404) → completed', async () => {
+    const notFound = Object.assign(new Error('Not found'), { status: 404 })
+    const forge = makeMockForge({
+      getIssue: vi.fn().mockRejectedValue(notFound),
+    })
+    const runId = insertRun(db, { status: 'error' })
+
+    const engine = new SyncEngine(db, config, () => forge)
+    const result = await engine.reconcile(false)
+
+    expect(result.reconciledRuns).toHaveLength(1)
+    expect(result.reconciledRuns[0]!.action).toBe('closed')
+    expect(result.reconciledRuns[0]!.reason).toContain('deleted')
+
+    const row = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as { status: string }
+    expect(row.status).toBe('completed')
+  })
+
+  it('non-terminal run + open issue remains unchanged', async () => {
+    const forge = makeMockForge()
+    const runId = insertRun(db, { status: 'blocked' })
+
+    const engine = new SyncEngine(db, config, () => forge)
+    const result = await engine.reconcile(false)
+
+    expect(result.reconciledRuns).toHaveLength(0)
+
+    const row = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as { status: string }
+    expect(row.status).toBe('blocked')
+  })
+
   it('running run + expired lease + no PR → queued (retry)', async () => {
     const forge = makeMockForge()
     const runId = insertRun(db)

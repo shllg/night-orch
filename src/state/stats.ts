@@ -86,7 +86,7 @@ export function loadTuiStats(db: Database.Database): TuiStatsSnapshot {
     .prepare(
       `SELECT
          COUNT(*) AS total_runs,
-         SUM(CASE WHEN status IN ('queued', 'running') THEN 1 ELSE 0 END) AS active_runs,
+         SUM(CASE WHEN status IN ('queued', 'running', 'blocked', 'review_ready', 'error') THEN 1 ELSE 0 END) AS active_runs,
          SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) AS queued_runs,
          SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running_runs,
          SUM(CASE WHEN status = 'review_ready' THEN 1 ELSE 0 END) AS review_ready_runs,

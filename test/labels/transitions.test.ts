@@ -112,4 +112,23 @@ describe('computeLabelMutation', () => {
     expect(m.remove).toContain('orch:needs-human')
     expect(m.remove).toContain('orch:retry')
   })
+
+  it('any non-completed state → completed: remove all runtime orchestration labels', () => {
+    const m = computeLabelMutation(
+      'blocked',
+      'completed',
+      ['orch:ready', 'orch:running', 'orch:blocked', 'orch:needs-human', 'orch:review-ready', 'orch:error', 'orch:retry'],
+      config,
+    )
+    expect(m.add).toEqual([])
+    expect(m.remove).toEqual([
+      'orch:ready',
+      'orch:running',
+      'orch:blocked',
+      'orch:needs-human',
+      'orch:review-ready',
+      'orch:error',
+      'orch:retry',
+    ])
+  })
 })

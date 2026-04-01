@@ -186,7 +186,7 @@ export class RunManager {
 
   getActive(): RunRecord[] {
     const rows = this.db
-      .prepare("SELECT * FROM runs WHERE status IN ('queued', 'running') ORDER BY created_at")
+      .prepare("SELECT * FROM runs WHERE status IN ('queued', 'running', 'blocked', 'review_ready', 'error') ORDER BY created_at")
       .all() as RawRunRow[]
     return rows.map((r) => this.mapRow(r))
   }

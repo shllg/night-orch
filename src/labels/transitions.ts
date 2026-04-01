@@ -63,7 +63,7 @@ export function computeLabelMutation(
       remove = [config.running]
       break
     case 'completed':
-      remove = [config.running, config.reviewReady]
+      remove = [...config.ready, config.running, config.blocked, config.needsHuman, config.reviewReady, config.error, config.retry]
       break
     case 'queued':
       add = [...config.ready]

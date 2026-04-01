@@ -103,7 +103,7 @@ describe('RunManager', () => {
     expect(found).toBeNull()
   })
 
-  it('getActive returns only queued/running records', () => {
+  it('getActive returns non-completed records', () => {
     const r1 = runManager.create({
       repo: 'org/repo',
       issueNumber: 1,
@@ -120,11 +120,20 @@ describe('RunManager', () => {
       coder: 'claude',
       reviewer: 'claude',
     })
+    const r3 = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 3,
+      issueNodeId: 'n3',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
     runManager.update(r1.id, { status: 'running' })
-    runManager.update(r2.id, { status: 'completed' })
+    runManager.update(r2.id, { status: 'blocked' })
+    runManager.update(r3.id, { status: 'completed' })
 
     const active = runManager.getActive()
-    expect(active).toHaveLength(1)
-    expect(active[0]?.issueNumber).toBe(1)
+    expect(active).toHaveLength(2)
+    expect(active.map((run) => run.issueNumber).sort((a, b) => a - b)).toEqual([1, 2])
   })
 })

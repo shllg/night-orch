@@ -196,10 +196,10 @@ async function handleStatus(args: { repo?: string }, deps: MCPDependencies): Pro
   const active = runManager.getActive()
   const filtered = args.repo ? active.filter((r) => r.repo === args.repo) : active
 
-  // Recent completed/error runs
+  // Recent completed runs
   const recentSql = args.repo
-    ? "SELECT * FROM runs WHERE status IN ('completed', 'blocked', 'error') AND repo = ? ORDER BY updated_at DESC LIMIT 10"
-    : "SELECT * FROM runs WHERE status IN ('completed', 'blocked', 'error') ORDER BY updated_at DESC LIMIT 10"
+    ? "SELECT * FROM runs WHERE status = 'completed' AND repo = ? ORDER BY updated_at DESC LIMIT 10"
+    : "SELECT * FROM runs WHERE status = 'completed' ORDER BY updated_at DESC LIMIT 10"
   const recentRows = args.repo
     ? deps.db.prepare(recentSql).all(args.repo)
     : deps.db.prepare(recentSql).all()
