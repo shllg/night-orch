@@ -111,7 +111,7 @@ See `docs/specs-active/index.md` for the full implementation spec with dependenc
 
 - **GitHub issues are the queue** — no separate UI
 - **Always PR** — never push directly to base branch
-- **Serial processing** in v1 — one issue at a time
+- **Per-repo concurrency** — repos run in parallel; each repo defaults to one active run
 - **Orchestrator owns verification** — never trust agent claims that tests pass
 - **Forge abstraction** — GitHub first, Forgejo second via `ForgeAdapter` interface
 - **Review gates readiness** — PR only marked ready when reviewer approves AND verify passes

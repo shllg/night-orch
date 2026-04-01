@@ -76,17 +76,19 @@ Night-orch handles multiple repos in a single instance:
 repos:
   - repo: myorg/frontend
     localPath: ~/code/frontend
+    maxConcurrentRuns: 1
     baseBranch: main
     verify: [pnpm lint, pnpm test]
 
   - repo: myorg/backend
     localPath: ~/code/backend
+    maxConcurrentRuns: 2  # optional: increase per-repo parallel issue runs
     baseBranch: main
     verify: [cargo test, cargo clippy]
     workflow: minimal  # different pipeline for this repo
 ```
 
-Each repo can have its own worker profiles, verify commands, workflow, merge queue settings, and labels.
+Repos are polled in parallel. By default, each repo runs one issue at a time; raise `maxConcurrentRuns` to process multiple issues concurrently in that repo.
 
 ---
 

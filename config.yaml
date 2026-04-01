@@ -91,6 +91,7 @@ repos:
   - repo: shllg/night-orch
     forge: github
     localPath: ~/src/tools/ai-project-runner
+    maxConcurrentRuns: 1
     baseBranch: master
     branchPrefix: orch
     labels:
