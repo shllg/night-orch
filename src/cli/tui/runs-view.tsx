@@ -1,7 +1,14 @@
 import React from 'react'
 import { Box, Text } from 'ink'
 import type { TuiStatsSnapshot } from '../../state/stats.js'
-import { EVENT_COLORS, STATUS_COLORS } from './constants.js'
+import {
+  EVENT_COLORS,
+  colorForCostUsd,
+  colorForIterationCount,
+  colorForPhase,
+  colorForPrNumber,
+  colorForRunStatus,
+} from './constants.js'
 import type { AgentEventRow, IssueListRow, MergeBatchRow, RunListRow } from './data.js'
 import { formatEventSummary, formatPrList, formatTime, truncate } from './format.js'
 import { resolveIssueTitle, resolvePrTitle, type TitleLookup } from './titles.js'
@@ -68,9 +75,8 @@ export function RunsView({
   const renderIssueRow = (issue: IssueListRow, dimmed: boolean): React.ReactElement => {
     const selected = selectedIssue?.key === issue.key
     const issueTitle = resolveIssueTitle(issue, titleLookup) ?? '(title unavailable)'
-    const statusColor = STATUS_COLORS[issue.status] ?? 'white'
+    const statusColor = colorForRunStatus(issue.status)
     const absoluteIndex = issueIndexByKey.get(issue.key) ?? 0
-    const runStatuses = issue.runs.slice(0, 3).map((run) => run.status).join(' -> ')
 
     return (
       <Box key={issue.key} flexDirection="column">
@@ -87,13 +93,23 @@ export function RunsView({
             <Text>{truncate(issueTitle, 56)}</Text>
           </Text>
         </Text>
-        <Text dimColor color={dimmed ? 'gray' : undefined}>
+        <Text dimColor={dimmed}>
           {'    '}
-          <Text>runs {issue.runs.length}</Text>
+          <Text color="gray">phase </Text>
+          <Text color={colorForPhase(issue.current_phase)}>{truncate(issue.current_phase ?? '-', 12)}</Text>
           {'  '}
-          <Text>history {truncate(runStatuses || '-', 44)}</Text>
+          <Text color="gray">iter </Text>
+          <Text color={colorForIterationCount(issue.iteration_count)}>{issue.iteration_count ?? 0}</Text>
           {'  '}
-          <Text>{formatTime(issue.updated_at)}</Text>
+          <Text color="gray">cost </Text>
+          <Text color={colorForCostUsd(issue.estimated_cost_usd)}>${(issue.estimated_cost_usd ?? 0).toFixed(2)}</Text>
+          {'  '}
+          <Text color={colorForPrNumber(issue.pr_number)}>{issue.pr_number !== null ? `PR #${issue.pr_number}` : 'no PR'}</Text>
+          {'  '}
+          <Text color="gray">runs {issue.runs.length} hist </Text>
+          <RunHistory runs={issue.runs} maxItems={3} maxStatusLength={10} />
+          {'  '}
+          <Text color="gray">{formatTime(issue.updated_at)}</Text>
         </Text>
       </Box>
     )
@@ -130,21 +146,40 @@ export function RunsView({
           {selectedIssue && (
             <>
               <Text>{selectedIssue.repo}#{selectedIssue.issue_number}</Text>
-              <Text color={STATUS_COLORS[selectedIssue.status] ?? 'white'}>{selectedIssue.status}</Text>
+              <Text color={colorForRunStatus(selectedIssue.status)}>{selectedIssue.status}</Text>
               <Text>{truncate(resolveIssueTitle(selectedIssue, titleLookup) ?? '(title unavailable)', 46)}</Text>
+              <Text>
+                <Text color="gray">phase </Text>
+                <Text color={colorForPhase(selectedIssue.current_phase)}>{truncate(selectedIssue.current_phase ?? '-', 10)}</Text>
+                {'  '}
+                <Text color="gray">iter </Text>
+                <Text color={colorForIterationCount(selectedIssue.iteration_count)}>{selectedIssue.iteration_count ?? 0}</Text>
+                {'  '}
+                <Text color="gray">cost </Text>
+                <Text color={colorForCostUsd(selectedIssue.estimated_cost_usd)}>${(selectedIssue.estimated_cost_usd ?? 0).toFixed(2)}</Text>
+              </Text>
               {selectedIssue.pr_number !== null && (
-                <Text dimColor>PR #{selectedIssue.pr_number}: {truncate(resolvePrTitle(selectedIssue, titleLookup) ?? '(title unavailable)', 36)}</Text>
+                <Text dimColor>
+                  <Text color={colorForPrNumber(selectedIssue.pr_number)}>PR #{selectedIssue.pr_number}</Text>
+                  {`: ${truncate(resolvePrTitle(selectedIssue, titleLookup) ?? '(title unavailable)', 36)}`}
+                </Text>
               )}
 
               <Box marginTop={1} flexDirection="column">
                 <Text bold>Runs</Text>
                 {selectedIssue.runs.slice(0, 5).map((run) => (
                   <Text key={run.id}>
-                    <Text color={STATUS_COLORS[run.status] ?? 'white'}>{truncate(run.status, 11)}</Text>
+                    <Text color={colorForRunStatus(run.status)}>{truncate(run.status, 11)}</Text>
+                    {' '}
+                    <Text color={colorForPhase(run.current_phase)}>{truncate(run.current_phase ?? '-', 8)}</Text>
+                    {' '}
+                    <Text color={colorForIterationCount(run.iteration_count)}>i{run.iteration_count ?? 0}</Text>
+                    {' '}
+                    <Text color={colorForCostUsd(run.estimated_cost_usd)}>${(run.estimated_cost_usd ?? 0).toFixed(2)}</Text>
                     {' '}
                     <Text color="gray">{formatTime(run.updated_at)}</Text>
                     {' '}
-                    <Text>{run.pr_number !== null ? `PR #${run.pr_number}` : 'no PR'}</Text>
+                    <Text color={colorForPrNumber(run.pr_number)}>{run.pr_number !== null ? `PR #${run.pr_number}` : 'no PR'}</Text>
                   </Text>
                 ))}
               </Box>
@@ -227,24 +262,42 @@ function FocusedIssueView({
             <Box width="35%" flexDirection="column" marginRight={1} borderStyle="single" borderColor="gray" paddingX={1}>
               <Text bold color="cyan">Overview</Text>
               <Text>{selectedIssue.repo}#{selectedIssue.issue_number}</Text>
-              <Text color={STATUS_COLORS[selectedIssue.status] ?? 'white'}>{selectedIssue.status}</Text>
+              <Text color={colorForRunStatus(selectedIssue.status)}>{selectedIssue.status}</Text>
               <Text>{resolveIssueTitle(selectedIssue, titleLookup) ?? '(title unavailable)'}</Text>
               {selectedIssue.pr_number !== null && (
-                <Text dimColor>PR #{selectedIssue.pr_number}: {resolvePrTitle(selectedIssue, titleLookup) ?? '(title unavailable)'}</Text>
+                <Text dimColor>
+                  <Text color={colorForPrNumber(selectedIssue.pr_number)}>PR #{selectedIssue.pr_number}</Text>
+                  {`: ${resolvePrTitle(selectedIssue, titleLookup) ?? '(title unavailable)'}`}
+                </Text>
               )}
-              <Text>phase {selectedIssue.current_phase ?? '-'}</Text>
-              <Text>iter {selectedIssue.iteration_count ?? 0}  cost ${(selectedIssue.estimated_cost_usd ?? 0).toFixed(2)}</Text>
+              <Text>
+                <Text color="gray">phase </Text>
+                <Text color={colorForPhase(selectedIssue.current_phase)}>{selectedIssue.current_phase ?? '-'}</Text>
+              </Text>
+              <Text>
+                <Text color="gray">iter </Text>
+                <Text color={colorForIterationCount(selectedIssue.iteration_count)}>{selectedIssue.iteration_count ?? 0}</Text>
+                {'  '}
+                <Text color="gray">cost </Text>
+                <Text color={colorForCostUsd(selectedIssue.estimated_cost_usd)}>${(selectedIssue.estimated_cost_usd ?? 0).toFixed(2)}</Text>
+              </Text>
               <Text dimColor>updated {formatTime(selectedIssue.updated_at)}</Text>
               {selectedIssue.last_error && <Text color="red">error: {truncate(selectedIssue.last_error, 90)}</Text>}
               <Box marginTop={1} flexDirection="column">
                 <Text bold>Runs ({selectedIssue.runs.length})</Text>
                 {selectedIssue.runs.slice(0, 10).map((run) => (
                   <Text key={run.id}>
-                    <Text color={STATUS_COLORS[run.status] ?? 'white'}>{truncate(run.status, 11)}</Text>
+                    <Text color={colorForRunStatus(run.status)}>{truncate(run.status, 10)}</Text>
+                    {' '}
+                    <Text color={colorForPhase(run.current_phase)}>{truncate(run.current_phase ?? '-', 8)}</Text>
+                    {' '}
+                    <Text color={colorForIterationCount(run.iteration_count)}>i{run.iteration_count ?? 0}</Text>
+                    {' '}
+                    <Text color={colorForCostUsd(run.estimated_cost_usd)}>${(run.estimated_cost_usd ?? 0).toFixed(2)}</Text>
+                    {' '}
+                    <Text color={colorForPrNumber(run.pr_number)}>{run.pr_number !== null ? `PR #${run.pr_number}` : 'no PR'}</Text>
                     {' '}
                     <Text color="gray">{formatTime(run.updated_at)}</Text>
-                    {' '}
-                    <Text>{run.id.slice(0, 12)}</Text>
                   </Text>
                 ))}
               </Box>
@@ -260,7 +313,15 @@ function FocusedIssueView({
               {!selectedRun && <Text color="gray">No run available for this issue</Text>}
               {selectedRun && (
                 <Text dimColor>
-                  source run {selectedRun.id} ({selectedRun.status})
+                  source run {selectedRun.id}
+                  {'  '}
+                  <Text color={colorForRunStatus(selectedRun.status)}>{selectedRun.status}</Text>
+                  {'  '}
+                  <Text color={colorForPhase(selectedRun.current_phase)}>{selectedRun.current_phase ?? '-'}</Text>
+                  {'  '}
+                  <Text color={colorForIterationCount(selectedRun.iteration_count)}>i{selectedRun.iteration_count ?? 0}</Text>
+                  {'  '}
+                  <Text color={colorForCostUsd(selectedRun.estimated_cost_usd)}>${(selectedRun.estimated_cost_usd ?? 0).toFixed(2)}</Text>
                 </Text>
               )}
               {selectedRunEvents.length === 0 && <Text color="gray">No agent events</Text>}
@@ -289,5 +350,29 @@ function FocusedIssueView({
         </>
       )}
     </Box>
+  )
+}
+
+interface RunHistoryProps {
+  runs: RunListRow[]
+  maxItems: number
+  maxStatusLength: number
+}
+
+function RunHistory({ runs, maxItems, maxStatusLength }: RunHistoryProps): React.ReactElement {
+  const history = runs.slice(0, maxItems)
+  if (history.length === 0) {
+    return <Text color="gray">-</Text>
+  }
+
+  return (
+    <>
+      {history.map((run, index) => (
+        <React.Fragment key={run.id}>
+          {index > 0 && <Text color="gray">→</Text>}
+          <Text color={colorForRunStatus(run.status)}>{truncate(run.status, maxStatusLength)}</Text>
+        </React.Fragment>
+      ))}
+    </>
   )
 }

@@ -1,6 +1,14 @@
 import React from 'react'
 import { Box, Text } from 'ink'
 import type Database from 'better-sqlite3'
+import {
+  colorForCostUsd,
+  colorForIterationCount,
+  colorForPhase,
+  colorForPrNumber,
+  colorForRunStatus,
+  type TuiColor,
+} from './constants.js'
 
 interface ActiveRunsProps {
   db: Database.Database
@@ -12,12 +20,13 @@ interface ActiveRunRow {
   repo: string
   issue_number: number
   status: string
+  pr_number: number | null
   current_phase: string | null
   iteration_count: number | null
   estimated_cost_usd: number | null
 }
 
-const STATUS_ICONS: Record<string, { icon: string; color: string }> = {
+const STATUS_ICONS: Record<string, { icon: string; color: TuiColor }> = {
   running: { icon: '●', color: 'yellow' },
   queued: { icon: '○', color: 'cyan' },
   review_ready: { icon: '◆', color: 'magenta' },
@@ -27,7 +36,7 @@ const STATUS_ICONS: Record<string, { icon: string; color: string }> = {
 
 export function ActiveRuns({ db, tick: _tick }: ActiveRunsProps): React.ReactElement {
   const rows = db
-    .prepare("SELECT id, repo, issue_number, status, current_phase, iteration_count, estimated_cost_usd FROM runs WHERE status IN ('queued', 'running', 'review_ready', 'blocked', 'error') ORDER BY created_at DESC LIMIT 10")
+    .prepare("SELECT id, repo, issue_number, status, pr_number, current_phase, iteration_count, estimated_cost_usd FROM runs WHERE status IN ('queued', 'running', 'review_ready', 'blocked', 'error') ORDER BY created_at DESC LIMIT 10")
     .all() as ActiveRunRow[]
 
   if (rows.length === 0) {
@@ -47,17 +56,19 @@ export function ActiveRuns({ db, tick: _tick }: ActiveRunsProps): React.ReactEle
         return (
           <Text key={row.id}>
             {'  '}
-            <Text color={s.color as 'yellow' | 'cyan' | 'magenta' | 'red' | 'white'}>{s.icon}</Text>
+            <Text color={s.color}>{s.icon}</Text>
             {' '}
             <Text>#{row.issue_number} {row.repo}</Text>
             {'  '}
-            <Text color="gray">{row.status}</Text>
+            <Text color={colorForRunStatus(row.status)}>{row.status}</Text>
             {'  '}
-            <Text color="gray">[{row.current_phase ?? '?'}]</Text>
+            <Text color={colorForPhase(row.current_phase)}>[{row.current_phase ?? '?'}]</Text>
             {'  '}
-            <Text color="gray">iter {row.iteration_count ?? 0}</Text>
+            <Text color={colorForIterationCount(row.iteration_count)}>iter {row.iteration_count ?? 0}</Text>
             {'  '}
-            <Text color="green">${(row.estimated_cost_usd ?? 0).toFixed(2)}</Text>
+            <Text color={colorForCostUsd(row.estimated_cost_usd)}>${(row.estimated_cost_usd ?? 0).toFixed(2)}</Text>
+            {'  '}
+            <Text color={colorForPrNumber(row.pr_number)}>{row.pr_number !== null ? `PR #${row.pr_number}` : 'no PR'}</Text>
           </Text>
         )
       })}
