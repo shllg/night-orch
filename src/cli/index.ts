@@ -23,10 +23,13 @@ program
   .option('--trust-workspace', 'Allow loading .night-orch.yaml/.yml from the current directory')
   .option('--dry-run', 'Show what would happen without making changes')
   .option('--log-level <level>', 'Log level (debug, info, warn, error)', 'info')
+  .action(async (_opts, cmd) => {
+    await runWatch(cmd.opts())
+  })
 
 program
   .command('run')
-  .description('Long-running poller — poll GitHub on interval and process eligible issues')
+  .description('Headless long-running poller — poll GitHub on interval and process eligible issues')
   .action((_opts, cmd) => runCommand(cmd.parent?.opts()))
 
 program
@@ -98,7 +101,7 @@ program
 
 program
   .command('tui')
-  .description('Interactive monitoring and control TUI')
+  .description('Interactive monitoring and control TUI with integrated poller and logs')
   .action((_opts, cmd) => runWatch(cmd.parent?.opts()))
 
 program.parse()

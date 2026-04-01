@@ -52,6 +52,10 @@ src/state/           — SQLite DB, migrations
 
 Detailed implementation specs in `docs/specs-active/`. Consult the relevant phase spec before making changes.
 
+## React TUI Rules
+
+- Follow `.claude/rules/08-react-tui.md` and `.codex/rules/08-react-tui.md` for React TUI structure, keybinding scoping, and state management.
+
 ## Config Documentation
 
 Configuration authoring reference lives in `docs/CONFIGURATION.md`.

@@ -28,16 +28,34 @@ export async function runWatch(globalOpts?: GlobalOpts): Promise<void> {
   }
 
   const db = initDatabase(config.storage.dbPath)
+  const pollIntervalMs = config.github.pollIntervalSeconds * 1000
+  const useAltScreen = Boolean(process.stdout.isTTY)
 
-  const { waitUntilExit } = render(
-    React.createElement(App, {
-      db,
-      config,
-      pollIntervalMs: 2000,
-      dryRun: globalOpts?.dryRun ?? false,
-    }),
-  )
+  if (useAltScreen) {
+    process.stdout.write('\u001B[?1049h\u001B[H')
+    process.stdout.write('\u001B[?25l')
+  }
 
-  await waitUntilExit()
-  db.close()
+  try {
+    const { waitUntilExit } = render(
+      React.createElement(App, {
+        db,
+        config,
+        pollIntervalMs,
+        dryRun: globalOpts?.dryRun ?? false,
+        enableBackgroundPoller: true,
+      }),
+      {
+        exitOnCtrlC: false,
+      },
+    )
+
+    await waitUntilExit()
+  } finally {
+    if (useAltScreen) {
+      process.stdout.write('\u001B[?25h')
+      process.stdout.write('\u001B[?1049l')
+    }
+    db.close()
+  }
 }
