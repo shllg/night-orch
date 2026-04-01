@@ -153,6 +153,31 @@ describe('MCP Tools', () => {
     delete process.env['MCP_TOKEN']
   })
 
+  it('poll tool triggers running headless poller when available', async () => {
+    const triggerPollCycle = vi.fn().mockReturnValue({
+      accepted: true as const,
+      state: 'woke-sleeper' as const,
+    })
+    deps.poller = { triggerPollCycle }
+
+    const result = await handleToolCall('night-orch-poll', {}, deps) as {
+      success: boolean
+      queued: boolean
+      state: string
+      processed: null
+      errors: null
+    }
+
+    expect(triggerPollCycle).toHaveBeenCalledTimes(1)
+    expect(result).toMatchObject({
+      success: true,
+      queued: true,
+      state: 'woke-sleeper',
+      processed: null,
+      errors: null,
+    })
+  })
+
   describe('list-issues', () => {
     function makeIssue(num: number, title: string, labels: string[] = []): ForgeIssue {
       return {

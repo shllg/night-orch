@@ -3,6 +3,7 @@ import { initDatabase } from '../../state/db.js'
 import { pollOnce } from '../../runner/poller.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { ShutdownHandler } from '../../poller/shutdown.js'
+import { PollCycleController } from '../../poller/control.js'
 import { createMetricsService, type MetricsService } from '../../metrics/service.js'
 import { createForgeAdapter } from '../../forge/factory.js'
 import { startMCPHttpServer } from '../../mcp/http.js'
@@ -76,6 +77,7 @@ export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
 
   // Start embedded MCP HTTP/SSE server
   let mcpServer: Server | undefined
+  const pollerControl = new PollCycleController()
   if (config.mcp.enabled) {
     const forgeAdapters = new Map<string, ForgeAdapter>()
     for (const repo of config.repos) {
@@ -87,7 +89,7 @@ export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
     }
     try {
       mcpServer = await startMCPHttpServer(
-        { db, config, forgeAdapters, poller: null, metrics: metrics ?? null },
+        { db, config, forgeAdapters, poller: pollerControl, metrics: metrics ?? null },
         config.mcp.httpHost,
         config.mcp.httpPort,
       )
@@ -122,13 +124,9 @@ export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
 
     if (shutdown.isShuttingDown) break
 
-    // Wait for next interval
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, intervalMs)
-      if (shutdown.isShuttingDown) {
-        clearTimeout(timer)
-        resolve()
-      }
-    })
+    const waitResult = await pollerControl.waitForNextCycle(intervalMs)
+    if (waitResult === 'manual') {
+      logger.info('Manual poll trigger received — running next cycle immediately')
+    }
   }
 }

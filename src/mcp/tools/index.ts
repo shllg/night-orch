@@ -345,6 +345,22 @@ async function handlePoll(
   deps: MCPDependencies,
 ): Promise<unknown> {
   assertMcpMutationAuth(args.authToken, deps)
+  if (deps.poller && !(args.dryRun ?? false)) {
+    const trigger = deps.poller.triggerPollCycle()
+    return {
+      success: true,
+      queued: true,
+      state: trigger.state,
+      processed: null,
+      errors: null,
+      message: trigger.state === 'woke-sleeper'
+        ? 'Triggered immediate poll cycle on running headless poller'
+        : trigger.state === 'queued-next-cycle'
+          ? 'Queued immediate poll cycle after current run finishes'
+          : 'Manual poll already pending; no additional cycle queued',
+    }
+  }
+
   const result = await pollOnce(deps.config, deps.db, args.dryRun ?? false)
   return {
     success: true,

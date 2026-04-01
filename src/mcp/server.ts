@@ -10,6 +10,7 @@ import type Database from 'better-sqlite3'
 import type { Config } from '../config/schema.js'
 import type { ForgeAdapter } from '../forge/types.js'
 import type { MetricsService } from '../metrics/service.js'
+import type { PollerControl } from '../poller/control.js'
 import { registerTools, handleToolCall } from './tools/index.js'
 import { registerResources, handleResourceRead } from './resources/index.js'
 import { createLogger } from '../utils/logger.js'
@@ -18,7 +19,7 @@ export interface MCPDependencies {
   db: Database.Database
   config: Config
   forgeAdapters: Map<string, ForgeAdapter>
-  poller: unknown | null
+  poller: PollerControl | null
   metrics: MetricsService | null
 }
 
