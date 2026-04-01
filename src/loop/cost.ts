@@ -1,8 +1,13 @@
 import type Database from 'better-sqlite3'
 import type { Config } from '../config/schema.js'
+import { IssueManager } from '../state/issues.js'
 
 export class CostTracker {
-  constructor(private db: Database.Database) {}
+  private issueManager: IssueManager
+
+  constructor(private db: Database.Database) {
+    this.issueManager = new IssueManager(db)
+  }
 
   recordCost(runId: string, costUsd: number): void {
     if (costUsd <= 0) return
@@ -27,6 +32,8 @@ export class CostTracker {
       this.db
         .prepare('UPDATE runs SET estimated_cost_usd = estimated_cost_usd + ? WHERE id = ?')
         .run(amountUsd, id)
+
+      this.issueManager.syncFromRunId(id)
     })
 
     tx(runId, today, costUsd)

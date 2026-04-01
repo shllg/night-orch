@@ -5,7 +5,7 @@ import { createForgeAdapter } from '../forge/factory.js'
 import { buildLabelConfig } from '../labels/config.js'
 import { transitionLabels } from '../labels/manager.js'
 import { LeaseManager } from '../state/leases.js'
-import type { RunStatus } from '../state/runs.js'
+import { RunManager, type RunStatus } from '../state/runs.js'
 import { pollOnce } from '../runner/poller.js'
 import { logger } from '../utils/logger.js'
 
@@ -14,13 +14,6 @@ export interface RetryOptions {
   resetPlan: boolean
   resetBranch: boolean
   dryRun: boolean
-}
-
-interface RunRow {
-  id: string
-  status: RunStatus
-  repo: string
-  issue_number: number
 }
 
 const RETRYABLE_STATUSES: RunStatus[] = ['blocked', 'error', 'review_ready']
@@ -48,10 +41,8 @@ export class RetryEngine {
       dryRun: options.dryRun ?? false,
     }
 
-    // Find latest run
-    const run = this.db
-      .prepare('SELECT id, status, repo, issue_number FROM runs WHERE repo = ? AND issue_number = ? ORDER BY created_at DESC LIMIT 1')
-      .get(repo, issueNumber) as RunRow | undefined
+    const runManager = new RunManager(this.db)
+    const run = runManager.getByRepoAndIssue(repo, issueNumber)
 
     if (!run) {
       throw new Error(`No run found for ${repo}#${issueNumber}`)
@@ -73,30 +64,23 @@ export class RetryEngine {
     }
 
     // Reset run to queued
-    const resetFields: Record<string, unknown> = {
+    const resetFields: Parameters<RunManager['update']>[1] = {
       status: 'queued',
-      current_phase: null,
-      last_error: null,
-      ended_at: null,
+      currentPhase: null,
+      lastError: null,
+      endedAt: null,
     }
 
     if (opts.resetPlan || opts.resetBranch) {
-      resetFields.phase_data = null
+      resetFields.phaseData = null
     }
 
     if (opts.resetBranch) {
       // Signal the poller to hard-reset the branch to base on next pickup
-      resetFields.block_reason = 'merge_conflict'
+      resetFields.blockReason = 'merge_conflict'
     }
 
-    const setClauses = Object.keys(resetFields).map((k) => `${k} = ?`)
-    setClauses.push("updated_at = datetime('now')")
-    const values = Object.values(resetFields)
-    values.push(run.id)
-
-    this.db
-      .prepare(`UPDATE runs SET ${setClauses.join(', ')} WHERE id = ?`)
-      .run(...values)
+    runManager.update(run.id, resetFields)
 
     // Release any lease
     this.leaseManager.release(repo, issueNumber)

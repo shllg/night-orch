@@ -1,13 +1,19 @@
 import type Database from 'better-sqlite3'
 import type { LoopPhase, RunContext, PlannerOutput, CoderOutput, ReviewerOutput } from './types.js'
+import { IssueManager } from '../state/issues.js'
 
 export class Checkpoint {
-  constructor(private db: Database.Database) {}
+  private issueManager: IssueManager
+
+  constructor(private db: Database.Database) {
+    this.issueManager = new IssueManager(db)
+  }
 
   phaseStarted(runId: string, phase: LoopPhase): void {
     this.db
       .prepare("UPDATE runs SET current_phase = ?, updated_at = datetime('now') WHERE id = ?")
       .run(phase, runId)
+    this.issueManager.syncFromRunId(runId)
     this.recordEvent(runId, 'phase_started', phase, null)
   }
 
@@ -21,6 +27,7 @@ export class Checkpoint {
         "UPDATE runs SET current_phase = ?, phase_data = ?, updated_at = datetime('now') WHERE id = ?",
       )
       .run(phase, JSON.stringify(merged), runId)
+    this.issueManager.syncFromRunId(runId)
     this.recordEvent(runId, 'phase_completed', phase, artifacts)
   }
 

@@ -9,6 +9,7 @@ import { finalizeMerge } from './finalize.js'
 import { bisectBatch, isCulpritIdentified } from './bisect.js'
 import { logger } from '../utils/logger.js'
 import type { MergeBatchRecord } from './types.js'
+import { RunManager } from '../state/runs.js'
 
 /**
  * Process the merge queue for a single repo.
@@ -201,14 +202,24 @@ async function quarantineCulpritPR(
     logger.warn({ repo: repoConfig.repo, prNumber, err }, 'Failed to clear merge queue labels from culprit PR')
   }
 
-  db.prepare(
-    `UPDATE runs
-     SET status = 'blocked',
-         block_reason = 'merge_conflict',
-         ended_at = COALESCE(ended_at, datetime('now')),
-         updated_at = datetime('now')
-     WHERE repo = ?
-       AND pr_number = ?
-       AND status = 'review_ready'`,
-  ).run(repoConfig.repo, prNumber)
+  const rows = db
+    .prepare(
+      `SELECT id
+       FROM runs
+       WHERE repo = ?
+         AND pr_number = ?
+         AND status = 'review_ready'`,
+    )
+    .all(repoConfig.repo, prNumber) as Array<{ id: string }>
+  if (rows.length === 0) return
+
+  const runManager = new RunManager(db)
+  const endedAt = new Date().toISOString()
+  for (const row of rows) {
+    runManager.update(row.id, {
+      status: 'blocked',
+      blockReason: 'merge_conflict',
+      endedAt,
+    })
+  }
 }

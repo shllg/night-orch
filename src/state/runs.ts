@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
 import { generateRunId } from '../utils/ids.js'
+import { IssueManager } from './issues.js'
 
 export type RunStatus = 'queued' | 'running' | 'blocked' | 'review_ready' | 'error' | 'completed'
 
@@ -41,31 +42,58 @@ export interface CreateRunParams {
 }
 
 export class RunManager {
-  constructor(private db: Database.Database) {}
+  private issueManager: IssueManager
+
+  constructor(private db: Database.Database) {
+    this.issueManager = new IssueManager(db)
+  }
 
   create(params: CreateRunParams): RunRecord {
     const id = generateRunId()
     const now = new Date().toISOString()
 
-    this.db
-      .prepare(
-        `INSERT INTO runs (id, repo, issue_number, issue_title, issue_node_id, status, planner, coder, reviewer, parent_run_id, started_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        id,
-        params.repo,
-        params.issueNumber,
-        params.issueTitle ?? null,
-        params.issueNodeId,
-        params.planner,
-        params.coder,
-        params.reviewer,
-        params.parentRunId ?? null,
-        now,
-        now,
-        now,
-      )
+    const createTx = this.db.transaction(() => {
+      const activeExisting = this.db
+        .prepare(
+          `SELECT id, status
+           FROM runs
+           WHERE repo = ?
+             AND issue_number = ?
+             AND status IN ('queued', 'running', 'blocked', 'review_ready', 'error')
+           LIMIT 1`,
+        )
+        .get(params.repo, params.issueNumber) as { id: string; status: string } | undefined
+
+      if (activeExisting) {
+        throw new Error(
+          `Cannot create a new run for ${params.repo}#${params.issueNumber}: active run ${activeExisting.id} is ${activeExisting.status}`,
+        )
+      }
+
+      this.db
+        .prepare(
+          `INSERT INTO runs (id, repo, issue_number, issue_title, issue_node_id, status, planner, coder, reviewer, parent_run_id, started_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          id,
+          params.repo,
+          params.issueNumber,
+          params.issueTitle ?? null,
+          params.issueNodeId,
+          params.planner,
+          params.coder,
+          params.reviewer,
+          params.parentRunId ?? null,
+          now,
+          now,
+          now,
+        )
+
+      this.issueManager.syncFromRunId(id)
+    })
+
+    createTx()
 
     return this.getById(id)!
   }
@@ -129,9 +157,14 @@ export class RunManager {
     setClauses.push("updated_at = datetime('now')")
     values.push(id)
 
-    this.db
-      .prepare(`UPDATE runs SET ${setClauses.join(', ')} WHERE id = ?`)
-      .run(...values)
+    const updateTx = this.db.transaction(() => {
+      this.db
+        .prepare(`UPDATE runs SET ${setClauses.join(', ')} WHERE id = ?`)
+        .run(...values)
+      this.issueManager.syncFromRunId(id)
+    })
+
+    updateTx()
   }
 
   getById(id: string): RunRecord | null {
@@ -141,7 +174,18 @@ export class RunManager {
 
   getByRepoAndIssue(repo: string, issueNumber: number): RunRecord | null {
     const row = this.db
-      .prepare('SELECT * FROM runs WHERE repo = ? AND issue_number = ? ORDER BY created_at DESC LIMIT 1')
+      .prepare(
+        `SELECT *
+         FROM runs
+         WHERE repo = ?
+           AND issue_number = ?
+         ORDER BY
+           COALESCE(julianday(created_at), 0) DESC,
+           COALESCE(julianday(updated_at), 0) DESC,
+           rowid DESC,
+           id DESC
+         LIMIT 1`,
+      )
       .get(repo, issueNumber) as RawRunRow | undefined
     return row ? this.mapRow(row) : null
   }
@@ -186,7 +230,26 @@ export class RunManager {
 
   getActive(): RunRecord[] {
     const rows = this.db
-      .prepare("SELECT * FROM runs WHERE status IN ('queued', 'running', 'blocked', 'review_ready', 'error') ORDER BY created_at")
+      .prepare(
+        `WITH ranked_runs AS (
+           SELECT
+             r.*,
+             ROW_NUMBER() OVER (
+               PARTITION BY r.repo, r.issue_number
+               ORDER BY
+                 COALESCE(julianday(r.created_at), 0) DESC,
+                 COALESCE(julianday(r.updated_at), 0) DESC,
+                 r.rowid DESC,
+                 r.id DESC
+             ) AS run_rank
+           FROM runs r
+         )
+         SELECT *
+         FROM ranked_runs
+         WHERE run_rank = 1
+           AND status IN ('queued', 'running', 'blocked', 'review_ready', 'error')
+         ORDER BY COALESCE(julianday(created_at), 0)`,
+      )
       .all() as RawRunRow[]
     return rows.map((r) => this.mapRow(r))
   }

@@ -2,11 +2,13 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { SummaryEngine, parseSinceArg } from '../../src/ops/summary.js'
 import { initDatabase } from '../../src/state/db.js'
 
+let nextIssueNumber = 1
+
 function insertRun(db: ReturnType<typeof initDatabase>, overrides: Record<string, unknown> = {}) {
   const defaults = {
     id: `run-${Math.random().toString(36).slice(2)}`,
     repo: 'org/repo',
-    issue_number: 1,
+    issue_number: nextIssueNumber++,
     status: 'completed',
     planner: 'claude',
     coder: 'claude',

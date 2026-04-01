@@ -31,9 +31,48 @@ export async function findMergeEligiblePRs(
 
   const rows = db
     .prepare(
-      "SELECT id, issue_number, pr_number FROM runs WHERE repo = ? AND status = 'review_ready' AND pr_number IS NOT NULL ORDER BY created_at",
+      `WITH canonical_ready AS (
+         SELECT
+           r.id,
+           i.issue_number,
+           i.pr_number,
+           i.updated_at
+         FROM issues i
+         JOIN runs r
+           ON r.id = i.current_run_id
+         WHERE i.repo = ?
+           AND i.status = 'review_ready'
+           AND i.pr_number IS NOT NULL
+           AND i.current_run_id IS NOT NULL
+       ),
+       fallback_ready AS (
+         SELECT
+           r.id,
+           r.issue_number,
+           r.pr_number,
+           r.updated_at
+         FROM runs r
+         WHERE r.repo = ?
+           AND r.status = 'review_ready'
+           AND r.pr_number IS NOT NULL
+           AND NOT EXISTS (
+             SELECT 1
+             FROM issues i
+             WHERE i.repo = r.repo
+               AND i.issue_number = r.issue_number
+               AND i.current_run_id = r.id
+               AND i.status = 'review_ready'
+           )
+       )
+       SELECT id, issue_number, pr_number
+       FROM (
+         SELECT id, issue_number, pr_number, updated_at FROM canonical_ready
+         UNION ALL
+         SELECT id, issue_number, pr_number, updated_at FROM fallback_ready
+       )
+       ORDER BY datetime(updated_at)`,
     )
-    .all(repoConfig.repo) as RawRunRow[]
+    .all(repoConfig.repo, repoConfig.repo) as RawRunRow[]
 
   for (const row of rows) {
     try {

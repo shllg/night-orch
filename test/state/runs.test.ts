@@ -98,6 +98,39 @@ describe('RunManager', () => {
     expect(found?.issueNumber).toBe(42)
   })
 
+  it('getByRepoAndIssue prefers latest run when issues aggregate pointer is stale', () => {
+    const first = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 77,
+      issueNodeId: 'node77',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(first.id, { status: 'completed' })
+
+    const latest = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 77,
+      issueNodeId: 'node77',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+
+    db.prepare(
+      `UPDATE issues
+       SET status = 'completed',
+           current_run_id = ?,
+           last_run_id = ?,
+           updated_at = datetime('now')
+       WHERE repo = ? AND issue_number = ?`,
+    ).run(first.id, first.id, 'org/repo', 77)
+
+    const found = runManager.getByRepoAndIssue('org/repo', 77)
+    expect(found?.id).toBe(latest.id)
+  })
+
   it('getByRepoAndIssue returns null for missing', () => {
     const found = runManager.getByRepoAndIssue('org/repo', 999)
     expect(found).toBeNull()
@@ -135,5 +168,82 @@ describe('RunManager', () => {
     const active = runManager.getActive()
     expect(active).toHaveLength(2)
     expect(active.map((run) => run.issueNumber).sort((a, b) => a - b)).toEqual([1, 2])
+  })
+
+  it('getActive falls back to latest runs when issues aggregate state is stale', () => {
+    const run = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 88,
+      issueNodeId: 'n88',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(run.id, { status: 'blocked' })
+
+    db.prepare(
+      `UPDATE issues
+       SET status = 'completed',
+           current_run_id = NULL,
+           updated_at = datetime('now')
+       WHERE repo = ? AND issue_number = ?`,
+    ).run('org/repo', 88)
+
+    const active = runManager.getActive()
+    expect(active.some((row) => row.id === run.id)).toBe(true)
+  })
+
+  it('getByRepoAndIssue chooses newest attempt by created_at when older run has newer updated_at', () => {
+    const oldRun = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 91,
+      issueNodeId: 'n91',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(oldRun.id, { status: 'completed' })
+
+    const newRun = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 91,
+      issueNodeId: 'n91',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(newRun.id, { status: 'blocked' })
+
+    db.prepare("UPDATE runs SET updated_at = ? WHERE id = ?").run('2099-01-01T00:00:00.000Z', oldRun.id)
+
+    const found = runManager.getByRepoAndIssue('org/repo', 91)
+    expect(found?.id).toBe(newRun.id)
+  })
+
+  it('getActive keeps issue visible when older run was touched after newest blocked attempt', () => {
+    const oldRun = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 92,
+      issueNodeId: 'n92',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(oldRun.id, { status: 'completed' })
+
+    const newRun = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 92,
+      issueNodeId: 'n92',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(newRun.id, { status: 'blocked' })
+
+    db.prepare("UPDATE runs SET updated_at = ? WHERE id = ?").run('2099-01-01T00:00:00.000Z', oldRun.id)
+
+    const active = runManager.getActive()
+    expect(active.some((row) => row.id === newRun.id)).toBe(true)
   })
 })

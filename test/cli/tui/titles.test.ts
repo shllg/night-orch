@@ -74,6 +74,7 @@ function runRow(partial: Partial<RunListRow>): RunListRow {
     last_error: partial.last_error ?? null,
     pr_number: partial.pr_number ?? null,
     pr_title: partial.pr_title ?? null,
+    created_at: partial.created_at ?? '2026-03-31T00:00:00.000Z',
     updated_at: partial.updated_at ?? '2026-03-31T00:00:00.000Z',
   }
 }

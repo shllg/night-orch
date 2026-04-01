@@ -857,10 +857,6 @@ interface ProcessCommentCommandsParams {
   botUser: string
 }
 
-interface CommandIssueRow {
-  issue_number: number
-}
-
 /** Issues that returned 404 during comment scan in this process lifecycle. */
 const missingCommentCommandIssues = new Set<string>()
 
@@ -887,14 +883,16 @@ async function processCommentCommands(params: ProcessCommentCommandsParams): Pro
   const commandSettings = config.commentCommands ?? { enabled: true, requireCollaborator: false }
   if (!commandSettings.enabled) return
 
-  const issueRows = db
-    .prepare(
-      `SELECT DISTINCT issue_number
-       FROM runs
-       WHERE repo = ? AND status IN ('queued', 'running', 'blocked', 'review_ready', 'error')
-       ORDER BY issue_number`,
-    )
-    .all(repoConfig.repo) as CommandIssueRow[]
+  const activeIssueNumbers = new Set(
+    runManager
+      .getActive()
+      .filter((run) => run.repo === repoConfig.repo)
+      .map((run) => run.issueNumber),
+  )
+
+  const issueRows = [...activeIssueNumbers]
+    .sort((a, b) => a - b)
+    .map((issue_number) => ({ issue_number }))
 
   if (issueRows.length === 0) return
 
@@ -1237,12 +1235,16 @@ interface ScanAndHandleReactionsParams {
 async function scanAndHandleReactions(params: ScanAndHandleReactionsParams): Promise<void> {
   const { db, forge, runManager, repoConfig, labelConfig, botUser } = params
 
-  // Find review_ready runs with PRs for this repo
-  const rows = db
-    .prepare(
-      "SELECT * FROM runs WHERE repo = ? AND status = 'review_ready' AND pr_number IS NOT NULL",
-    )
-    .all(repoConfig.repo) as Array<{ id: string; repo: string; issue_number: number; pr_number: number }>
+  // Find review_ready issues with PRs for this repo.
+  const rows = runManager
+    .getActive()
+    .filter((run) => run.repo === repoConfig.repo && run.status === 'review_ready' && run.prNumber !== null)
+    .map((run) => ({
+      id: run.id,
+      repo: run.repo,
+      issue_number: run.issueNumber,
+      pr_number: run.prNumber as number,
+    }))
 
   for (const row of rows) {
     const cursorKey = `${row.repo}#${row.issue_number}`

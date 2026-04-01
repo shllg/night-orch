@@ -3,7 +3,7 @@ import type { Config } from '../config/schema.js'
 import type { ForgeAdapter } from '../forge/types.js'
 import { createForgeAdapter } from '../forge/factory.js'
 import { LeaseManager } from '../state/leases.js'
-import type { RunStatus } from '../state/runs.js'
+import { RunManager, type RunStatus } from '../state/runs.js'
 import { transitionLabels } from '../labels/manager.js'
 import { buildLabelConfig } from '../labels/config.js'
 import { computeLabelMutation } from '../labels/transitions.js'
@@ -45,6 +45,7 @@ interface ActiveRunRow {
 
 export class SyncEngine {
   private leaseManager: LeaseManager
+  private runManager: RunManager
 
   constructor(
     private db: Database.Database,
@@ -56,6 +57,7 @@ export class SyncEngine {
     },
   ) {
     this.leaseManager = new LeaseManager(db)
+    this.runManager = new RunManager(db)
   }
 
   async reconcile(dryRun: boolean): Promise<SyncResult> {
@@ -67,9 +69,8 @@ export class SyncEngine {
     }
 
     // 1. Find all non-completed runs that can drift from forge state.
-    const activeRuns = this.db
-      .prepare("SELECT id, repo, issue_number, status, pr_number, branch_name, worktree_path FROM runs WHERE status IN ('running', 'queued', 'blocked', 'review_ready', 'error')")
-      .all() as ActiveRunRow[]
+    // Prefer canonical issue rows, but fall back to runs-only rows during transitional states.
+    const activeRuns = this.loadActiveRuns()
 
     for (const run of activeRuns) {
       if (run.status === 'running') {
@@ -256,7 +257,10 @@ export class SyncEngine {
 
   private markCompleted(run: ActiveRunRow, dryRun: boolean, reason: string, forge: ForgeAdapter): SyncAction {
     if (!dryRun) {
-      this.db.prepare("UPDATE runs SET status = 'completed', ended_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(run.id)
+      this.runManager.update(run.id, {
+        status: 'completed',
+        endedAt: new Date().toISOString(),
+      })
       this.leaseManager.release(run.repo, run.issue_number)
       this.updateLabels(forge, run, 'completed').catch((err) => {
         logger.debug({ repo: run.repo, issue: run.issue_number, err }, 'Label update failed while marking run completed')
@@ -268,7 +272,10 @@ export class SyncEngine {
 
   private markClosed(run: ActiveRunRow, dryRun: boolean, reason: string, forge: ForgeAdapter): SyncAction {
     if (!dryRun) {
-      this.db.prepare("UPDATE runs SET status = 'completed', ended_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(run.id)
+      this.runManager.update(run.id, {
+        status: 'completed',
+        endedAt: new Date().toISOString(),
+      })
       this.leaseManager.release(run.repo, run.issue_number)
       this.updateLabels(forge, run, 'completed').catch((err) => {
         logger.debug({ repo: run.repo, issue: run.issue_number, err }, 'Label update failed while marking run closed')
@@ -280,7 +287,9 @@ export class SyncEngine {
 
   private markReviewReady(run: ActiveRunRow, dryRun: boolean, reason: string, forge: ForgeAdapter): SyncAction {
     if (!dryRun) {
-      this.db.prepare("UPDATE runs SET status = 'review_ready', updated_at = datetime('now') WHERE id = ?").run(run.id)
+      this.runManager.update(run.id, {
+        status: 'review_ready',
+      })
       this.leaseManager.release(run.repo, run.issue_number)
       this.updateLabels(forge, run, 'review_ready').catch((err) => {
         logger.debug({ repo: run.repo, issue: run.issue_number, err }, 'Label update failed while marking run review_ready')
@@ -292,7 +301,11 @@ export class SyncEngine {
 
   private async markStale(run: ActiveRunRow, dryRun: boolean, reason: string): Promise<SyncAction> {
     if (!dryRun) {
-      this.db.prepare("UPDATE runs SET status = 'queued', current_phase = NULL, last_error = ?, updated_at = datetime('now') WHERE id = ?").run(reason, run.id)
+      this.runManager.update(run.id, {
+        status: 'queued',
+        currentPhase: null,
+        lastError: reason,
+      })
       this.leaseManager.release(run.repo, run.issue_number)
 
       // Transition labels back to queued (ready) so the poller picks it up
@@ -329,12 +342,7 @@ export class SyncEngine {
   private async checkLabelMismatches(dryRun: boolean): Promise<LabelCorrection[]> {
     const corrections: LabelCorrection[] = []
 
-    // Find runs where DB status and labels might be out of sync
-    const runs = this.db
-      .prepare("SELECT id, repo, issue_number, status FROM runs WHERE status IN ('queued', 'running', 'blocked', 'error', 'review_ready')")
-      .all() as Array<{ id: string; repo: string; issue_number: number; status: string }>
-
-    for (const run of runs) {
+    for (const run of this.loadActiveRuns()) {
       const repoConfig = this.config.repos.find((r) => r.repo === run.repo)
       if (!repoConfig) continue
 
@@ -383,6 +391,51 @@ export class SyncEngine {
       return status
     }
     return null
+  }
+
+  private loadActiveRuns(): ActiveRunRow[] {
+    return this.db
+      .prepare(
+        `WITH canonical_active AS (
+           SELECT
+             i.current_run_id AS id,
+             i.repo,
+             i.issue_number,
+             i.status,
+             i.pr_number,
+             i.branch_name,
+             i.worktree_path
+           FROM issues i
+           WHERE i.status IN ('running', 'queued', 'blocked', 'review_ready', 'error')
+             AND i.current_run_id IS NOT NULL
+         ),
+         fallback_active AS (
+           SELECT
+             r.id,
+             r.repo,
+             r.issue_number,
+             r.status,
+             r.pr_number,
+             r.branch_name,
+             r.worktree_path
+           FROM runs r
+           WHERE r.status IN ('running', 'queued', 'blocked', 'review_ready', 'error')
+             AND NOT EXISTS (
+               SELECT 1
+               FROM issues i
+               WHERE i.repo = r.repo
+                 AND i.issue_number = r.issue_number
+                 AND i.current_run_id = r.id
+                 AND i.status = r.status
+             )
+         )
+         SELECT id, repo, issue_number, status, pr_number, branch_name, worktree_path
+         FROM canonical_active
+         UNION ALL
+         SELECT id, repo, issue_number, status, pr_number, branch_name, worktree_path
+         FROM fallback_active`,
+      )
+      .all() as ActiveRunRow[]
   }
 
   private async detectOrphanedWorktrees(): Promise<string[]> {

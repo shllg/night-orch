@@ -11,6 +11,7 @@ describe('buildActionHints', () => {
     })
 
     expect(hints.line1).toContain('[j/k]select')
+    expect(hints.line1).toContain('[1]issues')
     expect(hints.line1).toContain('[o/enter]open')
     expect(hints.line1).toContain('[4]logs')
     expect(hints.line2).toContain('[r]etry')

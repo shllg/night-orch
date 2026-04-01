@@ -1,7 +1,7 @@
 import type { TabId } from './types.js'
 
 export const TABS: Array<{ id: TabId; hotkey: string; label: string }> = [
-  { id: 'runs', hotkey: '1', label: 'Runs' },
+  { id: 'runs', hotkey: '1', label: 'Issues' },
   { id: 'projects', hotkey: '2', label: 'Projects' },
   { id: 'stats', hotkey: '3', label: 'Stats' },
   { id: 'logs', hotkey: '4', label: 'Logs' },

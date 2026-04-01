@@ -10,7 +10,7 @@ import { createForgeAdapter } from '../../forge/factory.js'
 import type Database from 'better-sqlite3'
 import { loadTuiStats } from '../../state/stats.js'
 import { ActionsBar } from './actions-bar.js'
-import { loadRuns, loadAgentEvents, loadMergeBatches, type RunListRow } from './data.js'
+import { buildIssueList, loadRuns, loadAgentEvents, loadMergeBatches, type IssueListRow } from './data.js'
 import { Header } from './header.js'
 import { LogsView } from './logs-view.js'
 import { ProjectsView } from './projects-view.js'
@@ -62,7 +62,7 @@ export function App({
 
   const [termRows, setTermRows] = useState(stdout.rows ?? 24)
   const [tick, setTick] = useState(0)
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+  const [selectedIssueKey, setSelectedIssueKey] = useState<string | null>(null)
   const [statusLine, setStatusLine] = useState('Ready')
   const [actionState, setActionState] = useState<ActionState>({ busy: false, action: null })
   const [activeTab, setActiveTab] = useState<TabId>('runs')
@@ -170,8 +170,10 @@ export function App({
   }, [appendLog, config, db, dryRun, enableBackgroundPoller])
 
   const runs = useMemo(() => loadRuns(db), [db, tick])
-  const selectedIndex = runs.findIndex((run) => run.id === selectedRunId)
-  const selectedRun = selectedIndex >= 0 ? (runs[selectedIndex] ?? null) : (runs[0] ?? null)
+  const issues = useMemo(() => buildIssueList(runs), [runs])
+  const selectedIndex = issues.findIndex((issue) => issue.key === selectedIssueKey)
+  const selectedIssue = selectedIndex >= 0 ? (issues[selectedIndex] ?? null) : (issues[0] ?? null)
+  const selectedRun = selectedIssue?.runs[0] ?? null
   const selectedRunEvents = useMemo(
     () => (selectedRun ? loadAgentEvents(db, selectedRun.id, runsViewMode === 'focus' ? 240 : 12) : []),
     [db, tick, selectedRun?.id, runsViewMode],
@@ -185,14 +187,14 @@ export function App({
   }, [selectedRunEvents.length])
 
   useEffect(() => {
-    if (runs.length === 0) {
-      if (selectedRunId !== null) setSelectedRunId(null)
+    if (issues.length === 0) {
+      if (selectedIssueKey !== null) setSelectedIssueKey(null)
       return
     }
-    if (!selectedRunId || !runs.some((run) => run.id === selectedRunId)) {
-      setSelectedRunId(runs[0]!.id)
+    if (!selectedIssueKey || !issues.some((issue) => issue.key === selectedIssueKey)) {
+      setSelectedIssueKey(issues[0]!.key)
     }
-  }, [runs, selectedRunId])
+  }, [issues, selectedIssueKey])
 
   useEffect(() => {
     const maxIndex = Math.max(0, config.repos.length - 1)
@@ -237,8 +239,22 @@ export function App({
            AND issue_number = ?
            AND (issue_title IS NULL OR TRIM(issue_title) = '')`,
       )
+      const updateIssueAggregateStmt = db.prepare(
+        `UPDATE issues
+         SET issue_title = ?
+         WHERE repo = ?
+           AND issue_number = ?
+           AND (issue_title IS NULL OR TRIM(issue_title) = '')`,
+      )
       const updatePrStmt = db.prepare(
         `UPDATE runs
+         SET pr_title = ?
+         WHERE repo = ?
+           AND pr_number = ?
+           AND (pr_title IS NULL OR TRIM(pr_title) = '')`,
+      )
+      const updatePrAggregateStmt = db.prepare(
+        `UPDATE issues
          SET pr_title = ?
          WHERE repo = ?
            AND pr_number = ?
@@ -254,6 +270,7 @@ export function App({
             const title = issue.title.trim()
             nextIssueTitles[target.key] = title
             updateIssueStmt.run(title, target.repo, target.issueNumber)
+            updateIssueAggregateStmt.run(title, target.repo, target.issueNumber)
           }
         } catch {
           // Best effort title hydration; keep previous UI value when unavailable.
@@ -269,6 +286,7 @@ export function App({
             const title = pr.title.trim()
             nextPrTitles[target.key] = title
             updatePrStmt.run(title, target.repo, target.prNumber)
+            updatePrAggregateStmt.run(title, target.repo, target.prNumber)
           }
         } catch {
           // Best effort title hydration; keep previous UI value when unavailable.
@@ -289,18 +307,18 @@ export function App({
 
   const runPollCycle = useCallback(async (
     trigger: 'auto' | 'manual',
-    targetRun?: RunListRow | null,
+    targetIssue?: IssueListRow | null,
   ): Promise<string> => {
     if (pollInFlight.current) {
       return 'poll already in progress'
     }
     pollInFlight.current = true
     const p = (async () => {
-      const targetIssue = trigger === 'manual' && targetRun
-        ? { repo: targetRun.repo, issueNumber: targetRun.issue_number }
+      const target = trigger === 'manual' && targetIssue
+        ? { repo: targetIssue.repo, issueNumber: targetIssue.issue_number }
         : undefined
-      const result = await pollOnce(config, db, dryRun, undefined, targetIssue)
-      const targetSuffix = targetIssue ? ` for ${targetIssue.repo}#${targetIssue.issueNumber}` : ''
+      const result = await pollOnce(config, db, dryRun, undefined, target)
+      const targetSuffix = target ? ` for ${target.repo}#${target.issueNumber}` : ''
       const summary = `${result.processed} processed, ${result.errors} error(s)${targetSuffix}${dryRun ? ' (dry-run)' : ''}`
       appendLog('info', `${trigger} poll: ${summary}`)
       return summary
@@ -344,17 +362,18 @@ export function App({
   }, [autoRefresh, enableBackgroundPoller, pollIntervalMs, runPollCycle, startupReady])
 
   const moveSelection = useCallback((direction: -1 | 1) => {
-    if (runs.length === 0) return
+    if (issues.length === 0) return
 
-    const currentIndex = selectedRun
-      ? runs.findIndex((run) => run.id === selectedRun.id)
+    const currentIndex = selectedIssue
+      ? issues.findIndex((issue) => issue.key === selectedIssue.key)
       : 0
-    const nextIndex = Math.max(0, Math.min(runs.length - 1, currentIndex + direction))
-    const nextRun = runs[nextIndex]
-    if (nextRun) {
-      setSelectedRunId(nextRun.id)
+    const safeIndex = currentIndex >= 0 ? currentIndex : 0
+    const nextIndex = Math.max(0, Math.min(issues.length - 1, safeIndex + direction))
+    const nextIssue = issues[nextIndex]
+    if (nextIssue) {
+      setSelectedIssueKey(nextIssue.key)
     }
-  }, [runs, selectedRun])
+  }, [issues, selectedIssue])
 
   const switchTab = useCallback((direction: -1 | 1) => {
     const currentIndex = TABS.findIndex((tab) => tab.id === activeTab)
@@ -393,18 +412,18 @@ export function App({
   const runRetry = useCallback(async (fresh = false) => {
     const label = fresh ? 'retry-fresh' : 'retry'
     await runAction(label, async () => {
-      if (!selectedRun) throw new Error('No run selected')
+      if (!selectedIssue) throw new Error('No issue selected')
       const engine = new RetryEngine(db, config)
-      await engine.retry(selectedRun.repo, selectedRun.issue_number, {
+      await engine.retry(selectedIssue.repo, selectedIssue.issue_number, {
         immediate: false,
         resetPlan: fresh,
         resetBranch: fresh,
         dryRun,
       })
       const suffix = fresh ? ' (fresh start)' : ''
-      return `queued ${selectedRun.repo}#${selectedRun.issue_number}${suffix}${dryRun ? ' (dry-run)' : ''}`
+      return `queued ${selectedIssue.repo}#${selectedIssue.issue_number}${suffix}${dryRun ? ' (dry-run)' : ''}`
     })
-  }, [config, db, dryRun, runAction, selectedRun])
+  }, [config, db, dryRun, runAction, selectedIssue])
 
   const runSync = useCallback(async () => {
     await runAction('sync', async () => {
@@ -430,13 +449,13 @@ export function App({
   }, [config, db, dryRun, runAction])
 
   const runPoll = useCallback(async () => {
-    await runAction('poll', async () => runPollCycle('manual', selectedRun))
-  }, [runAction, runPollCycle, selectedRun])
+    await runAction('poll', async () => runPollCycle('manual', selectedIssue))
+  }, [runAction, runPollCycle, selectedIssue])
 
   const runRebase = useCallback(async () => {
     await runAction('rebase', async () => {
-      const target = selectedRun ?? runs.find((r) => r.status === 'review_ready')
-      if (!target) throw new Error('No run selected')
+      const target = selectedIssue ?? issues.find((issue) => issue.status === 'review_ready')
+      if (!target) throw new Error('No issue selected')
       const repoConfig = config.repos.find((r) => r.repo === target.repo)
       if (!repoConfig) throw new Error(`Repo not found in config: ${target.repo}`)
       const forge = createForgeAdapter(repoConfig, config)
@@ -450,7 +469,7 @@ export function App({
       const result = await queueRebase(db, forge, repoConfig, target.issue_number, botUser)
       return `${target.repo}#${target.issue_number}: ${result.reason}`
     })
-  }, [config, db, runAction, runs, selectedRun])
+  }, [config, db, issues, runAction, selectedIssue])
 
   const gracefulExit = useCallback(() => {
     if (shuttingDown.current) return
@@ -479,7 +498,7 @@ export function App({
     if (activeTab === 'runs' && runsViewMode === 'focus') {
       if (key.escape || input === 'q') {
         setRunsViewMode('list')
-        setStatusLine('Closed run detail')
+        setStatusLine('Closed issue detail')
         return
       }
       if (key.downArrow || input === 'j') {
@@ -521,7 +540,7 @@ export function App({
         return
       }
       if (input === 'o' || key.return) {
-        if (selectedRun) {
+        if (selectedIssue) {
           setRunsViewMode('focus')
           setRunEventScrollOffset(0)
         }
@@ -620,8 +639,9 @@ export function App({
 
       {activeTab === 'runs' && (
         <RunsView
-          runs={runs}
+          issues={issues}
           selectedIndex={selectedIndex < 0 ? 0 : selectedIndex}
+          selectedIssue={selectedIssue}
           selectedRun={selectedRun}
           selectedRunEvents={selectedRunEvents}
           mergeBatches={mergeBatches}

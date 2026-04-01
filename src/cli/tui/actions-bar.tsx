@@ -15,9 +15,9 @@ interface ActionHints {
 }
 
 export function buildActionHints(props: ActionsBarProps): ActionHints {
-  const tabHints = '[1]runs  [2]projects  [3]stats  [4]logs  [h/l]tabs'
+  const tabHints = '[1]issues  [2]projects  [3]stats  [4]logs  [h/l]tabs'
   if (props.activeTab === 'runs') {
-    const navHint = props.runFocused ? '[j/k]scroll  [esc/q]close' : '[j/k]select  [o/enter]open'
+    const navHint = props.runFocused ? '[j/k]scroll  [esc/q]close' : '[j/k]select issue  [o/enter]open'
     const actionHints = props.busy
       ? 'actions locked while task is running'
       : '[r]etry  [R]etry fresh  [b]rebase  [p]oll  [s]ync  [c]leanup'

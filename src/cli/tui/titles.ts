@@ -34,14 +34,25 @@ export function hasReadableTitle(value: string | null | undefined): value is str
   return typeof value === 'string' && value.trim().length > 0
 }
 
-export function resolveIssueTitle(run: RunListRow, lookup: TitleLookup): string | null {
+interface IssueTitleSource {
+  repo: string
+  issue_number: number
+  issue_title: string | null
+}
+
+interface PrTitleSource extends IssueTitleSource {
+  pr_number: number | null
+  pr_title: string | null
+}
+
+export function resolveIssueTitle(run: IssueTitleSource, lookup: TitleLookup): string | null {
   if (hasReadableTitle(run.issue_title)) {
     return run.issue_title.trim()
   }
   return lookup.issues[issueKey(run.repo, run.issue_number)] ?? null
 }
 
-export function resolvePrTitle(run: RunListRow, lookup: TitleLookup): string | null {
+export function resolvePrTitle(run: PrTitleSource, lookup: TitleLookup): string | null {
   if (run.pr_number === null) return null
   if (hasReadableTitle(run.pr_title)) {
     return run.pr_title.trim()

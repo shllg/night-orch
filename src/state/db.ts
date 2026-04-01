@@ -11,6 +11,8 @@ import { up as migration006 } from './migrations/006-parent-run.js'
 import { up as migration007 } from './migrations/007-merge-queue.js'
 import { up as migration008 } from './migrations/008-agent-events.js'
 import { up as migration009 } from './migrations/009-run-titles.js'
+import { up as migration010 } from './migrations/010-issues.js'
+import { up as migration011 } from './migrations/011-rebuild-issues-from-latest-run.js'
 
 const MIGRATIONS = [
   { version: 1, name: '001-initial', up: migration001 },
@@ -22,6 +24,8 @@ const MIGRATIONS = [
   { version: 7, name: '007-merge-queue', up: migration007 },
   { version: 8, name: '008-agent-events', up: migration008 },
   { version: 9, name: '009-run-titles', up: migration009 },
+  { version: 10, name: '010-issues', up: migration010 },
+  { version: 11, name: '011-rebuild-issues-from-latest-run', up: migration011 },
 ]
 
 export function initDatabase(dbPath: string): Database.Database {
