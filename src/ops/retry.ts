@@ -12,6 +12,7 @@ import { logger } from '../utils/logger.js'
 export interface RetryOptions {
   immediate: boolean
   resetPlan: boolean
+  resetBranch: boolean
   dryRun: boolean
 }
 
@@ -43,6 +44,7 @@ export class RetryEngine {
     const opts: RetryOptions = {
       immediate: options.immediate ?? false,
       resetPlan: options.resetPlan ?? false,
+      resetBranch: options.resetBranch ?? false,
       dryRun: options.dryRun ?? false,
     }
 
@@ -78,8 +80,13 @@ export class RetryEngine {
       ended_at: null,
     }
 
-    if (opts.resetPlan) {
+    if (opts.resetPlan || opts.resetBranch) {
       resetFields.phase_data = null
+    }
+
+    if (opts.resetBranch) {
+      // Signal the poller to hard-reset the branch to base on next pickup
+      resetFields.block_reason = 'merge_conflict'
     }
 
     const setClauses = Object.keys(resetFields).map((k) => `${k} = ?`)

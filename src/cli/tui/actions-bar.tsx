@@ -19,7 +19,7 @@ export function buildActionHints(props: ActionsBarProps): ActionHints {
     const navHint = props.runFocused ? '[j/k]scroll  [esc/q]close' : '[j/k]select  [o/enter]open'
     const actionHints = props.busy
       ? 'actions locked while task is running'
-      : '[r]etry  [b]rebase  [p]oll  [s]ync  [c]leanup'
+      : '[r]etry  [R]etry fresh  [b]rebase  [p]oll  [s]ync  [c]leanup'
     return {
       line1: `${tabHints}  ${navHint}`,
       line2: `${actionHints}  [f]refresh  [q]quit`,

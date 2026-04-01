@@ -12,6 +12,7 @@ interface GlobalOpts {
 interface RetryCommandOpts extends GlobalOpts {
   immediate?: boolean
   resetPlan?: boolean
+  fresh?: boolean
 }
 
 export async function retryCommand(
@@ -46,9 +47,11 @@ export async function retryCommand(
 
   try {
     const engine = new RetryEngine(db, config)
+    const fresh = globalOpts?.fresh ?? false
     await engine.retry(repo, num, {
       immediate: globalOpts?.immediate ?? false,
-      resetPlan: globalOpts?.resetPlan ?? false,
+      resetPlan: globalOpts?.resetPlan ?? fresh,
+      resetBranch: fresh,
       dryRun: globalOpts?.dryRun ?? false,
     })
 

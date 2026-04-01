@@ -370,16 +370,19 @@ export function App({
     }
   }, [actionState.busy, appendLog])
 
-  const runRetry = useCallback(async () => {
-    await runAction('retry', async () => {
+  const runRetry = useCallback(async (fresh = false) => {
+    const label = fresh ? 'retry-fresh' : 'retry'
+    await runAction(label, async () => {
       if (!selectedRun) throw new Error('No run selected')
       const engine = new RetryEngine(db, config)
       await engine.retry(selectedRun.repo, selectedRun.issue_number, {
         immediate: false,
-        resetPlan: false,
+        resetPlan: fresh,
+        resetBranch: fresh,
         dryRun,
       })
-      return `queued ${selectedRun.repo}#${selectedRun.issue_number}${dryRun ? ' (dry-run)' : ''}`
+      const suffix = fresh ? ' (fresh start)' : ''
+      return `queued ${selectedRun.repo}#${selectedRun.issue_number}${suffix}${dryRun ? ' (dry-run)' : ''}`
     })
   }, [config, db, dryRun, runAction, selectedRun])
 
@@ -549,6 +552,10 @@ export function App({
 
     if (input === 'r') {
       void runRetry()
+      return
+    }
+    if (input === 'R') {
+      void runRetry(true)
       return
     }
     if (input === 'b') {

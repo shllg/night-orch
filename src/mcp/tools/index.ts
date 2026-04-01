@@ -74,6 +74,7 @@ export function registerTools(): ToolDefinition[] {
           repo: { type: 'string', description: 'Repository (owner/name)' },
           issueNumber: { type: 'number', description: 'Issue number to retry' },
           resetPlan: { type: 'boolean', description: 'Re-run planner instead of reusing existing plan', default: false },
+          fresh: { type: 'boolean', description: 'Reset branch to base and re-implement from scratch (use after merge conflicts)', default: false },
           authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
         },
         required: ['repo', 'issueNumber'],
@@ -169,7 +170,7 @@ export async function handleToolCall(
     case 'night-orch-cost-report':
       return handleCostReport(args as { days?: number }, deps)
     case 'night-orch-retry':
-      return handleRetry(args as { repo: string; issueNumber: number; resetPlan?: boolean; authToken?: string }, deps)
+      return handleRetry(args as { repo: string; issueNumber: number; resetPlan?: boolean; fresh?: boolean; authToken?: string }, deps)
     case 'night-orch-sync':
       return handleSync(args as { dryRun?: boolean; authToken?: string }, deps)
     case 'night-orch-cleanup':
@@ -310,17 +311,20 @@ async function handleCostReport(args: { days?: number }, deps: MCPDependencies):
 }
 
 async function handleRetry(
-  args: { repo: string; issueNumber: number; resetPlan?: boolean; authToken?: string },
+  args: { repo: string; issueNumber: number; resetPlan?: boolean; fresh?: boolean; authToken?: string },
   deps: MCPDependencies,
 ): Promise<unknown> {
   assertMcpMutationAuth(args.authToken, deps)
+  const fresh = args.fresh ?? false
   const engine = new RetryEngine(deps.db, deps.config)
   await engine.retry(args.repo, args.issueNumber, {
-    resetPlan: args.resetPlan ?? false,
+    resetPlan: args.resetPlan ?? fresh,
+    resetBranch: fresh,
     dryRun: false,
     immediate: false,
   })
-  return { success: true, message: `Retry queued for ${args.repo}#${args.issueNumber}` }
+  const suffix = fresh ? ' (fresh start — branch will be reset)' : ''
+  return { success: true, message: `Retry queued for ${args.repo}#${args.issueNumber}${suffix}` }
 }
 
 async function handleSync(args: { dryRun?: boolean; authToken?: string }, deps: MCPDependencies): Promise<unknown> {

@@ -202,6 +202,7 @@ export async function pollOnce(
           worktreePath,
           endedAt: null,
           lastError: null,
+          blockReason: null,
         })
 
         // Label transition
@@ -218,13 +219,17 @@ export async function pollOnce(
         // Notify
         await notifier.dispatch(makePayload('run_started', repoConfig.repo, discoveredIssue.issue))
 
+        // Detect if this queued run needs a forced branch reset (e.g., after merge conflict)
+        const forceReset = queuedRun?.blockReason === 'merge_conflict'
+
         // Detect rebase mode from queued run's phaseData
-        const isRebaseRun = queuedRun?.phaseData?.reactionType === 'rebase'
+        // If force-resetting, ignore stale rebase context — we're starting fresh
+        const isRebaseRun = !forceReset && queuedRun?.phaseData?.reactionType === 'rebase'
 
         // Check if prior run left tainted work that should be discarded
         // Never reset to base for rebase runs — we need the existing branch
         const planningMode = isPlanningIssue(discoveredIssue.issue.labels, repoConfig)
-        const resetToBase = !isRebaseRun && (planningMode || shouldResetBranch(runManager, repoConfig.repo, discoveredIssue.issue.number, run.id))
+        const resetToBase = forceReset || (!isRebaseRun && (planningMode || shouldResetBranch(runManager, repoConfig.repo, discoveredIssue.issue.number, run.id)))
 
         // Create worktree
         await worktreeManager.ensure({
