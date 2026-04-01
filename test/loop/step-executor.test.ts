@@ -230,6 +230,8 @@ describe('executeWorkerStep', () => {
     expect(result.ctx.totalAgentPasses).toBe(1)
     expect(result.ctx.sessionIds['plan']).toBe('sess-planner-1')
     expect(result.ctx.sessionIds['planner']).toBe('sess-planner-1')
+    expect(result.ctx.sessionIds['plan::claude']).toBe('sess-planner-1')
+    expect(result.ctx.sessionIds['planner::claude']).toBe('sess-planner-1')
     expect(result.ctx.stepOutputs['plan']).not.toBeUndefined()
   })
 
@@ -243,6 +245,36 @@ describe('executeWorkerStep', () => {
     expect(result.ctx.totalAgentPasses).toBe(1)
     expect(result.ctx.sessionIds['code']).toBe('sess-coder-1')
     expect(result.ctx.sessionIds['coder']).toBe('sess-coder-1')
+    expect(result.ctx.sessionIds['code::claude']).toBe('sess-coder-1')
+    expect(result.ctx.sessionIds['coder::claude']).toBe('sess-coder-1')
+  })
+
+  it('does not pass continueSessionId across different role agents', async () => {
+    const step: WorkerStep = { type: 'worker', id: 'code', role: 'coder', continueFrom: 'plan' }
+    const adapter = makeMockAdapter(makeCoderResult())
+    const config = makeConfig()
+    config.workerProfiles['codex'] = {
+      type: 'codex',
+      command: 'codex',
+      args: ['-p'],
+      workerTimeoutSeconds: 1800,
+      minimalEnv: true,
+      runtimeWrapper: null,
+      env: {},
+    }
+    const ctx = makeCtx({
+      roles: { planner: 'claude', coder: 'codex', reviewer: 'claude' },
+      repoConfig: {
+        ...makeCtx().repoConfig,
+        agents: { claude: 'claude', codex: 'codex' },
+      },
+      sessionIds: { plan: 'sess-plan-claude', planner: 'sess-plan-claude' },
+    })
+    const deps: StepDependencies = { adapters: { codex: adapter }, config }
+
+    await executeWorkerStep(ctx, step, deps)
+
+    expect(adapter.runTask).toHaveBeenCalledWith(expect.objectContaining({ continueSessionId: null }))
   })
 
   it('reviewer role populates ctx.reviewResult', async () => {
@@ -510,25 +542,40 @@ describe('resolveContinueSession', () => {
   it('returns null when step has no continueFrom', () => {
     const step: WorkerStep = { type: 'worker', id: 'review', role: 'reviewer' }
     const ctx = makeCtx({ sessionIds: { planner: 'sess-1', coder: 'sess-2' } })
-    expect(resolveContinueSession(ctx, step)).toBeNull()
+    expect(resolveContinueSession(ctx, step, 'claude')).toBeNull()
   })
 
   it('returns session from continueFrom step', () => {
     const step: WorkerStep = { type: 'worker', id: 'code', role: 'coder', continueFrom: 'plan' }
     const ctx = makeCtx({ sessionIds: { plan: 'sess-plan-1' } })
-    expect(resolveContinueSession(ctx, step)).toBe('sess-plan-1')
+    expect(resolveContinueSession(ctx, step, 'claude')).toBe('sess-plan-1')
+  })
+
+  it('prefers scoped session from continueFrom step', () => {
+    const step: WorkerStep = { type: 'worker', id: 'code', role: 'coder', continueFrom: 'plan' }
+    const ctx = makeCtx({ sessionIds: { 'plan::claude': 'sess-plan-scoped', plan: 'sess-plan-unscoped' } })
+    expect(resolveContinueSession(ctx, step, 'claude')).toBe('sess-plan-scoped')
   })
 
   it('supports legacy role-keyed planner sessions', () => {
     const step: WorkerStep = { type: 'worker', id: 'code', role: 'coder', continueFrom: 'plan' }
     const ctx = makeCtx({ sessionIds: { planner: 'sess-planner-legacy' } })
-    expect(resolveContinueSession(ctx, step)).toBe('sess-planner-legacy')
+    expect(resolveContinueSession(ctx, step, 'claude')).toBe('sess-planner-legacy')
   })
 
   it('supports legacy continueFrom values keyed by role name', () => {
     const step: WorkerStep = { type: 'worker', id: 'code', role: 'coder', continueFrom: 'planner' }
     const ctx = makeCtx({ sessionIds: { planner: 'sess-planner-1' } })
-    expect(resolveContinueSession(ctx, step)).toBe('sess-planner-1')
+    expect(resolveContinueSession(ctx, step, 'claude')).toBe('sess-planner-1')
+  })
+
+  it('does not continue unscoped session across different role agents', () => {
+    const step: WorkerStep = { type: 'worker', id: 'code', role: 'coder', continueFrom: 'plan' }
+    const ctx = makeCtx({
+      roles: { planner: 'claude', coder: 'codex', reviewer: 'claude' },
+      sessionIds: { plan: 'sess-plan-claude', planner: 'sess-plan-claude' },
+    })
+    expect(resolveContinueSession(ctx, step, 'codex')).toBeNull()
   })
 
   it('falls back to own session on iteration 2+', () => {
@@ -538,7 +585,7 @@ describe('resolveContinueSession', () => {
       sessionIds: { coder: 'sess-coder-prev' },
       // no planner session
     })
-    expect(resolveContinueSession(ctx, step)).toBe('sess-coder-prev')
+    expect(resolveContinueSession(ctx, step, 'claude')).toBe('sess-coder-prev')
   })
 
   it('does not fall back to own session on iteration 1', () => {
@@ -547,7 +594,7 @@ describe('resolveContinueSession', () => {
       iteration: 1,
       sessionIds: { coder: 'sess-coder-prev' },
     })
-    expect(resolveContinueSession(ctx, step)).toBeNull()
+    expect(resolveContinueSession(ctx, step, 'claude')).toBeNull()
   })
 
   it('prefers continueFrom session over own session', () => {
@@ -556,6 +603,6 @@ describe('resolveContinueSession', () => {
       iteration: 2,
       sessionIds: { planner: 'sess-planner-1', coder: 'sess-coder-prev' },
     })
-    expect(resolveContinueSession(ctx, step)).toBe('sess-planner-1')
+    expect(resolveContinueSession(ctx, step, 'claude')).toBe('sess-planner-1')
   })
 })

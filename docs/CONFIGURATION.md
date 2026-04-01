@@ -273,7 +273,7 @@ workflows:
 | `decide` | `id`, `onIterate` | Evaluate review/verify results and route to publish, iterate (jump to `onIterate` step), or block. |
 
 - `skipWhen` — skip the step when the triage level matches (e.g., `trivial`)
-- `continueFrom` — continue the AI session from a prior step (e.g., coder continues planner's session)
+- `continueFrom` — continue the AI session from a prior step (e.g., coder continues planner's session). Session reuse is agent-specific; cross-agent handoffs (for example `planner=claude`, `coder=codex`) start a fresh session.
 - `prompt` — path to a custom system prompt template (overrides the default)
 
 Reference a workflow in `repos[].workflow` by name.

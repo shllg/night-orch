@@ -330,6 +330,71 @@ describe('pollOnce', () => {
     expect(commandRow?.command).toBe('retry:applied')
   })
 
+  it('continues scanning comment commands when one issue comment fetch returns 404', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([])
+    mockListIssueComments.mockImplementation(async (_repo: string, issueNumber: number) => {
+      if (issueNumber === 1) {
+        throw Object.assign(new Error('Not Found'), { status: 404 })
+      }
+      if (issueNumber === 2) {
+        return [
+          {
+            id: 5003,
+            body: '/orch retry',
+            user: 'collaborator-user',
+            createdAt: '2026-01-02T00:00:00Z',
+            updatedAt: '2026-01-02T00:00:00Z',
+          },
+        ]
+      }
+      return []
+    })
+
+    const runManager = new RunManager(db)
+    const staleRun = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 1,
+      issueNodeId: '',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(staleRun.id, {
+      status: 'blocked',
+      endedAt: new Date().toISOString(),
+      lastError: 'failed verify',
+    })
+
+    const retryRun = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 2,
+      issueNodeId: '',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(retryRun.id, {
+      status: 'blocked',
+      endedAt: new Date().toISOString(),
+      lastError: 'failed verify',
+    })
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    await pollOnce(config, db, false)
+
+    const staleRow = db.prepare("SELECT status FROM runs WHERE id = ?").get(staleRun.id) as { status: string }
+    const retryRow = db.prepare("SELECT status FROM runs WHERE id = ?").get(retryRun.id) as { status: string }
+    expect(staleRow.status).toBe('blocked')
+    expect(retryRow.status).toBe('queued')
+    expect(mockListIssueComments).toHaveBeenCalledWith('org/repo', 1)
+    expect(mockListIssueComments).toHaveBeenCalledWith('org/repo', 2)
+
+    const commandRow = db
+      .prepare('SELECT command FROM command_tracking WHERE repo = ? AND issue_number = ? AND comment_id = ?')
+      .get('org/repo', 2, 5003) as { command: string } | undefined
+    expect(commandRow?.command).toBe('retry:applied')
+  })
+
   it('returns error when publish fails', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([{
       issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },

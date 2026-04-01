@@ -176,7 +176,7 @@ workflows:
 ### Step options
 
 - `skipWhen: trivial` — skip this step for trivially-triaged issues
-- `continueFrom: plan` — continue the AI session from a prior step (reduces token usage, improves context)
+- `continueFrom: plan` — continue the AI session from a prior step when both steps use the same agent (reduces token usage, improves context)
 - `prompt: path/to/template.md` — use a custom system prompt instead of the default
 
 ---
@@ -290,7 +290,7 @@ repos:
 
 ### Session continuity
 
-Agents retain context across pipeline phases. The coder continues from the planner's session (so it already knows the plan), and on iteration, the coder continues from its own prior session. The reviewer always starts fresh to avoid bias.
+Agents retain context across pipeline phases when the agent implementation matches. For example, coder can continue planner context when both are on the same agent, and on iteration, coder continues from its own prior session. Cross-agent handoffs start a fresh session.
 
 This is configured per-step in workflows via `continueFrom`:
 

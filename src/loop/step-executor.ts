@@ -71,7 +71,7 @@ export async function executeWorkerStep(
   )
 
   const env = buildWorkerEnv(profile, deps.envOverrides)
-  const continueSessionId = resolveContinueSession(ctx, step)
+  const continueSessionId = resolveContinueSession(ctx, step, profile.type)
 
   const supervisor = superviseWorker(step.role, ctx.adjustedLimits.workerTimeoutSeconds * 1000, () => {
     // Advisory — the timeout.ts layer handles actual SIGTERM
@@ -123,7 +123,7 @@ export async function executeWorkerStep(
   }
 
   // Map result to the appropriate RunContext field based on role
-  const ctxPatch = buildWorkerCtxPatch(ctx, step, result)
+  const ctxPatch = buildWorkerCtxPatch(ctx, step, result, profile.type)
   let updatedCtx = updateContext(ctx, ctxPatch)
 
   // Coder fallback: if parse failed but worker exited 0, build synthetic
@@ -261,27 +261,65 @@ export function getWorkerProfile(
  * Determine which session to continue for a workflow step.
  * Uses step.continueFrom to find the session ID of a prior step's role.
  */
-export function resolveContinueSession(ctx: RunContext, step: WorkerStep): string | null {
+export function resolveContinueSession(ctx: RunContext, step: WorkerStep, profileType: string): string | null {
   if (!step.continueFrom) return null
 
-  // continueFrom references a workflow step ID.
-  const sessionId = ctx.sessionIds[step.continueFrom]
-  if (sessionId) return sessionId
+  const scopedStepSession = ctx.sessionIds[sessionScopeKey(step.continueFrom, profileType)]
+  if (scopedStepSession) return scopedStepSession
 
+  // continueFrom references a workflow step ID.
   // Backward-compatibility: older checkpoints keyed by default role names.
   const legacyRoleAlias = STEP_ID_TO_DEFAULT_ROLE[step.continueFrom]
   if (legacyRoleAlias) {
-    const legacySession = ctx.sessionIds[legacyRoleAlias]
-    if (legacySession) return legacySession
+    const scopedLegacySession = ctx.sessionIds[sessionScopeKey(legacyRoleAlias, profileType)]
+    if (scopedLegacySession) return scopedLegacySession
+  }
+
+  // Only reuse unscoped continueFrom sessions when source/current roles use the same agent.
+  if (isUntypedContinueAllowed(ctx, step)) {
+    const sessionId = ctx.sessionIds[step.continueFrom]
+    if (sessionId) return sessionId
+
+    if (legacyRoleAlias) {
+      const legacySession = ctx.sessionIds[legacyRoleAlias]
+      if (legacySession) return legacySession
+    }
   }
 
   // On iteration 2+, also try this step's own prior session.
   if (ctx.iteration > 1) {
-    const ownSession = ctx.sessionIds[step.id] ?? ctx.sessionIds[step.role]
+    const ownSession = ctx.sessionIds[sessionScopeKey(step.id, profileType)]
+      ?? ctx.sessionIds[sessionScopeKey(step.role, profileType)]
+      ?? ctx.sessionIds[step.id]
+      ?? ctx.sessionIds[step.role]
     if (ownSession) return ownSession
   }
 
   return null
+}
+
+function isUntypedContinueAllowed(ctx: RunContext, step: WorkerStep): boolean {
+  if (!step.continueFrom) return false
+  if (!isBuiltInRole(step.role)) return true
+
+  const sourceRole = resolveContinueSourceRole(step.continueFrom)
+  if (!sourceRole) return true
+
+  return ctx.roles[sourceRole] === ctx.roles[step.role]
+}
+
+function resolveContinueSourceRole(continueFrom: string): keyof RunContext['roles'] | null {
+  if (isBuiltInRole(continueFrom)) return continueFrom
+  const legacyRoleAlias = STEP_ID_TO_DEFAULT_ROLE[continueFrom]
+  return isBuiltInRole(legacyRoleAlias) ? legacyRoleAlias : null
+}
+
+function isBuiltInRole(role: string | undefined): role is keyof RunContext['roles'] {
+  return role === 'planner' || role === 'coder' || role === 'reviewer'
+}
+
+function sessionScopeKey(id: string, profileType: string): string {
+  return `${id}::${profileType}`
 }
 
 const STEP_ID_TO_DEFAULT_ROLE: Record<string, string> = {
@@ -298,11 +336,18 @@ function buildWorkerCtxPatch(
   ctx: RunContext,
   step: WorkerStep,
   result: WorkerTaskResult,
+  profileType: string,
 ): Partial<RunContext> {
   const basePatch: Partial<RunContext> = {
     totalAgentPasses: ctx.totalAgentPasses + 1,
     sessionIds: result.sessionId
-      ? { ...ctx.sessionIds, [step.id]: result.sessionId, [step.role]: result.sessionId }
+      ? {
+          ...ctx.sessionIds,
+          [step.id]: result.sessionId,
+          [step.role]: result.sessionId,
+          [sessionScopeKey(step.id, profileType)]: result.sessionId,
+          [sessionScopeKey(step.role, profileType)]: result.sessionId,
+        }
       : ctx.sessionIds,
     stepOutputs: { ...ctx.stepOutputs, [step.id]: result.parsed },
   }

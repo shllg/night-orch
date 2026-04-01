@@ -856,6 +856,14 @@ interface CommandIssueRow {
   issue_number: number
 }
 
+function getHttpStatus(err: unknown): number | null {
+  if (typeof err !== 'object' || err === null) return null
+  const e = err as { status?: unknown; response?: { status?: unknown } }
+  if (typeof e.status === 'number') return e.status
+  if (typeof e.response?.status === 'number') return e.response.status
+  return null
+}
+
 async function processCommentCommands(params: ProcessCommentCommandsParams): Promise<void> {
   const {
     config,
@@ -885,7 +893,19 @@ async function processCommentCommands(params: ProcessCommentCommandsParams): Pro
   const collaboratorCache = new Map<string, boolean>()
 
   for (const row of issueRows) {
-    const comments = await forge.listIssueComments(repoConfig.repo, row.issue_number)
+    let comments: Awaited<ReturnType<typeof forge.listIssueComments>>
+    try {
+      comments = await forge.listIssueComments(repoConfig.repo, row.issue_number)
+    } catch (err) {
+      if (getHttpStatus(err) === 404) {
+        logger.debug(
+          { repo: repoConfig.repo, issueNumber: row.issue_number },
+          'Skipping comment command scan for missing or inaccessible issue',
+        )
+        continue
+      }
+      throw err
+    }
     const parsed = parseOrchCommands(comments, '1970-01-01T00:00:00Z')
 
     for (const item of parsed) {

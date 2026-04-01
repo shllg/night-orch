@@ -58,7 +58,7 @@ export interface RunContext {
   readonly blockReason: BlockReason | null
   readonly prReviewFeedback: unknown | null
 
-  /** Session IDs from worker adapters, keyed by role, for conversation continuity. */
+  /** Session IDs from worker adapters, keyed by step/role and optional `::adapterType` scope. */
   readonly sessionIds: Readonly<Record<string, string>>
 
   /** Generic step outputs keyed by step ID, for custom workflow steps. */
