@@ -66,9 +66,9 @@ export class SyncEngine {
       labelCorrections: [],
     }
 
-    // 1. Find all active runs that can drift (running/queued)
+    // 1. Find all non-completed runs that can drift from forge state.
     const activeRuns = this.db
-      .prepare("SELECT id, repo, issue_number, status, pr_number, branch_name, worktree_path FROM runs WHERE status IN ('running', 'queued')")
+      .prepare("SELECT id, repo, issue_number, status, pr_number, branch_name, worktree_path FROM runs WHERE status IN ('running', 'queued', 'blocked', 'review_ready', 'error')")
       .all() as ActiveRunRow[]
 
     for (const run of activeRuns) {
@@ -86,10 +86,15 @@ export class SyncEngine {
         if (action) {
           result.reconciledRuns.push(action)
         }
+      } else if (run.status === 'blocked' || run.status === 'review_ready' || run.status === 'error') {
+        const action = await this.reconcileNonTerminalRun(run, dryRun)
+        if (action) {
+          result.reconciledRuns.push(action)
+        }
       }
     }
 
-    // 2. Check label mismatches for non-running statuses
+    // 2. Check label mismatches for active, non-completed statuses
     const labelCorrections = await this.checkLabelMismatches(dryRun)
     result.labelCorrections = labelCorrections
 
@@ -119,30 +124,22 @@ export class SyncEngine {
       return await this.markStale(run, dryRun, 'Cannot check GitHub state')
     }
 
-    // Check if PR exists and its state
-    if (run.pr_number) {
-      try {
-        const pr = await forge.findPRByBranch(run.repo, run.branch_name ?? '')
-        if (pr && pr.state === 'merged') {
-          return this.markCompleted(run, dryRun, 'PR merged', forge)
-        }
-        if (pr && pr.state === 'open') {
-          // PR exists and is open — mark as review_ready
-          return this.markReviewReady(run, dryRun, 'PR open but run stale', forge)
-        }
-      } catch (err) {
-        logger.warn({ repo: run.repo, prNumber: run.pr_number, err }, 'Failed to check PR state')
-      }
+    // Check if PR exists and its state.
+    const prState = await this.resolvePRState(forge, run)
+    if (prState === 'merged') {
+      return this.markCompleted(run, dryRun, 'PR merged', forge)
+    }
+    if (prState === 'open') {
+      // PR exists and is open — mark as review_ready.
+      return this.markReviewReady(run, dryRun, 'PR open but run stale', forge)
     }
 
-    // Check issue state
-    try {
-      const issue = await forge.getIssue(run.repo, run.issue_number)
-      if (issue.state === 'closed') {
-        return this.markClosed(run, dryRun, 'Issue closed externally', forge)
-      }
-    } catch (err) {
-      logger.warn({ repo: run.repo, issue: run.issue_number, err }, 'Failed to check issue state')
+    const issueState = await this.resolveIssueState(forge, run)
+    if (issueState === 'closed') {
+      return this.markClosed(run, dryRun, 'Issue closed externally', forge)
+    }
+    if (issueState === 'missing') {
+      return this.markClosed(run, dryRun, 'Issue deleted or no longer accessible', forge)
     }
 
     // Issue still open, no PR — mark as queued for retry
@@ -159,16 +156,102 @@ export class SyncEngine {
     }
 
     // Queued runs should not remain active if the issue has already been closed externally.
-    try {
-      const issue = await forge.getIssue(run.repo, run.issue_number)
-      if (issue.state === 'closed') {
-        return this.markClosed(run, dryRun, 'Issue closed while queued', forge)
-      }
-    } catch (err) {
-      logger.warn({ repo: run.repo, issue: run.issue_number, err }, 'Failed to check queued issue state')
+    const issueState = await this.resolveIssueState(forge, run)
+    if (issueState === 'closed') {
+      return this.markClosed(run, dryRun, 'Issue closed while queued', forge)
+    }
+    if (issueState === 'missing') {
+      return this.markClosed(run, dryRun, 'Issue deleted while queued', forge)
     }
 
     return null
+  }
+
+  private async reconcileNonTerminalRun(run: ActiveRunRow, dryRun: boolean): Promise<SyncAction | null> {
+    let forge: ForgeAdapter
+    try {
+      forge = this.forgeFactory(run.repo)
+    } catch {
+      logger.warn({ repo: run.repo }, 'Cannot create forge adapter for non-terminal run reconciliation')
+      return null
+    }
+
+    const prState = await this.resolvePRState(forge, run)
+    if (prState === 'merged') {
+      return this.markCompleted(run, dryRun, `PR merged while run was ${run.status}`, forge)
+    }
+
+    const issueState = await this.resolveIssueState(forge, run)
+    if (issueState === 'closed') {
+      return this.markClosed(run, dryRun, `Issue closed while run was ${run.status}`, forge)
+    }
+    if (issueState === 'missing') {
+      return this.markClosed(run, dryRun, `Issue deleted while run was ${run.status}`, forge)
+    }
+
+    return null
+  }
+
+  private async resolveIssueState(
+    forge: ForgeAdapter,
+    run: Pick<ActiveRunRow, 'repo' | 'issue_number'>,
+  ): Promise<'open' | 'closed' | 'missing' | 'unknown'> {
+    try {
+      const issue = await forge.getIssue(run.repo, run.issue_number)
+      return issue.state === 'closed' ? 'closed' : 'open'
+    } catch (err) {
+      if (isNotFoundError(err)) {
+        return 'missing'
+      }
+      logger.warn({ repo: run.repo, issue: run.issue_number, err }, 'Failed to check issue state')
+      return 'unknown'
+    }
+  }
+
+  private async resolvePRState(
+    forge: ForgeAdapter,
+    run: Pick<ActiveRunRow, 'repo' | 'pr_number' | 'branch_name'>,
+  ): Promise<'open' | 'closed' | 'merged' | 'missing' | 'unknown' | null> {
+    if (!run.pr_number && !run.branch_name) {
+      return null
+    }
+
+    let stateByNumber: 'open' | 'closed' | 'merged' | 'missing' | 'unknown' | null = null
+
+    if (run.pr_number && forge.getPR) {
+      try {
+        const pr = await forge.getPR(run.repo, run.pr_number)
+        stateByNumber = pr.state
+      } catch (err) {
+        if (isNotFoundError(err)) {
+          stateByNumber = 'missing'
+        } else {
+          logger.warn({ repo: run.repo, prNumber: run.pr_number, err }, 'Failed to check PR state by number')
+          stateByNumber = 'unknown'
+        }
+      }
+    }
+
+    const shouldFallbackToBranch = Boolean(run.branch_name) && (
+      stateByNumber === null ||
+      stateByNumber === 'missing' ||
+      stateByNumber === 'closed' ||
+      stateByNumber === 'unknown'
+    )
+
+    if (run.branch_name && shouldFallbackToBranch) {
+      try {
+        const pr = await forge.findPRByBranch(run.repo, run.branch_name)
+        if (pr) {
+          return pr.state
+        }
+      } catch (err) {
+        logger.warn({ repo: run.repo, branch: run.branch_name, err }, 'Failed to check PR state by branch')
+        return stateByNumber ?? 'unknown'
+      }
+    }
+
+    return stateByNumber
   }
 
   private markCompleted(run: ActiveRunRow, dryRun: boolean, reason: string, forge: ForgeAdapter): SyncAction {
@@ -236,7 +319,8 @@ export class SyncEngine {
     try {
       const issue = await forge.getIssue(run.repo, run.issue_number)
       const labelConfig = buildLabelConfig(repoConfig)
-      await transitionLabels(forge, run.repo, run.issue_number, issue.labels, 'running', targetStatus, labelConfig)
+      const fromStatus = this.toRunStatus(run.status) ?? 'running'
+      await transitionLabels(forge, run.repo, run.issue_number, issue.labels, fromStatus, targetStatus, labelConfig)
     } catch (err) {
       logger.warn({ repo: run.repo, issue: run.issue_number, err }, 'Failed to update labels during sync')
     }
@@ -247,7 +331,7 @@ export class SyncEngine {
 
     // Find runs where DB status and labels might be out of sync
     const runs = this.db
-      .prepare("SELECT id, repo, issue_number, status FROM runs WHERE status IN ('running', 'blocked', 'error', 'review_ready') AND ended_at IS NULL")
+      .prepare("SELECT id, repo, issue_number, status FROM runs WHERE status IN ('queued', 'running', 'blocked', 'error', 'review_ready')")
       .all() as Array<{ id: string; repo: string; issue_number: number; status: string }>
 
     for (const run of runs) {
@@ -295,7 +379,7 @@ export class SyncEngine {
   }
 
   private toRunStatus(status: string): RunStatus | null {
-    if (status === 'running' || status === 'blocked' || status === 'review_ready' || status === 'error') {
+    if (status === 'queued' || status === 'running' || status === 'blocked' || status === 'review_ready' || status === 'error' || status === 'completed') {
       return status
     }
     return null
@@ -323,4 +407,16 @@ export class SyncEngine {
 
     return orphaned
   }
+}
+
+function getHttpStatus(err: unknown): number | null {
+  if (typeof err !== 'object' || err === null) return null
+  const e = err as { status?: unknown; response?: { status?: unknown } }
+  if (typeof e.status === 'number') return e.status
+  if (typeof e.response?.status === 'number') return e.response.status
+  return null
+}
+
+function isNotFoundError(err: unknown): boolean {
+  return getHttpStatus(err) === 404
 }

@@ -76,7 +76,7 @@ describe('loadTuiStats', () => {
     const stats = loadTuiStats(db)
 
     expect(stats.overview.totalRuns).toBe(5)
-    expect(stats.overview.activeRuns).toBe(2)
+    expect(stats.overview.activeRuns).toBe(4)
     expect(stats.overview.completedRuns).toBe(1)
     expect(stats.overview.errorRuns).toBe(1)
     expect(stats.overview.blockedRuns).toBe(1)

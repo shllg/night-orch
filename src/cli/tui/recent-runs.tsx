@@ -19,14 +19,11 @@ interface RecentRunRow {
 
 const STATUS_DISPLAY: Record<string, { icon: string; color: string }> = {
   completed: { icon: '✓', color: 'green' },
-  review_ready: { icon: '◆', color: 'magenta' },
-  blocked: { icon: '■', color: 'red' },
-  error: { icon: '✗', color: 'red' },
 }
 
 export function RecentRuns({ db, tick: _tick }: RecentRunsProps): React.ReactElement {
   const rows = db
-    .prepare("SELECT id, repo, issue_number, status, iteration_count, estimated_cost_usd, last_error FROM runs WHERE status NOT IN ('queued', 'running') ORDER BY updated_at DESC LIMIT 15")
+    .prepare("SELECT id, repo, issue_number, status, iteration_count, estimated_cost_usd, last_error FROM runs WHERE status = 'completed' ORDER BY updated_at DESC LIMIT 15")
     .all() as RecentRunRow[]
 
   if (rows.length === 0) {

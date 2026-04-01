@@ -22,7 +22,13 @@ export function sliceWindow<T>(rows: T[], selectedIndex: number, windowSize: num
 }
 
 export function isActiveRunStatus(status: string): boolean {
-  return status === 'queued' || status === 'running'
+  return (
+    status === 'queued' ||
+    status === 'running' ||
+    status === 'blocked' ||
+    status === 'review_ready' ||
+    status === 'error'
+  )
 }
 
 export function partitionRowsByActivity<T extends { status: string }>(rows: T[]): PartitionedRows<T> {
