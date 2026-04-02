@@ -13,8 +13,10 @@ Source of truth for the schema is [src/config/schema.ts](../src/config/schema.ts
 3. `.night-orch.yml` (only when `--trust-workspace` is set)
 4. `config.yaml`
 5. `config.yml`
-6. `~/.config/night-orch/config.yaml`
-7. `~/.config/night-orch/config.yml`
+6. `~/.night-orch/config.yaml`
+7. `~/.night-orch/config.yml`
+8. `~/.config/night-orch/config.yaml`
+9. `~/.config/night-orch/config.yml`
 
 ## YAML Conventions
 

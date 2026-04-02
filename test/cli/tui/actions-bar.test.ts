@@ -19,7 +19,7 @@ describe('buildActionHints', () => {
     expect(sections.issue).toContain('[t]retry [T]retry fresh [_]rebase [X]delete entry')
   })
 
-  it('hides run mutating controls in standalone monitor mode', () => {
+  it('keeps issue actions visible in monitor mode while hiding poll/sync/cleanup', () => {
     const sections = sectionMap(buildActionHints({
       activeTab: 'runs',
       busy: false,
@@ -29,8 +29,7 @@ describe('buildActionHints', () => {
     }))
 
     expect(sections.global).toBe('[q]quit [r]refresh')
-    expect(sections.issue).toContain('standalone monitor mode')
-    expect(sections.issue).not.toContain('[t]retry')
+    expect(sections.issue).toContain('[t]retry [T]retry fresh [_]rebase [X]delete entry')
   })
 
   it('shows focused run controls when detail view is open', () => {

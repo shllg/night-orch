@@ -214,7 +214,7 @@ describe('tui action key dispatch', () => {
     })).toBe('cleanupConfirm')
   })
 
-  it('shows standalone message for mutating action keys when controls are disabled', () => {
+  it('shows standalone message only for monitor-only controls when controls are disabled', () => {
     expect(resolveActionCommand({
       ...baseArgs,
       controlsEnabled: false,
@@ -223,13 +223,42 @@ describe('tui action key dispatch', () => {
     expect(resolveActionCommand({
       ...baseArgs,
       controlsEnabled: false,
-      input: 't',
+      input: 's',
     })).toBe('standaloneMessage')
     expect(resolveActionCommand({
       ...baseArgs,
       controlsEnabled: false,
-      input: 'X',
+      input: 'D',
+      cleanupConfirmPending: false,
     })).toBe('standaloneMessage')
+
+    expect(resolveActionCommand({
+      ...baseArgs,
+      controlsEnabled: false,
+      input: 't',
+    })).toBe('retry')
+    expect(resolveActionCommand({
+      ...baseArgs,
+      controlsEnabled: false,
+      input: 'T',
+    })).toBe('retryFresh')
+    expect(resolveActionCommand({
+      ...baseArgs,
+      controlsEnabled: false,
+      input: '_',
+    })).toBe('rebase')
+    expect(resolveActionCommand({
+      ...baseArgs,
+      controlsEnabled: false,
+      input: 'X',
+    })).toBe('deleteEntry')
+
+    expect(resolveActionCommand({
+      ...baseArgs,
+      controlsEnabled: false,
+      activeTab: 'stats',
+      input: 'X',
+    })).toBe('none')
   })
 })
 

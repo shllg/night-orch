@@ -116,7 +116,7 @@ program
 
 program
   .command('tui')
-  .description('Interactive monitoring TUI (run `night-orch run` in a separate process)')
+  .description('Interactive monitoring TUI with issue actions (retry/rebase/delete)')
   .action((_opts, cmd) => runWatch(cmd.parent?.opts()))
 
 program

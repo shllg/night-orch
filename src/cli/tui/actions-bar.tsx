@@ -59,17 +59,13 @@ function issueHints(options: {
   activeTab: TabId
   busy: boolean
   runFocused: boolean
-  controlsEnabled: boolean
 }): string {
-  const { activeTab, busy, runFocused, controlsEnabled } = options
+  const { activeTab, busy, runFocused } = options
   if (activeTab !== 'runs') {
     return 'n/a (issue actions on runs tab)'
   }
   if (runFocused) {
     return 'focused run detail'
-  }
-  if (!controlsEnabled) {
-    return 'standalone monitor mode (actions run via `night-orch` CLI)'
   }
   if (busy) {
     return 'actions locked while task is running'
@@ -101,7 +97,6 @@ export function buildActionHints(props: ActionsBarProps): ActionHints {
           activeTab: props.activeTab,
           busy: props.busy,
           runFocused: props.runFocused,
-          controlsEnabled,
         }),
       },
     ],

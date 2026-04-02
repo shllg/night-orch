@@ -199,6 +199,18 @@ describe('startWebServer', () => {
     expect(pollPayload.state).toBe('woke-sleeper')
     expect(triggerPollCycle).toHaveBeenCalledTimes(1)
 
+    const deleteEntry = await fetch(`${baseUrl}/api/operations/delete-entry`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+        [WEB_AUTH_TOKEN_HEADER]: mutationToken,
+      },
+      body: JSON.stringify({ repo: 'org/repo', issueNumber: 999 }),
+    })
+    expect(deleteEntry.status).toBe(200)
+    await expect(deleteEntry.json()).resolves.toMatchObject({ found: false })
+
     const index = await fetch(`${baseUrl}/`)
     expect(index.status).toBe(200)
     await expect(index.text()).resolves.toContain('<!doctype html>')

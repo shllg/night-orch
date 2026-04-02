@@ -71,9 +71,27 @@ class LiveMetricsService implements MetricsService {
   }
 
   async start(): Promise<void> {
-    this.server = startMetricsServer(this.metrics, this.config.host, this.config.port)
-    await new Promise<void>((resolve) => {
-      this.server!.once('listening', resolve)
+    const server = startMetricsServer(this.metrics, this.config.host, this.config.port)
+    this.server = server
+    await new Promise<void>((resolve, reject) => {
+      const onListening = () => {
+        cleanup()
+        resolve()
+      }
+
+      const onError = (err: Error) => {
+        cleanup()
+        this.server = undefined
+        reject(err)
+      }
+
+      const cleanup = () => {
+        server.off('listening', onListening)
+        server.off('error', onError)
+      }
+
+      server.once('listening', onListening)
+      server.once('error', onError)
     })
   }
 

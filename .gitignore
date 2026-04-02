@@ -4,6 +4,8 @@ web/dist/
 node_modules/
 *.tsbuildinfo
 .env
+/config.yaml
+/config.yml
 *.db
 *.db-wal
 *.db-shm

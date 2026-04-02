@@ -162,18 +162,14 @@ export function resolveActionCommand(args: ResolveActionCommandInput): TuiAction
   if (args.input === 'r') return 'refresh'
 
   const isFocusedRun = args.activeTab === 'runs' && args.runsViewMode === 'focus'
-  const mutatingActionKey = args.input === 'p'
+  const monitorOnlyActionKey = args.input === 'p'
     || args.input === 's'
     || args.input === 'D'
-    || args.input === 't'
-    || args.input === 'T'
-    || args.input === '_'
-    || args.input === 'X'
 
   if (args.actionBusy) return 'none'
 
-  if (!args.controlsEnabled) {
-    return mutatingActionKey ? 'standaloneMessage' : 'none'
+  if (!args.controlsEnabled && monitorOnlyActionKey) {
+    return 'standaloneMessage'
   }
 
   // Keep focused run detail isolated to match its legend.
@@ -846,7 +842,7 @@ export function App({
     }
 
     if (actionCommand === 'standaloneMessage') {
-      setStatusLine('Standalone monitor mode: run actions via `night-orch` CLI')
+      setStatusLine('Monitor mode: poll/sync/cleanup available via `night-orch` CLI')
       return
     }
 

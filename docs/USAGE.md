@@ -69,6 +69,7 @@ The `watch` command shows:
 - Merge queue batches in progress
 - Daily cost bar against budget
 - Recent completed/errored/blocked runs
+- Issue actions on selected runs: retry, retry fresh, rebase, and delete entry
 
 ### Multi-repo setup
 
@@ -384,7 +385,7 @@ Show current state: active runs, active leases, daily cost against budget, recen
 
 ### `night-orch tui`
 
-Live-updating terminal dashboard. Refreshes every 2 seconds. Shows active runs, merge queue, cost bar, and recent history. Press Ctrl+C to exit.
+Live-updating terminal dashboard. Refreshes every 2 seconds. Shows active runs, merge queue, cost bar, recent history, and issue actions (`retry`, `retry fresh`, `rebase`, `delete entry`). Press Ctrl+C to exit.
 
 ### `night-orch sync`
 

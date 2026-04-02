@@ -420,6 +420,33 @@ async function handleApiRequest(
     return
   }
 
+  if (method === 'POST' && pathname === '/api/operations/delete-entry') {
+    const body = await readJsonBody(req)
+    const repo = toNonEmptyString(body['repo'])
+    const issueNumber = toBoundedInt(body['issueNumber'], NaN, 1, Number.MAX_SAFE_INTEGER)
+
+    if (!repo || Number.isNaN(issueNumber)) {
+      writeJson(res, 400, { error: 'repo and issueNumber are required' })
+      return
+    }
+
+    const result = await handleToolCall(
+      'night-orch-delete-entry',
+      withMcpMutationAuth(
+        {
+          repo,
+          issueNumber,
+          force: Boolean(body['force']),
+          dryRun: Boolean(body['dryRun']),
+        },
+        security,
+      ),
+      deps,
+    )
+    writeJson(res, 200, result)
+    return
+  }
+
   writeJson(res, 404, { error: `Unknown API route: ${method} ${pathname}` })
 }
 

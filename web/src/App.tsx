@@ -106,6 +106,10 @@ export function App(): ReactElement {
   const [rebaseRepo, setRebaseRepo] = useState('')
   const [rebaseIssueNumber, setRebaseIssueNumber] = useState('')
 
+  const [deleteRepo, setDeleteRepo] = useState('')
+  const [deleteIssueNumber, setDeleteIssueNumber] = useState('')
+  const [deleteForce, setDeleteForce] = useState(false)
+
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
   const selectedRunIdRef = useRef('')
@@ -162,11 +166,13 @@ export function App(): ReactElement {
     if (repos.length === 0) {
       setRetryRepo('')
       setRebaseRepo('')
+      setDeleteRepo('')
       return
     }
 
     setRetryRepo((prev) => (prev && repos.includes(prev) ? prev : repos[0] ?? ''))
     setRebaseRepo((prev) => (prev && repos.includes(prev) ? prev : repos[0] ?? ''))
+    setDeleteRepo((prev) => (prev && repos.includes(prev) ? prev : repos[0] ?? ''))
     setSelectedRepo((prev) => (prev === 'all' || repos.includes(prev) ? prev : 'all'))
   }, [repos])
 
@@ -342,6 +348,26 @@ export function App(): ReactElement {
       `Rebase queued for ${rebaseRepo}#${issueNumber}`,
     )
   }, [rebaseIssueNumber, rebaseRepo, runOperation])
+
+  const submitDeleteEntry = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const issueNumber = Number.parseInt(deleteIssueNumber, 10)
+    if (!deleteRepo || !Number.isFinite(issueNumber) || issueNumber <= 0) {
+      setErrorMessage('Delete entry requires a repo and a positive issue number')
+      return
+    }
+
+    await runOperation(
+      'delete-entry',
+      '/api/operations/delete-entry',
+      {
+        repo: deleteRepo,
+        issueNumber,
+        force: deleteForce,
+      },
+      `Deleted local entry for ${deleteRepo}#${issueNumber}`,
+    )
+  }, [deleteForce, deleteIssueNumber, deleteRepo, runOperation])
 
   return (
     <main className="min-h-screen bg-orch-gradient px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
@@ -538,6 +564,37 @@ export function App(): ReactElement {
                 />
               </label>
               <ActionButton busy={activeOperation === 'rebase'} label="Queue Rebase" submit />
+            </form>
+
+            <form className="mt-5 space-y-2" onSubmit={(event) => { void submitDeleteEntry(event) }}>
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-cyan-200">Delete Entry</h3>
+              <label className="block text-xs text-slate-300">
+                Repo
+                <select
+                  className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-900/80 px-2 py-1"
+                  value={deleteRepo}
+                  onChange={(event) => setDeleteRepo(event.target.value)}
+                >
+                  {repos.map((repo) => (
+                    <option key={repo} value={repo}>{repo}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-xs text-slate-300">
+                Issue Number
+                <input
+                  className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-900/80 px-2 py-1"
+                  value={deleteIssueNumber}
+                  onChange={(event) => setDeleteIssueNumber(event.target.value)}
+                  inputMode="numeric"
+                  placeholder="123"
+                />
+              </label>
+              <label className="flex items-center gap-2 text-xs text-slate-300">
+                <input type="checkbox" checked={deleteForce} onChange={(event) => setDeleteForce(event.target.checked)} />
+                Force delete if running
+              </label>
+              <ActionButton busy={activeOperation === 'delete-entry'} label="Delete Local Entry" submit />
             </form>
           </div>
         </section>

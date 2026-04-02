@@ -140,5 +140,27 @@ describe('MetricsService', () => {
       // Connection should fail after stop
       await expect(getMetrics(port)).rejects.toThrow()
     })
+
+    it('start rejects when port is already in use', async () => {
+      const occupiedServer = http.createServer((_req, res) => {
+        res.writeHead(200)
+        res.end('ok')
+      })
+      await new Promise<void>((resolve) => {
+        occupiedServer.listen(port, '127.0.0.1', resolve)
+      })
+
+      try {
+        service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
+        await expect(service.start()).rejects.toMatchObject({ code: 'EADDRINUSE' })
+      } finally {
+        await new Promise<void>((resolve, reject) => {
+          occupiedServer.close((err) => {
+            if (err) reject(err)
+            else resolve()
+          })
+        })
+      }
+    })
   })
 })
