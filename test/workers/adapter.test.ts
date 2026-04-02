@@ -27,6 +27,9 @@ import { streamingExec } from '../../src/workers/streaming-exec.js'
 
 const mockExecWithTimeout = vi.mocked(execWithTimeout)
 const mockStreamingExec = vi.mocked(streamingExec)
+const expectedDefaultPermissionMode = typeof process.getuid === 'function' && process.getuid() === 0
+  ? 'acceptEdits'
+  : 'bypassPermissions'
 
 const baseProfile: WorkerProfileInput = {
   type: 'claude',
@@ -71,13 +74,38 @@ describe('ClaudeWorkerAdapter', () => {
 
     expect(mockStreamingExec).toHaveBeenCalledWith({
       command: 'claude',
-      args: ['-p', '--output-format', 'json', '--max-turns', '50', '--permission-mode', 'bypassPermissions', '--append-system-prompt', expect.stringContaining('Do NOT use plan mode')],
+      args: ['-p', '--output-format', 'json', '--max-turns', '50', '--append-system-prompt', expect.stringContaining('Do NOT use plan mode'), '--permission-mode', expectedDefaultPermissionMode],
       cwd: '/tmp/worktree',
       env: { PATH: '/usr/bin' },
       timeoutMs: 1_800_000,
       stdin: 'Plan the fix',
       onStdoutLine: expect.any(Function),
     })
+  })
+
+  it('does not override explicit permission args from profile config', async () => {
+    mockStreamingExec.mockResolvedValue({
+      stdout: '```json\n{"objective": "Fix it"}\n```',
+      stderr: '',
+      exitCode: 0,
+      timedOut: false,
+      durationMs: 5000,
+    })
+
+    const profileWithPermission = {
+      ...baseProfile,
+      args: ['-p', '--permission-mode', 'default'],
+    }
+
+    await adapter.runTask(makeTaskInput({ profile: profileWithPermission }))
+
+    const call = mockStreamingExec.mock.calls.at(-1)
+    expect(call).toBeDefined()
+    const args = (call?.[0].args ?? [])
+    expect(args.filter((arg) => arg === '--permission-mode')).toHaveLength(1)
+    expect(args).toContain('default')
+    expect(args).not.toContain('acceptEdits')
+    expect(args).not.toContain('bypassPermissions')
   })
 
   it('parses planner output for planner role', async () => {

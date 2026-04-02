@@ -6,8 +6,20 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=%i
-EnvironmentFile=%h/.config/night-orch/.env
-ExecStart=%h/.local/bin/night-orch run --config %h/.config/night-orch/config.yaml
+WorkingDirectory=%h/apps/night-orch
+Environment=HOME=%h
+Environment=XDG_CONFIG_HOME=%h/.config
+Environment=XDG_DATA_HOME=%h/.local/share
+Environment=XDG_CACHE_HOME=%h/.cache
+Environment=XDG_STATE_HOME=%h/.local/state
+Environment=MISE_CONFIG_DIR=%h/.config/mise
+Environment=MISE_DATA_DIR=%h/.local/share/mise
+Environment=MISE_CACHE_DIR=%h/.cache/mise
+Environment=MISE_STATE_DIR=%h/.local/state/mise
+Environment=PNPM_HOME=%h/.local/share/pnpm
+Environment=PATH=%h/.local/bin:%h/.local/share/pnpm:%h/.local/share/mise/shims:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=%h/apps/night-orch/.env
+ExecStart=%h/.local/share/pnpm/night-orch serve --config %h/.night-orch/config.yaml
 Restart=on-failure
 RestartSec=30
 
@@ -22,7 +34,7 @@ CPUQuota=200%
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=%h/.config/night-orch %h/code/.night-orch
+ReadWritePaths=%h/.config %h/.cache %h/.local %h/.night-orch %h/apps
 
 [Install]
 WantedBy=default.target

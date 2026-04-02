@@ -1,3 +1,4 @@
+import { delimiter, join } from 'node:path'
 import type { WorkerProfileInput } from './types.js'
 import { logger } from '../utils/logger.js'
 
@@ -23,10 +24,44 @@ export const ENV_BLACKLIST_PATTERNS = [
   /^GH_/i,
 ]
 
+const PATH_FALLBACK_DIRS = [
+  '/usr/local/bin',
+  '/usr/bin',
+  '/bin',
+]
+
 function isBlacklisted(key: string): boolean {
   const upper = key.toUpperCase()
   if (ENV_BLACKLIST_EXACT.has(upper)) return true
   return ENV_BLACKLIST_PATTERNS.some((p) => p.test(key))
+}
+
+export function normalizePathForSubprocess(
+  pathValue: string | undefined,
+  homeValue: string | undefined,
+): string {
+  const segments = (pathValue ?? '')
+    .split(delimiter)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+
+  const seen = new Set(segments)
+  const ensureSegment = (candidate: string | undefined) => {
+    if (!candidate || seen.has(candidate)) return
+    segments.push(candidate)
+    seen.add(candidate)
+  }
+
+  if (homeValue) {
+    ensureSegment(join(homeValue, '.local/bin'))
+    ensureSegment(join(homeValue, '.local/share/pnpm'))
+    ensureSegment(join(homeValue, '.local/share/mise/shims'))
+  }
+  for (const fallback of PATH_FALLBACK_DIRS) {
+    ensureSegment(fallback)
+  }
+
+  return segments.join(delimiter)
 }
 
 /**
@@ -68,6 +103,8 @@ export function buildWorkerEnv(
     result[key] = val
   }
 
+  result['PATH'] = normalizePathForSubprocess(result['PATH'], result['HOME'] ?? process.env['HOME'])
+
   return result
 }
 
@@ -99,5 +136,6 @@ export function buildVerifierEnv(overrides: Record<string, string> = {}): Record
     }
     result[key] = val
   }
+  result['PATH'] = normalizePathForSubprocess(result['PATH'], result['HOME'] ?? process.env['HOME'])
   return result
 }

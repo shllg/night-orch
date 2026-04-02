@@ -7,6 +7,7 @@ import { initDatabase } from '../../state/db.js'
 import { logger } from '../../utils/logger.js'
 import type { Config } from '../../config/schema.js'
 import { parseCommandSpec } from '../../utils/command.js'
+import { normalizePathForSubprocess } from '../../workers/env.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -193,13 +194,17 @@ export async function doctorCommand(globalOpts?: GlobalOpts): Promise<void> {
 }
 
 async function checkBinary(name: string): Promise<string | null> {
+  const env = {
+    ...process.env,
+    PATH: normalizePathForSubprocess(process.env['PATH'], process.env['HOME']),
+  }
   try {
-    const { stdout } = await execFileAsync(name, ['--version'], { timeout: 5000 })
+    const { stdout } = await execFileAsync(name, ['--version'], { timeout: 5000, env })
     return stdout.trim().split('\n')[0] ?? 'found'
   } catch {
     // Some tools use --version on stderr or exit with non-zero
     try {
-      const { stdout } = await execFileAsync('which', [name], { timeout: 5000 })
+      const { stdout } = await execFileAsync('which', [name], { timeout: 5000, env })
       return stdout.trim() ? 'found' : null
     } catch {
       return null

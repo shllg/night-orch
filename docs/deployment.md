@@ -5,6 +5,7 @@ This guide covers deploying night-orch on a Debian server behind Tailscale.
 ## Prerequisites
 
 - Debian 13+ server accessible only via Tailscale
+- Root access for one-time system setup (`useradd`, systemd, packages)
 - `mise` installed (for Node.js management)
 - Docker installed (`apt install docker.io docker-cli docker-compose`)
 - Caddy installed (`apt install caddy`)
@@ -12,11 +13,28 @@ This guide covers deploying night-orch on a Debian server behind Tailscale.
 
 ## Initial Setup
 
-### 1. Clone and Build
+### 1. Create Dedicated Runtime User (Required)
+
+Do not run night-orch as `root`. Create and use a dedicated service user:
 
 ```bash
-git clone https://github.com/shllg/night-orch.git /opt/night-orch
-cd /opt/night-orch
+useradd --create-home --shell /bin/bash orch
+usermod -aG docker orch
+sudo -iu orch
+```
+
+If you already switched users but `echo $HOME` is not `/home/orch`, re-enter with:
+
+```bash
+sudo -iu orch
+```
+
+### 2. Clone and Build
+
+```bash
+mkdir -p ~/apps
+git clone https://github.com/shllg/night-orch.git ~/apps/night-orch
+cd ~/apps/night-orch
 mise install              # installs Node.js per mise.toml
 mise use --global node@24
 mise use --global pnpm@latest
@@ -25,32 +43,52 @@ pnpm install && pnpm build && pnpm install-global
 
 Verify: `night-orch --help`
 
-### 2. Configuration
+### 3. Install Agent CLIs (as `orch`)
+
+Install both worker CLIs for the non-root user:
+
+```bash
+npm install -g @openai/codex @anthropic-ai/claude-code
+codex --version
+claude --version
+```
+
+Authenticate interactively (one time):
+
+```bash
+codex login
+claude auth
+```
+
+If any command still references `/root/...`, your session is not a clean `orch`
+login shell. Re-enter with `sudo -iu orch` and retry.
+
+### 4. Configuration
 
 Copy and edit the example config:
 
 ```bash
 mkdir -p ~/.night-orch
-cp examples/config.example.yaml ~/.night-orch/config.yaml
+cp ~/apps/night-orch/examples/config.example.yaml ~/.night-orch/config.yaml
 # Edit with your repos, tokens, and settings
 ```
 
 Create the environment file with secrets:
 
 ```bash
-cat > /opt/night-orch/.env << 'EOF'
+cat > ~/apps/night-orch/.env << 'EOF'
 GITHUB_TOKEN=ghp_...
 EOF
-chmod 0600 /opt/night-orch/.env
+chmod 0600 ~/apps/night-orch/.env
 ```
 
-### 3. Docker Compose (Monitoring Stack)
+### 5. Docker Compose (Monitoring Stack)
 
 The monitoring stack (Prometheus + Grafana) ships as `docker-compose.example.yaml`.
 Copy and customize for your environment:
 
 ```bash
-cd /opt/night-orch
+cd ~/apps/night-orch
 cp docker-compose.example.yaml docker-compose.yaml
 ```
 
@@ -72,7 +110,7 @@ firewall issues), set `--web.listen-address=127.0.0.1:9091` in the command.
 `docker-compose.yaml` is gitignored. `night-orch run` and `night-orch serve`
 will refuse to start if the file is missing.
 
-### 4. AppArmor Fix for Docker
+### 6. AppArmor Fix for Docker
 
 On Debian 13, the runc AppArmor profile breaks Docker containers:
 
@@ -116,11 +154,23 @@ Requires=wait-for-tailscale.service
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/night-orch
-Environment=PATH=/root/.local/share/pnpm:/root/.local/share/mise/shims:/usr/local/bin:/usr/bin:/bin
-ExecStartPre=/usr/bin/docker compose -f /opt/night-orch/docker-compose.yaml up -d
-ExecStart=/root/.local/share/pnpm/night-orch serve --allowed-host night-orch.hllg.eu
-EnvironmentFile=-/opt/night-orch/.env
+User=orch
+Group=orch
+WorkingDirectory=/home/orch/apps/night-orch
+Environment=HOME=/home/orch
+Environment=XDG_CONFIG_HOME=/home/orch/.config
+Environment=XDG_DATA_HOME=/home/orch/.local/share
+Environment=XDG_CACHE_HOME=/home/orch/.cache
+Environment=XDG_STATE_HOME=/home/orch/.local/state
+Environment=MISE_CONFIG_DIR=/home/orch/.config/mise
+Environment=MISE_DATA_DIR=/home/orch/.local/share/mise
+Environment=MISE_CACHE_DIR=/home/orch/.cache/mise
+Environment=MISE_STATE_DIR=/home/orch/.local/state/mise
+Environment=PNPM_HOME=/home/orch/.local/share/pnpm
+Environment=PATH=/home/orch/.local/bin:/home/orch/.local/share/pnpm:/home/orch/.local/share/mise/shims:/home/orch/.local/share/mise/installs/node/24.14.1/bin:/usr/local/bin:/usr/bin:/bin
+ExecStartPre=/usr/bin/docker compose -f /home/orch/apps/night-orch/docker-compose.yaml up -d
+ExecStart=/home/orch/.local/share/pnpm/night-orch serve --allowed-host night-orch.hllg.eu --config /home/orch/.night-orch/config.yaml
+EnvironmentFile=-/home/orch/apps/night-orch/.env
 Restart=on-failure
 RestartSec=5
 MemoryMax=6G

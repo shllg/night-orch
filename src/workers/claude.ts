@@ -5,6 +5,7 @@ import { parsePlannerOutput } from './parsers/planner.js'
 import { parseCoderOutput } from './parsers/coder.js'
 import { parseReviewerOutput } from './parsers/reviewer.js'
 import { buildWorkerCommand } from './command.js'
+import { normalizePathForSubprocess } from './env.js'
 import { logger } from '../utils/logger.js'
 import { emitWorkerEvent, isRecord, summarizeValue } from './events.js'
 
@@ -15,9 +16,11 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
       ...input.profile.args,
       '--output-format', 'json',
       '--max-turns', maxTurns,
-      '--permission-mode', 'bypassPermissions',
       '--append-system-prompt', 'IMPORTANT: Do NOT use plan mode. Do NOT call EnterPlanMode. Output everything directly in your response. Do NOT write files to ~/.claude/plans/.',
     ]
+    if (!hasExplicitPermissionMode(input.profile.args)) {
+      taskArgs.push('--permission-mode', resolveDefaultPermissionMode())
+    }
 
     // Continue from a prior session if available
     if (input.continueSessionId) {
@@ -95,7 +98,7 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
     try {
       const result = await execWithTimeout('claude', ['--version'], {
         cwd: '.',
-        env: { PATH: process.env['PATH'] ?? '' },
+        env: { PATH: normalizePathForSubprocess(process.env['PATH'], process.env['HOME']) },
         timeoutMs: 5000,
       })
       if (result.exitCode === 0) {
@@ -106,6 +109,28 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
       return { available: false, version: null }
     }
   }
+}
+
+function hasExplicitPermissionMode(args: string[]): boolean {
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i]
+    if (!arg) continue
+    if (arg === '--permission-mode' || arg.startsWith('--permission-mode=')) return true
+    if (arg === '--dangerously-skip-permissions') return true
+    if (arg === '--allow-dangerously-skip-permissions') return true
+  }
+  return false
+}
+
+function resolveDefaultPermissionMode(): 'acceptEdits' | 'bypassPermissions' {
+  try {
+    if (typeof process.getuid === 'function' && process.getuid() === 0) {
+      return 'acceptEdits'
+    }
+  } catch {
+    // Ignore and fall back to non-root default.
+  }
+  return 'bypassPermissions'
 }
 
 function emitClaudeStreamEvents(line: string, input: WorkerTaskInput): void {

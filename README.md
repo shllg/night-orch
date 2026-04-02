@@ -37,6 +37,10 @@ night-orch doctor    # validate setup
 
 Requires Node.js 24+ and at least one agent CLI (`claude` or `codex`).
 
+Run night-orch as a dedicated non-root user (for example `orch`), not as `root`.
+Use user-home paths for code and state (for example `/home/orch/apps/night-orch` and
+`/home/orch/.night-orch`).
+
 ## Commands
 
 ```

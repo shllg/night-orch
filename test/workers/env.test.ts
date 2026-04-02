@@ -1,3 +1,4 @@
+import { delimiter, join } from 'node:path'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { buildWorkerEnv, buildVerifierEnv } from '../../src/workers/env.js'
 import type { WorkerProfileInput } from '../../src/workers/types.js'
@@ -14,6 +15,7 @@ const baseProfile: WorkerProfileInput = {
 
 describe('buildWorkerEnv', () => {
   const originalEnv = { ...process.env }
+  const splitPath = (value: string | undefined): string[] => (value ?? '').split(delimiter).filter(Boolean)
 
   beforeEach(() => {
     process.env['PATH'] = '/usr/bin'
@@ -35,7 +37,9 @@ describe('buildWorkerEnv', () => {
 
   it('includes whitelisted vars in minimal mode', () => {
     const env = buildWorkerEnv(baseProfile)
-    expect(env['PATH']).toBe('/usr/bin')
+    const pathSegments = splitPath(env['PATH'])
+    expect(pathSegments).toContain('/usr/bin')
+    expect(pathSegments).toContain(join('/home/test', '.local/bin'))
     expect(env['HOME']).toBe('/home/test')
   })
 
@@ -84,7 +88,9 @@ describe('buildWorkerEnv', () => {
 
   it('buildVerifierEnv returns strict whitelist without secrets', () => {
     const env = buildVerifierEnv()
-    expect(env['PATH']).toBe('/usr/bin')
+    const pathSegments = splitPath(env['PATH'])
+    expect(pathSegments).toContain('/usr/bin')
+    expect(pathSegments).toContain(join('/home/test', '.local/bin'))
     expect(env['HOME']).toBe('/home/test')
     expect(env['GITHUB_TOKEN']).toBeUndefined()
     expect(env['NPM_TOKEN']).toBeUndefined()

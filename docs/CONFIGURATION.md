@@ -18,6 +18,11 @@ Source of truth for the schema is [src/config/schema.ts](../src/config/schema.ts
 8. `~/.config/night-orch/config.yaml`
 9. `~/.config/night-orch/config.yml`
 
+Recommended deployment uses a dedicated non-root user (for example `orch`) with:
+- config/state in `/home/orch/.night-orch/`
+- code in `/home/orch/apps/night-orch`
+- target repos in `/home/orch/repos/*`
+
 ## YAML Conventions
 
 - `version` must be exactly `1`.
@@ -183,6 +188,9 @@ workerProfiles:
 | `minimalEnv` | boolean | no | `true` | Deprecated/ignored; worker env is always whitelist-based. |
 | `runtimeWrapper` | string or `null` | no | `null` | Wrapper command prepended before `command` (for sandbox wrappers, etc.). |
 | `env` | record string->string | no | `{}` | Extra env vars for worker process; blacklist still applies. |
+
+Worker `PATH` is normalized at runtime: if missing, `~/.local/bin`, `~/.local/share/pnpm`,
+`~/.local/share/mise/shims`, `/usr/local/bin`, `/usr/bin`, and `/bin` are appended.
 
 `repos[].agents` references these profile names. Unknown profile references fail config load.
 
