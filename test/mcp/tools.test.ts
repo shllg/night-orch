@@ -51,11 +51,12 @@ describe('MCP Tools', () => {
     expect(names).toContain('night-orch-retry')
     expect(names).toContain('night-orch-sync')
     expect(names).toContain('night-orch-cleanup')
+    expect(names).toContain('night-orch-delete-entry')
     expect(names).toContain('night-orch-poll')
     expect(names).toContain('night-orch-list-issues')
     expect(names).toContain('night-orch-stream-events')
     expect(names).toContain('night-orch-rebase')
-    expect(tools.length).toBe(11)
+    expect(tools.length).toBe(12)
   })
 
   it('status tool returns summary', async () => {
@@ -100,6 +101,38 @@ describe('MCP Tools', () => {
     const result = await handleToolCall('night-orch-cost-report', { days: 7 }, deps) as { totalCostUsd: number; dailyBudgetUsd: number }
     expect(result.totalCostUsd).toBe(0)
     expect(result.dailyBudgetUsd).toBe(50)
+  })
+
+  it('delete-entry tool removes local issue state', async () => {
+    const runManager = new RunManager(db)
+    const run = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 17,
+      issueNodeId: '',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    db.prepare(
+      `INSERT INTO leases (repo, issue_number, lease_owner, leased_until)
+       VALUES (?, ?, ?, datetime('now', '+1 hour'))`,
+    ).run('org/repo', 17, 'test-owner')
+    db.prepare(
+      `INSERT INTO command_tracking (repo, issue_number, comment_id, command)
+       VALUES (?, ?, ?, ?)`,
+    ).run('org/repo', 17, 99, 'retry:applied')
+
+    const result = await handleToolCall(
+      'night-orch-delete-entry',
+      { repo: 'org/repo', issueNumber: 17 },
+      deps,
+    ) as { runsDeleted: number; issuesDeleted: number; leasesDeleted: number; commandTrackingDeleted: number }
+
+    expect(result.runsDeleted).toBe(1)
+    expect(result.issuesDeleted).toBe(1)
+    expect(result.leasesDeleted).toBe(1)
+    expect(result.commandTrackingDeleted).toBe(1)
+    expect(db.prepare('SELECT 1 FROM runs WHERE id = ?').get(run.id)).toBeUndefined()
   })
 
   it('stream-events returns events and supports since cursor', async () => {

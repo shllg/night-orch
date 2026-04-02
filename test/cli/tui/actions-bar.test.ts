@@ -16,7 +16,7 @@ describe('buildActionHints', () => {
 
     expect(sections.navigation).toContain('[1-4]tabs [h/l]tabs [j/k]select issue [o/enter]open')
     expect(sections.global).toContain('[q]quit [r]refresh [p]poll [s]sync [D]cleanup(confirm)')
-    expect(sections.issue).toContain('[t]retry [T]retry fresh [_]rebase')
+    expect(sections.issue).toContain('[t]retry [T]retry fresh [_]rebase [X]delete entry')
   })
 
   it('hides run mutating controls in standalone monitor mode', () => {

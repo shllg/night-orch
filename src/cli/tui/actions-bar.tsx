@@ -74,7 +74,7 @@ function issueHints(options: {
   if (busy) {
     return 'actions locked while task is running'
   }
-  return '[t]retry [T]retry fresh [_]rebase'
+  return '[t]retry [T]retry fresh [_]rebase [X]delete entry'
 }
 
 export function buildActionHints(props: ActionsBarProps): ActionHints {
