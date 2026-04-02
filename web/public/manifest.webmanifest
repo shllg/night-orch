@@ -1,0 +1,16 @@
+{
+  "name": "night-orch web",
+  "short_name": "night-orch",
+  "description": "Mobile-first night-orch control interface.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b1220",
+  "theme_color": "#112d4e",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

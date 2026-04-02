@@ -12,8 +12,13 @@ import { labelsInitCommand } from './commands/labels-init.js'
 import { statusCommand } from './commands/status.js'
 import { runInit } from './commands/init.js'
 import { runWatch } from './commands/watch.js'
+import { webCommand } from './commands/web.js'
 
 const program = new Command()
+
+function collectOptionValue(value: string, previous: string[]): string[] {
+  return [...previous, value]
+}
 
 program
   .name('night-orch')
@@ -104,5 +109,24 @@ program
   .command('tui')
   .description('Interactive monitoring TUI (run `night-orch run` in a separate process)')
   .action((_opts, cmd) => runWatch(cmd.parent?.opts()))
+
+program
+  .command('web')
+  .description('Run poller with embedded REST + WebSocket web interface')
+  .option('--host <host>', 'Web server bind host', '127.0.0.1')
+  .option(
+    '--allowed-host <host>',
+    'Allowed Host/Origin hostname for web API + websocket requests (repeatable)',
+    collectOptionValue,
+    [] as string[],
+  )
+  .option('--port <port>', 'Web server port', '3200')
+  .option('--snapshot-interval-ms <ms>', 'WebSocket snapshot interval in milliseconds', '3000')
+  .action((opts: { host?: string; allowedHost?: string[]; port?: string; snapshotIntervalMs?: string }, cmd) => webCommand({
+    host: opts.host,
+    allowedHost: opts.allowedHost,
+    port: opts.port,
+    snapshotIntervalMs: opts.snapshotIntervalMs,
+  }, cmd.parent?.opts()))
 
 program.parse()
