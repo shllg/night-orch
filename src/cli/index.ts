@@ -121,7 +121,7 @@ program
 
 program
   .command('web')
-  .description('Run poller with embedded REST + WebSocket web interface')
+  .description('Run embedded REST + WebSocket web interface (attach mode by default)')
   .option('--host <host>', 'Web server bind host', '127.0.0.1')
   .option(
     '--allowed-host <host>',
@@ -131,11 +131,13 @@ program
   )
   .option('--port <port>', 'Web server port', '3200')
   .option('--snapshot-interval-ms <ms>', 'WebSocket snapshot interval in milliseconds', '3000')
-  .action((opts: { host?: string; allowedHost?: string[]; port?: string; snapshotIntervalMs?: string }, cmd) => webCommand({
+  .option('--standalone', 'Run poller + metrics + embedded MCP in this process')
+  .action((opts: { host?: string; allowedHost?: string[]; port?: string; snapshotIntervalMs?: string; standalone?: boolean }, cmd) => webCommand({
     host: opts.host,
     allowedHost: opts.allowedHost,
     port: opts.port,
     snapshotIntervalMs: opts.snapshotIntervalMs,
+    standalone: opts.standalone,
   }, cmd.parent?.opts()))
 
 program.parse()

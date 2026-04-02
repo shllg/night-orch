@@ -48,7 +48,8 @@ Run from anywhere — night-orch reads its config from `~/.config/night-orch/`:
 
 ```bash
 night-orch run       # long-running daemon, polls all repos on interval
-night-orch web       # run daemon + embedded mobile web UI (REST + WebSocket)
+night-orch web       # web UI/API server (attach mode by default)
+night-orch web --standalone  # run daemon + web UI in one process
 night-orch run-once  # single poll cycle (useful for testing)
 ```
 
@@ -359,11 +360,14 @@ Options: `--config`, `--trust-workspace`, `--dry-run`, `--log-level`
 
 ### `night-orch web`
 
-Start the long-running poller plus the embedded web control surface. Serves the React/Tailwind frontend, a REST API under `/api/*`, and a WebSocket stream endpoint at `/ws`.
+Start the embedded web control surface. Serves the React/Tailwind frontend, a REST API under `/api/*`, and a WebSocket stream endpoint at `/ws`.
+
+By default, `web` runs in attach mode: no poll loop, no metrics server, and no embedded MCP server are started in the web process.
+Use `--standalone` to run poller + metrics + embedded MCP in the same process as the web server.
 
 Default bind is `127.0.0.1:3200`. Use `--host` / `--port` to change this (for example when reverse-proxying through Caddy or nginx). Use `--allowed-host` (repeatable) to permit additional Host/Origin values when proxying.
 
-Options: `--config`, `--trust-workspace`, `--dry-run`, `--log-level`, `--host`, `--allowed-host`, `--port`, `--snapshot-interval-ms`
+Options: `--config`, `--trust-workspace`, `--dry-run`, `--log-level`, `--host`, `--allowed-host`, `--port`, `--snapshot-interval-ms`, `--standalone`
 
 ### `night-orch run-once`
 

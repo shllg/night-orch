@@ -244,6 +244,38 @@ describe('startWebServer', () => {
     })
   })
 
+  it('disables web operations when operationsEnabled is false', async () => {
+    server = await startWebServer(
+      deps,
+      {
+        host: '127.0.0.1',
+        port: 0,
+        frontendDistPath: frontendDir,
+        operationsEnabled: false,
+      },
+    )
+
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Unexpected address type')
+    }
+    baseUrl = `http://127.0.0.1:${address.port}`
+
+    const session = await fetch(`${baseUrl}/api/session`)
+    expect(session.status).toBe(200)
+    await expect(session.json()).resolves.toMatchObject({ operationsEnabled: false })
+
+    const poll = await fetch(`${baseUrl}/api/operations/poll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    })
+    expect(poll.status).toBe(409)
+    await expect(poll.json()).resolves.toMatchObject({
+      error: 'Web operations are disabled in attach mode. Restart with --standalone to enable them.',
+    })
+  })
+
   it('requires application/json for mutating API requests', async () => {
     server = await startWebServer(
       deps,

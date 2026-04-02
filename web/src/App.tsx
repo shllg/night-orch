@@ -72,6 +72,7 @@ interface WsEnvelope {
 
 interface SessionResponse {
   mutationToken: string
+  operationsEnabled?: boolean
 }
 
 const STATUS_TONE: Record<RunStatus, string> = {
@@ -97,6 +98,7 @@ export function App(): ReactElement {
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null)
   const [activeOperation, setActiveOperation] = useState<string | null>(null)
   const [webMutationToken, setWebMutationToken] = useState<string | null>(null)
+  const [operationsEnabled, setOperationsEnabled] = useState(true)
 
   const [retryRepo, setRetryRepo] = useState('')
   const [retryIssueNumber, setRetryIssueNumber] = useState('')
@@ -147,6 +149,7 @@ export function App(): ReactElement {
       throw new Error('Missing mutation token in session response')
     }
     setWebMutationToken(payload.mutationToken)
+    setOperationsEnabled(payload.operationsEnabled ?? true)
   }, [])
 
   useEffect(() => {
@@ -282,6 +285,9 @@ export function App(): ReactElement {
       if (!webMutationToken) {
         throw new Error('Web session is not initialized yet. Refresh the page and try again.')
       }
+      if (!operationsEnabled) {
+        throw new Error('Web operations are disabled in attach mode. Restart with --standalone to enable them.')
+      }
 
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -307,7 +313,7 @@ export function App(): ReactElement {
     } finally {
       setActiveOperation(null)
     }
-  }, [loadDashboard, webMutationToken])
+  }, [loadDashboard, operationsEnabled, webMutationToken])
 
   const submitRetry = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -478,126 +484,137 @@ export function App(): ReactElement {
             )}
           </div>
 
-          <div className="rounded-2xl border border-white/15 bg-slate-950/55 p-4 shadow-xl backdrop-blur sm:p-5">
-            <h2 className="text-lg font-semibold">Operations</h2>
-            <div className="mt-3 grid grid-cols-1 gap-2">
-              <ActionButton
-                busy={activeOperation === 'poll'}
-                onClick={() => {
-                  void runOperation('poll', '/api/operations/poll', {}, 'Manual poll requested')
-                }}
-                label="Trigger Poll"
-              />
-              <ActionButton
-                busy={activeOperation === 'sync'}
-                onClick={() => {
-                  void runOperation('sync', '/api/operations/sync', {}, 'Sync completed')
-                }}
-                label="Run Sync"
-              />
-              <ActionButton
-                busy={activeOperation === 'cleanup'}
-                onClick={() => {
-                  void runOperation('cleanup', '/api/operations/cleanup', {}, 'Cleanup completed')
-                }}
-                label="Run Cleanup"
-              />
+            <div className="rounded-2xl border border-white/15 bg-slate-950/55 p-4 shadow-xl backdrop-blur sm:p-5">
+              <h2 className="text-lg font-semibold">Operations</h2>
+              {!operationsEnabled && (
+                <p className="mt-2 rounded-lg border border-slate-600/70 bg-slate-900/70 px-3 py-2 text-xs text-slate-300">
+                  Attach mode: operations are disabled. Start with <code className="text-slate-100">night-orch web --standalone</code> to enable control actions.
+                </p>
+              )}
+
+              <fieldset
+                disabled={!operationsEnabled}
+                className={`mt-3 ${!operationsEnabled ? 'opacity-60' : ''}`}
+              >
+                <div className="grid grid-cols-1 gap-2">
+                  <ActionButton
+                    busy={activeOperation === 'poll'}
+                    onClick={() => {
+                      void runOperation('poll', '/api/operations/poll', {}, 'Manual poll requested')
+                    }}
+                    label="Trigger Poll"
+                  />
+                  <ActionButton
+                    busy={activeOperation === 'sync'}
+                    onClick={() => {
+                      void runOperation('sync', '/api/operations/sync', {}, 'Sync completed')
+                    }}
+                    label="Run Sync"
+                  />
+                  <ActionButton
+                    busy={activeOperation === 'cleanup'}
+                    onClick={() => {
+                      void runOperation('cleanup', '/api/operations/cleanup', {}, 'Cleanup completed')
+                    }}
+                    label="Run Cleanup"
+                  />
+                </div>
+
+                <form className="mt-5 space-y-2" onSubmit={(event) => { void submitRetry(event) }}>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-cyan-200">Retry</h3>
+                  <label className="block text-xs text-slate-300">
+                    Repo
+                    <select
+                      className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-900/80 px-2 py-1"
+                      value={retryRepo}
+                      onChange={(event) => setRetryRepo(event.target.value)}
+                    >
+                      {repos.map((repo) => (
+                        <option key={repo} value={repo}>{repo}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block text-xs text-slate-300">
+                    Issue Number
+                    <input
+                      className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-900/80 px-2 py-1"
+                      value={retryIssueNumber}
+                      onChange={(event) => setRetryIssueNumber(event.target.value)}
+                      inputMode="numeric"
+                      placeholder="123"
+                    />
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-slate-300">
+                    <input type="checkbox" checked={retryResetPlan} onChange={(event) => setRetryResetPlan(event.target.checked)} />
+                    Reset saved plan
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-slate-300">
+                    <input type="checkbox" checked={retryFresh} onChange={(event) => setRetryFresh(event.target.checked)} />
+                    Fresh branch reset
+                  </label>
+                  <ActionButton busy={activeOperation === 'retry'} label="Queue Retry" submit />
+                </form>
+
+                <form className="mt-5 space-y-2" onSubmit={(event) => { void submitRebase(event) }}>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-cyan-200">Rebase</h3>
+                  <label className="block text-xs text-slate-300">
+                    Repo
+                    <select
+                      className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-900/80 px-2 py-1"
+                      value={rebaseRepo}
+                      onChange={(event) => setRebaseRepo(event.target.value)}
+                    >
+                      {repos.map((repo) => (
+                        <option key={repo} value={repo}>{repo}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block text-xs text-slate-300">
+                    Issue Number
+                    <input
+                      className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-900/80 px-2 py-1"
+                      value={rebaseIssueNumber}
+                      onChange={(event) => setRebaseIssueNumber(event.target.value)}
+                      inputMode="numeric"
+                      placeholder="123"
+                    />
+                  </label>
+                  <ActionButton busy={activeOperation === 'rebase'} label="Queue Rebase" submit />
+                </form>
+
+                <form className="mt-5 space-y-2" onSubmit={(event) => { void submitDeleteEntry(event) }}>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-cyan-200">Delete Entry</h3>
+                  <label className="block text-xs text-slate-300">
+                    Repo
+                    <select
+                      className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-900/80 px-2 py-1"
+                      value={deleteRepo}
+                      onChange={(event) => setDeleteRepo(event.target.value)}
+                    >
+                      {repos.map((repo) => (
+                        <option key={repo} value={repo}>{repo}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block text-xs text-slate-300">
+                    Issue Number
+                    <input
+                      className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-900/80 px-2 py-1"
+                      value={deleteIssueNumber}
+                      onChange={(event) => setDeleteIssueNumber(event.target.value)}
+                      inputMode="numeric"
+                      placeholder="123"
+                    />
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-slate-300">
+                    <input type="checkbox" checked={deleteForce} onChange={(event) => setDeleteForce(event.target.checked)} />
+                    Force delete if running
+                  </label>
+                  <ActionButton busy={activeOperation === 'delete-entry'} label="Delete Local Entry" submit />
+                </form>
+              </fieldset>
             </div>
-
-            <form className="mt-5 space-y-2" onSubmit={(event) => { void submitRetry(event) }}>
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-cyan-200">Retry</h3>
-              <label className="block text-xs text-slate-300">
-                Repo
-                <select
-                  className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-900/80 px-2 py-1"
-                  value={retryRepo}
-                  onChange={(event) => setRetryRepo(event.target.value)}
-                >
-                  {repos.map((repo) => (
-                    <option key={repo} value={repo}>{repo}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-xs text-slate-300">
-                Issue Number
-                <input
-                  className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-900/80 px-2 py-1"
-                  value={retryIssueNumber}
-                  onChange={(event) => setRetryIssueNumber(event.target.value)}
-                  inputMode="numeric"
-                  placeholder="123"
-                />
-              </label>
-              <label className="flex items-center gap-2 text-xs text-slate-300">
-                <input type="checkbox" checked={retryResetPlan} onChange={(event) => setRetryResetPlan(event.target.checked)} />
-                Reset saved plan
-              </label>
-              <label className="flex items-center gap-2 text-xs text-slate-300">
-                <input type="checkbox" checked={retryFresh} onChange={(event) => setRetryFresh(event.target.checked)} />
-                Fresh branch reset
-              </label>
-              <ActionButton busy={activeOperation === 'retry'} label="Queue Retry" submit />
-            </form>
-
-            <form className="mt-5 space-y-2" onSubmit={(event) => { void submitRebase(event) }}>
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-cyan-200">Rebase</h3>
-              <label className="block text-xs text-slate-300">
-                Repo
-                <select
-                  className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-900/80 px-2 py-1"
-                  value={rebaseRepo}
-                  onChange={(event) => setRebaseRepo(event.target.value)}
-                >
-                  {repos.map((repo) => (
-                    <option key={repo} value={repo}>{repo}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-xs text-slate-300">
-                Issue Number
-                <input
-                  className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-900/80 px-2 py-1"
-                  value={rebaseIssueNumber}
-                  onChange={(event) => setRebaseIssueNumber(event.target.value)}
-                  inputMode="numeric"
-                  placeholder="123"
-                />
-              </label>
-              <ActionButton busy={activeOperation === 'rebase'} label="Queue Rebase" submit />
-            </form>
-
-            <form className="mt-5 space-y-2" onSubmit={(event) => { void submitDeleteEntry(event) }}>
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-cyan-200">Delete Entry</h3>
-              <label className="block text-xs text-slate-300">
-                Repo
-                <select
-                  className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-900/80 px-2 py-1"
-                  value={deleteRepo}
-                  onChange={(event) => setDeleteRepo(event.target.value)}
-                >
-                  {repos.map((repo) => (
-                    <option key={repo} value={repo}>{repo}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-xs text-slate-300">
-                Issue Number
-                <input
-                  className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-900/80 px-2 py-1"
-                  value={deleteIssueNumber}
-                  onChange={(event) => setDeleteIssueNumber(event.target.value)}
-                  inputMode="numeric"
-                  placeholder="123"
-                />
-              </label>
-              <label className="flex items-center gap-2 text-xs text-slate-300">
-                <input type="checkbox" checked={deleteForce} onChange={(event) => setDeleteForce(event.target.checked)} />
-                Force delete if running
-              </label>
-              <ActionButton busy={activeOperation === 'delete-entry'} label="Delete Local Entry" submit />
-            </form>
-          </div>
-        </section>
+          </section>
 
         <section className="rounded-2xl border border-white/15 bg-slate-950/55 p-4 shadow-xl backdrop-blur sm:p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">

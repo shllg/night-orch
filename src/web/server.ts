@@ -17,6 +17,7 @@ export interface WebServerOptions {
   allowedHosts?: string[]
   frontendDistPath?: string
   snapshotIntervalMs?: number
+  operationsEnabled?: boolean
 }
 
 interface WsClientState {
@@ -80,6 +81,7 @@ export async function startWebServer(
   options: WebServerOptions,
 ): Promise<Server> {
   const security = createWebSecurityContext(deps, options)
+  const operationsEnabled = options.operationsEnabled ?? true
   const frontendDistPath = resolveWebFrontendDistPath(options.frontendDistPath)
   const hasFrontendAssets = existsSync(resolve(frontendDistPath, 'index.html'))
 
@@ -102,7 +104,7 @@ export async function startWebServer(
           writeJson(res, 403, { error: 'Forbidden host' })
           return
         }
-        await handleApiRequest(req, res, requestUrl, deps, security)
+        await handleApiRequest(req, res, requestUrl, deps, security, operationsEnabled)
         return
       }
 
@@ -241,11 +243,17 @@ async function handleApiRequest(
   requestUrl: URL,
   deps: MCPDependencies,
   security: WebSecurityContext,
+  operationsEnabled: boolean,
 ): Promise<void> {
   const method = req.method ?? 'GET'
   const { pathname, searchParams } = requestUrl
 
   if (method === 'POST' && pathname.startsWith('/api/operations/')) {
+    if (!operationsEnabled) {
+      writeJson(res, 409, { error: 'Web operations are disabled in attach mode. Restart with --standalone to enable them.' })
+      return
+    }
+
     const guardFailure = validateMutationRequest(req, security)
     if (guardFailure) {
       writeJson(res, guardFailure.statusCode, { error: guardFailure.error })
@@ -267,6 +275,7 @@ async function handleApiRequest(
   if (method === 'GET' && pathname === '/api/session') {
     writeJson(res, 200, {
       mutationToken: security.webMutationToken,
+      operationsEnabled,
     })
     return
   }

@@ -24,6 +24,7 @@ interface WebCommandOpts {
   allowedHost?: string[] | string
   port?: string | number
   snapshotIntervalMs?: string | number
+  standalone?: boolean
 }
 
 export async function webCommand(
@@ -53,13 +54,14 @@ export async function webCommand(
   const allowedHosts = normalizeAllowedHosts(commandOpts.allowedHost)
   const port = normalizePort(commandOpts.port, 3200)
   const snapshotIntervalMs = normalizePort(commandOpts.snapshotIntervalMs, 3000)
+  const standalone = commandOpts.standalone ?? false
 
   const db = initDatabase(config.storage.dbPath)
   const intervalMs = config.github.pollIntervalSeconds * 1000
 
-  // Start metrics service
+  // Start metrics service (standalone mode only)
   let metrics: MetricsService | undefined
-  if (config.metrics) {
+  if (standalone && config.metrics) {
     metrics = createMetricsService(config.metrics)
     try {
       await metrics.start()
@@ -69,25 +71,27 @@ export async function webCommand(
     }
   }
 
-  // Crash recovery: release all leases and reconcile stale runs.
-  try {
-    const { LeaseManager } = await import('../../state/leases.js')
-    const leaseManager = new LeaseManager(db)
-    const releasedLeases = leaseManager.releaseAll()
-    if (releasedLeases > 0) {
-      logger.info({ releasedLeases }, 'Released orphaned leases from previous run')
-    }
+  if (standalone) {
+    // Crash recovery: release all leases and reconcile stale runs.
+    try {
+      const { LeaseManager } = await import('../../state/leases.js')
+      const leaseManager = new LeaseManager(db)
+      const releasedLeases = leaseManager.releaseAll()
+      if (releasedLeases > 0) {
+        logger.info({ releasedLeases }, 'Released orphaned leases from previous run')
+      }
 
-    const syncEngine = new SyncEngine(db, config)
-    const syncResult = await syncEngine.reconcile(dryRun)
-    if (syncResult.reconciledRuns.length > 0 || syncResult.expiredLeases > 0) {
-      logger.info(
-        { reconciled: syncResult.reconciledRuns.length, expiredLeases: syncResult.expiredLeases },
-        'Startup sync complete',
-      )
+      const syncEngine = new SyncEngine(db, config)
+      const syncResult = await syncEngine.reconcile(dryRun)
+      if (syncResult.reconciledRuns.length > 0 || syncResult.expiredLeases > 0) {
+        logger.info(
+          { reconciled: syncResult.reconciledRuns.length, expiredLeases: syncResult.expiredLeases },
+          'Startup sync complete',
+        )
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Startup sync failed — continuing')
     }
-  } catch (err) {
-    logger.warn({ err }, 'Startup sync failed — continuing')
   }
 
   const forgeAdapters = new Map<string, ForgeAdapter>()
@@ -99,10 +103,10 @@ export async function webCommand(
     }
   }
 
-  // Start optional embedded MCP server.
-  const pollerControl = new PollCycleController()
+  // Start optional embedded MCP server (standalone mode only).
+  const pollerControl = standalone ? new PollCycleController() : null
   let mcpServer: Server | undefined
-  if (config.mcp.enabled) {
+  if (standalone && config.mcp.enabled) {
     try {
       mcpServer = await startMCPHttpServer(
         { db, config, forgeAdapters, poller: pollerControl, metrics: metrics ?? null },
@@ -119,7 +123,7 @@ export async function webCommand(
   try {
     webServer = await startWebServer(
       { db, config, forgeAdapters, poller: pollerControl, metrics: metrics ?? null },
-      { host, allowedHosts, port, snapshotIntervalMs },
+      { host, allowedHosts, port, snapshotIntervalMs, operationsEnabled: standalone },
     )
   } catch (err) {
     logger.error({ err, host, allowedHosts, port }, 'Failed to start web server')
@@ -133,8 +137,6 @@ export async function webCommand(
     process.exitCode = 1
     return
   }
-
-  logger.info({ intervalMs, dryRun, repos: config.repos.length, host, port }, 'Starting web poller')
 
   // Graceful shutdown
   const shutdown = new ShutdownHandler(db)
@@ -154,6 +156,14 @@ export async function webCommand(
     }
   })
 
+  if (!standalone) {
+    logger.info({ host, port }, 'Starting web monitor (attach mode)')
+    await new Promise<void>(() => {})
+    return
+  }
+
+  logger.info({ intervalMs, dryRun, repos: config.repos.length, host, port }, 'Starting web poller')
+
   // Poll loop
   while (!shutdown.isShuttingDown) {
     try {
@@ -166,7 +176,7 @@ export async function webCommand(
 
     if (shutdown.isShuttingDown) break
 
-    const waitResult = await pollerControl.waitForNextCycle(intervalMs)
+    const waitResult = await pollerControl!.waitForNextCycle(intervalMs)
     if (waitResult === 'manual') {
       logger.info('Manual poll trigger received — running next cycle immediately')
     }
