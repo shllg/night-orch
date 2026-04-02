@@ -12,6 +12,7 @@ A self-hosted Node.js/TypeScript CLI that autonomously processes GitHub/Forgejo 
 - **Session persistence** — agents retain context across pipeline phases
 - **Reaction engine** — auto-responds to CI failures and human review comments
 - **Live monitoring** — terminal dashboard with active runs, costs, merge queue status
+- **Mobile web interface** — REST + WebSocket control surface with React/Tailwind frontend
 - **Prometheus metrics** — full observability with 13+ metrics
 - **MCP integration** — 9 tools for Claude Code integration
 - **GitHub + Forgejo** — dual forge support
@@ -40,6 +41,7 @@ Requires Node.js 24+ and at least one agent CLI (`claude` or `codex`).
 
 ```
 night-orch run              # long-running poller daemon
+night-orch web              # poller + embedded REST/WebSocket web UI server
 night-orch run-once         # single poll cycle (for testing/CI)
 night-orch init             # interactive setup wizard
 night-orch doctor           # validate config, auth, CLIs, repos, DB
@@ -82,6 +84,8 @@ The orchestrator's job ends when the PR is ready. A human merges.
 
 ```bash
 pnpm dev doctor             # run via tsx
+pnpm web:dev               # run frontend in Vite dev mode
+pnpm web:build             # build frontend assets for `night-orch web`
 pnpm test                   # vitest
 pnpm lint                   # eslint
 pnpm typecheck              # tsc --noEmit

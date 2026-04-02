@@ -48,6 +48,7 @@ Run from anywhere — night-orch reads its config from `~/.config/night-orch/`:
 
 ```bash
 night-orch run       # long-running daemon, polls all repos on interval
+night-orch web       # run daemon + embedded mobile web UI (REST + WebSocket)
 night-orch run-once  # single poll cycle (useful for testing)
 ```
 
@@ -60,6 +61,7 @@ From any terminal:
 ```bash
 night-orch status    # one-shot status snapshot
 night-orch tui       # live-updating terminal dashboard
+night-orch web       # browser UI at http://127.0.0.1:3200 by default
 ```
 
 The `watch` command shows:
@@ -353,6 +355,14 @@ All commands can be run from any directory — night-orch reads its config from 
 Start the long-running poller daemon. Polls all configured repos on the configured interval, processes eligible issues, creates PRs. Also starts the embedded MCP HTTP/SSE server and Prometheus metrics endpoint.
 
 Options: `--config`, `--trust-workspace`, `--dry-run`, `--log-level`
+
+### `night-orch web`
+
+Start the long-running poller plus the embedded web control surface. Serves the React/Tailwind frontend, a REST API under `/api/*`, and a WebSocket stream endpoint at `/ws`.
+
+Default bind is `127.0.0.1:3200`. Use `--host` / `--port` to change this (for example when reverse-proxying through Caddy or nginx). Use `--allowed-host` (repeatable) to permit additional Host/Origin values when proxying.
+
+Options: `--config`, `--trust-workspace`, `--dry-run`, `--log-level`, `--host`, `--allowed-host`, `--port`, `--snapshot-interval-ms`
 
 ### `night-orch run-once`
 
