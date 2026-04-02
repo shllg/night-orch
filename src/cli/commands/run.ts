@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { loadConfig, resolveConfigPath, ConfigError } from '../../config/loader.js'
 import { initDatabase } from '../../state/db.js'
 import { pollOnce } from '../../runner/poller.js'
@@ -20,6 +22,17 @@ interface GlobalOpts {
 
 export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
   const dryRun = globalOpts?.dryRun ?? false
+
+  // Require docker-compose.yaml for the monitoring stack
+  const composeFile = join(process.cwd(), 'docker-compose.yaml')
+  if (!existsSync(composeFile)) {
+    process.stderr.write(
+      'docker-compose.yaml not found.\n' +
+      'Copy docker-compose.example.yaml to docker-compose.yaml and adjust for your environment.\n',
+    )
+    process.exitCode = 1
+    return
+  }
 
   let config
   try {
