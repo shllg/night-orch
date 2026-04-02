@@ -10,84 +10,101 @@ interface ActionsBarProps {
   controlsEnabled?: boolean
 }
 
+interface ActionHintSection {
+  name: 'navigation' | 'global' | 'issue'
+  hints: string
+}
+
 interface ActionHints {
-  line1: string
-  line2: string
+  sections: ActionHintSection[]
 }
 
 function joinHintGroups(...groups: Array<string | null>): string {
   return groups.filter((group): group is string => Boolean(group && group.trim().length > 0)).join('  |  ')
 }
 
-function globalNavGroup(options: { includePoll: boolean; closeLabel?: '[q]quit' | '[q/esc]close' }): string {
-  const closeHint = options.closeLabel ?? '[q]quit'
-  const pollHint = options.includePoll ? ' [p]poll' : ''
-  return `[1]issues [2]projects [3]stats ${closeHint}${pollHint}`
+function navigationHints(activeTab: TabId, runFocused: boolean): string {
+  if (activeTab === 'runs' && runFocused) {
+    return '[1-4]tabs [h/l]tabs [j/k]scroll run'
+  }
+  if (activeTab === 'runs') {
+    return '[1-4]tabs [h/l]tabs [j/k]select issue [o/enter]open'
+  }
+  if (activeTab === 'projects') {
+    return '[1-4]tabs [h/l]tabs [j/k]select project'
+  }
+  if (activeTab === 'logs') {
+    return '[1-4]tabs [h/l]tabs [j/k]select log [J/K]scroll raw'
+  }
+  return '[1-4]tabs [h/l]tabs'
 }
 
-const EXTRA_TAB_NAV_GROUP = '[4]logs [h/l]tabs'
+function globalHints(options: {
+  activeTab: TabId
+  busy: boolean
+  runFocused: boolean
+  controlsEnabled: boolean
+}): string {
+  const { activeTab, busy, runFocused, controlsEnabled } = options
+  if (activeTab === 'runs' && runFocused) {
+    return '[q/esc]close [r]refresh'
+  }
+
+  const autoRefreshHint = activeTab === 'stats' ? ' [a]toggle auto-refresh' : ''
+  const actionHints = controlsEnabled && !busy ? ' [p]poll [s]sync [D]cleanup(confirm)' : ''
+  return `[q]quit [r]refresh${autoRefreshHint}${actionHints}`
+}
+
+function issueHints(options: {
+  activeTab: TabId
+  busy: boolean
+  runFocused: boolean
+  controlsEnabled: boolean
+}): string {
+  const { activeTab, busy, runFocused, controlsEnabled } = options
+  if (activeTab !== 'runs') {
+    return 'n/a (issue actions on runs tab)'
+  }
+  if (runFocused) {
+    return 'focused run detail'
+  }
+  if (!controlsEnabled) {
+    return 'standalone monitor mode (actions run via `night-orch` CLI)'
+  }
+  if (busy) {
+    return 'actions locked while task is running'
+  }
+  return '[t]retry [T]retry fresh [_]rebase'
+}
 
 export function buildActionHints(props: ActionsBarProps): ActionHints {
   const controlsEnabled = props.controlsEnabled ?? true
 
-  if (props.activeTab === 'runs') {
-    if (props.runFocused) {
-      return {
-        line1: joinHintGroups(
-          globalNavGroup({ includePoll: false, closeLabel: '[q/esc]close' }),
-          '[j/k]scroll run',
-          EXTRA_TAB_NAV_GROUP,
-        ),
-        line2: joinHintGroups('focused run detail', '[f]refresh'),
-      }
-    }
-
-    const actionHints = !controlsEnabled
-      ? 'standalone monitor mode (actions run via `night-orch` CLI)'
-      : props.busy
-      ? 'actions locked while task is running'
-      : '[r]etry [R]etry fresh [b]rebase [s]ync [c]leanup'
-
-    return {
-      line1: joinHintGroups(
-        globalNavGroup({ includePoll: controlsEnabled && !props.busy }),
-        '[j/k]select issue [o/enter]open',
-        EXTRA_TAB_NAV_GROUP,
-      ),
-      line2: joinHintGroups(actionHints, '[f]refresh'),
-    }
-  }
-
-  if (props.activeTab === 'stats') {
-    const polling = props.autoRefresh ? 'polling live' : 'polling paused'
-    return {
-      line1: joinHintGroups(
-        globalNavGroup({ includePoll: false }),
-        '[f]refresh now [a]toggle auto-refresh',
-        EXTRA_TAB_NAV_GROUP,
-      ),
-      line2: polling,
-    }
-  }
-
-  if (props.activeTab === 'projects') {
-    return {
-      line1: joinHintGroups(
-        globalNavGroup({ includePoll: false }),
-        '[j/k]select project [f]refresh',
-        EXTRA_TAB_NAV_GROUP,
-      ),
-      line2: 'view labels, lanes, tools, and environment config',
-    }
-  }
-
   return {
-    line1: joinHintGroups(
-      globalNavGroup({ includePoll: false }),
-      '[j/k]select log [J/K]scroll raw [f]refresh',
-      EXTRA_TAB_NAV_GROUP,
-    ),
-    line2: 'inspect full payload in the raw log pane',
+    sections: [
+      {
+        name: 'navigation',
+        hints: navigationHints(props.activeTab, props.runFocused),
+      },
+      {
+        name: 'global',
+        hints: globalHints({
+          activeTab: props.activeTab,
+          busy: props.busy,
+          runFocused: props.runFocused,
+          controlsEnabled,
+        }),
+      },
+      {
+        name: 'issue',
+        hints: issueHints({
+          activeTab: props.activeTab,
+          busy: props.busy,
+          runFocused: props.runFocused,
+          controlsEnabled,
+        }),
+      },
+    ],
   }
 }
 
@@ -96,8 +113,14 @@ export function ActionsBar(props: ActionsBarProps): React.ReactElement {
 
   return (
     <Box marginTop={1} flexDirection="column">
-      <Text color="gray">{hints.line1}</Text>
-      <Text color="gray">{hints.line2}</Text>
+      {hints.sections.map((section) => (
+        <Text key={section.name} color="gray">
+          {section.name}:{' '}
+          {joinHintGroups(section.hints, section.name === 'global' && props.activeTab === 'stats'
+            ? (props.autoRefresh ? 'polling live' : 'polling paused')
+            : null)}
+        </Text>
+      ))}
     </Box>
   )
 }

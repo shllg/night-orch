@@ -38,6 +38,7 @@ const FOCUSED_EVENT_WINDOW_SIZE = 18
 const MIN_LOG_WINDOW_SIZE = 4
 const LOG_WINDOW_RESERVED_ROWS = 17
 const EXIT_GRACE_TIMEOUT_MS = 15_000
+const CLEANUP_CONFIRM_TIMEOUT_MS = 5_000
 
 export function resolveTabHotkey(input: string): TabId | null {
   if (input === '1') return 'runs'
@@ -117,6 +118,83 @@ export function resolveLogWindowSize(termRows: number): number {
   return Math.max(MIN_LOG_WINDOW_SIZE, termRows - LOG_WINDOW_RESERVED_ROWS)
 }
 
+export type CleanupConfirmationEvent = 'pressD' | 'pressOther' | 'timeout'
+export type CleanupConfirmationTransition = 'none' | 'arm' | 'confirm' | 'cancel' | 'expire'
+
+export function resolveCleanupConfirmationTransition(
+  pending: boolean,
+  event: CleanupConfirmationEvent,
+): CleanupConfirmationTransition {
+  if (!pending) {
+    return event === 'pressD' ? 'arm' : 'none'
+  }
+
+  if (event === 'pressD') return 'confirm'
+  if (event === 'pressOther') return 'cancel'
+  if (event === 'timeout') return 'expire'
+  return 'none'
+}
+
+export type TuiActionCommand =
+  | 'none'
+  | 'refresh'
+  | 'poll'
+  | 'sync'
+  | 'retry'
+  | 'retryFresh'
+  | 'rebase'
+  | 'cleanupArm'
+  | 'cleanupConfirm'
+  | 'standaloneMessage'
+
+interface ResolveActionCommandInput {
+  input: string
+  activeTab: TabId
+  runsViewMode: RunsViewMode
+  controlsEnabled: boolean
+  actionBusy: boolean
+  cleanupConfirmPending: boolean
+}
+
+export function resolveActionCommand(args: ResolveActionCommandInput): TuiActionCommand {
+  if (args.input === 'r') return 'refresh'
+
+  const isFocusedRun = args.activeTab === 'runs' && args.runsViewMode === 'focus'
+  const mutatingActionKey = args.input === 'p'
+    || args.input === 's'
+    || args.input === 'D'
+    || args.input === 't'
+    || args.input === 'T'
+    || args.input === '_'
+
+  if (args.actionBusy) return 'none'
+
+  if (!args.controlsEnabled) {
+    return mutatingActionKey ? 'standaloneMessage' : 'none'
+  }
+
+  // Keep focused run detail isolated to match its legend.
+  if (isFocusedRun && (args.input === 'p' || args.input === 's' || args.input === 'D')) {
+    return 'none'
+  }
+
+  if (args.input === 'p') return 'poll'
+  if (args.input === 's') return 'sync'
+
+  if (args.input === 'D') {
+    return args.cleanupConfirmPending ? 'cleanupConfirm' : 'cleanupArm'
+  }
+
+  if (args.activeTab !== 'runs' || args.runsViewMode !== 'list') {
+    return 'none'
+  }
+
+  if (args.input === 't') return 'retry'
+  if (args.input === 'T') return 'retryFresh'
+  if (args.input === '_') return 'rebase'
+  return 'none'
+}
+
 export function App({
   db,
   config,
@@ -136,6 +214,7 @@ export function App({
   const [runsViewMode, setRunsViewMode] = useState<RunsViewMode>('list')
   const [selectedProjectIndex, setSelectedProjectIndex] = useState(0)
   const [autoRefresh, setAutoRefresh] = useState(true)
+  const [cleanupConfirmPending, setCleanupConfirmPending] = useState(false)
   const [lastRefreshAt, setLastRefreshAt] = useState(new Date().toISOString())
   const [titleLookup, setTitleLookup] = useState<TitleLookup>({ issues: {}, prs: {} })
   const [runEventScrollOffset, setRunEventScrollOffset] = useState(0)
@@ -155,6 +234,7 @@ export function App({
   const actionPromise = useRef<Promise<unknown> | null>(null)
   const shuttingDown = useRef(false)
   const exitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cleanupConfirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     const onResize = () => setTermRows(stdout.rows ?? 24)
@@ -538,6 +618,14 @@ export function App({
     })
   }, [config, db, dryRun, runAction])
 
+  const clearCleanupConfirmation = useCallback(() => {
+    if (cleanupConfirmTimer.current) {
+      clearTimeout(cleanupConfirmTimer.current)
+      cleanupConfirmTimer.current = null
+    }
+    setCleanupConfirmPending(false)
+  }, [])
+
   const runPoll = useCallback(async () => {
     await runAction('poll', async () => runPollCycle('manual', selectedIssue))
   }, [runAction, runPollCycle, selectedIssue])
@@ -603,6 +691,10 @@ export function App({
         clearTimeout(exitTimer.current)
         exitTimer.current = null
       }
+      if (cleanupConfirmTimer.current) {
+        clearTimeout(cleanupConfirmTimer.current)
+        cleanupConfirmTimer.current = null
+      }
     }
   }, [])
 
@@ -612,7 +704,15 @@ export function App({
       return
     }
 
-    if (activeTab === 'runs' && runsViewMode === 'focus') {
+    const focusedRunDetail = activeTab === 'runs' && runsViewMode === 'focus'
+    if (cleanupConfirmPending && (input !== 'D' || focusedRunDetail)) {
+      const transition = resolveCleanupConfirmationTransition(true, 'pressOther')
+      if (transition === 'cancel') {
+        clearCleanupConfirmation()
+      }
+    }
+
+    if (focusedRunDetail) {
       if (key.escape || input === 'q') {
         setRunsViewMode('list')
         setStatusLine('Closed issue detail')
@@ -699,11 +799,6 @@ export function App({
       }
     }
 
-    if (input === 'f') {
-      forceRefresh()
-      return
-    }
-
     if (activeTab === 'stats' && input === 'a') {
       setAutoRefresh((current) => {
         const next = !current
@@ -714,43 +809,73 @@ export function App({
       return
     }
 
-    if (actionState.busy) {
+    const actionCommand = resolveActionCommand({
+      input,
+      activeTab,
+      runsViewMode,
+      controlsEnabled: enableBackgroundPoller,
+      actionBusy: actionState.busy,
+      cleanupConfirmPending,
+    })
+
+    if (actionCommand === 'refresh') {
+      forceRefresh()
       return
     }
 
-    if (activeTab !== 'runs' || runsViewMode === 'focus') {
+    if (actionCommand === 'standaloneMessage') {
+      setStatusLine('Standalone monitor mode: run actions via `night-orch` CLI')
       return
     }
 
-    if (!enableBackgroundPoller) {
-      if (input === 'r' || input === 'R' || input === 'b' || input === 's' || input === 'c' || input === 'p') {
-        setStatusLine('Standalone monitor mode: run actions via `night-orch` CLI')
-      }
+    if (actionCommand === 'poll') {
+      void runPoll()
       return
     }
-
-    if (input === 'r') {
-      void runRetry()
-      return
-    }
-    if (input === 'R') {
-      void runRetry(true)
-      return
-    }
-    if (input === 'b') {
-      void runRebase()
-      return
-    }
-    if (input === 's') {
+    if (actionCommand === 'sync') {
       void runSync()
       return
     }
-    if (input === 'c') {
+    if (actionCommand === 'cleanupArm') {
+      const transition = resolveCleanupConfirmationTransition(cleanupConfirmPending, 'pressD')
+      if (transition !== 'arm') return
+      setCleanupConfirmPending(true)
+      setStatusLine('Press D again within 5s to confirm cleanup')
+      appendLog('warn', 'cleanup requested: awaiting confirmation')
+      if (cleanupConfirmTimer.current) {
+        clearTimeout(cleanupConfirmTimer.current)
+      }
+      cleanupConfirmTimer.current = setTimeout(() => {
+        cleanupConfirmTimer.current = null
+        const timeoutTransition = resolveCleanupConfirmationTransition(true, 'timeout')
+        if (timeoutTransition === 'expire') {
+          setCleanupConfirmPending(false)
+          setStatusLine('Cleanup confirmation expired')
+        }
+      }, CLEANUP_CONFIRM_TIMEOUT_MS)
+      return
+    }
+    if (actionCommand === 'cleanupConfirm') {
+      const transition = resolveCleanupConfirmationTransition(cleanupConfirmPending, 'pressD')
+      if (transition !== 'confirm') return
+      clearCleanupConfirmation()
       void runCleanup()
       return
     }
-    if (input === 'p') {
-      void runPoll()
+    if (actionCommand === 'retry') {
+      void runRetry()
+      return
+    }
+    if (actionCommand === 'retryFresh') {
+      void runRetry(true)
+      return
+    }
+    if (actionCommand === 'rebase') {
+      void runRebase()
+      return
+    }
+    if (actionCommand === 'none') {
+      return
     }
   })
 
@@ -820,7 +945,7 @@ export function App({
       <ActionsBar
         activeTab={activeTab}
         busy={actionState.busy}
-        runFocused={runsViewMode === 'focus'}
+        runFocused={activeTab === 'runs' && runsViewMode === 'focus'}
         autoRefresh={autoRefresh}
         controlsEnabled={enableBackgroundPoller}
       />

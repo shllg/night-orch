@@ -2,87 +2,99 @@ import { describe, expect, it } from 'vitest'
 import { buildActionHints } from '../../../src/cli/tui/actions-bar.js'
 
 describe('buildActionHints', () => {
+  const sectionMap = (hints: ReturnType<typeof buildActionHints>): Record<string, string> => (
+    Object.fromEntries(hints.sections.map((section) => [section.name, section.hints]))
+  )
+
   it('shows run-specific controls on runs tab', () => {
-    const hints = buildActionHints({
+    const sections = sectionMap(buildActionHints({
       activeTab: 'runs',
       busy: false,
       runFocused: false,
       autoRefresh: true,
-    })
+    }))
 
-    expect(hints.line1).toContain('[1]issues [2]projects [3]stats [q]quit [p]poll')
-    expect(hints.line1).toContain('[j/k]select issue [o/enter]open')
-    expect(hints.line1).toContain('[4]logs [h/l]tabs')
-    expect(hints.line1).toContain(' | ')
-    expect(hints.line2).toContain('[r]etry')
-    expect(hints.line2).toContain('[b]rebase')
+    expect(sections.navigation).toContain('[1-4]tabs [h/l]tabs [j/k]select issue [o/enter]open')
+    expect(sections.global).toContain('[q]quit [r]refresh [p]poll [s]sync [D]cleanup(confirm)')
+    expect(sections.issue).toContain('[t]retry [T]retry fresh [_]rebase')
   })
 
   it('hides run mutating controls in standalone monitor mode', () => {
-    const hints = buildActionHints({
+    const sections = sectionMap(buildActionHints({
       activeTab: 'runs',
       busy: false,
       runFocused: false,
       autoRefresh: true,
       controlsEnabled: false,
-    })
+    }))
 
-    expect(hints.line1).not.toContain('[p]poll')
-    expect(hints.line2).toContain('standalone monitor mode')
-    expect(hints.line2).not.toContain('[r]etry')
+    expect(sections.global).toBe('[q]quit [r]refresh')
+    expect(sections.issue).toContain('standalone monitor mode')
+    expect(sections.issue).not.toContain('[t]retry')
   })
 
   it('shows focused run controls when detail view is open', () => {
-    const hints = buildActionHints({
+    const sections = sectionMap(buildActionHints({
       activeTab: 'runs',
       busy: false,
       runFocused: true,
       autoRefresh: true,
-    })
+    }))
 
-    expect(hints.line1).toContain('[1]issues [2]projects [3]stats [q/esc]close')
-    expect(hints.line1).toContain('[j/k]scroll run')
-    expect(hints.line2).toContain('focused run detail')
+    expect(sections.navigation).toContain('[1-4]tabs [h/l]tabs [j/k]scroll run')
+    expect(sections.global).toContain('[q/esc]close [r]refresh')
+    expect(sections.issue).toContain('focused run detail')
   })
 
   it('shows stats polling controls on stats tab without retry/rebase', () => {
-    const hints = buildActionHints({
+    const sections = sectionMap(buildActionHints({
       activeTab: 'stats',
       busy: false,
       runFocused: false,
       autoRefresh: false,
-    })
+    }))
 
-    expect(hints.line1).toContain('[a]toggle auto-refresh')
-    expect(hints.line1).toContain('[1]issues [2]projects [3]stats [q]quit')
-    expect(hints.line2).toContain('polling paused')
-    expect(hints.line2).not.toContain('retry')
-    expect(hints.line2).not.toContain('rebase')
+    expect(sections.navigation).toBe('[1-4]tabs [h/l]tabs')
+    expect(sections.global).toContain('[q]quit [r]refresh [a]toggle auto-refresh')
+    expect(sections.issue).not.toContain('retry')
+    expect(sections.issue).not.toContain('rebase')
+  })
+
+  it('does not leak focused-run global hints onto non-runs tabs', () => {
+    const sections = sectionMap(buildActionHints({
+      activeTab: 'stats',
+      busy: false,
+      runFocused: true,
+      autoRefresh: true,
+    }))
+
+    expect(sections.global).toContain('[q]quit [r]refresh [a]toggle auto-refresh')
+    expect(sections.global).not.toContain('[q/esc]close')
   })
 
   it('shows project selection controls on projects tab', () => {
-    const hints = buildActionHints({
+    const sections = sectionMap(buildActionHints({
       activeTab: 'projects',
       busy: false,
       runFocused: false,
       autoRefresh: true,
-    })
+    }))
 
-    expect(hints.line1).toContain('[j/k]select project [f]refresh')
-    expect(hints.line1).toContain('[2]projects')
-    expect(hints.line2).toContain('labels')
+    expect(sections.navigation).toContain('[j/k]select project')
+    expect(sections.global).toContain('[q]quit [r]refresh')
+    expect(sections.issue).toContain('runs tab')
   })
 
   it('shows log navigation controls on logs tab', () => {
-    const hints = buildActionHints({
+    const sections = sectionMap(buildActionHints({
       activeTab: 'logs',
       busy: false,
       runFocused: false,
       autoRefresh: false,
-    })
+    }))
 
-    expect(hints.line1).toContain('[j/k]select log [J/K]scroll raw [f]refresh')
-    expect(hints.line1).toContain('[1]issues [2]projects [3]stats [q]quit')
-    expect(hints.line2).toContain('raw log pane')
+    expect(sections.navigation).toContain('[j/k]select log [J/K]scroll raw')
+    expect(sections.global).toContain('[q]quit [r]refresh')
+    expect(sections.issue).toContain('runs tab')
   })
 })

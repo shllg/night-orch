@@ -4,6 +4,8 @@ import {
   moveProjectSelection,
   reconcileLogSelectionSnapshot,
   reconcileSelectedLogId,
+  resolveActionCommand,
+  resolveCleanupConfirmationTransition,
   resolveLogWindowSize,
   resolveSelectedLogIndex,
   resolveTabHotkey,
@@ -113,5 +115,123 @@ describe('tui app input helpers', () => {
     expect(snapshot.selectedLogId).toBe(501)
     expect(snapshot.selectedLogIndex).toBe(499)
     expect(snapshot.logCount).toBe(500)
+  })
+})
+
+describe('tui action key dispatch', () => {
+  const baseArgs = {
+    activeTab: 'runs' as const,
+    runsViewMode: 'list' as const,
+    controlsEnabled: true,
+    actionBusy: false,
+    cleanupConfirmPending: false,
+  }
+
+  it('maps r to refresh globally', () => {
+    expect(resolveActionCommand({
+      ...baseArgs,
+      activeTab: 'stats',
+      input: 'r',
+    })).toBe('refresh')
+  })
+
+  it('maps issue actions only on runs list mode', () => {
+    expect(resolveActionCommand({
+      ...baseArgs,
+      input: 't',
+    })).toBe('retry')
+    expect(resolveActionCommand({
+      ...baseArgs,
+      input: 'T',
+    })).toBe('retryFresh')
+    expect(resolveActionCommand({
+      ...baseArgs,
+      input: '_',
+    })).toBe('rebase')
+    expect(resolveActionCommand({
+      ...baseArgs,
+      activeTab: 'stats',
+      input: 't',
+    })).toBe('none')
+  })
+
+  it('blocks p/s/D actions while focused run detail is open', () => {
+    const focusedArgs = {
+      ...baseArgs,
+      runsViewMode: 'focus' as const,
+    }
+    expect(resolveActionCommand({
+      ...focusedArgs,
+      input: 'p',
+    })).toBe('none')
+    expect(resolveActionCommand({
+      ...focusedArgs,
+      input: 's',
+    })).toBe('none')
+    expect(resolveActionCommand({
+      ...focusedArgs,
+      input: 'D',
+      cleanupConfirmPending: true,
+    })).toBe('none')
+  })
+
+  it('does not treat non-runs tabs as focused even when runsViewMode is focus', () => {
+    const nonRunsFocusedArgs = {
+      ...baseArgs,
+      activeTab: 'stats' as const,
+      runsViewMode: 'focus' as const,
+    }
+
+    expect(resolveActionCommand({
+      ...nonRunsFocusedArgs,
+      input: 'p',
+    })).toBe('poll')
+    expect(resolveActionCommand({
+      ...nonRunsFocusedArgs,
+      input: 'D',
+      cleanupConfirmPending: false,
+    })).toBe('cleanupArm')
+    expect(resolveActionCommand({
+      ...nonRunsFocusedArgs,
+      input: 't',
+    })).toBe('none')
+  })
+
+  it('requires double D press for cleanup command dispatch', () => {
+    expect(resolveActionCommand({
+      ...baseArgs,
+      input: 'D',
+      cleanupConfirmPending: false,
+    })).toBe('cleanupArm')
+    expect(resolveActionCommand({
+      ...baseArgs,
+      input: 'D',
+      cleanupConfirmPending: true,
+    })).toBe('cleanupConfirm')
+  })
+
+  it('shows standalone message for mutating action keys when controls are disabled', () => {
+    expect(resolveActionCommand({
+      ...baseArgs,
+      controlsEnabled: false,
+      input: 'p',
+    })).toBe('standaloneMessage')
+    expect(resolveActionCommand({
+      ...baseArgs,
+      controlsEnabled: false,
+      input: 't',
+    })).toBe('standaloneMessage')
+  })
+})
+
+describe('cleanup confirmation transitions', () => {
+  it('supports arm and confirm flow on D presses', () => {
+    expect(resolveCleanupConfirmationTransition(false, 'pressD')).toBe('arm')
+    expect(resolveCleanupConfirmationTransition(true, 'pressD')).toBe('confirm')
+  })
+
+  it('cancels on non-D key and expires on timeout', () => {
+    expect(resolveCleanupConfirmationTransition(true, 'pressOther')).toBe('cancel')
+    expect(resolveCleanupConfirmationTransition(true, 'timeout')).toBe('expire')
   })
 })
