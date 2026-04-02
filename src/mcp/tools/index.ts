@@ -6,6 +6,7 @@ import { CostTracker } from '../../loop/cost.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { CleanupEngine } from '../../ops/cleanup.js'
 import { RetryEngine } from '../../ops/retry.js'
+import { DeleteIssueEntryEngine } from '../../ops/delete-entry.js'
 import { isIssueEligibleForRepo } from '../../discovery/discover.js'
 import { pollOnce } from '../../runner/poller.js'
 import { flushActiveAgentObservability } from '../../events/observability.js'
@@ -104,6 +105,21 @@ export function registerTools(): ToolDefinition[] {
       },
     },
     {
+      name: 'night-orch-delete-entry',
+      description: 'Delete local orchestrator state for an issue (runs, leases, worktree pointers) so it can be rediscovered fresh.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          repo: { type: 'string', description: 'Repository (owner/name)' },
+          issueNumber: { type: 'number', description: 'Issue number' },
+          force: { type: 'boolean', description: 'Delete even if a run is currently in running status', default: false },
+          dryRun: { type: 'boolean', description: 'Preview deletion counts without applying changes', default: false },
+          authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
+        },
+        required: ['repo', 'issueNumber'],
+      },
+    },
+    {
       name: 'night-orch-poll',
       description: 'Manually trigger a single poll cycle — discovers eligible issues and processes them immediately.',
       inputSchema: {
@@ -176,6 +192,8 @@ export async function handleToolCall(
       return handleSync(args as { dryRun?: boolean; authToken?: string }, deps)
     case 'night-orch-cleanup':
       return handleCleanup(args as { dryRun?: boolean; authToken?: string }, deps)
+    case 'night-orch-delete-entry':
+      return handleDeleteEntry(args as { repo: string; issueNumber: number; force?: boolean; dryRun?: boolean; authToken?: string }, deps)
     case 'night-orch-poll':
       return handlePoll(args as { dryRun?: boolean; authToken?: string }, deps)
     case 'night-orch-list-issues':
@@ -338,6 +356,18 @@ async function handleCleanup(args: { dryRun?: boolean; authToken?: string }, dep
   assertMcpMutationAuth(args.authToken, deps)
   const engine = new CleanupEngine(deps.db, deps.config)
   return engine.run({ dryRun: args.dryRun ?? false })
+}
+
+async function handleDeleteEntry(
+  args: { repo: string; issueNumber: number; force?: boolean; dryRun?: boolean; authToken?: string },
+  deps: MCPDependencies,
+): Promise<unknown> {
+  assertMcpMutationAuth(args.authToken, deps)
+  const engine = new DeleteIssueEntryEngine(deps.db, deps.config)
+  return engine.deleteEntry(args.repo, args.issueNumber, {
+    dryRun: args.dryRun ?? false,
+    force: args.force ?? false,
+  })
 }
 
 async function handlePoll(

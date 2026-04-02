@@ -4,6 +4,7 @@ import type { Config } from '../../config/schema.js'
 import { RetryEngine } from '../../ops/retry.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { CleanupEngine } from '../../ops/cleanup.js'
+import { DeleteIssueEntryEngine } from '../../ops/delete-entry.js'
 import { pollOnce } from '../../runner/poller.js'
 import { queueRebase } from '../../ops/rebase-and-check.js'
 import { createForgeAdapter } from '../../forge/factory.js'
@@ -143,6 +144,7 @@ export type TuiActionCommand =
   | 'retry'
   | 'retryFresh'
   | 'rebase'
+  | 'deleteEntry'
   | 'cleanupArm'
   | 'cleanupConfirm'
   | 'standaloneMessage'
@@ -166,6 +168,7 @@ export function resolveActionCommand(args: ResolveActionCommandInput): TuiAction
     || args.input === 't'
     || args.input === 'T'
     || args.input === '_'
+    || args.input === 'X'
 
   if (args.actionBusy) return 'none'
 
@@ -192,6 +195,7 @@ export function resolveActionCommand(args: ResolveActionCommandInput): TuiAction
   if (args.input === 't') return 'retry'
   if (args.input === 'T') return 'retryFresh'
   if (args.input === '_') return 'rebase'
+  if (args.input === 'X') return 'deleteEntry'
   return 'none'
 }
 
@@ -649,6 +653,24 @@ export function App({
     })
   }, [config, db, issues, runAction, selectedIssue])
 
+  const runDeleteEntry = useCallback(async () => {
+    await runAction('delete-entry', async () => {
+      if (!selectedIssue) throw new Error('No issue selected')
+      const engine = new DeleteIssueEntryEngine(db, config)
+      const result = await engine.deleteEntry(selectedIssue.repo, selectedIssue.issue_number, {
+        dryRun,
+        force: false,
+      })
+      if (!result.found) {
+        return `no local entry for ${selectedIssue.repo}#${selectedIssue.issue_number}${dryRun ? ' (dry-run)' : ''}`
+      }
+      const warningSuffix = result.worktreesFailed.length > 0
+        ? `, ${result.worktreesFailed.length} worktree warning(s)`
+        : ''
+      return `${selectedIssue.repo}#${selectedIssue.issue_number}: ${result.runsDeleted} run(s), ${result.issuesDeleted} issue row(s), ${result.worktreesRemoved.length} worktree(s)${warningSuffix}${dryRun ? ' (dry-run)' : ''}`
+    })
+  }, [config, db, dryRun, runAction, selectedIssue])
+
   const gracefulExit = useCallback(() => {
     if (shuttingDown.current) {
       if (exitTimer.current) {
@@ -872,6 +894,10 @@ export function App({
     }
     if (actionCommand === 'rebase') {
       void runRebase()
+      return
+    }
+    if (actionCommand === 'deleteEntry') {
+      void runDeleteEntry()
       return
     }
     if (actionCommand === 'none') {

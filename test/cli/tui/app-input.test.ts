@@ -150,6 +150,10 @@ describe('tui action key dispatch', () => {
     })).toBe('rebase')
     expect(resolveActionCommand({
       ...baseArgs,
+      input: 'X',
+    })).toBe('deleteEntry')
+    expect(resolveActionCommand({
+      ...baseArgs,
       activeTab: 'stats',
       input: 't',
     })).toBe('none')
@@ -220,6 +224,11 @@ describe('tui action key dispatch', () => {
       ...baseArgs,
       controlsEnabled: false,
       input: 't',
+    })).toBe('standaloneMessage')
+    expect(resolveActionCommand({
+      ...baseArgs,
+      controlsEnabled: false,
+      input: 'X',
     })).toBe('standaloneMessage')
   })
 })

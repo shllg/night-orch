@@ -10,6 +10,7 @@ import { notifyTestCommand } from './commands/notify-test.js'
 import { mcpCommand } from './commands/mcp.js'
 import { labelsInitCommand } from './commands/labels-init.js'
 import { statusCommand } from './commands/status.js'
+import { deleteEntryCommand } from './commands/delete-entry.js'
 import { runInit } from './commands/init.js'
 import { runWatch } from './commands/watch.js'
 import { webCommand } from './commands/web.js'
@@ -61,6 +62,14 @@ program
   .option('--fresh', 'Reset branch to base and re-implement from scratch (use after merge conflicts)')
   .description('Force a re-run of one task')
   .action((repo, issueNumber, opts, cmd) => retryCommand(repo, issueNumber, { ...cmd.parent?.opts(), ...opts }))
+
+program
+  .command('delete')
+  .argument('<repo>', 'Repository (owner/name)')
+  .argument('<issue-number>', 'Issue number')
+  .option('--force', 'Delete even when the issue currently has a running run')
+  .description('Delete one local issue entry (runs, issue state, worktree, lease) so it can be rediscovered fresh')
+  .action((repo, issueNumber, opts, cmd) => deleteEntryCommand(repo, issueNumber, { ...cmd.parent?.opts(), ...opts }))
 
 program
   .command('rebase')
