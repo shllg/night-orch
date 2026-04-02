@@ -98,6 +98,34 @@ describe('RunManager', () => {
     expect(found?.issueNumber).toBe(42)
   })
 
+  it('rejects creating a new run while another active run exists', () => {
+    const activeStatuses = ['queued', 'running', 'blocked', 'review_ready', 'error'] as const
+
+    activeStatuses.forEach((status, index) => {
+      const issueNumber = 700 + index
+      const run = runManager.create({
+        repo: 'org/repo',
+        issueNumber,
+        issueNodeId: `node-${issueNumber}`,
+        planner: 'claude',
+        coder: 'claude',
+        reviewer: 'claude',
+      })
+      if (status !== 'queued') {
+        runManager.update(run.id, { status })
+      }
+
+      expect(() => runManager.create({
+        repo: 'org/repo',
+        issueNumber,
+        issueNodeId: `node-${issueNumber}`,
+        planner: 'claude',
+        coder: 'claude',
+        reviewer: 'claude',
+      })).toThrow(/active run/)
+    })
+  })
+
   it('getByRepoAndIssue prefers latest run when issues aggregate pointer is stale', () => {
     const first = runManager.create({
       repo: 'org/repo',

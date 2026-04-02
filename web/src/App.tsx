@@ -311,7 +311,7 @@ export function App(): ReactElement {
         throw new Error('Web session is not initialized yet. Refresh the page and try again.')
       }
       if (!operationsEnabled) {
-        throw new Error('Web operations are disabled in attach mode. Restart with --standalone to enable them.')
+        throw new Error('Web operations are disabled by server policy.')
       }
 
       const response = await fetch(endpoint, {
@@ -532,7 +532,7 @@ export function App(): ReactElement {
               {!operationsEnabled && (
                 <div className="alert alert-warning mt-1 text-xs">
                   <span>
-                    Attach mode: operations are disabled. Start with <code>night-orch web --standalone</code> to enable control actions.
+                    Operations are disabled by server policy for this web instance.
                   </span>
                 </div>
               )}

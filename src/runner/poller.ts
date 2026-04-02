@@ -3,7 +3,7 @@ import type Database from 'better-sqlite3'
 import type { MetricsService } from '../metrics/service.js'
 import { createForgeAdapter } from '../forge/factory.js'
 import { LeaseManager } from '../state/leases.js'
-import { RunManager } from '../state/runs.js'
+import { RunManager, type RunRecord } from '../state/runs.js'
 import { IssueManager } from '../state/issues.js'
 import { discoverEligibleIssues, type DiscoveredIssue } from '../discovery/discover.js'
 import { resolveRoles, type ResolvedRoles } from '../discovery/roles.js'
@@ -225,11 +225,15 @@ export async function pollOnce(
                 try {
                 const resolvedRoles = resolveRoles(discoveredIssue.issue.labels, repoConfig.defaults)
                 const queuedRun = runManager.getLatestQueuedByIssue(repoConfig.repo, discoveredIssue.issue.number)
-                const roles = queuedRun
+                const replayableRun = queuedRun
+                  ? null
+                  : selectReplayableRun(runManager.getByRepoAndIssue(repoConfig.repo, discoveredIssue.issue.number))
+                const activeRun = queuedRun ?? replayableRun
+                const roles = activeRun
                   ? {
-                      planner: coerceAgentName(queuedRun.planner, resolvedRoles.planner),
-                      coder: coerceAgentName(queuedRun.coder, resolvedRoles.coder),
-                      reviewer: coerceAgentName(queuedRun.reviewer, resolvedRoles.reviewer),
+                      planner: coerceAgentName(activeRun.planner, resolvedRoles.planner),
+                      coder: coerceAgentName(activeRun.coder, resolvedRoles.coder),
+                      reviewer: coerceAgentName(activeRun.reviewer, resolvedRoles.reviewer),
                     }
                   : resolvedRoles
                 const slug = getOrPinSlug(db, repoConfig.repo, discoveredIssue.issue.number, discoveredIssue.issue.title)
@@ -237,7 +241,7 @@ export async function pollOnce(
                 const worktreePath = buildWorktreePath(config.storage.worktreeRoot, repoConfig.repo, discoveredIssue.issue.number)
                 activeWorktreePath = worktreePath
 
-                const run = queuedRun ?? runManager.create({
+                const run = activeRun ?? runManager.create({
                   repo: repoConfig.repo,
                   issueNumber: discoveredIssue.issue.number,
                   issueTitle: discoveredIssue.issue.title,
@@ -246,6 +250,13 @@ export async function pollOnce(
                   coder: roles.coder,
                   reviewer: roles.reviewer,
                 })
+                const previousRunStatus = run.status
+                if (replayableRun) {
+                  logger.info(
+                    { repo: repoConfig.repo, issue: discoveredIssue.issue.number, runId: run.id, status: replayableRun.status },
+                    'Re-queuing active run for rediscovered ready issue',
+                  )
+                }
                 runId = run.id
                 runManager.update(run.id, {
                   status: 'running',
@@ -268,7 +279,7 @@ export async function pollOnce(
                   issueRepo,
                   discoveredIssue.issue.number,
                   discoveredIssue.issue.labels,
-                  'queued',
+                  previousRunStatus,
                   'running',
                   buildLabelConfig(repoConfig, discoveredIssue.issue.labels),
                 )
@@ -277,11 +288,11 @@ export async function pollOnce(
                 await notifier.dispatch(makePayload('run_started', repoConfig.repo, discoveredIssue.issue))
 
                 // Detect if this queued run needs a forced branch reset (e.g., after merge conflict)
-                const forceReset = queuedRun?.blockReason === 'merge_conflict'
+                const forceReset = activeRun?.blockReason === 'merge_conflict'
 
                 // Detect rebase mode from queued run's phaseData
                 // If force-resetting, ignore stale rebase context — we're starting fresh
-                const reactionType = queuedRun?.phaseData?.reactionType
+                const reactionType = activeRun?.phaseData?.reactionType
                 const isRebaseRun = !forceReset && (reactionType === 'rebase' || reactionType === 'merge_conflict')
 
                 // Check if prior run left tainted work that should be discarded
@@ -1435,6 +1446,14 @@ function getIssueQueuePriority(
   if (reactionType === 'merge_conflict' || reactionType === 'rebase') return 0
   if (typeof reactionType === 'string' && reactionType.length > 0) return 1
   return 2
+}
+
+function selectReplayableRun(run: RunRecord | null): RunRecord | null {
+  if (!run) return null
+  if (run.status === 'blocked' || run.status === 'review_ready' || run.status === 'error') {
+    return run
+  }
+  return null
 }
 
 function shouldResetBranch(

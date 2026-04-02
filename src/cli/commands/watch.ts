@@ -47,7 +47,7 @@ export async function runWatch(globalOpts?: GlobalOpts): Promise<void> {
         config,
         pollIntervalMs,
         dryRun: globalOpts?.dryRun ?? false,
-        enableBackgroundPoller: false,
+        enableBackgroundPoller: true,
       }),
       {
         exitOnCtrlC: false,

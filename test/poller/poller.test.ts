@@ -261,6 +261,39 @@ describe('pollOnce', () => {
     expect(rows[0]!.id).toBe(existing.id)
   })
 
+  it('reuses existing blocked run when issue is rediscovered as ready', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([{
+      issue: { number: 2, nodeId: '', title: 'Retry me', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      triage: { level: 'standard', reason: '' },
+    }])
+    mockExecuteLoop.mockResolvedValue({
+      currentPhase: 'publish',
+      terminalStatus: 'blocked',
+    })
+
+    const runManager = new RunManager(db)
+    const existing = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 2,
+      issueNodeId: '',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(existing.id, {
+      status: 'blocked',
+      endedAt: new Date().toISOString(),
+      lastError: 'prior failure',
+    })
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    await pollOnce(config, db, false)
+
+    const rows = db.prepare('SELECT id FROM runs WHERE repo = ? AND issue_number = ?').all('org/repo', 2) as Array<{ id: string }>
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.id).toBe(existing.id)
+  })
+
   it('denies /orch retry from non-collaborator when requireCollaborator=true', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([])
     mockListIssueComments.mockResolvedValue([

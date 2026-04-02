@@ -75,7 +75,7 @@ describe('runWatch', () => {
     expect(mockLogger.level).toBe('silent')
     expect(mockRender).toHaveBeenCalledTimes(1)
     const element = mockRender.mock.calls[0]?.[0] as { props?: Record<string, unknown> } | undefined
-    expect(element?.props?.enableBackgroundPoller).toBe(false)
+    expect(element?.props?.enableBackgroundPoller).toBe(true)
 
     wait.resolve()
     await runPromise

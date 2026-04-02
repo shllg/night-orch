@@ -97,7 +97,7 @@ export class Supervisor {
     proc.on('message', (msg: unknown) => {
       if (isUpdateRequest(msg)) {
         logger.info({ source: child.name }, 'Update requested via IPC')
-        this.triggerUpdate()
+        void this.triggerUpdate()
       }
     })
 
@@ -211,7 +211,7 @@ export class Supervisor {
     this.shuttingDown = true
     logger.info('Supervisor shutting down...')
     unwatchFile(this.triggerFilePath)
-    this.drainAll().then(() => {
+    void this.drainAll().then(() => {
       logger.info('All children stopped')
       process.exit(0)
     })
@@ -221,7 +221,7 @@ export class Supervisor {
     watchFile(this.triggerFilePath, { interval: 2000 }, () => {
       if (existsSync(this.triggerFilePath)) {
         logger.info('Update trigger file detected')
-        this.triggerUpdate()
+        void this.triggerUpdate()
       }
     })
   }

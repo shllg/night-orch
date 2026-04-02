@@ -272,7 +272,7 @@ describe('startWebServer', () => {
     })
     expect(poll.status).toBe(409)
     await expect(poll.json()).resolves.toMatchObject({
-      error: 'Web operations are disabled in attach mode. Restart with --standalone to enable them.',
+      error: 'Web operations are disabled by server policy.',
     })
   })
 

@@ -123,7 +123,7 @@ export async function webCommand(
   try {
     webServer = await startWebServer(
       { db, config, forgeAdapters, poller: pollerControl, metrics: metrics ?? null },
-      { host, allowedHosts, port, snapshotIntervalMs, operationsEnabled: standalone },
+      { host, allowedHosts, port, snapshotIntervalMs, operationsEnabled: true },
     )
   } catch (err) {
     logger.error({ err, host, allowedHosts, port }, 'Failed to start web server')
@@ -157,7 +157,7 @@ export async function webCommand(
   })
 
   if (!standalone) {
-    logger.info({ host, port }, 'Starting web monitor (attach mode)')
+    logger.info({ host, port }, 'Starting web control surface (attach mode)')
     await new Promise<void>(() => {})
     return
   }

@@ -362,7 +362,7 @@ Options: `--config`, `--trust-workspace`, `--dry-run`, `--log-level`
 
 Start the embedded web control surface. Serves the React/Tailwind frontend, a REST API under `/api/*`, and a WebSocket stream endpoint at `/ws`.
 
-By default, `web` runs in attach mode: no poll loop, no metrics server, and no embedded MCP server are started in the web process.
+By default, `web` runs in attach mode: no poll loop, no metrics server, and no embedded MCP server are started in the web process. Manual web operations (`poll`, `sync`, `cleanup`, `retry`, `rebase`, `delete entry`) remain available and execute in the web process.
 Use `--standalone` to run poller + metrics + embedded MCP in the same process as the web server.
 
 Default bind is `127.0.0.1:3200`. Use `--host` / `--port` to change this (for example when reverse-proxying through Caddy or nginx). Use `--allowed-host` (repeatable) to permit additional Host/Origin values when proxying.
@@ -389,7 +389,7 @@ Show current state: active runs, active leases, daily cost against budget, recen
 
 ### `night-orch tui`
 
-Live-updating terminal dashboard. Refreshes every 2 seconds. Shows active runs, merge queue, cost bar, recent history, and issue actions (`retry`, `retry fresh`, `rebase`, `delete entry`). Press Ctrl+C to exit.
+Live-updating terminal dashboard. Refreshes every 2 seconds. Shows active runs, merge queue, cost bar, recent history, and issue actions (`poll`, `sync`, `cleanup`, `retry`, `retry fresh`, `rebase`, `delete entry`). Press Ctrl+C to exit.
 
 ### `night-orch sync`
 

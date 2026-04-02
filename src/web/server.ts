@@ -252,7 +252,7 @@ async function handleApiRequest(
   if (method === 'POST' && pathname.startsWith('/api/operations/')) {
     // Update is a supervisor operation — always allowed regardless of attach/standalone mode
     if (!operationsEnabled && pathname !== '/api/operations/update') {
-      writeJson(res, 409, { error: 'Web operations are disabled in attach mode. Restart with --standalone to enable them.' })
+      writeJson(res, 409, { error: 'Web operations are disabled by server policy.' })
       return
     }
 
@@ -461,7 +461,11 @@ async function handleApiRequest(
   if (method === 'GET' && pathname === '/api/update-status') {
     const statusPath = resolve(homedir(), '.config', 'night-orch', 'update-status.json')
     try {
-      const status = JSON.parse(readFileSync(statusPath, 'utf-8'))
+      const parsed = JSON.parse(readFileSync(statusPath, 'utf-8')) as Record<string, unknown>
+      const status = {
+        state: typeof parsed['state'] === 'string' ? parsed['state'] : 'idle',
+        ...(typeof parsed['error'] === 'string' ? { error: parsed['error'] } : {}),
+      }
       writeJson(res, 200, status)
     } catch {
       writeJson(res, 200, { state: 'idle' })

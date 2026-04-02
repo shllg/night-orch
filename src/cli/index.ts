@@ -118,7 +118,7 @@ program
 
 program
   .command('tui')
-  .description('Interactive monitoring TUI with issue actions (retry/rebase/delete)')
+  .description('Interactive TUI with poll/sync/cleanup and issue actions')
   .action((_opts, cmd) => runWatch(cmd.parent?.opts()))
 
 program
