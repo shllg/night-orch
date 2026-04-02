@@ -1,6 +1,9 @@
 import type { MCPDependencies } from '../server.js'
 import type { ForgeIssue } from '../../forge/types.js'
 import { createHash, timingSafeEqual } from 'node:crypto'
+import { resolve } from 'node:path'
+import { homedir } from 'node:os'
+import { writeFileSync, mkdirSync } from 'node:fs'
 import { RunManager } from '../../state/runs.js'
 import { CostTracker } from '../../loop/cost.js'
 import { SyncEngine } from '../../ops/sync.js'
@@ -169,6 +172,16 @@ export function registerTools(): ToolDefinition[] {
         required: ['repo', 'issueNumber'],
       },
     },
+    {
+      name: 'night-orch-update',
+      description: 'Trigger a self-update: pulls latest code, rebuilds, and restarts all services.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
+        },
+      },
+    },
   ]
 }
 
@@ -202,6 +215,8 @@ export async function handleToolCall(
       return handleStreamEvents(args as { runId: string; since?: number; limit?: number }, deps)
     case 'night-orch-rebase':
       return handleRebase(args as { repo: string; issueNumber: number; check?: boolean; authToken?: string }, deps)
+    case 'night-orch-update':
+      return handleUpdate(args as { authToken?: string }, deps)
     default:
       throw new Error(`Unknown tool: ${name}`)
   }
@@ -548,6 +563,26 @@ async function handleRebase(
     queued: result.queued,
     reason: result.reason,
   }
+}
+
+async function handleUpdate(
+  args: { authToken?: string },
+  deps: MCPDependencies,
+): Promise<unknown> {
+  assertMcpMutationAuth(args.authToken, deps)
+
+  // Try IPC first (running under supervisor)
+  if (typeof process.send === 'function') {
+    process.send({ type: 'update-requested' })
+    return { accepted: true, method: 'ipc' }
+  }
+
+  // Fallback: trigger file
+  const dataDir = resolve(homedir(), '.config', 'night-orch')
+  const triggerPath = resolve(dataDir, 'update-requested')
+  mkdirSync(dataDir, { recursive: true })
+  writeFileSync(triggerPath, new Date().toISOString())
+  return { accepted: true, method: 'trigger-file' }
 }
 
 function assertMcpMutationAuth(providedToken: string | undefined, deps: MCPDependencies): void {

@@ -14,6 +14,8 @@ import { deleteEntryCommand } from './commands/delete-entry.js'
 import { runInit } from './commands/init.js'
 import { runWatch } from './commands/watch.js'
 import { webCommand } from './commands/web.js'
+import { serveCommand } from './commands/serve.js'
+import { updateCommand } from './commands/update.js'
 
 const program = new Command()
 
@@ -139,5 +141,28 @@ program
     snapshotIntervalMs: opts.snapshotIntervalMs,
     standalone: opts.standalone,
   }, cmd.parent?.opts()))
+
+program
+  .command('serve')
+  .description('Run supervisor — manages both poller and web server, supports self-update')
+  .option('--web-host <host>', 'Web server bind host', '127.0.0.1')
+  .option('--web-port <port>', 'Web server port', '3200')
+  .option(
+    '--allowed-host <host>',
+    'Allowed Host/Origin hostname for web requests (repeatable)',
+    collectOptionValue,
+    [] as string[],
+  )
+  .action((opts: { webHost?: string; webPort?: string; allowedHost?: string[] }, cmd) =>
+    serveCommand(
+      { webHost: opts.webHost, webPort: opts.webPort, allowedHost: opts.allowedHost },
+      cmd.parent?.opts(),
+    ),
+  )
+
+program
+  .command('update')
+  .description('Trigger self-update — pulls latest code, rebuilds, and restarts services')
+  .action((_opts, cmd) => updateCommand(cmd.parent?.opts()))
 
 program.parse()

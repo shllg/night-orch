@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { readFile, stat } from 'node:fs/promises'
 import { extname, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -249,7 +250,8 @@ async function handleApiRequest(
   const { pathname, searchParams } = requestUrl
 
   if (method === 'POST' && pathname.startsWith('/api/operations/')) {
-    if (!operationsEnabled) {
+    // Update is a supervisor operation — always allowed regardless of attach/standalone mode
+    if (!operationsEnabled && pathname !== '/api/operations/update') {
       writeJson(res, 409, { error: 'Web operations are disabled in attach mode. Restart with --standalone to enable them.' })
       return
     }
@@ -453,6 +455,34 @@ async function handleApiRequest(
       deps,
     )
     writeJson(res, 200, result)
+    return
+  }
+
+  if (method === 'GET' && pathname === '/api/update-status') {
+    const statusPath = resolve(homedir(), '.config', 'night-orch', 'update-status.json')
+    try {
+      const status = JSON.parse(readFileSync(statusPath, 'utf-8'))
+      writeJson(res, 200, status)
+    } catch {
+      writeJson(res, 200, { state: 'idle' })
+    }
+    return
+  }
+
+  if (method === 'POST' && pathname === '/api/operations/update') {
+    // Try IPC first (running under supervisor)
+    if (typeof process.send === 'function') {
+      process.send({ type: 'update-requested' })
+      writeJson(res, 200, { accepted: true, method: 'ipc' })
+      return
+    }
+
+    // Fallback: trigger file
+    const dataDir = resolve(homedir(), '.config', 'night-orch')
+    const triggerPath = resolve(dataDir, 'update-requested')
+    mkdirSync(dataDir, { recursive: true })
+    writeFileSync(triggerPath, new Date().toISOString())
+    writeJson(res, 200, { accepted: true, method: 'trigger-file' })
     return
   }
 

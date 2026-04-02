@@ -112,6 +112,8 @@ export function App(): ReactElement {
   const [deleteIssueNumber, setDeleteIssueNumber] = useState('')
   const [deleteForce, setDeleteForce] = useState(false)
 
+  const [updateStatus, setUpdateStatus] = useState<{ state: string; error?: string } | null>(null)
+
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
   const selectedRunIdRef = useRef('')
@@ -271,6 +273,29 @@ export function App(): ReactElement {
 
     subscribedRunRef.current = selectedRunId
   }, [selectedRunId, socketConnected])
+
+  // Poll update status while an update is in progress
+  useEffect(() => {
+    if (!updateStatus || updateStatus.state === 'idle') return
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/update-status')
+        if (res.ok) {
+          const status = await res.json() as { state: string; error?: string }
+          setUpdateStatus(status)
+          if (status.state === 'idle' || status.state === 'failed') {
+            clearInterval(interval)
+            if (status.state === 'failed') {
+              setErrorMessage(`Update failed: ${status.error ?? 'unknown error'}`)
+            } else {
+              setFeedbackMessage('Update complete — services restarted')
+            }
+          }
+        }
+      } catch { /* ignore fetch errors during update */ }
+    }, 2000)
+    return () => clearInterval(interval)
+  }, [updateStatus?.state])
 
   const runOperation = useCallback(async (
     operationName: string,
@@ -663,6 +688,25 @@ export function App(): ReactElement {
                   </div>
                 </form>
               </fieldset>
+
+              <div className="rounded-box border border-base-300/70 bg-base-100/60 p-3 mt-4">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-info">Deploy</h3>
+                <div className="mt-2 space-y-2">
+                  <ActionButton
+                    busy={activeOperation === 'update' || (updateStatus != null && updateStatus.state !== 'idle' && updateStatus.state !== 'failed')}
+                    onClick={() => {
+                      setUpdateStatus({ state: 'draining' })
+                      void runOperation('update', '/api/operations/update', {}, 'Update initiated — pulling and rebuilding...')
+                    }}
+                    label={updateStatus && updateStatus.state !== 'idle' && updateStatus.state !== 'failed'
+                      ? `Updating (${updateStatus.state})...`
+                      : 'Pull & Restart'}
+                  />
+                  {updateStatus && updateStatus.state === 'failed' && (
+                    <div className="text-xs text-error">{updateStatus.error}</div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </section>
