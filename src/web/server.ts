@@ -10,6 +10,7 @@ import type { MCPDependencies } from '../mcp/server.js'
 import { handleToolCall } from '../mcp/tools/index.js'
 import { handleResourceRead } from '../mcp/resources/index.js'
 import { loadTuiStats } from '../state/stats.js'
+import { getBuildInfo } from '../utils/build-info.js'
 import { logger } from '../utils/logger.js'
 import { nowUtcIso } from '../utils/time.js'
 
@@ -31,6 +32,10 @@ interface DashboardSnapshot {
   status: unknown
   runs: unknown
   cost: unknown
+  build: {
+    version: string
+    gitSha: string | null
+  }
   config: {
     repos: string[]
     pollIntervalSeconds: number
@@ -54,6 +59,7 @@ const DEFAULT_SNAPSHOT_INTERVAL_MS = 3000
 const MUTATION_INTENT_HEADER = 'x-night-orch-intent'
 const MUTATION_INTENT_VALUE = 'mutate'
 const WEB_AUTH_TOKEN_HEADER = 'x-night-orch-web-token'
+const BUILD_INFO = getBuildInfo()
 const CONTENT_TYPES: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
   '.html': 'text/html; charset=utf-8',
@@ -876,6 +882,7 @@ async function buildDashboardSnapshot(deps: MCPDependencies): Promise<DashboardS
     status,
     runs,
     cost,
+    build: BUILD_INFO,
     config: {
       repos: deps.config.repos.map((repo) => repo.repo),
       pollIntervalSeconds: deps.config.github.pollIntervalSeconds,

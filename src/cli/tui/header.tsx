@@ -4,6 +4,7 @@ import type { TuiStatsSnapshot } from '../../state/stats.js'
 import { TABS } from './constants.js'
 import type { TabId } from './types.js'
 import { formatTime } from './format.js'
+import type { BuildInfo } from '../../utils/build-info.js'
 
 interface HeaderProps {
   activeTab: TabId
@@ -12,6 +13,7 @@ interface HeaderProps {
   status: TuiStatsSnapshot
   autoRefresh: boolean
   lastRefreshAt: string
+  buildInfo: BuildInfo
 }
 
 export function Header({
@@ -21,11 +23,16 @@ export function Header({
   status,
   autoRefresh,
   lastRefreshAt,
+  buildInfo,
 }: HeaderProps): React.ReactElement {
+  const shortSha = buildInfo.gitSha ? buildInfo.gitSha.slice(0, 12) : 'unknown'
+
   return (
     <Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="blue" paddingX={1}>
       <Box>
         <Text bold color="white">NIGHT-ORCH CONTROL ROOM</Text>
+        <Text color="gray">  v{buildInfo.version}</Text>
+        <Text color="gray">  sha {shortSha}</Text>
         <Text color="gray">  refresh {pollIntervalMs / 1000}s</Text>
         {dryRun && <Text color="yellow">  [dry-run]</Text>}
         <Text color={autoRefresh ? 'green' : 'yellow'}>  {autoRefresh ? '● live' : '○ paused'}</Text>
