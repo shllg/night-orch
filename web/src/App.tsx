@@ -485,7 +485,7 @@ export function App(): ReactElement {
   }, [continueIssueNumber, continueRepo, runOperation])
 
   return (
-    <main data-theme="business" className="orch-shell min-h-screen bg-orch-admin">
+    <main data-theme="black" className="orch-shell min-h-screen bg-orch-admin">
       <DashboardHeader
         activePage={activePage}
         onPageChange={setActivePage}
