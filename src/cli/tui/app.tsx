@@ -22,6 +22,7 @@ import { collectMissingTitleTargets, hasReadableTitle, type TitleLookup } from '
 import { TABS } from './constants.js'
 import type { RunsViewMode, TabId, TuiLogLine } from './types.js'
 import { formatUtcClock, nowUtcIso } from '../../utils/time.js'
+import { getBuildInfo } from '../../utils/build-info.js'
 
 interface AppProps {
   db: Database.Database
@@ -42,6 +43,7 @@ const MIN_LOG_WINDOW_SIZE = 4
 const LOG_WINDOW_RESERVED_ROWS = 17
 const EXIT_GRACE_TIMEOUT_MS = 15_000
 const CLEANUP_CONFIRM_TIMEOUT_MS = 5_000
+const BUILD_INFO = getBuildInfo()
 
 export function resolveTabHotkey(input: string): TabId | null {
   if (input === '1') return 'runs'
@@ -939,6 +941,7 @@ export function App({
         status={stats}
         autoRefresh={autoRefresh}
         lastRefreshAt={lastRefreshAt}
+        buildInfo={BUILD_INFO}
       />
 
       <Box marginBottom={1}>

@@ -7,6 +7,10 @@ interface DashboardHeaderProps {
   onPageChange: (page: DashboardPage) => void
   currentStateLabel: string
   currentStateToneClass: string
+  frontendVersion: string
+  frontendGitSha: string
+  backendVersion: string
+  backendGitSha: string | null
 }
 
 const PAGES: Array<{ id: DashboardPage, label: string }> = [
@@ -21,12 +25,23 @@ export function DashboardHeader({
   onPageChange,
   currentStateLabel,
   currentStateToneClass,
+  frontendVersion,
+  frontendGitSha,
+  backendVersion,
+  backendGitSha,
 }: DashboardHeaderProps): ReactElement {
+  const frontendShortSha = frontendGitSha.slice(0, 12)
+  const backendShortSha = backendGitSha ? backendGitSha.slice(0, 12) : 'unknown'
+
   return (
     <header className="fixed inset-x-0 top-0 z-40 border-b border-base-300/60 bg-base-300/85 backdrop-blur">
       <div className="mx-auto w-full max-w-[1500px] px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between gap-3 py-3">
-          <p className="text-lg font-semibold tracking-wide text-base-content sm:text-xl">night-orch</p>
+          <div className="flex flex-col">
+            <p className="text-lg font-semibold tracking-wide text-base-content sm:text-xl">night-orch</p>
+            <p className="text-xs font-mono text-base-content/70">frontend v{frontendVersion} · sha {frontendShortSha}</p>
+            <p className="text-[11px] font-mono text-base-content/50">backend v{backendVersion} · sha {backendShortSha}</p>
+          </div>
           <div className="flex flex-col items-end gap-1">
             <span className="text-[10px] uppercase tracking-[0.22em] text-base-content/65">Current State</span>
             <span className={`badge badge-sm capitalize ${currentStateToneClass}`}>{currentStateLabel}</span>

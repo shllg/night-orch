@@ -22,6 +22,8 @@ import {
 const MUTATION_INTENT_HEADER = 'x-night-orch-intent'
 const MUTATION_INTENT_VALUE = 'mutate'
 const WEB_AUTH_TOKEN_HEADER = 'x-night-orch-web-token'
+const FRONTEND_BUILD_VERSION = import.meta.env.VITE_BUILD_VERSION ?? 'unknown'
+const FRONTEND_BUILD_GIT_SHA = import.meta.env.VITE_BUILD_GIT_SHA ?? 'unknown'
 
 interface PlaceholderPageProps {
   title: string
@@ -516,6 +518,10 @@ export function App(): ReactElement {
         onPageChange={setActivePage}
         currentStateLabel={currentState.label}
         currentStateToneClass={currentState.toneClass}
+        frontendVersion={FRONTEND_BUILD_VERSION}
+        frontendGitSha={FRONTEND_BUILD_GIT_SHA}
+        backendVersion={snapshot?.build?.version ?? 'unknown'}
+        backendGitSha={snapshot?.build?.gitSha ?? null}
       />
 
       <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-5 px-4 pb-6 pt-[var(--orch-header-offset)] sm:px-6 lg:px-8">

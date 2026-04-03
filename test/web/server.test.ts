@@ -253,10 +253,15 @@ describe('startWebServer', () => {
     const dashboard = await fetch(`${baseUrl}/api/dashboard`)
     expect(dashboard.status).toBe(200)
     const payload = await dashboard.json() as {
+      build: { version: string; gitSha: string | null }
       runs: { runs: Array<{ issue: number; status: string; runId: string; hasRun: boolean }> }
     }
     const trackedIssue = payload.runs.runs.find((run) => run.issue === 58)
 
+    expect(payload.build.version).toMatch(/\S+/)
+    if (payload.build.gitSha !== null) {
+      expect(payload.build.gitSha).toMatch(/^[0-9a-f]{7,40}$/)
+    }
     expect(trackedIssue).toBeDefined()
     expect(trackedIssue?.status).toBe('queued')
     expect(trackedIssue?.hasRun).toBe(false)

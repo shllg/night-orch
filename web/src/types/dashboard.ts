@@ -32,6 +32,10 @@ export interface DashboardSnapshot {
   cost: {
     dailyBudgetUsd: number
   }
+  build?: {
+    version: string
+    gitSha: string | null
+  }
   config: {
     repos: string[]
     pollIntervalSeconds: number
