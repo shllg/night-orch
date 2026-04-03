@@ -591,13 +591,15 @@ export async function pollOnce(
                 } catch (err) {
                   logger.error({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err }, 'Failed to process issue')
                   if (runId) {
+                    const errorMessage = toErrorMessage(err)
                     const recentErrors = runManager.countRecentErrors(repoConfig.repo, discoveredIssue.issue.number)
                     const maxRetries = config.loop.maxAutoRetries
                     const canAutoRetry = recentErrors < maxRetries
+                    const attemptCount = recentErrors + 1
 
                     runManager.update(runId, {
                       status: 'error',
-                      lastError: String(err),
+                      lastError: errorMessage,
                       endedAt: nowUtcIso(),
                     })
 
@@ -621,6 +623,17 @@ export async function pollOnce(
                       } catch (labelErr) {
                         logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: labelErr }, 'Failed to transition labels for auto-retry')
                       }
+                      await postErrorStatusComment({
+                        forge,
+                        issueRepo,
+                        issueNumber: discoveredIssue.issue.number,
+                        botUser,
+                        error: `Attempt ${attemptCount} failed. Last error: ${errorMessage}`,
+                        retryCount: attemptCount,
+                        maxRetries,
+                        nextStep: 'Automatic retry queued. night-orch will retry this issue on the next poll cycle.',
+                        warnMessage: 'Failed to post auto-retry status comment',
+                      })
                     } else {
                       // Retries exhausted: mark as error, require human
                       logger.warn(
@@ -638,22 +651,24 @@ export async function pollOnce(
                           'error',
                           buildLabelConfig(repoConfig, latestIssue.labels),
                         )
-                        const errorBody = formatStatusComment({
-                          error: `Failed after ${recentErrors + 1} attempts. Last error: ${(err as Error).message}`,
-                          retryCount: recentErrors + 1,
-                          maxRetries: maxRetries,
-                        })
-                        if (botUser) {
-                          await upsertBotComment(forge, issueRepo, discoveredIssue.issue.number, STATUS_MARKER, errorBody, botUser)
-                        } else {
-                          await forge.commentOnIssue(issueRepo, discoveredIssue.issue.number, `⚠️ **night-orch**: Failed after ${recentErrors + 1} attempts. Last error: ${(err as Error).message}\n\nRemove \`orch:error\` and add \`orch:ready\` to retry.`)
-                        }
                       } catch (labelErr) {
                         logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: labelErr }, 'Failed to transition labels after retry exhaustion')
                       }
+                      await postErrorStatusComment({
+                        forge,
+                        issueRepo,
+                        issueNumber: discoveredIssue.issue.number,
+                        botUser,
+                        error: `Failed after ${attemptCount} attempts. Last error: ${errorMessage}`,
+                        retryCount: attemptCount,
+                        maxRetries,
+                        nextStep: 'Manual action required: inspect the failure, then run /orch retry or /orch continue.',
+                        warnMessage: 'Failed to post retry-exhausted status comment',
+                      })
+                      const sanitizedErrorForSummary = sanitizeErrorForComment(errorMessage)
                       try {
                         await notifier.dispatch(makePayload('retry_exhausted', repoConfig.repo, discoveredIssue.issue, {
-                          summary: `Failed after ${recentErrors + 1} attempts: ${(err as Error).message}`,
+                          summary: `Failed after ${attemptCount} attempts: ${sanitizedErrorForSummary}`,
                         }))
                       } catch (notifyErr) {
                         logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: notifyErr }, 'Failed to send retry exhaustion notification')
@@ -776,6 +791,7 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
       return 'processed'
     } catch (err) {
       logger.error({ err }, 'Failed to publish PR')
+      const errorMessage = toErrorMessage(err)
 
       // Merge conflicts during push get structured block reason so retry resets the branch
       if (err instanceof MergeConflictError) {
@@ -795,6 +811,17 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
           'blocked',
           buildLabelConfig(repoConfig, latestIssue.labels),
         )
+        await postStatusComment({
+          forge,
+          issueRepo,
+          issueNumber,
+          botUser,
+          body: formatStatusComment({
+            blockReason: 'Publish failed due to merge conflicts while pushing branch updates.',
+            nextStep: 'Run /orch retry to reset the branch to base and re-implement on top of latest main.',
+          }),
+          warnMessage: 'Failed to post publish merge-conflict status comment',
+        })
         try {
           metrics?.incRunsTotal('blocked')
           metrics?.observeRunDuration(runDurationSec)
@@ -802,7 +829,7 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
         return 'error'
       }
 
-      runManager.update(runId, { status: 'error', lastError: String(err), endedAt: nowUtcIso() })
+      runManager.update(runId, { status: 'error', lastError: errorMessage, endedAt: nowUtcIso() })
       const recentErrors = new RunManager(db).countRecentErrors(repo, issueNumber)
       const latestIssue = await forge.getIssue(issueRepo, issueNumber)
       if (recentErrors < maxAutoRetries) {
@@ -816,6 +843,17 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
           buildLabelConfig(repoConfig, latestIssue.labels),
         )
         logger.info({ repo, issueNumber, recentErrors }, 'Publish failed — auto-retrying')
+        await postErrorStatusComment({
+          forge,
+          issueRepo,
+          issueNumber,
+          botUser,
+          error: `Publish failed. Last error: ${errorMessage}`,
+          retryCount: recentErrors,
+          maxRetries: maxAutoRetries,
+          nextStep: 'Automatic retry queued. night-orch will retry this issue on the next poll cycle.',
+          warnMessage: 'Failed to post publish auto-retry status comment',
+        })
       } else {
         await transitionLabels(
           forge,
@@ -826,6 +864,25 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
           'error',
           buildLabelConfig(repoConfig, latestIssue.labels),
         )
+        await postErrorStatusComment({
+          forge,
+          issueRepo,
+          issueNumber,
+          botUser,
+          error: `Failed after ${recentErrors} attempts. Last error: ${errorMessage}`,
+          retryCount: recentErrors,
+          maxRetries: maxAutoRetries,
+          nextStep: 'Manual action required: inspect the failure, then run /orch retry or /orch continue.',
+          warnMessage: 'Failed to post publish retry-exhausted status comment',
+        })
+        const sanitizedErrorForSummary = sanitizeErrorForComment(errorMessage)
+        try {
+          await notifier.dispatch(makePayload('retry_exhausted', repo, issue, {
+            summary: `Publish failed after ${recentErrors} attempts: ${sanitizedErrorForSummary}`,
+          }))
+        } catch (notifyErr) {
+          logger.warn({ repo, issueNumber, err: notifyErr }, 'Failed to send publish retry exhaustion notification')
+        }
       }
       try {
         metrics?.incRunsTotal('error')
@@ -896,6 +953,17 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
       buildLabelConfig(repoConfig, latestIssue.labels),
     )
     logger.info({ repo, issueNumber, recentErrors }, 'Unexpected state — auto-retrying')
+    await postErrorStatusComment({
+      forge,
+      issueRepo,
+      issueNumber,
+      botUser,
+      error: `Loop entered unexpected state: ${finalCtx.terminalStatus}/${finalCtx.currentPhase}`,
+      retryCount: recentErrors,
+      maxRetries: maxAutoRetries,
+      nextStep: 'Automatic retry queued. night-orch will retry this issue on the next poll cycle.',
+      warnMessage: 'Failed to post unexpected-state auto-retry status comment',
+    })
   } else {
     await transitionLabels(
       forge,
@@ -906,14 +974,17 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
       'error',
       buildLabelConfig(repoConfig, latestIssue.labels),
     )
-    try {
-      const unexpectedBody = formatStatusComment({ error: `Failed after ${recentErrors + 1} attempts. Last error: ${unexpectedError}` })
-      if (botUser) {
-        await upsertBotComment(forge, issueRepo, issueNumber, STATUS_MARKER, unexpectedBody, botUser)
-      } else {
-        await forge.commentOnIssue(issueRepo, issueNumber, `⚠️ **night-orch**: Failed after ${recentErrors + 1} attempts. Last error: ${unexpectedError}`)
-      }
-    } catch { /* best-effort */ }
+    await postErrorStatusComment({
+      forge,
+      issueRepo,
+      issueNumber,
+      botUser,
+      error: `Failed after ${recentErrors} attempts. Last error: ${unexpectedError}`,
+      retryCount: recentErrors,
+      maxRetries: maxAutoRetries,
+      nextStep: 'Manual action required: inspect the failure, then run /orch retry or /orch continue.',
+      warnMessage: 'Failed to post unexpected-state retry-exhausted status comment',
+    })
   }
   try {
     metrics?.incRunsTotal('error')
@@ -979,6 +1050,141 @@ function makePayload(
     timestamp: nowUtcIso(),
     ...extra,
   }
+}
+
+interface PostStatusCommentParams {
+  forge: ReturnType<typeof createForgeAdapter>
+  issueRepo: string
+  issueNumber: number
+  botUser: string
+  body: string
+  warnMessage: string
+}
+
+async function postStatusComment(params: PostStatusCommentParams): Promise<void> {
+  const {
+    forge,
+    issueRepo,
+    issueNumber,
+    botUser,
+    body,
+    warnMessage,
+  } = params
+
+  try {
+    if (botUser) {
+      await upsertBotComment(forge, issueRepo, issueNumber, STATUS_MARKER, body, botUser)
+    } else {
+      await forge.commentOnIssue(issueRepo, issueNumber, body)
+    }
+  } catch (commentErr) {
+    logger.warn({ repo: issueRepo, issueNumber, err: commentErr }, warnMessage)
+  }
+}
+
+interface PostErrorStatusCommentParams {
+  forge: ReturnType<typeof createForgeAdapter>
+  issueRepo: string
+  issueNumber: number
+  botUser: string
+  error: string
+  retryCount: number
+  maxRetries: number
+  nextStep: string
+  warnMessage: string
+}
+
+const ERROR_COMMENT_MAX_LENGTH = 400
+const TOKEN_REDACTION_PATTERNS: RegExp[] = [
+  /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/g,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
+  /\bsk-[A-Za-z0-9]{20,}\b/g,
+  /\bAKIA[0-9A-Z]{16}\b/g,
+  /\bASIA[0-9A-Z]{16}\b/g,
+  /\bAIza[0-9A-Za-z\-_]{20,}\b/g,
+  /\bxox[baprs]-[A-Za-z0-9-]{20,}\b/g,
+]
+
+async function postErrorStatusComment(params: PostErrorStatusCommentParams): Promise<void> {
+  const {
+    forge,
+    issueRepo,
+    issueNumber,
+    botUser,
+    error,
+    retryCount,
+    maxRetries,
+    nextStep,
+    warnMessage,
+  } = params
+
+  const sanitizedError = sanitizeErrorForComment(error)
+  const body = formatStatusComment({
+    error: sanitizedError,
+    retryCount,
+    maxRetries,
+    nextStep,
+  })
+
+  await postStatusComment({
+    forge,
+    issueRepo,
+    issueNumber,
+    botUser,
+    body,
+    warnMessage,
+  })
+}
+
+function toErrorMessage(err: unknown): string {
+  if (err instanceof Error && typeof err.message === 'string' && err.message.trim().length > 0) {
+    return err.message
+  }
+  return String(err)
+}
+
+function sanitizeErrorForComment(errorMessage: string): string {
+  let sanitized = errorMessage
+    .replace(/[\r\n]+/g, ' ')
+  sanitized = stripControlChars(sanitized)
+  sanitized = sanitized
+    .replace(/\b(token|secret|password|passwd|api[_-]?key)\s*[:=]\s*([^\s,;]+)/gi, '$1=[REDACTED]')
+    .trim()
+
+  for (const pattern of TOKEN_REDACTION_PATTERNS) {
+    sanitized = sanitized.replace(pattern, '[REDACTED]')
+  }
+
+  sanitized = sanitized.replace(/\s+/g, ' ').trim()
+  if (!sanitized) return 'unknown error'
+
+  const clipped = sanitized.length > ERROR_COMMENT_MAX_LENGTH
+    ? `${sanitized.slice(0, ERROR_COMMENT_MAX_LENGTH - 1)}…`
+    : sanitized
+
+  return escapeMarkdownForComment(clipped)
+}
+
+function escapeMarkdownForComment(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/([`*_#[\]])/g, '\\$1')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/@/g, '@\u200B')
+}
+
+function stripControlChars(value: string): string {
+  let out = ''
+  for (const ch of value) {
+    const code = ch.charCodeAt(0)
+    if ((code >= 0 && code <= 31) || code === 127) {
+      out += ' '
+      continue
+    }
+    out += ch
+  }
+  return out
 }
 
 interface ProcessCommentCommandsParams {

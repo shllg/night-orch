@@ -22,7 +22,7 @@ export interface PublishErrorResult {
 async function transitionToError(
   forge: ForgeAdapter,
   ctx: RunContext,
-  errorMessage: string,
+  _errorMessage: string,
 ): Promise<void> {
   const issueRepo = ctx.issueRepo ?? ctx.repo
 
@@ -40,17 +40,11 @@ async function transitionToError(
   } catch (labelErr) {
     logger.warn({ repo: issueRepo, issue: ctx.issueNumber, err: labelErr }, 'Failed to transition labels to error during publish failure')
   }
-
-  try {
-    await forge.commentOnIssue(issueRepo, ctx.issueNumber, `Publishing failed: ${errorMessage}`)
-  } catch (commentErr) {
-    logger.warn({ repo: issueRepo, issue: ctx.issueNumber, err: commentErr }, 'Failed to comment on issue during publish failure')
-  }
 }
 
 /**
  * Push branch and create/update PR.
- * On failure, transitions labels to error and notifies via issue comment.
+ * On failure, transitions labels to error. Caller owns status-comment reporting.
  */
 export async function publishPR(
   ctx: RunContext,

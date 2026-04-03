@@ -20,10 +20,12 @@ describe('formatStatusComment', () => {
       error: 'Worker timeout',
       retryCount: 2,
       maxRetries: 3,
+      nextStep: 'Automatic retry queued.',
     })
     expect(result).toContain('**Status:** Error')
     expect(result).toContain('Worker timeout')
     expect(result).toContain('**Retries:** 2/3')
+    expect(result).toContain('**Next:** Automatic retry queued.')
   })
 
   it('renders PR ready status', () => {

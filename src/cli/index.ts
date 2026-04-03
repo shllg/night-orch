@@ -88,7 +88,7 @@ program
   .command('continue')
   .argument('<repo>', 'Repository (owner/name)')
   .argument('<issue-number>', 'Issue number')
-  .description('Queue a context-aware continue pass for blocked/review_ready work')
+  .description('Queue a context-aware continue pass for blocked/review_ready/error work')
   .action((repo, issueNumber, _opts, cmd) => continueCommand(repo, issueNumber, cmd.parent?.opts()))
 
 program

@@ -16,6 +16,7 @@ const mockDiscoverEligibleIssues = vi.fn().mockResolvedValue([])
 const mockCommentOnIssue = vi.fn().mockResolvedValue(undefined)
 const mockListIssueComments = vi.fn().mockResolvedValue([])
 const mockIsCollaborator = vi.fn().mockResolvedValue(true)
+const mockNotificationDispatch = vi.fn().mockResolvedValue({ sent: [] })
 vi.mock('../../src/discovery/discover.js', () => ({
   discoverEligibleIssues: (...args: unknown[]) => mockDiscoverEligibleIssues(...args),
 }))
@@ -54,7 +55,7 @@ vi.mock('../../src/notify/factory.js', () => ({
 
 vi.mock('../../src/notify/dispatcher.js', () => {
   class MockNotificationDispatcher {
-    dispatch = vi.fn().mockResolvedValue({ sent: [] })
+    dispatch = (...args: unknown[]) => mockNotificationDispatch(...args)
   }
   return { NotificationDispatcher: MockNotificationDispatcher }
 })
@@ -134,7 +135,7 @@ function makeConfig(dbPath: string): Config {
     github: { tokenEnv: 'GITHUB_TOKEN', apiBaseUrl: 'https://api.github.com', pollIntervalSeconds: 300, appMentions: {} },
     storage: { dbPath, worktreeRoot: '/tmp/wt', logsRoot: '/tmp/logs' },
     notifications: { channels: [], events: { onRunStarted: false, onBlocked: true, onPrReady: true, onError: true, onRetryExhausted: true } },
-    loop: { maxReviewIterations: 4, maxTotalAgentPasses: 10, stopOnPlannerFailure: true, requireVerificationPass: true, reviewApprovalKeyword: 'APPROVED', reviewNeedsChangesKeyword: 'CHANGES_REQUIRED', blockOnAmbiguousReview: true },
+    loop: { maxReviewIterations: 4, maxTotalAgentPasses: 10, stopOnPlannerFailure: true, requireVerificationPass: true, reviewApprovalKeyword: 'APPROVED', reviewNeedsChangesKeyword: 'CHANGES_REQUIRED', blockOnAmbiguousReview: true, maxAutoRetries: 3 },
     security: { maxChangedFiles: 50, maxChangedLines: 5000, maxDailyCostUsd: 50, maxCostPerRunUsd: 10 },
     metrics: { enabled: false, port: 9090, host: '127.0.0.1' },
     commentCommands: { enabled: true, requireCollaborator: false },
@@ -493,6 +494,108 @@ describe('pollOnce', () => {
     expect(result.errors).toBe(1)
     const row = db.prepare('SELECT status FROM runs ORDER BY created_at DESC LIMIT 1').get() as { status: string }
     expect(row.status).toBe('error')
+  })
+
+  it('posts a structured auto-retry status comment when publish fails and retries remain', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([{
+      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      triage: { level: 'standard', reason: '' },
+    }])
+    mockExecuteLoop.mockResolvedValue({
+      currentPhase: 'completed',
+      terminalStatus: 'publish',
+    })
+    mockPublishPR.mockRejectedValueOnce(new Error('publish failed'))
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    await pollOnce(config, db, false)
+
+    const statusComment = mockCommentOnIssue.mock.calls.find(
+      (call) => typeof call[2] === 'string' && call[2].includes('**Status:** Error') && call[2].includes('Automatic retry queued'),
+    )
+    expect(statusComment).toBeDefined()
+    expect(statusComment?.[0]).toBe('org/repo')
+    expect(statusComment?.[1]).toBe(1)
+    expect(statusComment?.[2]).toContain('Publish failed. Last error: publish failed')
+  })
+
+  it('posts a structured retry-exhausted status comment when publish retries are exhausted', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([{
+      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      triage: { level: 'standard', reason: '' },
+    }])
+    mockExecuteLoop.mockResolvedValue({
+      currentPhase: 'completed',
+      terminalStatus: 'publish',
+    })
+    mockPublishPR.mockRejectedValueOnce(new Error('publish failed'))
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    config.loop.maxAutoRetries = 0
+    await pollOnce(config, db, false)
+
+    const statusComment = mockCommentOnIssue.mock.calls.find(
+      (call) => typeof call[2] === 'string' && call[2].includes('Failed after 1 attempts. Last error: publish failed'),
+    )
+    expect(statusComment).toBeDefined()
+    expect(statusComment?.[2]).toContain('**Status:** Error')
+    expect(statusComment?.[2]).toContain('Manual action required')
+  })
+
+  it('sanitizes error content before posting status comments', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([{
+      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      triage: { level: 'standard', reason: '' },
+    }])
+    mockExecuteLoop.mockResolvedValue({
+      currentPhase: 'completed',
+      terminalStatus: 'publish',
+    })
+    mockPublishPR.mockRejectedValueOnce(new Error('token=ghp_abcdefghijklmnopqrstuvwxyz123456\n@maintainer *boom*'))
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    config.loop.maxAutoRetries = 0
+    await pollOnce(config, db, false)
+
+    const statusComment = mockCommentOnIssue.mock.calls.find(
+      (call) => typeof call[2] === 'string' && call[2].includes('**Status:** Error'),
+    )
+    expect(statusComment).toBeDefined()
+    const body = statusComment?.[2] as string
+    expect(body).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz123456')
+    expect(body).toContain('token=\\[REDACTED\\]')
+    expect(body).not.toContain('@maintainer')
+    expect(body).toContain(`@\u200Bmaintainer`)
+    expect(body).not.toContain('*boom*')
+    expect(body).toContain('\\*boom\\*')
+  })
+
+  it('sanitizes retry_exhausted notification summaries', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([{
+      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      triage: { level: 'standard', reason: '' },
+    }])
+    mockExecuteLoop.mockResolvedValue({
+      currentPhase: 'completed',
+      terminalStatus: 'publish',
+    })
+    mockPublishPR.mockRejectedValueOnce(new Error('token=ghp_abcdefghijklmnopqrstuvwxyz123456\n@maintainer *boom*'))
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    config.loop.maxAutoRetries = 0
+    await pollOnce(config, db, false)
+
+    const retryExhaustedPayload = mockNotificationDispatch.mock.calls
+      .map((call) => call[0] as { event: string; summary: string })
+      .find((payload) => payload.event === 'retry_exhausted')
+
+    expect(retryExhaustedPayload).toBeDefined()
+    expect(retryExhaustedPayload?.summary).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz123456')
+    expect(retryExhaustedPayload?.summary).toContain('token=\\[REDACTED\\]')
+    expect(retryExhaustedPayload?.summary).not.toContain('@maintainer')
+    expect(retryExhaustedPayload?.summary).toContain(`@\u200Bmaintainer`)
+    expect(retryExhaustedPayload?.summary).not.toContain('*boom*')
+    expect(retryExhaustedPayload?.summary).toContain('\\*boom\\*')
   })
 
   it('posts a night-orch plan summary comment through the loop onPlanReady hook', async () => {

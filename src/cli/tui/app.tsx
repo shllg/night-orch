@@ -655,7 +655,7 @@ export function App({
 
   const runContinue = useCallback(async () => {
     await runAction('continue', async () => {
-      const target = selectedIssue ?? issues.find((issue) => issue.status === 'blocked' || issue.status === 'review_ready')
+      const target = selectedIssue ?? issues.find((issue) => issue.status === 'blocked' || issue.status === 'review_ready' || issue.status === 'error')
       if (!target) throw new Error('No issue selected')
       const repoConfig = config.repos.find((r) => r.repo === target.repo)
       if (!repoConfig) throw new Error(`Repo not found in config: ${target.repo}`)

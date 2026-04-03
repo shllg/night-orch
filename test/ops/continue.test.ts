@@ -161,7 +161,7 @@ describe('queueContinue', () => {
     expect(updated?.phaseData?.reactionContext).not.toContain('/orch continue')
   })
 
-  it('rejects continue for unsupported statuses', async () => {
+  it('queues error runs for a follow-up continue pass', async () => {
     const runManager = new RunManager(db)
     const run = runManager.create({
       repo: 'org/repo',
@@ -174,15 +174,43 @@ describe('queueContinue', () => {
     runManager.update(run.id, {
       status: 'error',
       endedAt: '2026-02-01T12:00:00Z',
+      lastError: 'Worker crashed while parsing output',
     })
 
     const forge = makeForge()
     const result = await queueContinue(db, forge, makeRepoConfig(), 59, '')
 
+    expect(result.queued).toBe(true)
+    expect(result.reason).toContain('Queued for continue pass')
+    const updated = runManager.getByRepoAndIssue('org/repo', 59)
+    expect(updated?.status).toBe('queued')
+    expect(updated?.phaseData?.reactionType).toBe('continue')
+    expect(updated?.phaseData?.reactionContext).toContain('## Previous Run State')
+    expect(updated?.phaseData?.reactionContext).toContain('Worker crashed while parsing output')
+  })
+
+  it('rejects continue for unsupported statuses', async () => {
+    const runManager = new RunManager(db)
+    const run = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 62,
+      issueNodeId: 'node-62',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(run.id, {
+      status: 'completed',
+      endedAt: '2026-02-01T12:00:00Z',
+    })
+
+    const forge = makeForge()
+    const result = await queueContinue(db, forge, makeRepoConfig(), 62, '')
+
     expect(result.queued).toBe(false)
-    expect(result.reason).toContain('blocked/review_ready')
-    const unchanged = runManager.getByRepoAndIssue('org/repo', 59)
-    expect(unchanged?.status).toBe('error')
+    expect(result.reason).toContain('blocked/review_ready/error')
+    const unchanged = runManager.getByRepoAndIssue('org/repo', 62)
+    expect(unchanged?.status).toBe('completed')
   })
 
   it('queues fallback continue context when no PR signals exist', async () => {
