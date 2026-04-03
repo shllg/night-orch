@@ -1,6 +1,7 @@
 import React from 'react'
 import { Box, Text } from 'ink'
 import type Database from 'better-sqlite3'
+import { formatTime } from './format.js'
 
 interface AgentStreamProps {
   db: Database.Database
@@ -132,10 +133,4 @@ function asString(value: unknown): string | null {
 function truncate(value: string, maxLen = 64): string {
   if (value.length <= maxLen) return value
   return `${value.slice(0, maxLen - 3)}...`
-}
-
-function formatTime(timestamp: string): string {
-  const date = new Date(timestamp)
-  if (Number.isNaN(date.getTime())) return '--:--:--'
-  return date.toISOString().slice(11, 19)
 }

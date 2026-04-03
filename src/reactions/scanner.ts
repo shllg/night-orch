@@ -1,6 +1,7 @@
 import type { ForgeAdapter, PRCheckStatus, ForgePRReview, ForgePRReviewComment } from '../forge/types.js'
 import type { Reaction, ReactionCursor, ReactionScanResult } from './types.js'
 import { logger } from '../utils/logger.js'
+import { nowUtcIso } from '../utils/time.js'
 
 const EMPTY_CURSOR: ReactionCursor = {
   lastReviewId: 0,
@@ -27,7 +28,7 @@ export async function scanForReactions(
 ): Promise<ReactionScanResult> {
   const reactions: Reaction[] = []
   const newCursor: ReactionCursor = { ...cursor }
-  const now = new Date().toISOString()
+  const now = nowUtcIso()
 
   // 0. Check mergeability (conflicting PRs should trigger rebase flow).
   if (forge.getPR) {

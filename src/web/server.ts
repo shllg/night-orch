@@ -11,6 +11,7 @@ import { handleToolCall } from '../mcp/tools/index.js'
 import { handleResourceRead } from '../mcp/resources/index.js'
 import { loadTuiStats } from '../state/stats.js'
 import { logger } from '../utils/logger.js'
+import { nowUtcIso } from '../utils/time.js'
 
 export interface WebServerOptions {
   host: string
@@ -168,7 +169,7 @@ export async function startWebServer(
 
     sendWebsocket(ws, {
       type: 'connected',
-      payload: { timestamp: new Date().toISOString() },
+      payload: { timestamp: nowUtcIso() },
     })
 
     ws.on('message', (raw) => {
@@ -264,7 +265,7 @@ async function handleApiRequest(
   }
 
   if (method === 'GET' && pathname === '/api/health') {
-    writeJson(res, 200, { status: 'ok', now: new Date().toISOString() })
+    writeJson(res, 200, { status: 'ok', now: nowUtcIso() })
     return
   }
 
@@ -485,7 +486,7 @@ async function handleApiRequest(
     const dataDir = resolve(homedir(), '.config', 'night-orch')
     const triggerPath = resolve(dataDir, 'update-requested')
     mkdirSync(dataDir, { recursive: true })
-    writeFileSync(triggerPath, new Date().toISOString())
+    writeFileSync(triggerPath, nowUtcIso())
     writeJson(res, 200, { accepted: true, method: 'trigger-file' })
     return
   }
@@ -846,7 +847,7 @@ async function buildDashboardSnapshot(deps: MCPDependencies): Promise<DashboardS
   ])
 
   return {
-    generatedAt: new Date().toISOString(),
+    generatedAt: nowUtcIso(),
     status,
     runs,
     cost,

@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
 import { generateRunId } from '../utils/ids.js'
+import { nowUtcIso } from '../utils/time.js'
 import { IssueManager } from './issues.js'
 
 export type RunStatus = 'queued' | 'running' | 'blocked' | 'review_ready' | 'error' | 'completed'
@@ -50,7 +51,7 @@ export class RunManager {
 
   create(params: CreateRunParams): RunRecord {
     const id = generateRunId()
-    const now = new Date().toISOString()
+    const now = nowUtcIso()
 
     const createTx = this.db.transaction(() => {
       const activeExisting = this.db
@@ -154,7 +155,8 @@ export class RunManager {
 
     if (setClauses.length === 0) return
 
-    setClauses.push("updated_at = datetime('now')")
+    setClauses.push('updated_at = ?')
+    values.push(nowUtcIso())
     values.push(id)
 
     const updateTx = this.db.transaction(() => {
@@ -206,7 +208,7 @@ export class RunManager {
       .prepare(
         `SELECT COUNT(*) as cnt FROM runs
          WHERE repo = ? AND issue_number = ? AND status = 'error'
-         AND ended_at > datetime('now', '-' || ? || ' minutes')`,
+         AND datetime(ended_at) > datetime('now', '-' || ? || ' minutes')`,
       )
       .get(repo, issueNumber, windowMinutes) as { cnt: number } | undefined
     return row?.cnt ?? 0

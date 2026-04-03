@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import { nowUtcIso } from '../utils/time.js'
 
 export class LeaseManager {
   constructor(private db: Database.Database) {}
@@ -8,7 +9,7 @@ export class LeaseManager {
    * Uses INSERT OR IGNORE + check for atomicity.
    */
   acquire(repo: string, issueNumber: number, owner: string, durationSeconds: number): boolean {
-    const now = new Date().toISOString()
+    const now = nowUtcIso()
     const acquireTx = this.db.transaction(
       (txRepo: string, txIssueNumber: number, txOwner: string, txNow: string, txDurationSeconds: number): boolean => {
         this.db
@@ -41,7 +42,7 @@ export class LeaseManager {
       .prepare(
         'SELECT 1 FROM leases WHERE repo = ? AND issue_number = ? AND leased_until >= datetime(?)',
       )
-      .get(repo, issueNumber, new Date().toISOString())
+      .get(repo, issueNumber, nowUtcIso())
     return row !== undefined
   }
 
@@ -49,7 +50,7 @@ export class LeaseManager {
   cleanExpired(): number {
     const result = this.db
       .prepare('DELETE FROM leases WHERE leased_until < datetime(?)')
-      .run(new Date().toISOString())
+      .run(nowUtcIso())
     return result.changes
   }
 

@@ -1,6 +1,7 @@
 import type { Config } from '../config/schema.js'
 import type { NotificationChannel, NotificationPayload, NotificationEvent, NotificationReport } from './types.js'
 import { logger } from '../utils/logger.js'
+import { nowUtcIso } from '../utils/time.js'
 
 const EVENT_CONFIG_MAP: Record<NotificationEvent, keyof Config['notifications']['events']> = {
   run_started: 'onRunStarted',
@@ -40,7 +41,7 @@ export class NotificationDispatcher {
       blockingReason: null,
       reviewSummary: null,
       iterationCount: 0,
-      timestamp: new Date().toISOString(),
+      timestamp: nowUtcIso(),
     }
 
     return this.sendToAll(testPayload)

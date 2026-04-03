@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import { nowUtcIso } from '../utils/time.js'
 
 export type IssueStatus = 'queued' | 'running' | 'blocked' | 'review_ready' | 'error' | 'completed'
 
@@ -139,7 +140,7 @@ export class IssueManager {
          run_count,
          created_at,
          updated_at
-       ) VALUES (?, ?, ?, ?, 'queued', 0, 0, 0, datetime('now'), datetime('now'))
+       ) VALUES (?, ?, ?, ?, 'queued', 0, 0, 0, ?, ?)
        ON CONFLICT(repo, issue_number) DO UPDATE SET
          issue_node_id = COALESCE(excluded.issue_node_id, issues.issue_node_id),
          issue_title = COALESCE(excluded.issue_title, issues.issue_title),
@@ -147,16 +148,20 @@ export class IssueManager {
            WHEN issues.current_run_id IS NULL THEN 'queued'
            ELSE issues.status
          END,
-         updated_at = datetime('now')`,
+         updated_at = ?`,
     )
 
     const tx = this.db.transaction((items: readonly DiscoveredIssueRow[]) => {
       for (const row of items) {
+        const now = nowUtcIso()
         stmt.run(
           row.repo,
           row.issueNumber,
           row.issueNodeId,
           row.issueTitle,
+          now,
+          now,
+          now,
         )
       }
     })

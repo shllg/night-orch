@@ -28,6 +28,7 @@ import { createChannels } from '../notify/factory.js'
 import { CostTracker } from '../loop/cost.js'
 import { branchName } from '../utils/ids.js'
 import { logger } from '../utils/logger.js'
+import { nowUtcIso } from '../utils/time.js'
 import type { RunContext } from '../loop/types.js'
 import type { NotificationPayload } from '../notify/types.js'
 import { postPlanSummaryComment } from '../loop/plan-summary-comment.js'
@@ -329,7 +330,7 @@ export async function pollOnce(
                       status: 'blocked',
                       blockReason: 'merge_conflict',
                       lastError: 'Rebase failed due to merge conflicts — retry will reset the branch and re-implement from scratch',
-                      endedAt: new Date().toISOString(),
+                      endedAt: nowUtcIso(),
                     })
                     const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
                     await transitionLabels(
@@ -355,7 +356,7 @@ export async function pollOnce(
                     logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number }, 'Rebase succeeded, verify passed — returning to review_ready')
                     runManager.update(run.id, {
                       status: 'review_ready',
-                      endedAt: new Date().toISOString(),
+                      endedAt: nowUtcIso(),
                       lastError: null,
                     })
                     const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
@@ -381,7 +382,7 @@ export async function pollOnce(
                     logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number }, 'Branch already up to date — returning to review_ready')
                     runManager.update(run.id, {
                       status: 'review_ready',
-                      endedAt: new Date().toISOString(),
+                      endedAt: nowUtcIso(),
                       lastError: null,
                     })
                     const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
@@ -507,7 +508,7 @@ export async function pollOnce(
 
                     const allSucceeded = subResults.every((r) => r.success)
                     if (allSucceeded) {
-                      runManager.update(run.id, { status: 'review_ready', endedAt: new Date().toISOString() })
+                      runManager.update(run.id, { status: 'review_ready', endedAt: nowUtcIso() })
                       const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
                       await transitionLabels(
                         forge,
@@ -527,7 +528,7 @@ export async function pollOnce(
                       runManager.update(run.id, {
                         status: 'blocked',
                         lastError: `${failed}/${decomposition.subtasks.length} sub-tasks failed`,
-                        endedAt: new Date().toISOString(),
+                        endedAt: nowUtcIso(),
                       })
                       const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
                       await transitionLabels(
@@ -595,7 +596,7 @@ export async function pollOnce(
                     runManager.update(runId, {
                       status: 'error',
                       lastError: String(err),
-                      endedAt: new Date().toISOString(),
+                      endedAt: nowUtcIso(),
                     })
 
                     if (canAutoRetry) {
@@ -745,7 +746,7 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
         status: 'review_ready',
         prNumber: publishResult.prNumber,
         prTitle: publishResult.prTitle,
-        endedAt: new Date().toISOString(),
+        endedAt: nowUtcIso(),
       })
       const latestIssue = await forge.getIssue(issueRepo, issueNumber)
       await transitionLabels(
@@ -780,7 +781,7 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
           status: 'blocked',
           blockReason: 'merge_conflict',
           lastError: err.message,
-          endedAt: new Date().toISOString(),
+          endedAt: nowUtcIso(),
         })
         const latestIssue = await forge.getIssue(issueRepo, issueNumber)
         await transitionLabels(
@@ -799,7 +800,7 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
         return 'error'
       }
 
-      runManager.update(runId, { status: 'error', lastError: String(err), endedAt: new Date().toISOString() })
+      runManager.update(runId, { status: 'error', lastError: String(err), endedAt: nowUtcIso() })
       const recentErrors = new RunManager(db).countRecentErrors(repo, issueNumber)
       const latestIssue = await forge.getIssue(issueRepo, issueNumber)
       if (recentErrors < maxAutoRetries) {
@@ -834,7 +835,7 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
 
   if (finalCtx.terminalStatus === 'blocked') {
     const blockReason = buildBlockReason(finalCtx)
-    runManager.update(runId, { status: 'blocked', lastError: blockReason, blockReason: finalCtx.blockReason, endedAt: new Date().toISOString() })
+    runManager.update(runId, { status: 'blocked', lastError: blockReason, blockReason: finalCtx.blockReason, endedAt: nowUtcIso() })
     const latestIssue = await forge.getIssue(issueRepo, issueNumber)
     await transitionLabels(
       forge,
@@ -879,7 +880,7 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
   }
 
   const unexpectedError = `Loop ended in unexpected state: ${finalCtx.terminalStatus}/${finalCtx.currentPhase}`
-  runManager.update(runId, { status: 'error', lastError: unexpectedError, endedAt: new Date().toISOString() })
+  runManager.update(runId, { status: 'error', lastError: unexpectedError, endedAt: nowUtcIso() })
   const recentErrors = new RunManager(db).countRecentErrors(repo, issueNumber)
   const latestIssue = await forge.getIssue(issueRepo, issueNumber)
   if (recentErrors < maxAutoRetries) {
@@ -973,7 +974,7 @@ function makePayload(
     blockingReason: null,
     reviewSummary: null,
     iterationCount: 0,
-    timestamp: new Date().toISOString(),
+    timestamp: nowUtcIso(),
     ...extra,
   }
 }
@@ -1328,7 +1329,7 @@ async function cancelRunFromComment(params: CancelRunFromCommentParams): Promise
 
   runManager.update(run.id, {
     status: 'blocked',
-    endedAt: new Date().toISOString(),
+    endedAt: nowUtcIso(),
     lastError: `Cancelled by @${user} via comment command`,
     blockReason: null,
   })

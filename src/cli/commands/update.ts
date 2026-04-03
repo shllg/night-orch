@@ -1,6 +1,7 @@
 import { resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { writeFileSync, mkdirSync } from 'node:fs'
+import { nowUtcIso } from '../../utils/time.js'
 
 export async function updateCommand(globalOpts?: { dryRun?: boolean }): Promise<void> {
   const dryRun = globalOpts?.dryRun ?? false
@@ -25,7 +26,7 @@ export async function updateCommand(globalOpts?: { dryRun?: boolean }): Promise<
   }
 
   mkdirSync(dataDir, { recursive: true })
-  writeFileSync(triggerPath, new Date().toISOString())
+  writeFileSync(triggerPath, nowUtcIso())
   process.stdout.write(
     `Update trigger written to ${triggerPath}\n` +
     'The supervisor will pick this up and start the update.\n',

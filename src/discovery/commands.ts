@@ -1,5 +1,6 @@
 import type { ForgeComment } from '../forge/types.js'
 import type Database from 'better-sqlite3'
+import { parseUtcTimestampMs } from '../utils/time.js'
 
 export type OrchCommand =
   | { type: 'retry'; resetPlan: boolean }
@@ -51,11 +52,13 @@ export function parseOrchCommands(
   comments: ForgeComment[],
   sinceTimestamp: string,
 ): ParsedCommand[] {
-  const since = new Date(sinceTimestamp).getTime()
+  const since = parseUtcTimestampMs(sinceTimestamp)
+  if (!Number.isFinite(since)) return []
   const results: ParsedCommand[] = []
 
   for (const comment of comments) {
-    if (new Date(comment.createdAt).getTime() <= since) continue
+    const commentTime = parseUtcTimestampMs(comment.createdAt)
+    if (!Number.isFinite(commentTime) || commentTime <= since) continue
 
     const cleaned = stripCodeBlocks(comment.body)
     const match = COMMAND_PATTERN.exec(cleaned)

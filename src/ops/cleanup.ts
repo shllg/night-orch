@@ -8,6 +8,7 @@ import { LeaseManager } from '../state/leases.js'
 import { statSync, readdirSync, renameSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { logger } from '../utils/logger.js'
+import { nowUtcIso, parseUtcTimestampMs } from '../utils/time.js'
 
 export interface CleanupOptions {
   completedWorktrees: boolean
@@ -75,7 +76,7 @@ export class CleanupEngine {
     } else {
       const count = this.db
         .prepare('SELECT COUNT(*) as c FROM leases WHERE leased_until < datetime(?)')
-        .get(new Date().toISOString()) as { c: number }
+        .get(nowUtcIso()) as { c: number }
       result.expiredLeases = count.c
     }
 
@@ -156,13 +157,17 @@ export class CleanupEngine {
     }
 
     if (row.status === 'error' && row.ended_at) {
-      const ageDays = (Date.now() - new Date(row.ended_at).getTime()) / (1000 * 60 * 60 * 24)
+      const endedAtMs = parseUtcTimestampMs(row.ended_at)
+      if (!Number.isFinite(endedAtMs)) return false
+      const ageDays = (Date.now() - endedAtMs) / (1000 * 60 * 60 * 24)
       return ageDays >= opts.errorWorktreeAgeDays
     }
 
     // Blocked and review_ready: clean after terminalWorktreeAgeDays
     if ((row.status === 'blocked' || row.status === 'review_ready') && row.ended_at) {
-      const ageDays = (Date.now() - new Date(row.ended_at).getTime()) / (1000 * 60 * 60 * 24)
+      const endedAtMs = parseUtcTimestampMs(row.ended_at)
+      if (!Number.isFinite(endedAtMs)) return false
+      const ageDays = (Date.now() - endedAtMs) / (1000 * 60 * 60 * 24)
       return ageDays >= opts.terminalWorktreeAgeDays
     }
 

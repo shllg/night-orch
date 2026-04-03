@@ -1,4 +1,5 @@
 import type { RunContext, LoopPhase, PhaseRecord } from './types.js'
+import { nowUtcIso } from '../utils/time.js'
 
 /**
  * Create an updated RunContext with new fields.
@@ -18,7 +19,7 @@ export function recordPhase(
   artifacts: Record<string, unknown> = {},
   startedAt?: string,
 ): RunContext {
-  const completedAt = new Date().toISOString()
+  const completedAt = nowUtcIso()
   const record: PhaseRecord = {
     phase,
     startedAt: startedAt ?? completedAt,

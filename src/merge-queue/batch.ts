@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3'
 import { nanoid } from 'nanoid'
 import type { MergeBatchRecord, MergeBatchStatus } from './types.js'
+import { nowUtcIso } from '../utils/time.js'
 
 /** Terminal statuses — a batch in one of these is no longer active. */
 const TERMINAL_STATUSES: MergeBatchStatus[] = ['passed', 'failed']
@@ -87,7 +88,8 @@ export class MergeBatchManager {
 
     if (setClauses.length === 0) return
 
-    setClauses.push("updated_at = datetime('now')")
+    setClauses.push('updated_at = ?')
+    values.push(nowUtcIso())
     values.push(id)
 
     this.db

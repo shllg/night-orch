@@ -10,6 +10,7 @@ import { computeLabelMutation } from '../labels/transitions.js'
 import { createWorktreeManager } from '../git/worktree.js'
 import { resolveIssueRepo } from '../utils/issue-repo.js'
 import { logger } from '../utils/logger.js'
+import { nowUtcIso } from '../utils/time.js'
 
 export interface SyncAction {
   repo: string
@@ -110,7 +111,7 @@ export class SyncEngine {
       // Count without deleting
       const count = this.db
         .prepare('SELECT COUNT(*) as c FROM leases WHERE leased_until < datetime(?)')
-        .get(new Date().toISOString()) as { c: number }
+        .get(nowUtcIso()) as { c: number }
       result.expiredLeases = count.c
     }
 
@@ -264,7 +265,7 @@ export class SyncEngine {
     if (!dryRun) {
       this.runManager.update(run.id, {
         status: 'completed',
-        endedAt: new Date().toISOString(),
+        endedAt: nowUtcIso(),
       })
       const issueRepo = resolveIssueRepoFromRun(run)
       this.leaseManager.release(issueRepo, run.issue_number)
@@ -283,7 +284,7 @@ export class SyncEngine {
     if (!dryRun) {
       this.runManager.update(run.id, {
         status: 'completed',
-        endedAt: new Date().toISOString(),
+        endedAt: nowUtcIso(),
       })
       const issueRepo = resolveIssueRepoFromRun(run)
       this.leaseManager.release(issueRepo, run.issue_number)

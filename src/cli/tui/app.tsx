@@ -20,6 +20,7 @@ import { StatsView } from './stats-view.js'
 import { collectMissingTitleTargets, hasReadableTitle, type TitleLookup } from './titles.js'
 import { TABS } from './constants.js'
 import type { RunsViewMode, TabId, TuiLogLine } from './types.js'
+import { formatUtcClock, nowUtcIso } from '../../utils/time.js'
 
 interface AppProps {
   db: Database.Database
@@ -215,7 +216,7 @@ export function App({
   const [selectedProjectIndex, setSelectedProjectIndex] = useState(0)
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [cleanupConfirmPending, setCleanupConfirmPending] = useState(false)
-  const [lastRefreshAt, setLastRefreshAt] = useState(new Date().toISOString())
+  const [lastRefreshAt, setLastRefreshAt] = useState(nowUtcIso())
   const [titleLookup, setTitleLookup] = useState<TitleLookup>({ issues: {}, prs: {} })
   const [runEventScrollOffset, setRunEventScrollOffset] = useState(0)
   const [selectedLogId, setSelectedLogId] = useState<number | null>(null)
@@ -248,7 +249,7 @@ export function App({
         ...current,
         {
           id: logSequence.current++,
-          createdAt: new Date().toISOString(),
+          createdAt: nowUtcIso(),
           level,
           message,
         },
@@ -275,7 +276,7 @@ export function App({
   }, [autoRefresh, pollIntervalMs])
 
   useEffect(() => {
-    setLastRefreshAt(new Date().toISOString())
+    setLastRefreshAt(nowUtcIso())
   }, [tick])
 
   useEffect(() => {
@@ -549,7 +550,7 @@ export function App({
 
   const forceRefresh = useCallback(() => {
     setTick((t) => t + 1)
-    setStatusLine(`Refreshed at ${new Date().toISOString().slice(11, 19)}`)
+    setStatusLine(`Refreshed at ${formatUtcClock(nowUtcIso())}`)
   }, [])
 
   const runAction = useCallback(async (

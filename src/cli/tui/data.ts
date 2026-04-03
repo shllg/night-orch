@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import { parseUtcTimestampMs } from '../../utils/time.js'
 
 export interface RunListRow {
   id: string
@@ -312,7 +313,7 @@ function compareRunRecency(a: RunListRow, b: RunListRow): number {
 
 function parseTimestamp(value: string | null | undefined): number {
   if (!value) return Number.NEGATIVE_INFINITY
-  const parsed = Date.parse(value)
+  const parsed = parseUtcTimestampMs(value)
   return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY
 }
 

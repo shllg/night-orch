@@ -14,6 +14,7 @@ import { isIssueEligibleForRepo } from '../../discovery/discover.js'
 import { pollOnce } from '../../runner/poller.js'
 import { flushActiveAgentObservability } from '../../events/observability.js'
 import { createForgeAdapter } from '../../forge/factory.js'
+import { nowUtcIso } from '../../utils/time.js'
 
 interface ToolDefinition {
   name: string
@@ -581,7 +582,7 @@ async function handleUpdate(
   const dataDir = resolve(homedir(), '.config', 'night-orch')
   const triggerPath = resolve(dataDir, 'update-requested')
   mkdirSync(dataDir, { recursive: true })
-  writeFileSync(triggerPath, new Date().toISOString())
+  writeFileSync(triggerPath, nowUtcIso())
   return { accepted: true, method: 'trigger-file' }
 }
 

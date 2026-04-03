@@ -1,6 +1,7 @@
 import { loadConfig, resolveConfigPath, ConfigError } from '../../config/loader.js'
 import { initDatabase } from '../../state/db.js'
 import { RunManager } from '../../state/runs.js'
+import { formatUtcDateTime, parseUtcTimestampMs } from '../../utils/time.js'
 
 interface GlobalOpts {
   config?: string
@@ -42,6 +43,7 @@ export async function statusCommand(globalOpts?: GlobalOpts): Promise<void> {
 
   // Header
   console.log('\n  night-orch status\n')
+  console.log('  Timestamps: UTC')
 
   // Active runs
   if (active.length === 0) {
@@ -58,7 +60,7 @@ export async function statusCommand(globalOpts?: GlobalOpts): Promise<void> {
   if (activeLeases.length > 0) {
     console.log(`\n  Active leases: ${activeLeases.length}`)
     for (const l of activeLeases) {
-      console.log(`    ${l.repo}#${l.issue_number}  owner=${l.lease_owner}  expires=${l.leased_until}`)
+      console.log(`    ${l.repo}#${l.issue_number}  owner=${l.lease_owner}  expires=${formatUtcDateTime(l.leased_until)}`)
     }
   }
 
@@ -114,12 +116,17 @@ function statusIcon(status: string): string {
 }
 
 function timeSince(isoDate: string): string {
-  const ms = Date.now() - new Date(isoDate).getTime()
+  const timestampMs = parseUtcTimestampMs(isoDate)
+  if (!Number.isFinite(timestampMs)) return '?'
+  const ms = Date.now() - timestampMs
   return formatMs(ms) + ' ago'
 }
 
 function formatDuration(start: string, end: string): string {
-  const ms = new Date(end).getTime() - new Date(start).getTime()
+  const startMs = parseUtcTimestampMs(start)
+  const endMs = parseUtcTimestampMs(end)
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return '?'
+  const ms = endMs - startMs
   return formatMs(ms)
 }
 

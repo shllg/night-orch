@@ -10,6 +10,7 @@ import { bisectBatch, isCulpritIdentified } from './bisect.js'
 import { logger } from '../utils/logger.js'
 import type { MergeBatchRecord } from './types.js'
 import { RunManager } from '../state/runs.js'
+import { nowUtcIso } from '../utils/time.js'
 
 /**
  * Process the merge queue for a single repo.
@@ -214,7 +215,7 @@ async function quarantineCulpritPR(
   if (rows.length === 0) return
 
   const runManager = new RunManager(db)
-  const endedAt = new Date().toISOString()
+  const endedAt = nowUtcIso()
   for (const row of rows) {
     runManager.update(row.id, {
       status: 'blocked',
