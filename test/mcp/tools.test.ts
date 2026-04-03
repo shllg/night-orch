@@ -97,6 +97,66 @@ describe('MCP Tools', () => {
     expect(result.count).toBe(1)
   })
 
+  it('list-runs includes tracked issues with no run rows', async () => {
+    db.prepare(
+      `INSERT INTO issues (
+        repo, issue_number, issue_node_id, issue_title, status,
+        iteration_count, estimated_cost_usd, run_count, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'org/repo',
+      58,
+      'node-58',
+      'Issue missing',
+      'queued',
+      0,
+      0,
+      0,
+      '2026-04-01T12:00:00.000Z',
+      '2026-04-01T12:00:00.000Z',
+    )
+
+    const result = await handleToolCall('night-orch-list-runs', { repo: 'org/repo' }, deps) as {
+      runs: Array<{ issue: number; status: string; runId: string; hasRun: boolean }>
+    }
+    const trackedIssue = result.runs.find((run) => run.issue === 58)
+
+    expect(trackedIssue).toBeDefined()
+    expect(trackedIssue?.status).toBe('queued')
+    expect(trackedIssue?.hasRun).toBe(false)
+    expect(trackedIssue?.runId.startsWith('issue:')).toBe(true)
+  })
+
+  it('list-runs returns completed runs for resolved issues when status filter is completed', async () => {
+    const runManager = new RunManager(db)
+    const run = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 91,
+      issueNodeId: 'node-91',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(run.id, {
+      status: 'completed',
+      endedAt: '2026-04-02T12:10:00.000Z',
+    })
+
+    const result = await handleToolCall(
+      'night-orch-list-runs',
+      { repo: 'org/repo', status: 'completed' },
+      deps,
+    ) as { count: number; runs: Array<{ runId: string; issue: number; status: string; hasRun: boolean }> }
+
+    expect(result.count).toBe(1)
+    expect(result.runs[0]).toMatchObject({
+      runId: run.id,
+      issue: 91,
+      status: 'completed',
+      hasRun: true,
+    })
+  })
+
   it('cost-report returns breakdown', async () => {
     const result = await handleToolCall('night-orch-cost-report', { days: 7 }, deps) as { totalCostUsd: number; dailyBudgetUsd: number }
     expect(result.totalCostUsd).toBe(0)

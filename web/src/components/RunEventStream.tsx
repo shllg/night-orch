@@ -17,7 +17,8 @@ export function RunEventStream({ selectedRunId, selectedRun, runEvents }: RunEve
           <h2 className="card-title text-lg">Run Event Stream</h2>
           {selectedRun && (
             <p className="text-xs text-base-content/70">
-              {selectedRun.repo} #{selectedRun.issue} ({selectedRun.runId})
+              {selectedRun.repo} #{selectedRun.issue}
+              {selectedRun.hasRun ? ` (${selectedRun.runId})` : ''}
             </p>
           )}
         </div>
@@ -25,6 +26,10 @@ export function RunEventStream({ selectedRunId, selectedRun, runEvents }: RunEve
         {!selectedRunId ? (
           <div className="alert mt-3 border border-base-300/60 bg-base-100/70 text-sm">
             <span>Select a run to stream live events.</span>
+          </div>
+        ) : selectedRun && !selectedRun.hasRun ? (
+          <div className="alert mt-3 border border-base-300/60 bg-base-100/70 text-sm">
+            <span>This issue is tracked but has no run yet.</span>
           </div>
         ) : runEvents.length === 0 ? (
           <div className="alert mt-3 border border-base-300/60 bg-base-100/70 text-sm">

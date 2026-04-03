@@ -350,4 +350,59 @@ describe('loadRuns', () => {
     expect(issue?.status).toBe('queued')
     expect(issue?.runs.some((run) => run.id === 'issue-88-old-completed')).toBe(true)
   })
+
+  it('supports SQL-level repo/status filtering with limit', () => {
+    const insertIssue = db.prepare(
+      `INSERT INTO issues (
+        repo, issue_number, issue_node_id, issue_title, status,
+        iteration_count, estimated_cost_usd, run_count, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+
+    for (let i = 1; i <= 40; i++) {
+      insertIssue.run(
+        'org/repo',
+        i,
+        `node-${i}`,
+        `Issue ${i}`,
+        'queued',
+        0,
+        0,
+        0,
+        `2026-04-02T10:${String(i % 60).padStart(2, '0')}:00.000Z`,
+        `2026-04-02T10:${String(i % 60).padStart(2, '0')}:00.000Z`,
+      )
+    }
+
+    insertIssue.run(
+      'other/repo',
+      999,
+      'node-999',
+      'Other repo issue',
+      'queued',
+      0,
+      0,
+      0,
+      '2026-04-02T10:59:00.000Z',
+      '2026-04-02T10:59:00.000Z',
+    )
+    insertIssue.run(
+      'org/repo',
+      777,
+      'node-777',
+      'Blocked issue',
+      'blocked',
+      0,
+      0,
+      0,
+      '2026-04-02T10:58:00.000Z',
+      '2026-04-02T10:58:00.000Z',
+    )
+
+    const rows = loadRuns(db, { repo: 'org/repo', status: 'queued', limit: 7 })
+
+    expect(rows).toHaveLength(7)
+    expect(rows.every((row) => row.repo === 'org/repo')).toBe(true)
+    expect(rows.every((row) => row.status === 'queued')).toBe(true)
+  })
 })
