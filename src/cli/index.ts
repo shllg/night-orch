@@ -16,6 +16,7 @@ import { runWatch } from './commands/watch.js'
 import { webCommand } from './commands/web.js'
 import { serveCommand } from './commands/serve.js'
 import { updateCommand } from './commands/update.js'
+import { continueCommand } from './commands/continue.js'
 
 const program = new Command()
 
@@ -82,6 +83,13 @@ program
     const { rebaseCommand } = await import('./commands/rebase.js')
     await rebaseCommand(repo, issueNumber, cmd.parent?.opts())
   })
+
+program
+  .command('continue')
+  .argument('<repo>', 'Repository (owner/name)')
+  .argument('<issue-number>', 'Issue number')
+  .description('Queue a context-aware continue pass for blocked/review_ready work')
+  .action((repo, issueNumber, _opts, cmd) => continueCommand(repo, issueNumber, cmd.parent?.opts()))
 
 program
   .command('cleanup')

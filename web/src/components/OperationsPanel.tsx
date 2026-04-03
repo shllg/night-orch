@@ -15,6 +15,11 @@ interface RebaseFormState {
   issueNumber: string
 }
 
+interface ContinueFormState {
+  repo: string
+  issueNumber: string
+}
+
 interface DeleteEntryFormState {
   repo: string
   issueNumber: string
@@ -28,15 +33,18 @@ interface OperationsPanelProps {
   repos: string[]
   retryForm: RetryFormState
   rebaseForm: RebaseFormState
+  continueForm: ContinueFormState
   deleteEntryForm: DeleteEntryFormState
   onRetryFormChange: (patch: Partial<RetryFormState>) => void
   onRebaseFormChange: (patch: Partial<RebaseFormState>) => void
+  onContinueFormChange: (patch: Partial<ContinueFormState>) => void
   onDeleteEntryFormChange: (patch: Partial<DeleteEntryFormState>) => void
   onPoll: () => void
   onSync: () => void
   onCleanup: () => void
   onRetrySubmit: (event: FormEvent<HTMLFormElement>) => void
   onRebaseSubmit: (event: FormEvent<HTMLFormElement>) => void
+  onContinueSubmit: (event: FormEvent<HTMLFormElement>) => void
   onDeleteEntrySubmit: (event: FormEvent<HTMLFormElement>) => void
   onUpdate: () => void
 }
@@ -48,15 +56,18 @@ export function OperationsPanel({
   repos,
   retryForm,
   rebaseForm,
+  continueForm,
   deleteEntryForm,
   onRetryFormChange,
   onRebaseFormChange,
+  onContinueFormChange,
   onDeleteEntryFormChange,
   onPoll,
   onSync,
   onCleanup,
   onRetrySubmit,
   onRebaseSubmit,
+  onContinueSubmit,
   onDeleteEntrySubmit,
   onUpdate,
 }: OperationsPanelProps): ReactElement {
@@ -164,6 +175,39 @@ export function OperationsPanel({
                 />
               </label>
               <ActionButton busy={activeOperation === 'rebase'} label="Queue Rebase" submit />
+            </div>
+          </form>
+
+          <form className="rounded-box border border-base-300/70 bg-base-100/60 p-3" onSubmit={onContinueSubmit}>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-info">Continue</h3>
+            <div className="mt-2 space-y-2">
+              <label className="form-control">
+                <div className="label py-0 pb-1">
+                  <span className="label-text text-xs">Repo</span>
+                </div>
+                <select
+                  className="select select-bordered select-sm w-full bg-base-100/90"
+                  value={continueForm.repo}
+                  onChange={(event) => onContinueFormChange({ repo: event.target.value })}
+                >
+                  {repos.map((repo) => (
+                    <option key={repo} value={repo}>{repo}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-control">
+                <div className="label py-0 pb-1">
+                  <span className="label-text text-xs">Issue Number</span>
+                </div>
+                <input
+                  className="input input-bordered input-sm w-full bg-base-100/90"
+                  value={continueForm.issueNumber}
+                  onChange={(event) => onContinueFormChange({ issueNumber: event.target.value })}
+                  inputMode="numeric"
+                  placeholder="123"
+                />
+              </label>
+              <ActionButton busy={activeOperation === 'continue'} label="Queue Continue Pass" submit />
             </div>
           </form>
 

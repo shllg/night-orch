@@ -16,7 +16,7 @@ describe('buildActionHints', () => {
 
     expect(sections.navigation).toContain('[1-4]tabs [h/l]tabs [j/k]select issue [o/enter]open')
     expect(sections.global).toContain('[q]quit [r]refresh [p]poll [s]sync [D]cleanup(confirm)')
-    expect(sections.issue).toContain('[t]retry [T]retry fresh [_]rebase [X]delete entry')
+    expect(sections.issue).toContain('[t]retry [T]retry fresh [c]continue [_]rebase [X]delete entry')
   })
 
   it('keeps issue actions visible in monitor mode while hiding poll/sync/cleanup', () => {
@@ -29,7 +29,7 @@ describe('buildActionHints', () => {
     }))
 
     expect(sections.global).toBe('[q]quit [r]refresh')
-    expect(sections.issue).toContain('[t]retry [T]retry fresh [_]rebase [X]delete entry')
+    expect(sections.issue).toContain('[t]retry [T]retry fresh [c]continue [_]rebase [X]delete entry')
   })
 
   it('shows focused run controls when detail view is open', () => {

@@ -7,6 +7,7 @@ import { CleanupEngine } from '../../ops/cleanup.js'
 import { DeleteIssueEntryEngine } from '../../ops/delete-entry.js'
 import { pollOnce } from '../../runner/poller.js'
 import { queueRebase } from '../../ops/rebase-and-check.js'
+import { queueContinue } from '../../ops/continue.js'
 import { createForgeAdapter } from '../../forge/factory.js'
 import type Database from 'better-sqlite3'
 import { loadTuiStats } from '../../state/stats.js'
@@ -144,6 +145,7 @@ export type TuiActionCommand =
   | 'sync'
   | 'retry'
   | 'retryFresh'
+  | 'continue'
   | 'rebase'
   | 'deleteEntry'
   | 'cleanupArm'
@@ -191,6 +193,7 @@ export function resolveActionCommand(args: ResolveActionCommandInput): TuiAction
 
   if (args.input === 't') return 'retry'
   if (args.input === 'T') return 'retryFresh'
+  if (args.input === 'c') return 'continue'
   if (args.input === '_') return 'rebase'
   if (args.input === 'X') return 'deleteEntry'
   return 'none'
@@ -650,6 +653,25 @@ export function App({
     })
   }, [config, db, issues, runAction, selectedIssue])
 
+  const runContinue = useCallback(async () => {
+    await runAction('continue', async () => {
+      const target = selectedIssue ?? issues.find((issue) => issue.status === 'blocked' || issue.status === 'review_ready')
+      if (!target) throw new Error('No issue selected')
+      const repoConfig = config.repos.find((r) => r.repo === target.repo)
+      if (!repoConfig) throw new Error(`Repo not found in config: ${target.repo}`)
+      const forge = createForgeAdapter(repoConfig, config)
+      let botUser = ''
+      try {
+        const auth = await forge.validateAuth()
+        botUser = auth.user
+      } catch {
+        // Best effort only.
+      }
+      const result = await queueContinue(db, forge, repoConfig, target.issue_number, botUser, { dryRun })
+      return `${target.repo}#${target.issue_number}: ${result.reason}${dryRun ? ' (dry-run)' : ''}`
+    })
+  }, [config, db, dryRun, issues, runAction, selectedIssue])
+
   const runDeleteEntry = useCallback(async () => {
     await runAction('delete-entry', async () => {
       if (!selectedIssue) throw new Error('No issue selected')
@@ -887,6 +909,10 @@ export function App({
     }
     if (actionCommand === 'retryFresh') {
       void runRetry(true)
+      return
+    }
+    if (actionCommand === 'continue') {
+      void runContinue()
       return
     }
     if (actionCommand === 'rebase') {

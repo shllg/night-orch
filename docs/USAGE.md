@@ -70,7 +70,7 @@ The `watch` command shows:
 - Merge queue batches in progress
 - Daily cost bar against budget
 - Recent completed/errored/blocked runs
-- Issue actions on selected runs: retry, retry fresh, rebase, and delete entry
+- Issue actions on selected runs: retry, retry fresh, continue, rebase, and delete entry
 
 ### Multi-repo setup
 
@@ -314,6 +314,7 @@ After a PR is created, night-orch monitors it for events and can automatically r
 - **CI failure** on the PR — detected via GitHub check status
 - **Human review with changes requested** — reviewer posts changes_requested
 - **Inline review comments** — new code comments from humans
+- **Merge conflicts** — PR is no longer mergeable against base
 
 ### How it works
 
@@ -321,7 +322,7 @@ Each poll cycle scans `review_ready` PRs for new events. When a reaction is dete
 
 1. The reaction context (CI output, review comments) is stored on the run
 2. The issue is transitioned back to `queued` with reaction context
-3. On the next poll cycle, the coder receives the reaction context and can address it
+3. On the next poll cycle, the next pass receives the reaction context and can address it
 
 This happens automatically — no configuration needed beyond the standard setup.
 
@@ -336,7 +337,7 @@ Night-orch responds to commands posted as GitHub issue comments:
 | `/orch retry` | Re-queue a blocked or errored issue |
 | `/orch rebase` | Rebase the work branch onto the latest base |
 | `/orch cancel` | Cancel an active run |
-| `/orch continue` | Continue from where a blocked run left off |
+| `/orch continue` | Queue a context-aware second pass for blocked/review-ready runs |
 
 ### Configuration
 
@@ -362,7 +363,7 @@ Options: `--config`, `--trust-workspace`, `--dry-run`, `--log-level`
 
 Start the embedded web control surface. Serves the React/Tailwind frontend, a REST API under `/api/*`, and a WebSocket stream endpoint at `/ws`.
 
-By default, `web` runs in attach mode: no poll loop, no metrics server, and no embedded MCP server are started in the web process. Manual web operations (`poll`, `sync`, `cleanup`, `retry`, `rebase`, `delete entry`) remain available and execute in the web process.
+By default, `web` runs in attach mode: no poll loop, no metrics server, and no embedded MCP server are started in the web process. Manual web operations (`poll`, `sync`, `cleanup`, `retry`, `continue`, `rebase`, `delete entry`) remain available and execute in the web process.
 Use `--standalone` to run poller + metrics + embedded MCP in the same process as the web server.
 
 Default bind is `127.0.0.1:3200`. Use `--host` / `--port` to change this (for example when reverse-proxying through Caddy or nginx). Use `--allowed-host` (repeatable) to permit additional Host/Origin values when proxying.
@@ -389,7 +390,7 @@ Show current state: active runs, active leases, daily cost against budget, recen
 
 ### `night-orch tui`
 
-Live-updating terminal dashboard. Refreshes every 2 seconds. Shows active runs, merge queue, cost bar, recent history, and issue actions (`poll`, `sync`, `cleanup`, `retry`, `retry fresh`, `rebase`, `delete entry`). Press Ctrl+C to exit.
+Live-updating terminal dashboard. Refreshes every 2 seconds. Shows active runs, merge queue, cost bar, recent history, and issue actions (`poll`, `sync`, `cleanup`, `retry`, `retry fresh`, `continue`, `rebase`, `delete entry`). Press Ctrl+C to exit.
 
 ### `night-orch sync`
 
@@ -407,6 +408,12 @@ Options: `--no-check` (skip verify commands after rebase — just rebase and pus
 
 Also available as a comment command: `/orch rebase` (with `--check` by default).
 
+### `night-orch continue <repo> <issue>`
+
+Queue a context-aware second pass for blocked/review-ready work. Night-orch collects the latest PR context (review comments, CI failures, mergeability state) and re-queues the run with that context.
+
+Also available as a comment command: `/orch continue`.
+
 ### `night-orch cleanup`
 
 Remove stale worktrees, delete merged branches, archive old logs. Respects `storage.retention` settings.
@@ -421,7 +428,7 @@ Send a test notification through all configured channels. Verifies webhook URLs,
 
 ### `night-orch mcp`
 
-Start the MCP server on stdio transport (for Claude Code integration). Exposes 9 tools and 3 resources for querying and controlling night-orch.
+Start the MCP server on stdio transport (for Claude Code integration). Exposes 14 tools and 3 resources for querying and controlling night-orch.
 
 ---
 
@@ -473,7 +480,7 @@ Key metrics:
 
 Night-orch exposes an MCP server for integration with Claude Code and other MCP clients.
 
-### Tools (9)
+### Tools (14)
 
 | Tool | Description |
 |------|-------------|
@@ -482,10 +489,15 @@ Night-orch exposes an MCP server for integration with Claude Code and other MCP 
 | `night-orch-list-runs` | Filtered run listing |
 | `night-orch-cost-report` | Daily cost breakdown |
 | `night-orch-retry` | Re-run an issue |
+| `night-orch-continue` | Queue a context-aware second pass |
 | `night-orch-sync` | Reconcile DB with GitHub |
 | `night-orch-cleanup` | Remove stale resources |
+| `night-orch-delete-entry` | Delete local issue state |
 | `night-orch-poll` | Trigger single poll cycle |
 | `night-orch-list-issues` | List eligible/active issues |
+| `night-orch-stream-events` | Stream recent agent events |
+| `night-orch-rebase` | Queue rebase + re-evaluate |
+| `night-orch-update` | Trigger self-update |
 
 ### Usage
 

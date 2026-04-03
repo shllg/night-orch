@@ -114,6 +114,11 @@ export interface PromptContext {
     isRetry: boolean
   }
   triageLevel: TriageLevel
+  followup?: {
+    type: string
+    summary: string | null
+    context: string
+  } | null
 }
 
 export interface WorkerAdapter {
