@@ -1,79 +1,20 @@
 import { type FormEvent, type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-type RunStatus = 'queued' | 'running' | 'blocked' | 'review_ready' | 'error' | 'completed'
-
-interface RunListResult {
-  count: number
-  runs: RunSummary[]
-}
-
-interface RunSummary {
-  runId: string
-  repo: string
-  issue: number
-  status: RunStatus
-  phase: string | null
-  iterations: number
-  costUsd: number
-  startedAt: string | null
-  endedAt: string | null
-}
-
-interface DashboardSnapshot {
-  generatedAt: string
-  status: {
-    activeRuns: number
-    dailyCostUsd: number
-  }
-  runs: RunListResult
-  cost: {
-    dailyBudgetUsd: number
-  }
-  config: {
-    repos: string[]
-    pollIntervalSeconds: number
-  }
-  stats: {
-    throughput: {
-      runs24h: number
-      successRate7d: number
-    }
-    overview: {
-      queuedRuns: number
-      runningRuns: number
-      reviewReadyRuns: number
-      blockedRuns: number
-      errorRuns: number
-    }
-  }
-}
-
-interface RunEvent {
-  id: number
-  runId: string
-  phase: string
-  role: string
-  type: string
-  timestamp: string
-  data: Record<string, unknown> | null
-}
-
-interface RunEventsPayload {
-  runId: string
-  events: RunEvent[]
-  lastEventId: number
-}
-
-interface WsEnvelope {
-  type: string
-  payload?: unknown
-  error?: string
-}
-
-interface SessionResponse {
-  mutationToken: string
-  operationsEnabled?: boolean
-}
+import { DashboardHeader } from './components/DashboardHeader.js'
+import { DashboardMetrics } from './components/DashboardMetrics.js'
+import { OperationsPanel } from './components/OperationsPanel.js'
+import { RunEventStream } from './components/RunEventStream.js'
+import { RunsPanel } from './components/RunsPanel.js'
+import { extractMessage } from './lib/format.js'
+import { asRunEventsPayload, mergeRunEvents } from './lib/run-events.js'
+import {
+  type DashboardSnapshot,
+  type RunEvent,
+  type RunStatus,
+  type SessionResponse,
+  type UpdateStatus,
+  type WsEnvelope,
+} from './types/dashboard.js'
 
 const STATUS_TONE: Record<RunStatus, string> = {
   queued: 'badge-info',
@@ -83,6 +24,7 @@ const STATUS_TONE: Record<RunStatus, string> = {
   error: 'badge-error',
   completed: 'badge-neutral',
 }
+
 const MUTATION_INTENT_HEADER = 'x-night-orch-intent'
 const MUTATION_INTENT_VALUE = 'mutate'
 const WEB_AUTH_TOKEN_HEADER = 'x-night-orch-web-token'
@@ -112,7 +54,7 @@ export function App(): ReactElement {
   const [deleteIssueNumber, setDeleteIssueNumber] = useState('')
   const [deleteForce, setDeleteForce] = useState(false)
 
-  const [updateStatus, setUpdateStatus] = useState<{ state: string; error?: string } | null>(null)
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
 
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
@@ -274,27 +216,32 @@ export function App(): ReactElement {
     subscribedRunRef.current = selectedRunId
   }, [selectedRunId, socketConnected])
 
-  // Poll update status while an update is in progress
   useEffect(() => {
     if (!updateStatus || updateStatus.state === 'idle') return
-    const interval = setInterval(async () => {
+
+    const interval = window.setInterval(async () => {
       try {
         const res = await fetch('/api/update-status')
         if (res.ok) {
-          const status = await res.json() as { state: string; error?: string }
+          const status = await res.json() as UpdateStatus
           setUpdateStatus(status)
           if (status.state === 'idle' || status.state === 'failed') {
-            clearInterval(interval)
+            window.clearInterval(interval)
             if (status.state === 'failed') {
               setErrorMessage(`Update failed: ${status.error ?? 'unknown error'}`)
             } else {
-              setFeedbackMessage('Update complete — services restarted')
+              setFeedbackMessage('Update complete - services restarted')
             }
           }
         }
-      } catch { /* ignore fetch errors during update */ }
+      } catch {
+        // Ignore fetch errors during update.
+      }
     }, 2000)
-    return () => clearInterval(interval)
+
+    return () => {
+      window.clearInterval(interval)
+    }
   }, [updateStatus?.state])
 
   const runOperation = useCallback(async (
@@ -403,27 +350,11 @@ export function App(): ReactElement {
   return (
     <main data-theme="business" className="min-h-screen bg-orch-admin px-4 py-5 sm:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-5">
-        <header className="navbar rounded-box border border-base-300/60 bg-base-200/60 px-4 py-3 shadow-panel backdrop-blur sm:px-5">
-          <div className="flex-1">
-            <div>
-              <p className="text-xs uppercase tracking-[0.24em] text-info/80">night-orch</p>
-              <h1 className="text-2xl font-semibold text-base-content sm:text-3xl">Web Control Center</h1>
-              <p className="text-sm text-base-content/70">
-                Poll interval {snapshot?.config.pollIntervalSeconds ?? '-'}s
-              </p>
-            </div>
-          </div>
-          <div className="flex-none">
-            <div className="flex flex-wrap justify-end gap-2">
-              <span className={`badge badge-outline gap-1 ${socketConnected ? 'badge-success' : 'badge-error'}`}>
-                {socketConnected ? 'Live stream online' : 'Reconnecting stream'}
-              </span>
-              <span className="badge badge-neutral badge-outline">
-                Last refresh {snapshot ? formatTimestamp(snapshot.generatedAt) : '--'}
-              </span>
-            </div>
-          </div>
-        </header>
+        <DashboardHeader
+          pollIntervalSeconds={snapshot?.config.pollIntervalSeconds ?? null}
+          generatedAt={snapshot?.generatedAt ?? null}
+          socketConnected={socketConnected}
+        />
 
         {errorMessage && (
           <div className="alert alert-error shadow-sm">
@@ -436,459 +367,82 @@ export function App(): ReactElement {
           </div>
         )}
 
-        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <MetricCard label="Active" value={snapshot?.status.activeRuns ?? 0} accent="cyan" />
-          <MetricCard label="Running" value={snapshot?.stats.overview.runningRuns ?? 0} accent="amber" />
-          <MetricCard
-            label="Daily Cost"
-            value={`$${formatMoney(snapshot?.status.dailyCostUsd ?? 0)}`}
-            accent="emerald"
-            subValue={`Budget $${formatMoney(snapshot?.cost.dailyBudgetUsd ?? 0)}`}
-          />
-          <MetricCard
-            label="24h Throughput"
-            value={snapshot?.stats.throughput.runs24h ?? 0}
-            accent="sky"
-            subValue={`${(snapshot?.stats.throughput.successRate7d ?? 0).toFixed(1)}% success (7d)`}
-          />
-        </section>
+        <DashboardMetrics snapshot={snapshot} />
 
         <section className="grid gap-5 xl:grid-cols-[1.65fr_1fr]">
-          <div className="card border border-base-300/60 bg-base-200/60 shadow-panel backdrop-blur">
-            <div className="card-body p-4 sm:p-5">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <h2 className="card-title text-lg">Runs</h2>
-                  <p className="text-xs text-base-content/70">Live and recent execution history.</p>
-                </div>
-                <label className="form-control max-w-sm">
-                  <div className="label py-0 pb-1">
-                    <span className="label-text text-xs uppercase tracking-wide text-base-content/70">
-                      Repo Filter
-                    </span>
-                  </div>
-                  <select
-                    className="select select-bordered select-sm w-full bg-base-100/80"
-                    value={selectedRepo}
-                    onChange={(event) => setSelectedRepo(event.target.value)}
-                  >
-                    <option value="all">All repos</option>
-                    {repos.map((repo) => (
-                      <option key={repo} value={repo}>{repo}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
+          <RunsPanel
+            isLoading={isLoading}
+            repos={repos}
+            selectedRepo={selectedRepo}
+            onSelectedRepoChange={setSelectedRepo}
+            filteredRuns={filteredRuns}
+            selectedRunId={selectedRunId}
+            onSelectedRunChange={setSelectedRunId}
+            statusTone={STATUS_TONE}
+          />
 
-              {isLoading ? (
-                <div className="mt-4 space-y-2">
-                  <div className="skeleton h-20 w-full" />
-                  <div className="skeleton h-20 w-full" />
-                </div>
-              ) : filteredRuns.length === 0 ? (
-                <div className="alert mt-4 border border-base-300/60 bg-base-100/70 text-sm">
-                  <span>No runs for the current filter.</span>
-                </div>
-              ) : (
-                <div className="mt-4 grid max-h-[540px] gap-3 overflow-y-auto pr-1">
-                  {filteredRuns.map((run) => (
-                    <button
-                      key={run.runId}
-                      type="button"
-                      onClick={() => setSelectedRunId(run.runId)}
-                      className={`card w-full border text-left transition-all ${
-                        selectedRunId === run.runId
-                          ? 'border-info/70 bg-info/10 shadow-md'
-                          : 'border-base-300/70 bg-base-100/50 hover:border-info/40 hover:bg-base-100/80'
-                      }`}
-                    >
-                      <div className="card-body gap-2 p-3">
-                        <div className="flex flex-wrap items-start justify-between gap-2">
-                          <div>
-                            <p className="text-sm font-semibold text-base-content">{run.repo} #{run.issue}</p>
-                            <p className="text-xs text-base-content/60">{run.runId}</p>
-                          </div>
-                          <span className={`badge badge-sm badge-outline capitalize ${STATUS_TONE[run.status]}`}>
-                            {run.status.replaceAll('_', ' ')}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2 text-xs text-base-content/75 md:grid-cols-4">
-                          <span>Phase: {run.phase ?? '-'}</span>
-                          <span>Iter: {run.iterations}</span>
-                          <span>Cost: ${formatMoney(run.costUsd)}</span>
-                          <span>{formatRunTime(run)}</span>
-                        </div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="card border border-base-300/60 bg-base-200/60 shadow-panel backdrop-blur">
-            <div className="card-body p-4 sm:p-5">
-              <h2 className="card-title text-lg">Operations</h2>
-              {!operationsEnabled && (
-                <div className="alert alert-warning mt-1 text-xs">
-                  <span>
-                    Operations are disabled by server policy for this web instance.
-                  </span>
-                </div>
-              )}
-
-              <fieldset disabled={!operationsEnabled} className={`space-y-4 ${!operationsEnabled ? 'opacity-60' : ''}`}>
-                <div className="grid grid-cols-1 gap-2">
-                  <ActionButton
-                    busy={activeOperation === 'poll'}
-                    onClick={() => {
-                      void runOperation('poll', '/api/operations/poll', {}, 'Manual poll requested')
-                    }}
-                    label="Trigger Poll"
-                  />
-                  <ActionButton
-                    busy={activeOperation === 'sync'}
-                    onClick={() => {
-                      void runOperation('sync', '/api/operations/sync', {}, 'Sync completed')
-                    }}
-                    label="Run Sync"
-                  />
-                  <ActionButton
-                    busy={activeOperation === 'cleanup'}
-                    onClick={() => {
-                      void runOperation('cleanup', '/api/operations/cleanup', {}, 'Cleanup completed')
-                    }}
-                    label="Run Cleanup"
-                  />
-                </div>
-
-                <form className="rounded-box border border-base-300/70 bg-base-100/60 p-3" onSubmit={(event) => { void submitRetry(event) }}>
-                  <h3 className="text-sm font-semibold uppercase tracking-wide text-info">Retry</h3>
-                  <div className="mt-2 space-y-2">
-                    <label className="form-control">
-                      <div className="label py-0 pb-1">
-                        <span className="label-text text-xs">Repo</span>
-                      </div>
-                      <select
-                        className="select select-bordered select-sm w-full bg-base-100/90"
-                        value={retryRepo}
-                        onChange={(event) => setRetryRepo(event.target.value)}
-                      >
-                        {repos.map((repo) => (
-                          <option key={repo} value={repo}>{repo}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="form-control">
-                      <div className="label py-0 pb-1">
-                        <span className="label-text text-xs">Issue Number</span>
-                      </div>
-                      <input
-                        className="input input-bordered input-sm w-full bg-base-100/90"
-                        value={retryIssueNumber}
-                        onChange={(event) => setRetryIssueNumber(event.target.value)}
-                        inputMode="numeric"
-                        placeholder="123"
-                      />
-                    </label>
-                    <label className="label cursor-pointer justify-start gap-2 py-0">
-                      <input
-                        type="checkbox"
-                        className="checkbox checkbox-info checkbox-sm"
-                        checked={retryResetPlan}
-                        onChange={(event) => setRetryResetPlan(event.target.checked)}
-                      />
-                      <span className="label-text text-xs">Reset saved plan</span>
-                    </label>
-                    <label className="label cursor-pointer justify-start gap-2 py-0">
-                      <input
-                        type="checkbox"
-                        className="checkbox checkbox-info checkbox-sm"
-                        checked={retryFresh}
-                        onChange={(event) => setRetryFresh(event.target.checked)}
-                      />
-                      <span className="label-text text-xs">Fresh branch reset</span>
-                    </label>
-                    <ActionButton busy={activeOperation === 'retry'} label="Queue Retry" submit />
-                  </div>
-                </form>
-
-                <form className="rounded-box border border-base-300/70 bg-base-100/60 p-3" onSubmit={(event) => { void submitRebase(event) }}>
-                  <h3 className="text-sm font-semibold uppercase tracking-wide text-info">Rebase</h3>
-                  <div className="mt-2 space-y-2">
-                    <label className="form-control">
-                      <div className="label py-0 pb-1">
-                        <span className="label-text text-xs">Repo</span>
-                      </div>
-                      <select
-                        className="select select-bordered select-sm w-full bg-base-100/90"
-                        value={rebaseRepo}
-                        onChange={(event) => setRebaseRepo(event.target.value)}
-                      >
-                        {repos.map((repo) => (
-                          <option key={repo} value={repo}>{repo}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="form-control">
-                      <div className="label py-0 pb-1">
-                        <span className="label-text text-xs">Issue Number</span>
-                      </div>
-                      <input
-                        className="input input-bordered input-sm w-full bg-base-100/90"
-                        value={rebaseIssueNumber}
-                        onChange={(event) => setRebaseIssueNumber(event.target.value)}
-                        inputMode="numeric"
-                        placeholder="123"
-                      />
-                    </label>
-                    <ActionButton busy={activeOperation === 'rebase'} label="Queue Rebase" submit />
-                  </div>
-                </form>
-
-                <form className="rounded-box border border-base-300/70 bg-base-100/60 p-3" onSubmit={(event) => { void submitDeleteEntry(event) }}>
-                  <h3 className="text-sm font-semibold uppercase tracking-wide text-info">Delete Entry</h3>
-                  <div className="mt-2 space-y-2">
-                    <label className="form-control">
-                      <div className="label py-0 pb-1">
-                        <span className="label-text text-xs">Repo</span>
-                      </div>
-                      <select
-                        className="select select-bordered select-sm w-full bg-base-100/90"
-                        value={deleteRepo}
-                        onChange={(event) => setDeleteRepo(event.target.value)}
-                      >
-                        {repos.map((repo) => (
-                          <option key={repo} value={repo}>{repo}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="form-control">
-                      <div className="label py-0 pb-1">
-                        <span className="label-text text-xs">Issue Number</span>
-                      </div>
-                      <input
-                        className="input input-bordered input-sm w-full bg-base-100/90"
-                        value={deleteIssueNumber}
-                        onChange={(event) => setDeleteIssueNumber(event.target.value)}
-                        inputMode="numeric"
-                        placeholder="123"
-                      />
-                    </label>
-                    <label className="label cursor-pointer justify-start gap-2 py-0">
-                      <input
-                        type="checkbox"
-                        className="checkbox checkbox-warning checkbox-sm"
-                        checked={deleteForce}
-                        onChange={(event) => setDeleteForce(event.target.checked)}
-                      />
-                      <span className="label-text text-xs">Force delete if running</span>
-                    </label>
-                    <ActionButton busy={activeOperation === 'delete-entry'} label="Delete Local Entry" submit />
-                  </div>
-                </form>
-              </fieldset>
-
-              <div className="rounded-box border border-base-300/70 bg-base-100/60 p-3 mt-4">
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-info">Deploy</h3>
-                <div className="mt-2 space-y-2">
-                  <ActionButton
-                    busy={activeOperation === 'update' || (updateStatus != null && updateStatus.state !== 'idle' && updateStatus.state !== 'failed')}
-                    onClick={() => {
-                      setUpdateStatus({ state: 'draining' })
-                      void runOperation('update', '/api/operations/update', {}, 'Update initiated — pulling and rebuilding...')
-                    }}
-                    label={updateStatus && updateStatus.state !== 'idle' && updateStatus.state !== 'failed'
-                      ? `Updating (${updateStatus.state})...`
-                      : 'Pull & Restart'}
-                  />
-                  {updateStatus && updateStatus.state === 'failed' && (
-                    <div className="text-xs text-error">{updateStatus.error}</div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
+          <OperationsPanel
+            operationsEnabled={operationsEnabled}
+            activeOperation={activeOperation}
+            updateStatus={updateStatus}
+            repos={repos}
+            retryForm={{
+              repo: retryRepo,
+              issueNumber: retryIssueNumber,
+              resetPlan: retryResetPlan,
+              fresh: retryFresh,
+            }}
+            rebaseForm={{
+              repo: rebaseRepo,
+              issueNumber: rebaseIssueNumber,
+            }}
+            deleteEntryForm={{
+              repo: deleteRepo,
+              issueNumber: deleteIssueNumber,
+              force: deleteForce,
+            }}
+            onRetryFormChange={(patch) => {
+              if (patch.repo !== undefined) setRetryRepo(patch.repo)
+              if (patch.issueNumber !== undefined) setRetryIssueNumber(patch.issueNumber)
+              if (patch.resetPlan !== undefined) setRetryResetPlan(patch.resetPlan)
+              if (patch.fresh !== undefined) setRetryFresh(patch.fresh)
+            }}
+            onRebaseFormChange={(patch) => {
+              if (patch.repo !== undefined) setRebaseRepo(patch.repo)
+              if (patch.issueNumber !== undefined) setRebaseIssueNumber(patch.issueNumber)
+            }}
+            onDeleteEntryFormChange={(patch) => {
+              if (patch.repo !== undefined) setDeleteRepo(patch.repo)
+              if (patch.issueNumber !== undefined) setDeleteIssueNumber(patch.issueNumber)
+              if (patch.force !== undefined) setDeleteForce(patch.force)
+            }}
+            onPoll={() => {
+              void runOperation('poll', '/api/operations/poll', {}, 'Manual poll requested')
+            }}
+            onSync={() => {
+              void runOperation('sync', '/api/operations/sync', {}, 'Sync completed')
+            }}
+            onCleanup={() => {
+              void runOperation('cleanup', '/api/operations/cleanup', {}, 'Cleanup completed')
+            }}
+            onRetrySubmit={(event) => {
+              void submitRetry(event)
+            }}
+            onRebaseSubmit={(event) => {
+              void submitRebase(event)
+            }}
+            onDeleteEntrySubmit={(event) => {
+              void submitDeleteEntry(event)
+            }}
+            onUpdate={() => {
+              setUpdateStatus({ state: 'draining' })
+              void runOperation('update', '/api/operations/update', {}, 'Update initiated - pulling and rebuilding...')
+            }}
+          />
         </section>
 
-        <section className="card border border-base-300/60 bg-base-200/60 shadow-panel backdrop-blur">
-          <div className="card-body p-4 sm:p-5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="card-title text-lg">Run Event Stream</h2>
-              {selectedRun && (
-                <p className="text-xs text-base-content/70">
-                  {selectedRun.repo} #{selectedRun.issue} ({selectedRun.runId})
-                </p>
-              )}
-            </div>
-
-            {!selectedRunId ? (
-              <div className="alert mt-3 border border-base-300/60 bg-base-100/70 text-sm">
-                <span>Select a run to stream live events.</span>
-              </div>
-            ) : runEvents.length === 0 ? (
-              <div className="alert mt-3 border border-base-300/60 bg-base-100/70 text-sm">
-                <span>No events yet for this run.</span>
-              </div>
-            ) : (
-              <div className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
-                {runEvents.slice(-150).map((event) => (
-                  <div key={event.id} className="rounded-box border border-base-300/70 bg-base-100/80 px-3 py-2">
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-base-content/70">
-                      <span>{formatTimestamp(event.timestamp)}</span>
-                      <span>{event.phase} / {event.role}</span>
-                    </div>
-                    <p className="mt-1 text-sm font-semibold text-info">{event.type}</p>
-                    <p className="mt-1 text-xs text-base-content/85">{describeEventData(event.data)}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </section>
+        <RunEventStream selectedRunId={selectedRunId} selectedRun={selectedRun} runEvents={runEvents} />
       </div>
     </main>
   )
-}
-
-interface MetricCardProps {
-  label: string
-  value: number | string
-  accent: 'cyan' | 'amber' | 'emerald' | 'sky'
-  subValue?: string
-}
-
-function MetricCard({ label, value, accent, subValue }: MetricCardProps): ReactElement {
-  const accentClass = accent === 'amber'
-    ? 'border-warning/50 bg-warning/10'
-    : accent === 'emerald'
-      ? 'border-success/50 bg-success/10'
-      : accent === 'sky'
-        ? 'border-accent/50 bg-accent/10'
-        : 'border-info/50 bg-info/10'
-
-  return (
-    <article className={`stat rounded-box border px-4 py-3 shadow-panel ${accentClass}`}>
-      <div className="stat-title text-[11px] uppercase tracking-wider text-base-content/70">{label}</div>
-      <div className="stat-value text-2xl text-base-content">{value}</div>
-      {subValue && <div className="stat-desc text-[11px] text-base-content/70">{subValue}</div>}
-    </article>
-  )
-}
-
-interface ActionButtonProps {
-  label: string
-  busy: boolean
-  onClick?: () => void
-  submit?: boolean
-}
-
-function ActionButton({ label, busy, onClick, submit = false }: ActionButtonProps): ReactElement {
-  return (
-    <button
-      type={submit ? 'submit' : 'button'}
-      onClick={onClick}
-      className={`btn btn-info btn-sm w-full ${submit ? '' : 'btn-outline'} justify-between`}
-      disabled={busy}
-    >
-      {busy ? 'Working...' : label}
-    </button>
-  )
-}
-
-function asRunEventsPayload(payload: unknown): RunEventsPayload | null {
-  if (!payload || typeof payload !== 'object') return null
-
-  const runId = (payload as { runId?: unknown }).runId
-  const events = (payload as { events?: unknown }).events
-  const lastEventId = (payload as { lastEventId?: unknown }).lastEventId
-
-  if (typeof runId !== 'string') return null
-  if (!Array.isArray(events)) return null
-  if (typeof lastEventId !== 'number') return null
-
-  return {
-    runId,
-    events: events.filter((event): event is RunEvent => {
-      if (!event || typeof event !== 'object') return false
-      const maybeId = (event as { id?: unknown }).id
-      return typeof maybeId === 'number'
-    }),
-    lastEventId,
-  }
-}
-
-function mergeRunEvents(existing: RunEvent[], incoming: RunEvent[]): RunEvent[] {
-  const seen = new Set(existing.map((event) => event.id))
-  const merged = [...existing]
-
-  for (const event of incoming) {
-    if (seen.has(event.id)) continue
-    seen.add(event.id)
-    merged.push(event)
-  }
-
-  merged.sort((a, b) => a.id - b.id)
-  return merged
-}
-
-function extractMessage(payload: Record<string, unknown>): string | null {
-  const direct = payload['message']
-  if (typeof direct === 'string' && direct.trim()) {
-    return direct
-  }
-
-  const reason = payload['reason']
-  if (typeof reason === 'string' && reason.trim()) {
-    return reason
-  }
-
-  return null
-}
-
-function formatMoney(value: number): string {
-  return Number.isFinite(value) ? value.toFixed(2) : '0.00'
-}
-
-function formatTimestamp(value: string): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString()
-}
-
-function formatRunTime(run: RunSummary): string {
-  if (run.endedAt) {
-    return `Ended ${formatTimestamp(run.endedAt)}`
-  }
-  if (run.startedAt) {
-    return `Started ${formatTimestamp(run.startedAt)}`
-  }
-  return 'Not started'
-}
-
-function describeEventData(data: Record<string, unknown> | null): string {
-  if (!data) return 'No payload'
-
-  if (typeof data['text'] === 'string' && data['text'].trim()) {
-    return truncate(data['text'], 220)
-  }
-
-  if (typeof data['toolName'] === 'string') {
-    return `Tool: ${data['toolName']}`
-  }
-
-  if (typeof data['error'] === 'string') {
-    return truncate(data['error'], 220)
-  }
-
-  try {
-    return truncate(JSON.stringify(data), 220)
-  } catch {
-    return 'Unserializable event payload'
-  }
-}
-
-function truncate(value: string, maxLength: number): string {
-  if (value.length <= maxLength) return value
-  return `${value.slice(0, maxLength - 3)}...`
 }

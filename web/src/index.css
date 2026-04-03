@@ -1,6 +1,8 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@plugin "daisyui" {
+  themes: business --default;
+  logs: false;
+}
 
 :root {
   color-scheme: dark;
@@ -22,6 +24,18 @@ body {
   min-height: 100vh;
   background: #040910;
   color: hsl(var(--bc));
+}
+
+.bg-orch-admin {
+  background-image:
+    radial-gradient(circle at 15% 0%, rgb(34 211 238 / 0.16), transparent 38%),
+    radial-gradient(circle at 85% 8%, rgb(14 165 233 / 0.14), transparent 32%),
+    radial-gradient(circle at 50% 100%, rgb(15 118 110 / 0.14), transparent 38%),
+    linear-gradient(165deg, #040910 0%, #081221 52%, #0b1729 100%);
+}
+
+.shadow-panel {
+  box-shadow: 0 20px 45px -28px rgb(2 8 23 / 0.85);
 }
 
 ::selection {
