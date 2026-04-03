@@ -69,6 +69,33 @@ src/config/defaults.ts`,
     expect(result.level).toBe('architectural')
   })
 
+  it('does not count file references inside code blocks as architectural', () => {
+    const result = triageIssue(
+      makeIssue({
+        body: `Add a helper that imports these modules:
+
+\`\`\`typescript
+import { foo } from './auth/login.ts'
+import { bar } from './auth/session.ts'
+import { baz } from './models/user.ts'
+import { qux } from './routes/api.ts'
+import { quux } from './middleware/cors.ts'
+import { corge } from './config/defaults.ts'
+\`\`\``,
+      }),
+    )
+    expect(result.level).toBe('standard')
+  })
+
+  it('does not count file references inside inline code as architectural', () => {
+    const result = triageIssue(
+      makeIssue({
+        body: 'Update `src/auth/login.ts`, `src/auth/session.ts`, `src/models/user.ts`, `src/routes/api.ts`, `src/middleware/cors.ts`, and `src/config/defaults.ts`',
+      }),
+    )
+    expect(result.level).toBe('standard')
+  })
+
   it('long body with bug label is standard, not trivial', () => {
     const longBody = 'A'.repeat(300)
     const result = triageIssue(makeIssue({ labels: ['bug'], body: longBody }))

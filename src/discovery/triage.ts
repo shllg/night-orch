@@ -29,7 +29,8 @@ export function triageIssue(issue: ForgeIssue): TriageResult {
     }
   }
 
-  const fileRefs = issue.body.match(FILE_REFERENCE_PATTERN)
+  const bodyWithoutCode = issue.body.replace(/```[\s\S]*?```/g, '').replace(/`[^`]+`/g, '')
+  const fileRefs = bodyWithoutCode.match(FILE_REFERENCE_PATTERN)
   if (fileRefs && fileRefs.length >= 5) {
     return {
       level: 'architectural',
