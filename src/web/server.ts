@@ -432,6 +432,31 @@ async function handleApiRequest(
     return
   }
 
+  if (method === 'POST' && pathname === '/api/operations/continue') {
+    const body = await readJsonBody(req)
+    const repo = toNonEmptyString(body['repo'])
+    const issueNumber = toBoundedInt(body['issueNumber'], NaN, 1, Number.MAX_SAFE_INTEGER)
+
+    if (!repo || Number.isNaN(issueNumber)) {
+      writeJson(res, 400, { error: 'repo and issueNumber are required' })
+      return
+    }
+
+    const result = await handleToolCall(
+      'night-orch-continue',
+      withMcpMutationAuth(
+        {
+          repo,
+          issueNumber,
+        },
+        security,
+      ),
+      deps,
+    )
+    writeJson(res, 200, result)
+    return
+  }
+
   if (method === 'POST' && pathname === '/api/operations/delete-entry') {
     const body = await readJsonBody(req)
     const repo = toNonEmptyString(body['repo'])

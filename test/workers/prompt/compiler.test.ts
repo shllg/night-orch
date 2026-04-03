@@ -167,6 +167,57 @@ describe('compilePrompt', () => {
     expect(userPrompt).toContain('This is a retry')
   })
 
+  it('includes follow-up context as untrusted input', () => {
+    const ctx = makeContext({
+      followup: {
+        type: 'ci_failure',
+        summary: 'Continue requested with failing CI checks',
+        context: '## CI\n- [FAIL] pnpm test',
+      },
+    })
+    const { userPrompt } = compilePrompt(null, '', ctx)
+
+    expect(userPrompt).toContain('## Follow-up Context')
+    expect(userPrompt).toContain('<untrusted_followup>')
+    expect(userPrompt).toContain('<type>ci_failure</type>')
+    expect(userPrompt).toContain('<summary>Continue requested with failing CI checks</summary>')
+    expect(userPrompt).toContain('<context>CI')
+  })
+
+  it('formats follow-up template substitutions as untrusted xml', () => {
+    const ctx = makeContext({
+      followup: {
+        type: 'ci_failure',
+        summary: 'Fix the checks',
+        context: 'Line one <script>alert(1)</script>',
+      },
+    })
+    const { systemPrompt } = compilePrompt(
+      null,
+      '{{followup.type}}\n{{followup.summary}}\n{{followup.context}}',
+      ctx,
+    )
+
+    expect(systemPrompt).toContain('<followup_type>ci_failure</followup_type>')
+    expect(systemPrompt).toContain('<followup_summary>Fix the checks</followup_summary>')
+    expect(systemPrompt).toContain('<followup_context>Line one alert(1)</followup_context>')
+    expect(systemPrompt).not.toContain('<script>')
+  })
+
+  it('sanitizes and truncates follow-up context', () => {
+    const ctx = makeContext({
+      followup: {
+        type: 'review_comment',
+        summary: 'Needs fixes',
+        context: `<script>alert('x')</script>${'A'.repeat(6000)}`,
+      },
+    })
+    const { userPrompt } = compilePrompt(null, '', ctx)
+
+    expect(userPrompt).not.toContain('<script>')
+    expect(userPrompt).toContain('[... truncated ...]')
+  })
+
   it('sanitizes HTML tags from issue body', () => {
     const ctx = makeContext({
       issue: {

@@ -33,6 +33,7 @@ import type { RunContext } from '../loop/types.js'
 import type { NotificationPayload } from '../notify/types.js'
 import { postPlanSummaryComment } from '../loop/plan-summary-comment.js'
 import { executeRebase, queueRebase } from '../ops/rebase-and-check.js'
+import { queueContinue } from '../ops/continue.js'
 import { markerTag, upsertBotComment } from '../forge/bot-comment.js'
 import { formatStatusComment } from '../forge/status-comment.js'
 import { scanForReactions } from '../reactions/scanner.js'
@@ -295,6 +296,7 @@ export async function pollOnce(
                 // If force-resetting, ignore stale rebase context — we're starting fresh
                 const reactionType = activeRun?.phaseData?.reactionType
                 const isRebaseRun = !forceReset && (reactionType === 'rebase' || reactionType === 'merge_conflict')
+                const followupPromptFeedback = extractFollowupPromptFeedback(activeRun?.phaseData)
 
                 // Check if prior run left tainted work that should be discarded
                 // Never reset to base for rebase runs — we need the existing branch
@@ -456,9 +458,9 @@ export async function pollOnce(
                   terminalStatus: 'running',
                   phaseHistory: [],
                   dryRun: false,
-                  runMode: isRebaseRun ? 'rebase' : 'fresh',
+                  runMode: isRebaseRun ? 'rebase' : followupPromptFeedback ? 'followup' : 'fresh',
                   blockReason: null,
-                  prReviewFeedback: null,
+                  prReviewFeedback: followupPromptFeedback,
                   sessionIds: {},
                   stepOutputs: {},
                 }
@@ -1192,14 +1194,10 @@ async function executeCommentCommand(params: ExecuteCommentCommandParams): Promi
         resetPlan: command.resetPlan,
       })
     case 'continue':
-      return queueContinueFromComment({
-        runManager,
-        leaseManager,
-        forge,
-        repoConfig,
-        issueRepo,
-        issueNumber,
-      })
+      {
+        const result = await queueContinue(db, forge, repoConfig, issueNumber, botUser, { issueRepo })
+        return result.queued ? { ok: true } : { ok: false, reason: result.reason }
+      }
     case 'rebase': {
       // queueRebase currently always verifies after rebase; keep behavior stable.
       const result = await queueRebase(db, forge, repoConfig, issueNumber, botUser)
@@ -1261,48 +1259,6 @@ async function queueRetryFromComment(params: QueueRetryFromCommentParams): Promi
     issueNumber,
     issue.labels,
     run.status,
-    'queued',
-    buildLabelConfig(repoConfig, issue.labels),
-  )
-  return { ok: true }
-}
-
-interface QueueContinueFromCommentParams {
-  runManager: RunManager
-  leaseManager: LeaseManager
-  forge: ReturnType<typeof createForgeAdapter>
-  repoConfig: Config['repos'][0]
-  issueRepo: string
-  issueNumber: number
-}
-
-async function queueContinueFromComment(params: QueueContinueFromCommentParams): Promise<CommandExecutionResult> {
-  const { runManager, leaseManager, forge, repoConfig, issueRepo, issueNumber } = params
-  const run = runManager.getByRepoAndIssue(repoConfig.repo, issueNumber)
-  if (!run) return { ok: false, reason: 'No run found for issue' }
-  if (run.status !== 'blocked') {
-    return { ok: false, reason: `Continue only supports blocked runs (current: ${run.status})` }
-  }
-
-  runManager.update(run.id, {
-    status: 'queued',
-    currentPhase: null,
-    endedAt: null,
-    lastError: null,
-    blockReason: null,
-  })
-  leaseManager.release(issueRepo, issueNumber)
-  if (issueRepo !== repoConfig.repo) {
-    leaseManager.release(repoConfig.repo, issueNumber)
-  }
-
-  const issue = await forge.getIssue(issueRepo, issueNumber)
-  await transitionLabels(
-    forge,
-    issueRepo,
-    issueNumber,
-    issue.labels,
-    'blocked',
     'queued',
     buildLabelConfig(repoConfig, issue.labels),
   )
@@ -1414,6 +1370,30 @@ async function scanAndHandleReactions(params: ScanAndHandleReactionsParams): Pro
       }
     }
   }
+}
+
+interface FollowupPromptFeedback {
+  type: string
+  summary: string
+  context: string
+}
+
+function extractFollowupPromptFeedback(
+  phaseData: Record<string, unknown> | null | undefined,
+): FollowupPromptFeedback | null {
+  if (!phaseData) return null
+
+  const context = phaseData['reactionContext']
+  if (typeof context !== 'string' || context.trim().length === 0) return null
+
+  const type = typeof phaseData['reactionType'] === 'string' && phaseData['reactionType'].trim().length > 0
+    ? phaseData['reactionType']
+    : 'continue'
+  const summary = typeof phaseData['reactionSummary'] === 'string' && phaseData['reactionSummary'].trim().length > 0
+    ? phaseData['reactionSummary']
+    : 'Follow-up context available'
+
+  return { type, summary, context }
 }
 
 /**

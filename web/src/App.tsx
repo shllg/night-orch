@@ -133,6 +133,8 @@ export function App(): ReactElement {
 
   const [rebaseRepo, setRebaseRepo] = useState('')
   const [rebaseIssueNumber, setRebaseIssueNumber] = useState('')
+  const [continueRepo, setContinueRepo] = useState('')
+  const [continueIssueNumber, setContinueIssueNumber] = useState('')
 
   const [deleteRepo, setDeleteRepo] = useState('')
   const [deleteIssueNumber, setDeleteIssueNumber] = useState('')
@@ -236,12 +238,14 @@ export function App(): ReactElement {
     if (repos.length === 0) {
       setRetryRepo('')
       setRebaseRepo('')
+      setContinueRepo('')
       setDeleteRepo('')
       return
     }
 
     setRetryRepo((prev) => (prev && repos.includes(prev) ? prev : repos[0] ?? ''))
     setRebaseRepo((prev) => (prev && repos.includes(prev) ? prev : repos[0] ?? ''))
+    setContinueRepo((prev) => (prev && repos.includes(prev) ? prev : repos[0] ?? ''))
     setDeleteRepo((prev) => (prev && repos.includes(prev) ? prev : repos[0] ?? ''))
     setSelectedRepo((prev) => (prev === 'all' || repos.includes(prev) ? prev : 'all'))
   }, [repos])
@@ -470,6 +474,25 @@ export function App(): ReactElement {
     )
   }, [deleteForce, deleteIssueNumber, deleteRepo, runOperation])
 
+  const submitContinue = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const issueNumber = Number.parseInt(continueIssueNumber, 10)
+    if (!continueRepo || !Number.isFinite(issueNumber) || issueNumber <= 0) {
+      setErrorMessage('Continue requires a repo and a positive issue number')
+      return
+    }
+
+    await runOperation(
+      'continue',
+      '/api/operations/continue',
+      {
+        repo: continueRepo,
+        issueNumber,
+      },
+      `Continue pass queued for ${continueRepo}#${issueNumber}`,
+    )
+  }, [continueIssueNumber, continueRepo, runOperation])
+
   return (
     <main data-theme="business" className="orch-shell min-h-screen bg-orch-admin">
       <DashboardHeader
@@ -531,6 +554,10 @@ export function App(): ReactElement {
                   repo: rebaseRepo,
                   issueNumber: rebaseIssueNumber,
                 }}
+                continueForm={{
+                  repo: continueRepo,
+                  issueNumber: continueIssueNumber,
+                }}
                 deleteEntryForm={{
                   repo: deleteRepo,
                   issueNumber: deleteIssueNumber,
@@ -545,6 +572,10 @@ export function App(): ReactElement {
                 onRebaseFormChange={(patch) => {
                   if (patch.repo !== undefined) setRebaseRepo(patch.repo)
                   if (patch.issueNumber !== undefined) setRebaseIssueNumber(patch.issueNumber)
+                }}
+                onContinueFormChange={(patch) => {
+                  if (patch.repo !== undefined) setContinueRepo(patch.repo)
+                  if (patch.issueNumber !== undefined) setContinueIssueNumber(patch.issueNumber)
                 }}
                 onDeleteEntryFormChange={(patch) => {
                   if (patch.repo !== undefined) setDeleteRepo(patch.repo)
@@ -565,6 +596,9 @@ export function App(): ReactElement {
                 }}
                 onRebaseSubmit={(event) => {
                   void submitRebase(event)
+                }}
+                onContinueSubmit={(event) => {
+                  void submitContinue(event)
                 }}
                 onDeleteEntrySubmit={(event) => {
                   void submitDeleteEntry(event)

@@ -53,6 +53,7 @@ night-orch status           # show active runs, costs, recent history
 night-orch tui              # live monitoring TUI dashboard
 night-orch sync             # reconcile DB state with GitHub
 night-orch retry <repo> <#> # re-run a blocked/errored issue
+night-orch continue <repo> <#> # queue a context-aware second pass
 night-orch rebase <repo> <#> # rebase PR branch + verify, requeue if broken
 night-orch cleanup          # remove stale worktrees, branches, logs
 night-orch labels-init      # create/update GitHub labels from config

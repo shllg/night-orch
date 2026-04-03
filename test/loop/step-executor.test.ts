@@ -496,6 +496,24 @@ describe('buildPromptContext', () => {
     expect(result.verifyResults).toBeNull()
     expect(result.iteration.isRetry).toBe(false)
   })
+
+  it('maps follow-up context from prReviewFeedback', () => {
+    const ctx = makeCtx({
+      prReviewFeedback: {
+        type: 'human_review',
+        summary: 'Continue requested with requested review changes',
+        context: 'Please address the requested changes',
+      },
+    })
+
+    const result = buildPromptContext(ctx, 'coder')
+
+    expect(result.followup).toEqual({
+      type: 'human_review',
+      summary: 'Continue requested with requested review changes',
+      context: 'Please address the requested changes',
+    })
+  })
 })
 
 describe('getWorkerProfile', () => {

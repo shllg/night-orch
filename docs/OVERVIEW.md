@@ -93,7 +93,7 @@ Metrics (best-effort Prometheus) ◄──────────────�
 ## Subsystems
 
 ### CLI (`src/cli/`)
-Eight commands built with `commander`: `run` (long-running poller), `run-once` (single cycle), `doctor` (validate setup), `sync` (reconcile state with forge), `retry` (requeue an issue), `cleanup` (remove stale artifacts), `notify-test` (test channels), `mcp` (start MCP server). Global flags: `--config`, `--trust-workspace`, `--dry-run`, `--log-level`.
+Core commands built with `commander`: `run` (long-running poller), `run-once` (single cycle), `doctor` (validate setup), `sync` (reconcile state with forge), `retry` (requeue an issue), `continue` (queue a context-aware second pass), `rebase` (rebase and re-evaluate), `cleanup` (remove stale artifacts), `notify-test` (test channels), and `mcp` (start MCP server). Global flags: `--config`, `--trust-workspace`, `--dry-run`, `--log-level`.
 
 ### Config (`src/config/`)
 YAML config validated by Zod schemas (`schema.ts`). The loader (`loader.ts`) reads the file, validates it, and expands paths (`~` → home dir, `{auto:3000-4000}` → allocated port). Key files: `schema.ts` (types + validation), `loader.ts` (load + expand).
@@ -140,10 +140,10 @@ Posts configured mentions to PRs. Deduplication is commit-specific (tracked in S
 Prometheus metrics via `prom-client`. `createMetricsService()` returns either a live service or a no-op. All metric calls are wrapped in try-catch — metrics never block or throw. HTTP endpoint serves `/metrics` (Prometheus format) and `/api/stats` (JSON).
 
 ### MCP Server (`src/mcp/`)
-Model Context Protocol interface for external agents. Eight tools (status, run detail, list runs, cost report, retry, sync, cleanup, list issues). Three resources (status, config, metrics). Mutation tools require auth token if configured.
+Model Context Protocol interface for external agents. Fourteen tools (status, run detail, list runs, cost report, retry, continue, sync, cleanup, delete entry, poll, list issues, stream events, rebase, update). Three resources (status, config, metrics). Mutation tools require auth token if configured.
 
 ### Ops (`src/ops/`)
-Maintenance engines: `sync.ts` reconciles local state with forge (finds orphaned runs, fixes label mismatches), `cleanup.ts` removes stale worktrees and archives old logs, `retry.ts` requeues failed/blocked runs.
+Maintenance engines: `sync.ts` reconciles local state with forge (finds orphaned runs, fixes label mismatches), `cleanup.ts` removes stale worktrees and archives old logs, `retry.ts` requeues failed/blocked runs, `continue.ts` gathers fresh PR context and queues a second pass.
 
 ### State (`src/state/`)
 SQLite with WAL mode via `better-sqlite3`. `db.ts` handles init and migrations. `runs.ts` manages run records (create, update, query). `leases.ts` provides atomic lease acquisition via `INSERT OR IGNORE`.

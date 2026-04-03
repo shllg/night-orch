@@ -205,6 +205,7 @@ function resolveAdapter(
  * Mirrors the engine.ts version but accepts any string role.
  */
 export function buildPromptContext(ctx: RunContext, role: string): PromptContext {
+  const followup = parseFollowupContext(ctx.prReviewFeedback)
   return {
     role: role as PromptContext['role'],
     issue: {
@@ -227,7 +228,25 @@ export function buildPromptContext(ctx: RunContext, role: string): PromptContext
       isRetry: ctx.iteration > 1,
     },
     triageLevel: ctx.triageResult.level,
+    followup,
   }
+}
+
+function parseFollowupContext(value: unknown): PromptContext['followup'] {
+  if (typeof value !== 'object' || value === null) return null
+  const candidate = value as Record<string, unknown>
+
+  const context = candidate['context']
+  if (typeof context !== 'string' || context.trim().length === 0) return null
+
+  const type = typeof candidate['type'] === 'string' && candidate['type'].trim().length > 0
+    ? candidate['type']
+    : 'continue'
+  const summary = typeof candidate['summary'] === 'string' && candidate['summary'].trim().length > 0
+    ? candidate['summary']
+    : null
+
+  return { type, summary, context }
 }
 
 /**

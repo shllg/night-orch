@@ -9,6 +9,7 @@ import { CostTracker } from '../../loop/cost.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { CleanupEngine } from '../../ops/cleanup.js'
 import { RetryEngine } from '../../ops/retry.js'
+import { queueContinue } from '../../ops/continue.js'
 import { DeleteIssueEntryEngine } from '../../ops/delete-entry.js'
 import { isIssueEligibleForRepo } from '../../discovery/discover.js'
 import { pollOnce } from '../../runner/poller.js'
@@ -175,6 +176,19 @@ export function registerTools(): ToolDefinition[] {
       },
     },
     {
+      name: 'night-orch-continue',
+      description: 'Queue a second-pass continuation for a blocked/review_ready issue using fresh PR context (comments, CI, mergeability).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          repo: { type: 'string', description: 'Repository (owner/name)' },
+          issueNumber: { type: 'number', description: 'Issue number' },
+          authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
+        },
+        required: ['repo', 'issueNumber'],
+      },
+    },
+    {
       name: 'night-orch-update',
       description: 'Trigger a self-update: pulls latest code, rebuilds, and restarts all services.',
       inputSchema: {
@@ -217,6 +231,8 @@ export async function handleToolCall(
       return handleStreamEvents(args as { runId: string; since?: number; limit?: number }, deps)
     case 'night-orch-rebase':
       return handleRebase(args as { repo: string; issueNumber: number; check?: boolean; authToken?: string }, deps)
+    case 'night-orch-continue':
+      return handleContinue(args as { repo: string; issueNumber: number; authToken?: string }, deps)
     case 'night-orch-update':
       return handleUpdate(args as { authToken?: string }, deps)
     default:
@@ -652,6 +668,30 @@ async function handleRebase(
 
   const { queueRebase } = await import('../../ops/rebase-and-check.js')
   const result = await queueRebase(deps.db, forge, repoConfig, args.issueNumber, botUser)
+
+  return {
+    queued: result.queued,
+    reason: result.reason,
+  }
+}
+
+async function handleContinue(
+  args: { repo: string; issueNumber: number; authToken?: string },
+  deps: MCPDependencies,
+): Promise<unknown> {
+  assertMcpMutationAuth(args.authToken, deps)
+
+  const repoConfig = deps.config.repos.find((r) => r.repo === args.repo)
+  if (!repoConfig) throw new Error(`Repository not found: ${args.repo}`)
+
+  const forge = createForgeAdapter(repoConfig, deps.config)
+  let botUser = ''
+  try {
+    const auth = await forge.validateAuth()
+    botUser = auth.user
+  } catch { /* best effort */ }
+
+  const result = await queueContinue(deps.db, forge, repoConfig, args.issueNumber, botUser)
 
   return {
     queued: result.queued,

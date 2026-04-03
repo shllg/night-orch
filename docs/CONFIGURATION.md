@@ -256,7 +256,7 @@ Supported commands (posted as issue comments):
 - `/orch retry` — re-queue a blocked/errored issue
 - `/orch rebase` — rebase the work branch onto the latest base
 - `/orch cancel` — cancel an active run
-- `/orch continue` — continue from where a blocked run left off
+- `/orch continue` — queue a context-aware second pass for blocked/review-ready runs
 
 ## `workflows`
 
