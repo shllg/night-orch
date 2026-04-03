@@ -334,3 +334,5 @@ curl http://127.0.0.1:9091/api/v1/targets
 
 If the target is down, check that the scrape target port in `prometheus.yml`
 matches the night-orch metrics port (default: 9090).
+Also ensure `metrics.host` in your night-orch config is reachable from Docker
+(`0.0.0.0` for the default monitoring stack).

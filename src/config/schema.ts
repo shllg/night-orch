@@ -239,7 +239,7 @@ const SecuritySchema = z.object({
 const MetricsSchema = z.object({
   enabled: z.boolean().default(true),
   port: z.number().int().positive().default(9090),
-  host: z.string().default('127.0.0.1'),
+  host: z.string().default('0.0.0.0'),
 })
 
 // --- Observability schema ---

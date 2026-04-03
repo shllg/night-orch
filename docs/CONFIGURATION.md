@@ -224,7 +224,7 @@ Requires `acpx` installed as a dependency (`pnpm add acpx`).
 | --- | --- | --- |
 | `enabled` | boolean | `true` |
 | `port` | positive int | `9090` |
-| `host` | string | `127.0.0.1` |
+| `host` | string | `0.0.0.0` |
 
 ## `observability`
 
