@@ -6,25 +6,16 @@ import { OperationsPanel } from './components/OperationsPanel.js'
 import { RunEventStream } from './components/RunEventStream.js'
 import { RunsPanel } from './components/RunsPanel.js'
 import { extractMessage, formatTimestamp } from './lib/format.js'
+import { STATUS_BADGE_TONE } from './lib/run-tone.js'
 import { asRunEventsPayload, mergeRunEvents } from './lib/run-events.js'
 import {
   type DashboardPage,
   type DashboardSnapshot,
   type RunEvent,
-  type RunStatus,
   type SessionResponse,
   type UpdateStatus,
   type WsEnvelope,
 } from './types/dashboard.js'
-
-const STATUS_TONE: Record<RunStatus, string> = {
-  queued: 'badge-info',
-  running: 'badge-warning',
-  blocked: 'badge-secondary',
-  review_ready: 'badge-success',
-  error: 'badge-error',
-  completed: 'badge-neutral',
-}
 
 const MUTATION_INTENT_HEADER = 'x-night-orch-intent'
 const MUTATION_INTENT_VALUE = 'mutate'
@@ -536,7 +527,7 @@ export function App(): ReactElement {
                 filteredRuns={filteredRuns}
                 selectedRunId={selectedRunId}
                 onSelectedRunChange={setSelectedRunId}
-                statusTone={STATUS_TONE}
+                statusTone={STATUS_BADGE_TONE}
               />
 
               <OperationsPanel

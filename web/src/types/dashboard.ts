@@ -11,10 +11,13 @@ export interface RunSummary {
   hasRun: boolean
   repo: string
   issue: number
+  issueTitle: string | null
   status: RunStatus
+  prNumber: number | null
   phase: string | null
   iterations: number
   costUsd: number
+  lastError: string | null
   startedAt: string | null
   endedAt: string | null
 }

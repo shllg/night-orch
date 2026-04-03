@@ -314,9 +314,12 @@ async function handleListRuns(
         repo: row.repo,
         issue: row.issue_number,
         status: row.status,
+        issueTitle: row.issue_title,
+        prNumber: row.pr_number,
         phase: row.current_phase,
         iterations: row.iteration_count ?? 0,
         costUsd: row.estimated_cost_usd ?? 0,
+        lastError: row.last_error,
         startedAt: row.started_at,
         endedAt: row.ended_at,
       })),
@@ -347,9 +350,12 @@ async function handleListRuns(
         repo: row.repo,
         issue: row.issue_number,
         status: row.status,
+        issueTitle: row.issue_title,
+        prNumber: row.pr_number,
         phase: row.current_phase,
         iterations: row.iteration_count ?? 0,
         costUsd: row.estimated_cost_usd ?? 0,
+        lastError: row.last_error,
         startedAt: hasRun ? timing?.started_at ?? null : null,
         endedAt: hasRun ? timing?.ended_at ?? null : null,
       }
@@ -367,9 +373,12 @@ interface CompletedRunRow extends RunTimingRow {
   repo: string
   issue_number: number
   status: string
+  issue_title: string | null
+  pr_number: number | null
   current_phase: string | null
   iteration_count: number | null
   estimated_cost_usd: number | null
+  last_error: string | null
 }
 
 function queryCompletedRuns(
@@ -391,9 +400,12 @@ function queryCompletedRuns(
          repo,
          issue_number,
          status,
+         issue_title,
+         pr_number,
          current_phase,
          iteration_count,
          estimated_cost_usd,
+         last_error,
          started_at,
          ended_at
        FROM runs

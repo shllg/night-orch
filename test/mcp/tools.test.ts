@@ -90,12 +90,38 @@ describe('MCP Tools', () => {
 
   it('list-runs returns filtered results', async () => {
     const runManager = new RunManager(db)
-    runManager.create({ repo: 'org/repo', issueNumber: 1, issueNodeId: '', planner: 'claude', coder: 'claude', reviewer: 'claude' })
+    runManager.create({
+      repo: 'org/repo',
+      issueNumber: 1,
+      issueTitle: 'Queue run title',
+      issueNodeId: '',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
     const r2 = runManager.create({ repo: 'org/repo', issueNumber: 2, issueNodeId: '', planner: 'claude', coder: 'claude', reviewer: 'claude' })
-    runManager.update(r2.id, { status: 'error' })
+    runManager.update(r2.id, { status: 'error', prNumber: 42, lastError: 'verify failed' })
 
-    const result = await handleToolCall('night-orch-list-runs', { status: 'queued' }, deps) as { count: number }
+    const result = await handleToolCall('night-orch-list-runs', { status: 'queued' }, deps) as {
+      count: number
+      runs: Array<{ issueTitle: string | null; prNumber: number | null; lastError: string | null }>
+    }
     expect(result.count).toBe(1)
+    expect(result.runs[0]).toMatchObject({
+      issueTitle: 'Queue run title',
+      prNumber: null,
+      lastError: null,
+    })
+
+    const errored = await handleToolCall('night-orch-list-runs', { status: 'error' }, deps) as {
+      count: number
+      runs: Array<{ prNumber: number | null; lastError: string | null }>
+    }
+    expect(errored.count).toBe(1)
+    expect(errored.runs[0]).toMatchObject({
+      prNumber: 42,
+      lastError: 'verify failed',
+    })
   })
 
   it('list-runs includes tracked issues with no run rows', async () => {
