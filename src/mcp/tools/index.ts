@@ -15,6 +15,7 @@ import { pollOnce } from '../../runner/poller.js'
 import { flushActiveAgentObservability } from '../../events/observability.js'
 import { createForgeAdapter } from '../../forge/factory.js'
 import { nowUtcIso } from '../../utils/time.js'
+import { loadRuns } from '../../cli/tui/data.js'
 
 interface ToolDefinition {
   name: string
@@ -285,43 +286,135 @@ async function handleListRuns(
   args: { repo?: string; status?: string; limit?: number },
   deps: MCPDependencies,
 ): Promise<unknown> {
-  const limit = args.limit ?? 20
-  const conditions: string[] = []
-  const params: unknown[] = []
+  const limit = normalizeListRunsLimit(args.limit)
 
-  if (args.repo) {
-    conditions.push('repo = ?')
-    params.push(args.repo)
+  if (args.status === 'completed') {
+    const rows = queryCompletedRuns(deps, args.repo, limit)
+    return {
+      count: rows.length,
+      runs: rows.map((row) => ({
+        runId: row.id,
+        hasRun: true,
+        repo: row.repo,
+        issue: row.issue_number,
+        status: row.status,
+        phase: row.current_phase,
+        iterations: row.iteration_count ?? 0,
+        costUsd: row.estimated_cost_usd ?? 0,
+        startedAt: row.started_at,
+        endedAt: row.ended_at,
+      })),
+    }
   }
-  if (args.status) {
-    conditions.push('status = ?')
-    params.push(args.status)
-  }
 
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
-  const sql = `SELECT id, repo, issue_number, status, current_phase, iteration_count, estimated_cost_usd, started_at, ended_at FROM runs ${where} ORDER BY created_at DESC LIMIT ?`
-  params.push(limit)
-
-  const rows = deps.db.prepare(sql).all(...params) as Array<{
-    id: string; repo: string; issue_number: number; status: string
-    current_phase: string | null; iteration_count: number; estimated_cost_usd: number
-    started_at: string | null; ended_at: string | null
-  }>
+  const filteredRows = loadRuns(deps.db, {
+    limit,
+    repo: args.repo,
+    status: args.status,
+  })
+  const runTimings = loadRunTimingsByRunId(
+    deps,
+    filteredRows
+      .map((row) => row.id)
+      .filter((runId) => !runId.startsWith('issue:')),
+  )
 
   return {
-    count: rows.length,
-    runs: rows.map((r) => ({
-      runId: r.id,
-      repo: r.repo,
-      issue: r.issue_number,
-      status: r.status,
-      phase: r.current_phase,
-      iterations: r.iteration_count,
-      costUsd: r.estimated_cost_usd,
-      startedAt: r.started_at,
-      endedAt: r.ended_at,
-    })),
+    count: filteredRows.length,
+    runs: filteredRows.map((row) => {
+      const hasRun = !row.id.startsWith('issue:')
+      const timing = hasRun ? runTimings.get(row.id) : undefined
+
+      return {
+        runId: row.id,
+        hasRun,
+        repo: row.repo,
+        issue: row.issue_number,
+        status: row.status,
+        phase: row.current_phase,
+        iterations: row.iteration_count ?? 0,
+        costUsd: row.estimated_cost_usd ?? 0,
+        startedAt: hasRun ? timing?.started_at ?? null : null,
+        endedAt: hasRun ? timing?.ended_at ?? null : null,
+      }
+    }),
   }
+}
+
+interface RunTimingRow {
+  id: string
+  started_at: string | null
+  ended_at: string | null
+}
+
+interface CompletedRunRow extends RunTimingRow {
+  repo: string
+  issue_number: number
+  status: string
+  current_phase: string | null
+  iteration_count: number | null
+  estimated_cost_usd: number | null
+}
+
+function queryCompletedRuns(
+  deps: MCPDependencies,
+  repo: string | undefined,
+  limit: number,
+): CompletedRunRow[] {
+  const params: unknown[] = []
+  const repoClause = repo ? 'AND repo = ?' : ''
+  if (repo) {
+    params.push(repo)
+  }
+  params.push(limit)
+
+  return deps.db
+    .prepare(
+      `SELECT
+         id,
+         repo,
+         issue_number,
+         status,
+         current_phase,
+         iteration_count,
+         estimated_cost_usd,
+         started_at,
+         ended_at
+       FROM runs
+       WHERE status = 'completed'
+         ${repoClause}
+       ORDER BY
+         COALESCE(julianday(created_at), 0) DESC,
+         COALESCE(julianday(updated_at), 0) DESC,
+         id DESC
+       LIMIT ?`,
+    )
+    .all(...params) as CompletedRunRow[]
+}
+
+function loadRunTimingsByRunId(
+  deps: MCPDependencies,
+  runIds: string[],
+): Map<string, RunTimingRow> {
+  const uniqueRunIds = [...new Set(runIds)]
+  if (uniqueRunIds.length === 0) {
+    return new Map()
+  }
+
+  const placeholders = uniqueRunIds.map(() => '?').join(', ')
+  const rows = deps.db
+    .prepare(`SELECT id, started_at, ended_at FROM runs WHERE id IN (${placeholders})`)
+    .all(...uniqueRunIds) as RunTimingRow[]
+
+  return new Map(rows.map((row) => [row.id, row]))
+}
+
+function normalizeListRunsLimit(limit: number | undefined): number {
+  if (typeof limit !== 'number' || !Number.isFinite(limit)) {
+    return 20
+  }
+
+  return Math.min(500, Math.max(1, Math.floor(limit)))
 }
 
 async function handleCostReport(args: { days?: number }, deps: MCPDependencies): Promise<unknown> {

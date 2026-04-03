@@ -50,7 +50,32 @@ export interface MergeBatchRow {
   pr_numbers: string
 }
 
-export function loadRuns(db: Database.Database, limit?: number): RunListRow[] {
+export interface LoadRunsOptions {
+  limit?: number
+  repo?: string
+  status?: string
+}
+
+export function loadRuns(
+  db: Database.Database,
+  limitOrOptions?: number | LoadRunsOptions,
+): RunListRow[] {
+  const options = typeof limitOrOptions === 'number'
+    ? { limit: limitOrOptions }
+    : (limitOrOptions ?? {})
+  const conditions: string[] = []
+  const params: unknown[] = []
+
+  if (options.repo) {
+    conditions.push('repo = ?')
+    params.push(options.repo)
+  }
+  if (options.status) {
+    conditions.push('status = ?')
+    params.push(options.status)
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
   const query = `WITH ranked_runs AS (
          SELECT
            r.repo,
@@ -208,6 +233,7 @@ export function loadRuns(db: Database.Database, limit?: number): RunListRow[] {
          created_at,
          updated_at
        FROM visible_rows
+       ${whereClause}
        ORDER BY
          CASE status
            WHEN 'running' THEN 0
@@ -215,15 +241,20 @@ export function loadRuns(db: Database.Database, limit?: number): RunListRow[] {
            WHEN 'review_ready' THEN 2
            WHEN 'blocked' THEN 3
            WHEN 'error' THEN 4
-           ELSE 5
-         END,
-         COALESCE(julianday(created_at), 0) DESC,
-         COALESCE(julianday(updated_at), 0) DESC,
-         id DESC`
+         ELSE 5
+        END,
+        COALESCE(julianday(created_at), 0) DESC,
+        COALESCE(julianday(updated_at), 0) DESC,
+        id DESC`
 
-  const limitedQuery = typeof limit === 'number' ? `${query}\n       LIMIT ?` : query
+  const limitedQuery = typeof options.limit === 'number'
+    ? `${query}\n       LIMIT ?`
+    : query
+  if (typeof options.limit === 'number') {
+    params.push(options.limit)
+  }
   const stmt = db.prepare(limitedQuery)
-  return (typeof limit === 'number' ? stmt.all(limit) : stmt.all()) as RunListRow[]
+  return stmt.all(...params) as RunListRow[]
 }
 
 export function buildIssueList(runs: RunListRow[]): IssueListRow[] {

@@ -58,7 +58,7 @@ export function App(): ReactElement {
 
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
-  const selectedRunIdRef = useRef('')
+  const selectedStreamRunIdRef = useRef('')
   const subscribedRunRef = useRef('')
 
   const repos = snapshot?.config.repos ?? []
@@ -73,6 +73,7 @@ export function App(): ReactElement {
     () => allRuns.find((run) => run.runId === selectedRunId) ?? null,
     [allRuns, selectedRunId],
   )
+  const selectedStreamRunId = selectedRun?.hasRun ? selectedRun.runId : ''
 
   const loadDashboard = useCallback(async () => {
     const response = await fetch('/api/dashboard')
@@ -135,7 +136,7 @@ export function App(): ReactElement {
         if (cancelled) return
         setSocketConnected(true)
         socket.send(JSON.stringify({ type: 'refresh' }))
-        const activeRun = selectedRunIdRef.current
+        const activeRun = selectedStreamRunIdRef.current
         if (activeRun) {
           socket.send(JSON.stringify({ type: 'subscribe-run-events', runId: activeRun, since: 0 }))
         }
@@ -151,7 +152,7 @@ export function App(): ReactElement {
 
           if (envelope.type === 'run-events' && envelope.payload) {
             const payload = asRunEventsPayload(envelope.payload)
-            if (!payload || payload.runId !== selectedRunIdRef.current) {
+            if (!payload || payload.runId !== selectedStreamRunIdRef.current) {
               return
             }
 
@@ -195,26 +196,26 @@ export function App(): ReactElement {
   }, [])
 
   useEffect(() => {
-    selectedRunIdRef.current = selectedRunId
+    selectedStreamRunIdRef.current = selectedStreamRunId
     setRunEvents([])
 
     const socket = wsRef.current
     if (!socket || socket.readyState !== WebSocket.OPEN) {
-      subscribedRunRef.current = selectedRunId
+      subscribedRunRef.current = selectedStreamRunId
       return
     }
 
     const previousRun = subscribedRunRef.current
-    if (previousRun && previousRun !== selectedRunId) {
+    if (previousRun && previousRun !== selectedStreamRunId) {
       socket.send(JSON.stringify({ type: 'unsubscribe-run-events', runId: previousRun }))
     }
 
-    if (selectedRunId) {
-      socket.send(JSON.stringify({ type: 'subscribe-run-events', runId: selectedRunId, since: 0 }))
+    if (selectedStreamRunId) {
+      socket.send(JSON.stringify({ type: 'subscribe-run-events', runId: selectedStreamRunId, since: 0 }))
     }
 
-    subscribedRunRef.current = selectedRunId
-  }, [selectedRunId, socketConnected])
+    subscribedRunRef.current = selectedStreamRunId
+  }, [selectedStreamRunId, socketConnected])
 
   useEffect(() => {
     if (!updateStatus || updateStatus.state === 'idle') return

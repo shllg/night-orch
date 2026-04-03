@@ -77,7 +77,9 @@ export function RunsPanel({
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
                       <p className="text-sm font-semibold text-base-content">{run.repo} #{run.issue}</p>
-                      <p className="text-xs text-base-content/60">{run.runId}</p>
+                      <p className="text-xs text-base-content/60">
+                        {run.hasRun ? run.runId : 'Tracked issue (no run yet)'}
+                      </p>
                     </div>
                     <span className={`badge badge-sm badge-outline capitalize ${statusTone[run.status]}`}>
                       {run.status.replaceAll('_', ' ')}

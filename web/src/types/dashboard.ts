@@ -7,6 +7,7 @@ export interface RunListResult {
 
 export interface RunSummary {
   runId: string
+  hasRun: boolean
   repo: string
   issue: number
   status: RunStatus

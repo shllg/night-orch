@@ -216,6 +216,53 @@ describe('startWebServer', () => {
     await expect(index.text()).resolves.toContain('<!doctype html>')
   })
 
+  it('dashboard includes tracked issues that do not have run rows yet', async () => {
+    db.prepare(
+      `INSERT INTO issues (
+        repo, issue_number, issue_node_id, issue_title, status,
+        iteration_count, estimated_cost_usd, run_count, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'org/repo',
+      58,
+      'node-58',
+      'Issue missing',
+      'queued',
+      0,
+      0,
+      0,
+      '2026-04-01T12:00:00.000Z',
+      '2026-04-01T12:00:00.000Z',
+    )
+
+    server = await startWebServer(
+      deps,
+      {
+        host: '127.0.0.1',
+        port: 0,
+        frontendDistPath: frontendDir,
+      },
+    )
+
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Unexpected address type')
+    }
+    baseUrl = `http://127.0.0.1:${address.port}`
+
+    const dashboard = await fetch(`${baseUrl}/api/dashboard`)
+    expect(dashboard.status).toBe(200)
+    const payload = await dashboard.json() as {
+      runs: { runs: Array<{ issue: number; status: string; runId: string; hasRun: boolean }> }
+    }
+    const trackedIssue = payload.runs.runs.find((run) => run.issue === 58)
+
+    expect(trackedIssue).toBeDefined()
+    expect(trackedIssue?.status).toBe('queued')
+    expect(trackedIssue?.hasRun).toBe(false)
+    expect(trackedIssue?.runId.startsWith('issue:')).toBe(true)
+  })
+
   it('rejects mutating API requests without explicit mutation intent header', async () => {
     server = await startWebServer(
       deps,
