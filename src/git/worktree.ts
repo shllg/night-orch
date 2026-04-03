@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, rm } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { logger } from '../utils/logger.js'
 import {
@@ -243,7 +243,11 @@ async function removeWorktree(repoPath: string, worktreePath: string): Promise<v
   try {
     await runGit(['worktree', 'remove', worktreePath, '--force'], { cwd: repoPath })
   } catch {
-    // Fallback: prune
+    // git worktree remove failed — prune stale metadata, then force-remove the directory
     await runGit(['worktree', 'prune'], { cwd: repoPath })
+    if (existsSync(worktreePath)) {
+      logger.warn({ worktreePath }, 'Force-removing orphaned worktree directory')
+      await rm(worktreePath, { recursive: true, force: true })
+    }
   }
 }
