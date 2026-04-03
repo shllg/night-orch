@@ -3,9 +3,11 @@ import type { Config } from '../config/schema.js'
 import { logger } from '../utils/logger.js'
 import { normalizeRepoRelativePath } from '../planning/mode.js'
 import { runGit } from '../git/process.js'
+import { compilePRTitle } from '../publishing/pr-body.js'
 
 export interface CommitChangesOptions {
   planningOnlyPrdPath?: string
+  issueLabels?: string[]
 }
 
 export interface CommitChangesResult {
@@ -74,7 +76,7 @@ export async function commitChanges(
     }
   }
 
-  const message = `night-orch: implement #${issueNumber} ${sanitizeCommitTitle(issueTitle)}`
+  const message = compilePRTitle(issueNumber, issueTitle, opts.issueLabels ?? [])
   await runGit(['commit', '-m', message], { cwd: worktreePath })
 
   logger.info(
@@ -83,14 +85,6 @@ export async function commitChanges(
   )
 
   return { committed: true, reason: null, blockRun: false }
-}
-
-function sanitizeCommitTitle(title: string): string {
-  return title
-    .replace(/[\r\n]+/g, ' ')
-    .replace(/[ \t]{2,}/g, ' ')
-    .replace(/[^\w\s.,:;!?()[\]{}\-/#]/g, '')
-    .trim()
 }
 
 function normalizeGitPath(path: string): string {

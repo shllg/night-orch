@@ -142,7 +142,10 @@ export async function executeLoop(
             ctx.issueNumber,
             ctx.issue.title,
             config.security,
-            { planningOnlyPrdPath },
+            {
+              planningOnlyPrdPath,
+              issueLabels: ctx.issue.labels,
+            },
           )
           if (!commitResult.committed) {
             logger.warn({ reason: commitResult.reason }, 'Commit skipped')
