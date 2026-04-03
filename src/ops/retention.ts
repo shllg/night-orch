@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
 import { logger } from '../utils/logger.js'
+import { utcIsoFromMs } from '../utils/time.js'
 
 export interface RetentionOptions {
   /** Compact phase_data and delete events after this many days. */
@@ -37,8 +38,8 @@ export class RetentionEngine {
       vacuumed: false,
     }
 
-    const detailCutoff = new Date(Date.now() - options.detailDays * 24 * 60 * 60 * 1000).toISOString()
-    const archiveCutoff = new Date(Date.now() - options.archiveDays * 24 * 60 * 60 * 1000).toISOString()
+    const detailCutoff = utcIsoFromMs(Date.now() - options.detailDays * 24 * 60 * 60 * 1000)
+    const archiveCutoff = utcIsoFromMs(Date.now() - options.archiveDays * 24 * 60 * 60 * 1000)
 
     if (options.dryRun) {
       const compactCount = this.db

@@ -1,4 +1,5 @@
 import type { AgentEventType } from '../events/types.js'
+import { nowUtcIso } from '../utils/time.js'
 import type { WorkerTaskInput } from './types.js'
 
 export function emitWorkerEvent(
@@ -11,7 +12,7 @@ export function emitWorkerEvent(
     phase: input.phase ?? 'unknown-phase',
     role: input.role,
     type,
-    timestamp: new Date().toISOString(),
+    timestamp: nowUtcIso(),
     data,
   })
 }

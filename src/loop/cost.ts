@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3'
 import type { Config } from '../config/schema.js'
 import { IssueManager } from '../state/issues.js'
+import { utcDayKey } from '../utils/time.js'
 
 export class CostTracker {
   private issueManager: IssueManager
@@ -12,7 +13,7 @@ export class CostTracker {
   recordCost(runId: string, costUsd: number): void {
     if (costUsd <= 0) return
 
-    const today = new Date().toISOString().split('T')[0]!
+    const today = utcDayKey()
     const tx = this.db.transaction((id: string, date: string, amountUsd: number) => {
       const row = this.db
         .prepare('SELECT estimated_cost_usd FROM runs WHERE id = ?')
@@ -40,7 +41,7 @@ export class CostTracker {
   }
 
   getDailyCost(): number {
-    const today = new Date().toISOString().split('T')[0]!
+    const today = utcDayKey()
     const row = this.db
       .prepare('SELECT total_cost_usd FROM daily_costs WHERE date = ?')
       .get(today) as { total_cost_usd: number } | undefined

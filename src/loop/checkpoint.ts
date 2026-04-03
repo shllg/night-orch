@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3'
 import type { LoopPhase, RunContext, PlannerOutput, CoderOutput, ReviewerOutput } from './types.js'
 import { IssueManager } from '../state/issues.js'
+import { nowUtcIso } from '../utils/time.js'
 
 export class Checkpoint {
   private issueManager: IssueManager
@@ -10,9 +11,10 @@ export class Checkpoint {
   }
 
   phaseStarted(runId: string, phase: LoopPhase): void {
+    const now = nowUtcIso()
     this.db
-      .prepare("UPDATE runs SET current_phase = ?, updated_at = datetime('now') WHERE id = ?")
-      .run(phase, runId)
+      .prepare('UPDATE runs SET current_phase = ?, updated_at = ? WHERE id = ?')
+      .run(phase, now, runId)
     this.issueManager.syncFromRunId(runId)
     this.recordEvent(runId, 'phase_started', phase, null)
   }
@@ -21,12 +23,13 @@ export class Checkpoint {
     // Merge artifacts with existing phase_data
     const existing = this.getPhaseData(runId)
     const merged = { ...existing, [phase]: artifacts }
+    const now = nowUtcIso()
 
     this.db
       .prepare(
-        "UPDATE runs SET current_phase = ?, phase_data = ?, updated_at = datetime('now') WHERE id = ?",
+        'UPDATE runs SET current_phase = ?, phase_data = ?, updated_at = ? WHERE id = ?',
       )
-      .run(phase, JSON.stringify(merged), runId)
+      .run(phase, JSON.stringify(merged), now, runId)
     this.issueManager.syncFromRunId(runId)
     this.recordEvent(runId, 'phase_completed', phase, artifacts)
   }
@@ -101,10 +104,11 @@ export class Checkpoint {
     data: Record<string, unknown> | null,
   ): void {
     try {
+      const now = nowUtcIso()
       this.db
         .prepare(
           `INSERT INTO events (run_id, repo, issue_number, event_type, phase, data, created_at)
-           SELECT ?, repo, issue_number, ?, ?, ?, datetime('now')
+           SELECT ?, repo, issue_number, ?, ?, ?, ?
            FROM runs
            WHERE id = ?`,
         )
@@ -113,6 +117,7 @@ export class Checkpoint {
           eventType,
           phase,
           data ? JSON.stringify(data) : null,
+          now,
           runId,
         )
     } catch {

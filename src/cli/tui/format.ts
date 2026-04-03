@@ -1,4 +1,5 @@
 import type { StatusAggregate } from '../../state/stats.js'
+import { formatUtcClock } from '../../utils/time.js'
 import type { AgentEventRow } from './data.js'
 import type { TuiLogLine } from './types.js'
 
@@ -38,9 +39,7 @@ export function truncate(value: string, maxLen = 72): string {
 }
 
 export function formatTime(timestamp: string): string {
-  const date = new Date(timestamp)
-  if (Number.isNaN(date.getTime())) return '--:--:--'
-  return date.toISOString().slice(11, 19)
+  return formatUtcClock(timestamp)
 }
 
 export function formatMinutes(minutes: number): string {

@@ -123,3 +123,4 @@ See `docs/specs-active/index.md` for the full implementation spec with dependenc
 - **Orchestrator owns verification** — never trust agent claims that tests pass
 - **Forge abstraction** — GitHub first, Forgejo second via `ForgeAdapter` interface
 - **Review gates readiness** — PR only marked ready when reviewer approves AND verify passes
+- **UTC timestamps everywhere** — persisted and displayed times are normalized to UTC

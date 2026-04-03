@@ -1,6 +1,7 @@
 import React from 'react'
 import { Box, Text } from 'ink'
 import type Database from 'better-sqlite3'
+import { utcDayKey } from '../../utils/time.js'
 
 interface CostBarProps {
   db: Database.Database
@@ -9,7 +10,7 @@ interface CostBarProps {
 }
 
 export function CostBar({ db, tick: _tick, maxDailyCost = 50 }: CostBarProps): React.ReactElement {
-  const today = new Date().toISOString().split('T')[0]!
+  const today = utcDayKey()
   const row = db
     .prepare('SELECT total_cost_usd FROM daily_costs WHERE date = ?')
     .get(today) as { total_cost_usd: number } | undefined

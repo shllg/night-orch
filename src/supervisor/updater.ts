@@ -1,5 +1,6 @@
 import { execa } from 'execa'
 import { logger } from '../utils/logger.js'
+import { nowUtcIso } from '../utils/time.js'
 import type { UpdateStatusTracker } from './status.js'
 
 export interface UpdateResult {
@@ -17,13 +18,13 @@ export async function runUpdate(
   const previousCommit = (await git(['rev-parse', 'HEAD'])).stdout.trim()
 
   // Pull
-  status.transition('pulling', { startedAt: new Date().toISOString(), previousCommit })
+  status.transition('pulling', { startedAt: nowUtcIso(), previousCommit })
   try {
     await git(['pull', '--ff-only'])
   } catch (err) {
     const message = `git pull failed: ${(err as Error).message}`
     logger.error(message)
-    status.transition('failed', { error: message, completedAt: new Date().toISOString() })
+    status.transition('failed', { error: message, completedAt: nowUtcIso() })
     return { success: false, previousCommit, newCommit: previousCommit, error: message }
   }
 
@@ -51,7 +52,7 @@ export async function runUpdate(
       logger.error({ err: rollbackErr }, 'Rollback also failed — manual intervention required')
     }
 
-    status.transition('failed', { error: message, completedAt: new Date().toISOString() })
+    status.transition('failed', { error: message, completedAt: nowUtcIso() })
     return { success: false, previousCommit, newCommit: previousCommit, error: message }
   }
 

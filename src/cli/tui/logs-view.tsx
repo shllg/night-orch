@@ -1,6 +1,7 @@
 import React from 'react'
 import { Box, Text } from 'ink'
 import { formatTime, truncate } from './format.js'
+import { formatUtcDateTime } from '../../utils/time.js'
 import type { TuiLogLine } from './types.js'
 import { sliceWindow } from './view-model.js'
 
@@ -94,7 +95,7 @@ export function buildLogDetailLines(row: TuiLogLine | null): string[] {
   const messageLines = row.message.split('\n')
   const rawLines = JSON.stringify(row, null, 2).split('\n')
   return [
-    `time ${row.createdAt}`,
+    `time ${formatUtcDateTime(row.createdAt)}`,
     `level ${row.level.toUpperCase()}`,
     `id ${row.id}`,
     '',

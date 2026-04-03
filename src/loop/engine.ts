@@ -9,6 +9,7 @@ import { executeStep, type StepDependencies } from './step-executor.js'
 import { Checkpoint } from './checkpoint.js'
 import { CostTracker } from './cost.js'
 import { logger } from '../utils/logger.js'
+import { utcIsoFromMs } from '../utils/time.js'
 import type Database from 'better-sqlite3'
 import { buildPlanningPrdPath, isPlanningIssue } from '../planning/mode.js'
 import type { AgentEvent } from '../events/types.js'
@@ -73,7 +74,7 @@ export async function executeLoop(
 
     // Execute step
     const stepStart = Date.now()
-    const stepStartedAt = new Date(stepStart).toISOString()
+    const stepStartedAt = utcIsoFromMs(stepStart)
     ctx = updateContext(ctx, { currentPhase: step.id })
     checkpoint.phaseStarted(ctx.runId, step.id)
 

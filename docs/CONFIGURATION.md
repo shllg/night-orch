@@ -38,6 +38,13 @@ Recommended deployment uses a dedicated non-root user (for example `orch`) with:
   - array: `["pnpm", "test", "--", "--run"]`
 - `repos[].labels.ready` and `repos[].labels.blocked` accept either string or string array and are normalized to arrays.
 
+## Timestamp & Timezone Semantics
+
+- Night-orch treats all timestamps as UTC.
+- Runtime-generated timestamps use ISO-8601 UTC (`YYYY-MM-DDTHH:mm:ss.sssZ`).
+- Legacy SQLite-style timestamps without an explicit timezone (for example `YYYY-MM-DD HH:mm:ss`) are interpreted as UTC.
+- CLI/TUI time displays include an explicit `UTC` label.
+
 ## Top-Level Schema
 
 | Key | Type | Required | Default | Notes |

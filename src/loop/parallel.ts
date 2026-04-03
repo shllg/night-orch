@@ -6,6 +6,7 @@ import { RunManager } from '../state/runs.js'
 import { createWorktreeManager } from '../git/worktree.js'
 import { buildWorktreePath } from '../git/slug.js'
 import { logger } from '../utils/logger.js'
+import { nowUtcIso } from '../utils/time.js'
 
 export interface SubTaskResult {
   index: number
@@ -143,7 +144,7 @@ export async function executeParallelSubtasks(
 
           runManager.update(subRun.id, {
             status: success ? 'review_ready' : 'blocked',
-            endedAt: new Date().toISOString(),
+            endedAt: nowUtcIso(),
           })
 
           return { index, subtask, ctx: finalCtx, success }

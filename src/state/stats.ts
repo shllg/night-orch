@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import { nowUtcIso } from '../utils/time.js'
 
 export interface StatusAggregate {
   status: string
@@ -377,7 +378,7 @@ export function loadTuiStats(db: Database.Database): TuiStatsSnapshot {
     .sort((a, b) => a - b)
 
   return {
-    updatedAt: new Date().toISOString(),
+    updatedAt: nowUtcIso(),
     overview: {
       totalRuns: toNumber(overviewRow?.total_runs),
       activeRuns: toNumber(overviewRow?.active_runs),

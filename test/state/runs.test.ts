@@ -242,7 +242,10 @@ describe('RunManager', () => {
     })
     runManager.update(newRun.id, { status: 'blocked' })
 
-    db.prepare("UPDATE runs SET updated_at = ? WHERE id = ?").run('2099-01-01T00:00:00.000Z', oldRun.id)
+    db.prepare('UPDATE runs SET created_at = ?, updated_at = ? WHERE id = ?')
+      .run('2026-01-01T00:00:00.000Z', '2099-01-01T00:00:00.000Z', oldRun.id)
+    db.prepare('UPDATE runs SET created_at = ?, updated_at = ? WHERE id = ?')
+      .run('2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000Z', newRun.id)
 
     const found = runManager.getByRepoAndIssue('org/repo', 91)
     expect(found?.id).toBe(newRun.id)
@@ -269,7 +272,10 @@ describe('RunManager', () => {
     })
     runManager.update(newRun.id, { status: 'blocked' })
 
-    db.prepare("UPDATE runs SET updated_at = ? WHERE id = ?").run('2099-01-01T00:00:00.000Z', oldRun.id)
+    db.prepare('UPDATE runs SET created_at = ?, updated_at = ? WHERE id = ?')
+      .run('2026-01-01T00:00:00.000Z', '2099-01-01T00:00:00.000Z', oldRun.id)
+    db.prepare('UPDATE runs SET created_at = ?, updated_at = ? WHERE id = ?')
+      .run('2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000Z', newRun.id)
 
     const active = runManager.getActive()
     expect(active.some((row) => row.id === newRun.id)).toBe(true)

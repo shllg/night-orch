@@ -2,6 +2,7 @@ import { fork, type ChildProcess } from 'node:child_process'
 import { resolve } from 'node:path'
 import { existsSync, unlinkSync, watchFile, unwatchFile } from 'node:fs'
 import { logger } from '../utils/logger.js'
+import { nowUtcIso } from '../utils/time.js'
 import { UpdateStatusTracker } from './status.js'
 import { runUpdate } from './updater.js'
 
@@ -200,7 +201,7 @@ export class Supervisor {
 
     this.updating = false
     if (result.success) {
-      this.status.transition('idle', { completedAt: new Date().toISOString() })
+      this.status.transition('idle', { completedAt: nowUtcIso() })
     }
 
     // Clean trigger file

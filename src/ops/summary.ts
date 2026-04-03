@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import { nowUtcIso, parseUtcTimestampMs } from '../utils/time.js'
 
 export interface SummaryOptions {
   since: Date
@@ -30,8 +31,8 @@ export function parseSinceArg(value: string): Date {
     }[unit]
     if (ms) return new Date(Date.now() - amount * ms)
   }
-  const date = new Date(value)
-  if (!isNaN(date.getTime())) return date
+  const parsed = parseUtcTimestampMs(value)
+  if (Number.isFinite(parsed)) return new Date(parsed)
   throw new Error(`Cannot parse time range: ${value}. Use "24h", "7d", "1w", "30d", or an ISO date.`)
 }
 
@@ -49,7 +50,7 @@ export class SummaryEngine {
 
   summarize(options: SummaryOptions): SummaryResult {
     const sinceStr = options.since.toISOString()
-    const nowStr = new Date().toISOString()
+    const nowStr = nowUtcIso()
 
     const repoFilter = options.repo ? ' AND repo = ?' : ''
     const repoParams = options.repo ? [options.repo] : []
