@@ -263,6 +263,117 @@ describe('startWebServer', () => {
     expect(trackedIssue?.runId.startsWith('issue:')).toBe(true)
   })
 
+  it('returns projects config snapshot for the web projects page', async () => {
+    deps.config.workerProfiles = {
+      codexCli: {
+        type: 'codex',
+        command: 'codex',
+        args: ['exec'],
+        workerTimeoutSeconds: 900,
+        minimalEnv: true,
+        runtimeWrapper: null,
+        env: {
+          OPENAI_API_KEY: 'top-secret',
+          MODE: 'dev',
+        },
+      },
+    }
+
+    deps.config.repos[0] = {
+      ...deps.config.repos[0],
+      tokenEnv: 'CUSTOM_GH_TOKEN',
+      apiBaseUrl: 'https://api.github.acme',
+      agents: {
+        codex: 'codexCli',
+      },
+      verify: ['pnpm lint', ['pnpm', 'test']],
+      prompts: {
+        plannerSystem: 'planner custom prompt',
+      },
+      environment: {
+        defaultMode: 'dedicated',
+        bootstrap: [{ when: 'always', command: ['pnpm', 'install'] }],
+        cleanup: [{ when: 'always', command: 'pnpm clean' }],
+        shared: {
+          requireRunning: true,
+          healthcheck: ['pnpm', 'health'],
+        },
+        dedicated: {
+          compose: {
+            file: 'docker-compose.yml',
+            services: ['api', 'db'],
+            projectName: 'orch-{issue}',
+          },
+          env: {
+            copyFrom: '.env',
+            overrides: {
+              API_KEY: 'sensitive',
+            },
+            overrideFiles: ['.env.local'],
+          },
+          healthcheck: 'pnpm health',
+          teardownOnComplete: true,
+        },
+      },
+    }
+
+    server = await startWebServer(
+      deps,
+      {
+        host: '127.0.0.1',
+        port: 0,
+        frontendDistPath: frontendDir,
+      },
+    )
+
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Unexpected address type')
+    }
+    baseUrl = `http://127.0.0.1:${address.port}`
+
+    const projects = await fetch(`${baseUrl}/api/projects`)
+    expect(projects.status).toBe(200)
+
+    const payload = await projects.json() as {
+      githubDefaults: { tokenEnv: string; apiBaseUrl: string }
+      workerProfiles: Record<string, { envKeys: string[]; env?: unknown }>
+      repos: Array<{
+        repo: string
+        labels: { blocked: string }
+        prompts: { plannerSystem: boolean; coderSystem: boolean; reviewerSystem: boolean }
+        environment?: {
+          dedicated?: {
+            env: { copyFrom: string; overrideKeys: string[]; overrideFiles: string[]; overrides?: unknown }
+          }
+        }
+      }>
+    }
+
+    expect(payload.githubDefaults).toMatchObject({
+      tokenEnv: 'GITHUB_TOKEN',
+      apiBaseUrl: 'https://api.github.com',
+    })
+    expect(payload.workerProfiles['codexCli']).toBeDefined()
+    expect(payload.workerProfiles['codexCli']?.envKeys).toEqual(['OPENAI_API_KEY', 'MODE'])
+    expect(payload.workerProfiles['codexCli']).not.toHaveProperty('env')
+
+    expect(payload.repos).toHaveLength(1)
+    expect(payload.repos[0]?.repo).toBe('org/repo')
+    expect(payload.repos[0]?.labels.blocked).toBe('orch:blocked')
+    expect(payload.repos[0]?.prompts).toMatchObject({
+      plannerSystem: true,
+      coderSystem: false,
+      reviewerSystem: false,
+    })
+    expect(payload.repos[0]?.environment?.dedicated?.env).toMatchObject({
+      copyFrom: '.env',
+      overrideKeys: ['API_KEY'],
+      overrideFiles: ['.env.local'],
+    })
+    expect(payload.repos[0]?.environment?.dedicated?.env).not.toHaveProperty('overrides')
+  })
+
   it('rejects mutating API requests without explicit mutation intent header', async () => {
     server = await startWebServer(
       deps,

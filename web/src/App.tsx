@@ -3,6 +3,7 @@ import { type FormEvent, type ReactElement, useCallback, useEffect, useMemo, use
 import { DashboardHeader } from './components/DashboardHeader.js'
 import { DashboardMetrics } from './components/DashboardMetrics.js'
 import { OperationsPanel } from './components/OperationsPanel.js'
+import { ProjectsPage } from './components/ProjectsPage.js'
 import { RunEventStream } from './components/RunEventStream.js'
 import { RunsPanel } from './components/RunsPanel.js'
 import { extractMessage, formatTimestamp } from './lib/format.js'
@@ -11,6 +12,7 @@ import { asRunEventsPayload, mergeRunEvents } from './lib/run-events.js'
 import {
   type DashboardPage,
   type DashboardSnapshot,
+  type ProjectsSnapshot,
   type RunEvent,
   type SessionResponse,
   type UpdateStatus,
@@ -105,10 +107,13 @@ function StatsPage({ snapshot, socketConnected }: StatsPageProps): ReactElement 
 
 export function App(): ReactElement {
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null)
+  const [projectsSnapshot, setProjectsSnapshot] = useState<ProjectsSnapshot | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [isProjectsLoading, setIsProjectsLoading] = useState(true)
   const [socketConnected, setSocketConnected] = useState(false)
   const [activePage, setActivePage] = useState<DashboardPage>('issues')
   const [selectedRepo, setSelectedRepo] = useState('all')
+  const [selectedProjectRepo, setSelectedProjectRepo] = useState('')
   const [selectedRunId, setSelectedRunId] = useState('')
   const [runEvents, setRunEvents] = useState<RunEvent[]>([])
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -212,18 +217,29 @@ export function App(): ReactElement {
     setOperationsEnabled(payload.operationsEnabled ?? true)
   }, [])
 
+  const loadProjects = useCallback(async () => {
+    const response = await fetch('/api/projects')
+    if (!response.ok) {
+      throw new Error(`Failed to load projects (${response.status})`)
+    }
+    const payload = await response.json() as ProjectsSnapshot
+    setProjectsSnapshot(payload)
+  }, [])
+
   useEffect(() => {
     void (async () => {
       try {
         setIsLoading(true)
-        await Promise.all([loadDashboard(), loadSessionToken()])
+        setIsProjectsLoading(true)
+        await Promise.all([loadDashboard(), loadSessionToken(), loadProjects()])
       } catch (err) {
         setErrorMessage((err as Error).message)
       } finally {
         setIsLoading(false)
+        setIsProjectsLoading(false)
       }
     })()
-  }, [loadDashboard, loadSessionToken])
+  }, [loadDashboard, loadProjects, loadSessionToken])
 
   useEffect(() => {
     if (repos.length === 0) {
@@ -240,6 +256,15 @@ export function App(): ReactElement {
     setDeleteRepo((prev) => (prev && repos.includes(prev) ? prev : repos[0] ?? ''))
     setSelectedRepo((prev) => (prev === 'all' || repos.includes(prev) ? prev : 'all'))
   }, [repos])
+
+  useEffect(() => {
+    const projectRepos = projectsSnapshot?.repos.map((repo) => repo.repo) ?? []
+    if (projectRepos.length === 0) {
+      setSelectedProjectRepo('')
+      return
+    }
+    setSelectedProjectRepo((prev) => (prev && projectRepos.includes(prev) ? prev : projectRepos[0] ?? ''))
+  }, [projectsSnapshot])
 
   useEffect(() => {
     let cancelled = false
@@ -608,10 +633,11 @@ export function App(): ReactElement {
         {activePage === 'stats' && <StatsPage snapshot={snapshot} socketConnected={socketConnected} />}
 
         {activePage === 'projects' && (
-          <PlaceholderPage
-            title="projects"
-            description="Project-level controls and repository grouping will live here once project metadata and workflows are wired into the dashboard."
-            detail="No project controls are available yet."
+          <ProjectsPage
+            snapshot={projectsSnapshot}
+            isLoading={isProjectsLoading}
+            selectedRepo={selectedProjectRepo}
+            onSelectedRepoChange={setSelectedProjectRepo}
           />
         )}
 
