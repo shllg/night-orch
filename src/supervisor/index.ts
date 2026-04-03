@@ -4,7 +4,8 @@ import { existsSync, unlinkSync, watchFile, unwatchFile } from 'node:fs'
 import { logger } from '../utils/logger.js'
 import { nowUtcIso } from '../utils/time.js'
 import { UpdateStatusTracker } from './status.js'
-import { runUpdate } from './updater.js'
+import { probeHealthEndpoint, resolveSupervisorHealthTargets, type SupervisorHealthTargets } from './health.js'
+import { rollbackToCheckpoint, runUpdate, type UpdateResult } from './updater.js'
 
 interface ManagedChild {
   name: string
@@ -24,6 +25,10 @@ export interface SupervisorOptions {
 
 const MAX_RESTART_BACKOFF_MS = 30_000
 const BASE_RESTART_DELAY_MS = 1_000
+const POST_UPDATE_HEALTH_TIMEOUT_MS = 90_000
+const POST_UPDATE_HEALTH_INTERVAL_MS = 2_000
+const HTTP_HEALTH_TIMEOUT_MS = 5_000
+const RUN_PROCESS_STABILIZATION_MS = 10_000
 
 export class Supervisor {
   private children: ManagedChild[] = []
@@ -174,38 +179,235 @@ export class Supervisor {
     if (this.shuttingDown) return
 
     this.updating = true
+    try {
+      this.status.transition('draining', {
+        completedAt: undefined,
+        error: undefined,
+      })
+      logger.info('Draining children for update...')
+      await this.drainAll()
 
-    // Drain children
-    this.status.transition('draining')
-    logger.info('Draining children for update...')
-    await this.drainAll()
+      const result = await runUpdate(this.options.projectRoot, this.status)
+      if (!result.success) {
+        logger.error({ error: result.error }, 'Update failed before restart')
+        this.respawnAll()
+        return
+      }
 
-    // Run update
-    const result = await runUpdate(this.options.projectRoot, this.status)
-
-    if (result.success) {
       logger.info(
-        { from: result.previousCommit.slice(0, 8), to: result.newCommit.slice(0, 8) },
-        'Update complete — respawning children',
+        { from: shortCommit(result.previousCommit), to: shortCommit(result.newCommit) },
+        'Update build complete — respawning children',
       )
-      this.status.transition('restarting')
-    } else {
-      logger.error({ error: result.error }, 'Update failed')
+      this.status.transition('restarting', {
+        targetCommit: result.newCommit,
+        error: undefined,
+      })
+      this.respawnAll()
+
+      this.status.transition('health-checking', {
+        targetCommit: result.newCommit,
+      })
+      const healthTargets = this.resolveHealthTargets()
+      const health = await this.waitForChildrenHealthy(healthTargets)
+      if (health.ok) {
+        this.status.transition('idle', {
+          completedAt: nowUtcIso(),
+          error: undefined,
+        })
+        logger.info({ commit: shortCommit(result.newCommit) }, 'Update complete — health checks passed')
+        return
+      }
+
+      await this.handleHealthCheckFailure(result, health.issues)
+    } catch (err) {
+      const message = `Update orchestration failed: ${(err as Error).message}`
+      logger.error({ err }, message)
+      this.status.transition('failed', { error: message, completedAt: nowUtcIso() })
+      this.respawnAll()
+    } finally {
+      this.updating = false
+      this.removeTriggerFile()
+    }
+  }
+
+  private async handleHealthCheckFailure(result: UpdateResult, issues: string[]): Promise<void> {
+    const initialFailure = this.formatHealthFailure(result.newCommit, issues)
+    logger.error(
+      {
+        targetCommit: result.newCommit,
+        issues,
+        childStates: this.snapshotChildStates(),
+      },
+      'Post-update health checks failed — rolling back to known-good commit',
+    )
+
+    await this.drainAll()
+    const rollback = await rollbackToCheckpoint(
+      this.options.projectRoot,
+      this.status,
+      {
+        previousCommit: result.previousCommit,
+        previousRef: result.previousRef,
+      },
+      initialFailure,
+    )
+
+    if (!rollback.success) {
+      const finalMessage = `${initialFailure}; rollback failed: ${rollback.error ?? 'unknown rollback error'}`
+      this.status.transition('failed', { error: finalMessage, completedAt: nowUtcIso() })
+      logger.error({ error: rollback.error }, 'Rollback failed after health-check failure')
+      this.respawnAll()
+      return
     }
 
-    // Respawn (even on failure — rollback should have restored old code)
+    this.status.transition('restarting', {
+      targetCommit: result.previousCommit,
+      error: initialFailure,
+    })
+    this.respawnAll()
+
+    this.status.transition('health-checking', {
+      targetCommit: result.previousCommit,
+      error: initialFailure,
+    })
+    const rollbackHealthTargets = this.resolveHealthTargets()
+    const rollbackHealth = await this.waitForChildrenHealthy(rollbackHealthTargets)
+    if (!rollbackHealth.ok) {
+      const rollbackFailure = this.formatHealthFailure(result.previousCommit, rollbackHealth.issues)
+      const finalMessage = `${initialFailure}; rollback health checks also failed: ${rollbackFailure}`
+      this.status.transition('failed', { error: finalMessage, completedAt: nowUtcIso() })
+      logger.error(
+        {
+          rollbackIssues: rollbackHealth.issues,
+          childStates: this.snapshotChildStates(),
+        },
+        'Rollback completed but services are still unhealthy',
+      )
+      return
+    }
+
+    const finalMessage =
+      `${initialFailure}; rolled back to ${shortCommit(result.previousCommit)} and restored service`
+    this.status.transition('failed', { error: finalMessage, completedAt: nowUtcIso() })
+    logger.error(
+      {
+        attemptedCommit: result.newCommit,
+        restoredCommit: result.previousCommit,
+      },
+      'Update failed health checks and was rolled back',
+    )
+  }
+
+  private async waitForChildrenHealthy(
+    healthTargets: SupervisorHealthTargets,
+  ): Promise<{ ok: true; issues: [] } | { ok: false; issues: string[] }> {
+    const deadline = Date.now() + POST_UPDATE_HEALTH_TIMEOUT_MS
+    let lastIssues: string[] = []
+
+    while (Date.now() < deadline) {
+      if (this.shuttingDown) {
+        return { ok: false, issues: ['Supervisor is shutting down'] }
+      }
+
+      const issues: string[] = []
+
+      for (const child of this.children) {
+        if (!child.process) {
+          issues.push(`child "${child.name}" exited before health checks passed`)
+        }
+      }
+
+      if (issues.length === 0) {
+        const webApi = await probeHealthEndpoint(healthTargets.webApiUrl, {
+          timeoutMs: HTTP_HEALTH_TIMEOUT_MS,
+          expectedStatus: 200,
+          expectedContentTypePrefix: 'application/json',
+          hostHeader: healthTargets.webHostHeader ?? undefined,
+        })
+        if (!webApi.ok) {
+          issues.push(`web API check failed: ${webApi.detail}`)
+        }
+
+        const webFrontend = await probeHealthEndpoint(healthTargets.webFrontendUrl, {
+          timeoutMs: HTTP_HEALTH_TIMEOUT_MS,
+          expectedStatus: 200,
+          expectedContentTypePrefix: 'text/html',
+          hostHeader: healthTargets.webHostHeader ?? undefined,
+        })
+        if (!webFrontend.ok) {
+          issues.push(`web frontend check failed: ${webFrontend.detail}`)
+        }
+
+        if (healthTargets.runMcpUrl) {
+          const runMcp = await probeHealthEndpoint(healthTargets.runMcpUrl, {
+            timeoutMs: HTTP_HEALTH_TIMEOUT_MS,
+            expectedStatus: 200,
+            expectedContentTypePrefix: 'application/json',
+          })
+          if (!runMcp.ok) {
+            issues.push(`run server check failed: ${runMcp.detail}`)
+          }
+        } else {
+          const runChild = this.children.find((candidate) => candidate.name === 'run')
+          if (!runChild?.process) {
+            issues.push('run process is not running')
+          } else {
+            const uptimeMs = Date.now() - runChild.lastStartedAt
+            if (uptimeMs < RUN_PROCESS_STABILIZATION_MS) {
+              issues.push(
+                `run process still stabilizing (${uptimeMs}ms < ${RUN_PROCESS_STABILIZATION_MS}ms)`,
+              )
+            }
+          }
+        }
+      }
+
+      if (issues.length === 0) {
+        return { ok: true, issues: [] }
+      }
+
+      lastIssues = issues
+      await sleep(POST_UPDATE_HEALTH_INTERVAL_MS)
+    }
+
+    if (lastIssues.length === 0) {
+      lastIssues = ['post-update health checks timed out']
+    }
+    return { ok: false, issues: lastIssues }
+  }
+
+  private respawnAll(): void {
     for (const child of this.children) {
       child.restartCount = 0
       this.spawn(child)
     }
+  }
 
-    this.updating = false
-    if (result.success) {
-      this.status.transition('idle', { completedAt: nowUtcIso() })
+  private snapshotChildStates(): string[] {
+    const now = Date.now()
+    return this.children.map((child) => {
+      const pid = child.process?.pid ?? 'none'
+      const uptimeMs = child.lastStartedAt > 0 ? now - child.lastStartedAt : 0
+      return `${child.name}: status=${child.status} pid=${pid} uptimeMs=${uptimeMs}`
+    })
+  }
+
+  private formatHealthFailure(targetCommit: string, issues: string[]): string {
+    const issueSummary = issues.length > 0 ? issues.join(' | ') : 'no diagnostics'
+    const childSummary = this.snapshotChildStates().join(' | ')
+    return `commit ${shortCommit(targetCommit)} failed health checks: ${issueSummary}; children: ${childSummary}`
+  }
+
+  private resolveHealthTargets(): SupervisorHealthTargets {
+    const resolution = resolveSupervisorHealthTargets(
+      this.options.projectRoot,
+      this.options.globalArgs,
+      this.options.webArgs,
+    )
+    for (const warning of resolution.warnings) {
+      logger.warn({ warning }, 'Supervisor health-check configuration warning')
     }
-
-    // Clean trigger file
-    this.removeTriggerFile()
+    return resolution.targets
   }
 
   private shutdown(): void {
@@ -242,4 +444,14 @@ function isUpdateRequest(msg: unknown): boolean {
     msg !== null &&
     (msg as Record<string, unknown>)['type'] === 'update-requested'
   )
+}
+
+function shortCommit(commit: string): string {
+  return commit.slice(0, 8)
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise<void>((resolveSleep) => {
+    setTimeout(() => resolveSleep(), ms)
+  })
 }

@@ -1,7 +1,15 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 
-export type UpdateState = 'idle' | 'draining' | 'pulling' | 'building' | 'restarting' | 'rolling-back' | 'failed'
+export type UpdateState =
+  | 'idle'
+  | 'draining'
+  | 'pulling'
+  | 'building'
+  | 'restarting'
+  | 'health-checking'
+  | 'rolling-back'
+  | 'failed'
 
 export interface UpdateStatus {
   state: UpdateState

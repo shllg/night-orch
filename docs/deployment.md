@@ -139,7 +139,7 @@ This spawns:
 The supervisor handles:
 - Auto-respawn on child crash (with exponential backoff)
 - Graceful drain and restart on self-update
-- Rollback if a build fails during update
+- Rollback if a build fails or if post-update health checks fail
 
 ### Systemd Unit
 
@@ -261,7 +261,7 @@ and restarts all services without downtime.
 ### From the Web UI
 
 Click the **Pull & Restart** button in the Deploy section of the Operations panel.
-The button shows the current update state (draining, pulling, building, restarting).
+The button shows the current update state (draining, pulling, building, restarting, health-checking).
 
 ### From the CLI
 
@@ -283,13 +283,18 @@ Use the `night-orch-update` tool.
 3. `git pull --ff-only`
 4. `pnpm install && pnpm build && pnpm install-global`
 5. Respawns both children with new code
-6. On build failure: rolls back to previous commit, rebuilds, respawns old code
+6. Runs health checks:
+   - run server (`/health` on MCP HTTP endpoint when MCP is enabled, otherwise process liveness stabilization)
+   - web API (`/api/health`)
+   - web frontend (`/`)
+7. On health-check failure: captures diagnostics, rolls back to the previous commit, rebuilds, and respawns known-good code
+8. On build failure: rolls back to previous commit, rebuilds, respawns old code
 
 ### Update Status
 
 Status is tracked at `~/.config/night-orch/update-status.json` and available
 via `GET /api/update-status`. States: `idle`, `draining`, `pulling`, `building`,
-`restarting`, `rolling-back`, `failed`.
+`restarting`, `health-checking`, `rolling-back`, `failed`.
 
 ## Troubleshooting
 
