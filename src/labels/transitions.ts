@@ -49,10 +49,11 @@ export function computeLabelMutation(
     case 'blocked':
       if (blockReason && isHumanRequired(blockReason)) {
         add = [config.blocked, config.needsHuman]
+        remove = [config.running]
       } else {
         add = [config.blocked]
+        remove = [config.running, config.needsHuman]
       }
-      remove = [config.running]
       break
     case 'review_ready':
       add = [config.reviewReady]

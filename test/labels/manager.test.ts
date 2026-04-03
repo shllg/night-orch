@@ -146,4 +146,21 @@ describe('transitionLabels', () => {
 
     expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:blocked'])
   })
+
+  it('removes stale needsHuman label when blocked reason does not require humans', async () => {
+    const forge = makeMockForge()
+
+    await transitionLabels(
+      forge,
+      'org/repo',
+      1,
+      ['orch:running', 'orch:needs-human'],
+      'running',
+      'blocked',
+      labelConfig,
+      'cost_limit',
+    )
+
+    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:running', 'orch:needs-human'])
+  })
 })

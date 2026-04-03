@@ -64,9 +64,18 @@ export async function executeLoop(
 
     // Cost check before worker steps
     if (step.type === 'worker' && costTracker.isOverBudget(ctx.runId, config.security)) {
+      const blockMessage = `Per-run cost limit exceeded: $${ctx.estimatedCostUsd.toFixed(2)} > $${config.security.maxCostPerRunUsd.toFixed(2)}`
       logger.warn({ runId: ctx.runId }, 'Cost limit exceeded')
       return recordPhase(
-        updateContext(ctx, { currentPhase: 'blocked', terminalStatus: 'blocked' }),
+        updateContext(ctx, {
+          currentPhase: 'blocked',
+          terminalStatus: 'blocked',
+          blockReason: 'cost_limit',
+          stepOutputs: {
+            ...ctx.stepOutputs,
+            blockMessage,
+          },
+        }),
         step.id,
         'failure',
       )
@@ -150,8 +159,16 @@ export async function executeLoop(
           if (!commitResult.committed) {
             logger.warn({ reason: commitResult.reason }, 'Commit skipped')
             if (commitResult.blockRun) {
+              const blockMessage = commitResult.reason ?? 'Commit blocked by repository policy'
               return recordPhase(
-                updateContext(ctx, { currentPhase: 'blocked', terminalStatus: 'blocked' }),
+                updateContext(ctx, {
+                  currentPhase: 'blocked',
+                  terminalStatus: 'blocked',
+                  stepOutputs: {
+                    ...ctx.stepOutputs,
+                    blockMessage,
+                  },
+                }),
                 'publish',
                 'failure',
               )
@@ -190,7 +207,15 @@ export async function executeLoop(
 
         case 'block':
           return recordPhase(
-            updateContext(ctx, { currentPhase: 'blocked', terminalStatus: 'blocked' }),
+            updateContext(ctx, {
+              currentPhase: 'blocked',
+              terminalStatus: 'blocked',
+              blockReason: decision.blockReason,
+              stepOutputs: {
+                ...ctx.stepOutputs,
+                blockMessage: decision.reason,
+              },
+            }),
             'decision',
             'failure',
           )

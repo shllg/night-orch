@@ -29,7 +29,7 @@ import { CostTracker } from '../loop/cost.js'
 import { branchName } from '../utils/ids.js'
 import { logger } from '../utils/logger.js'
 import { nowUtcIso } from '../utils/time.js'
-import type { RunContext } from '../loop/types.js'
+import type { RunContext, BlockReason } from '../loop/types.js'
 import type { NotificationPayload } from '../notify/types.js'
 import { postPlanSummaryComment } from '../loop/plan-summary-comment.js'
 import { executeRebase, queueRebase } from '../ops/rebase-and-check.js'
@@ -343,7 +343,19 @@ export async function pollOnce(
                       'running',
                       'blocked',
                       buildLabelConfig(repoConfig, latestIssue.labels),
+                      'merge_conflict',
                     )
+                    await postStatusComment({
+                      forge,
+                      issueRepo,
+                      issueNumber: discoveredIssue.issue.number,
+                      botUser,
+                      body: formatStatusComment({
+                        blockReason: 'Rebase failed due to merge conflicts while replaying the branch onto the latest base.',
+                        nextStep: 'Run /orch retry to reset the branch to base and re-implement on top of latest main.',
+                      }),
+                      warnMessage: 'Failed to post rebase merge-conflict status comment',
+                    })
                     await notifier.dispatch(makePayload('blocked', repoConfig.repo, discoveredIssue.issue, {
                       summary: 'Rebase failed due to merge conflicts',
                       blockingReason: 'merge_conflict',
@@ -810,6 +822,7 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
           'running',
           'blocked',
           buildLabelConfig(repoConfig, latestIssue.labels),
+          'merge_conflict',
         )
         await postStatusComment({
           forge,
@@ -894,7 +907,12 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
 
   if (finalCtx.terminalStatus === 'blocked') {
     const blockReason = buildBlockReason(finalCtx)
-    runManager.update(runId, { status: 'blocked', lastError: blockReason, blockReason: finalCtx.blockReason, endedAt: nowUtcIso() })
+    runManager.update(runId, {
+      status: 'blocked',
+      lastError: blockReason,
+      blockReason: finalCtx.blockReason ?? null,
+      endedAt: nowUtcIso(),
+    })
     const latestIssue = await forge.getIssue(issueRepo, issueNumber)
     await transitionLabels(
       forge,
@@ -904,6 +922,7 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
       'running',
       'blocked',
       buildLabelConfig(repoConfig, latestIssue.labels),
+      finalCtx.blockReason ?? undefined,
     )
 
     // Upsert status comment with block reason
@@ -1004,6 +1023,11 @@ function coerceAgentName(
 }
 
 function buildBlockReason(ctx: RunContext): string {
+  const blockMessage = ctx.stepOutputs?.['blockMessage']
+  if (typeof blockMessage === 'string' && blockMessage.trim().length > 0) {
+    return blockMessage
+  }
+
   if (ctx.reviewResult) {
     const findings = ctx.reviewResult.findings
       .filter((f) => f.severity === 'critical' || f.severity === 'major')
@@ -1013,7 +1037,33 @@ function buildBlockReason(ctx: RunContext): string {
       ? `${ctx.reviewResult.summary} — ${findings}`
       : ctx.reviewResult.summary
   }
+
+  if (ctx.blockReason) {
+    return blockReasonSummary(ctx.blockReason, ctx)
+  }
+
   return `Blocked in phase ${ctx.currentPhase} (no review result available)`
+}
+
+function blockReasonSummary(reason: BlockReason, ctx: RunContext): string {
+  switch (reason) {
+    case 'cost_limit':
+      return `Per-run cost limit exceeded: estimated cost is $${ctx.estimatedCostUsd.toFixed(4)}`
+    case 'iteration_limit':
+      return `Maximum review iterations reached (${ctx.iteration}/${ctx.adjustedLimits.maxReviewIterations})`
+    case 'agent_pass_limit':
+      return `Maximum total agent passes reached (${ctx.totalAgentPasses}/${ctx.adjustedLimits.maxTotalAgentPasses})`
+    case 'reviewer_blocked':
+      return 'Reviewer marked this run as blocked'
+    case 'ambiguous_review':
+      return 'Review output was not parseable and blockOnAmbiguousReview is enabled'
+    case 'verify_config':
+      return 'Verification is required but verify commands or results are unavailable'
+    case 'merge_conflict':
+      return 'Merge conflict encountered while applying updates'
+    default:
+      return `Blocked in phase ${ctx.currentPhase}`
+  }
 }
 
 function formatBlockComment(reason: string, ctx: RunContext): string {
