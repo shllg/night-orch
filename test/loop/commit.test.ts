@@ -65,7 +65,7 @@ describe('commitChanges', () => {
     )
     expect(mockExeca).toHaveBeenCalledWith(
       'git',
-      ['commit', '-m', 'night-orch: implement #42 Fix title'],
+      ['commit', '-m', '[CHORE] Fix title (night-orch / #42)'],
       expect.objectContaining({ cwd: '/tmp/wt', extendEnv: false }),
     )
   })
@@ -85,7 +85,27 @@ describe('commitChanges', () => {
 
     expect(mockExeca).toHaveBeenCalledWith(
       'git',
-      ['commit', '-m', 'night-orch: implement #1 Fix Injected trailer: value'],
+      ['commit', '-m', '[CHORE] Fix Injected trailer: value (night-orch / #1)'],
+      expect.objectContaining({ cwd: '/tmp/wt', extendEnv: false }),
+    )
+  })
+
+  it('uses label-derived category in commit message', async () => {
+    mockExeca
+      .mockResolvedValueOnce({ stdout: ' M src/a.ts\n' } as never)
+      .mockResolvedValueOnce({} as never)
+      .mockResolvedValueOnce({} as never)
+    mockCheckDiffSize.mockResolvedValue({
+      ok: true,
+      stats: { changedFiles: 1, insertions: 1, deletions: 0, totalChangedLines: 1 },
+      reason: null,
+    })
+
+    await commitChanges('/tmp/wt', 7, 'Fix parser edge-case', limits, { issueLabels: ['bug'] })
+
+    expect(mockExeca).toHaveBeenCalledWith(
+      'git',
+      ['commit', '-m', '[FIX] Fix parser edge-case (night-orch / #7)'],
       expect.objectContaining({ cwd: '/tmp/wt', extendEnv: false }),
     )
   })
