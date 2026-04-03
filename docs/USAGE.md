@@ -337,7 +337,7 @@ Night-orch responds to commands posted as GitHub issue comments:
 | `/orch retry` | Re-queue a blocked or errored issue |
 | `/orch rebase` | Rebase the work branch onto the latest base |
 | `/orch cancel` | Cancel an active run |
-| `/orch continue` | Queue a context-aware second pass for blocked/review-ready runs |
+| `/orch continue` | Queue a context-aware second pass for blocked/review-ready/errored runs |
 
 ### Configuration
 
@@ -410,7 +410,7 @@ Also available as a comment command: `/orch rebase` (with `--check` by default).
 
 ### `night-orch continue <repo> <issue>`
 
-Queue a context-aware second pass for blocked/review-ready work. Night-orch collects the latest PR context (review comments, CI failures, mergeability state) and re-queues the run with that context.
+Queue a context-aware second pass for blocked/review-ready/errored work. Night-orch collects the latest PR context (review comments, CI failures, mergeability state) and re-queues the run with that context.
 
 Also available as a comment command: `/orch continue`.
 

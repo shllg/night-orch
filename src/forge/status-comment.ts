@@ -3,6 +3,7 @@ export interface StatusCommentSections {
   plan?: string
   blockReason?: string
   error?: string
+  nextStep?: string
   cost?: number
   iteration?: number
   maxIterations?: number
@@ -41,6 +42,10 @@ export function formatStatusComment(sections: StatusCommentSections): string {
 
   if (sections.retryCount !== undefined && sections.maxRetries !== undefined) {
     parts.push(`**Retries:** ${sections.retryCount}/${sections.maxRetries}`)
+  }
+
+  if (sections.nextStep) {
+    parts.push(`**Next:** ${sections.nextStep}`)
   }
 
   if (sections.plan) {

@@ -20,7 +20,7 @@ const EMPTY_CURSOR: ReactionCursor = {
   lastCheckConclusion: null,
 }
 
-const CONTINUABLE_STATUSES = new Set(['blocked', 'review_ready'])
+const CONTINUABLE_STATUSES = new Set(['blocked', 'review_ready', 'error'])
 
 export interface QueueContinueOptions {
   issueRepo?: string
@@ -48,7 +48,7 @@ export async function queueContinue(
   }
 
   if (!CONTINUABLE_STATUSES.has(run.status)) {
-    return { queued: false, reason: `Continue supports blocked/review_ready runs (current: ${run.status})` }
+    return { queued: false, reason: `Continue supports blocked/review_ready/error runs (current: ${run.status})` }
   }
 
   const issueRepo = options.issueRepo ?? resolveIssueRepo(run.phaseData, repoConfig.repo)

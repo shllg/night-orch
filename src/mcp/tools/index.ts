@@ -177,7 +177,7 @@ export function registerTools(): ToolDefinition[] {
     },
     {
       name: 'night-orch-continue',
-      description: 'Queue a second-pass continuation for a blocked/review_ready issue using fresh PR context (comments, CI, mergeability).',
+      description: 'Queue a second-pass continuation for a blocked/review_ready/error issue using fresh PR context (comments, CI, mergeability).',
       inputSchema: {
         type: 'object',
         properties: {
