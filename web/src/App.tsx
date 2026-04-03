@@ -5,9 +5,10 @@ import { DashboardMetrics } from './components/DashboardMetrics.js'
 import { OperationsPanel } from './components/OperationsPanel.js'
 import { RunEventStream } from './components/RunEventStream.js'
 import { RunsPanel } from './components/RunsPanel.js'
-import { extractMessage } from './lib/format.js'
+import { extractMessage, formatTimestamp } from './lib/format.js'
 import { asRunEventsPayload, mergeRunEvents } from './lib/run-events.js'
 import {
+  type DashboardPage,
   type DashboardSnapshot,
   type RunEvent,
   type RunStatus,
@@ -29,10 +30,93 @@ const MUTATION_INTENT_HEADER = 'x-night-orch-intent'
 const MUTATION_INTENT_VALUE = 'mutate'
 const WEB_AUTH_TOKEN_HEADER = 'x-night-orch-web-token'
 
+interface PlaceholderPageProps {
+  title: string
+  description: string
+  detail: string
+}
+
+function PlaceholderPage({ title, description, detail }: PlaceholderPageProps): ReactElement {
+  return (
+    <section className="card border border-base-300/60 bg-base-200/60 shadow-panel backdrop-blur">
+      <div className="card-body p-6 sm:p-8">
+        <h2 className="card-title text-2xl font-semibold capitalize text-base-content">{title}</h2>
+        <p className="max-w-3xl text-sm text-base-content/75">{description}</p>
+        <div className="mt-3 rounded-box border border-dashed border-base-300/70 bg-base-100/50 p-4">
+          <p className="text-xs uppercase tracking-[0.18em] text-base-content/60">Placeholder</p>
+          <p className="mt-1 text-sm text-base-content/80">{detail}</p>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+interface StatsPageProps {
+  snapshot: DashboardSnapshot | null
+  socketConnected: boolean
+}
+
+function StatsPage({ snapshot, socketConnected }: StatsPageProps): ReactElement {
+  const overview = snapshot?.stats.overview
+
+  return (
+    <div className="flex flex-col gap-5">
+      <DashboardMetrics snapshot={snapshot} />
+
+      <section className="grid gap-5 xl:grid-cols-[1.45fr_1fr]">
+        <article className="card border border-base-300/60 bg-base-200/60 shadow-panel backdrop-blur">
+          <div className="card-body p-4 sm:p-5">
+            <h2 className="card-title text-lg">Queue Overview</h2>
+            <div className="mt-2 grid gap-3 sm:grid-cols-2">
+              {[
+                { label: 'Queued Runs', value: overview?.queuedRuns ?? 0, tone: 'text-info' },
+                { label: 'Running Runs', value: overview?.runningRuns ?? 0, tone: 'text-warning' },
+                { label: 'Review Ready', value: overview?.reviewReadyRuns ?? 0, tone: 'text-success' },
+                { label: 'Blocked Runs', value: overview?.blockedRuns ?? 0, tone: 'text-secondary' },
+                { label: 'Error Runs', value: overview?.errorRuns ?? 0, tone: 'text-error' },
+              ].map((item) => (
+                <div key={item.label} className="rounded-box border border-base-300/70 bg-base-100/70 px-3 py-2">
+                  <p className="text-xs uppercase tracking-wide text-base-content/60">{item.label}</p>
+                  <p className={`mt-1 text-2xl font-semibold ${item.tone}`}>{item.value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </article>
+
+        <article className="card border border-base-300/60 bg-base-200/60 shadow-panel backdrop-blur">
+          <div className="card-body p-4 sm:p-5">
+            <h2 className="card-title text-lg">System Signals</h2>
+            <dl className="mt-2 space-y-2 text-sm text-base-content/80">
+              <div className="flex items-center justify-between gap-3 rounded-box border border-base-300/70 bg-base-100/70 px-3 py-2">
+                <dt className="text-base-content/70">Poll Interval</dt>
+                <dd>{snapshot?.config.pollIntervalSeconds ?? '-'}s</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-box border border-base-300/70 bg-base-100/70 px-3 py-2">
+                <dt className="text-base-content/70">Tracked Repos</dt>
+                <dd>{snapshot?.config.repos.length ?? 0}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-box border border-base-300/70 bg-base-100/70 px-3 py-2">
+                <dt className="text-base-content/70">Websocket</dt>
+                <dd>{socketConnected ? 'Connected' : 'Reconnecting'}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-box border border-base-300/70 bg-base-100/70 px-3 py-2">
+                <dt className="text-base-content/70">Last Refresh</dt>
+                <dd>{snapshot?.generatedAt ? formatTimestamp(snapshot.generatedAt) : '--'}</dd>
+              </div>
+            </dl>
+          </div>
+        </article>
+      </section>
+    </div>
+  )
+}
+
 export function App(): ReactElement {
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [socketConnected, setSocketConnected] = useState(false)
+  const [activePage, setActivePage] = useState<DashboardPage>('issues')
   const [selectedRepo, setSelectedRepo] = useState('all')
   const [selectedRunId, setSelectedRunId] = useState('')
   const [runEvents, setRunEvents] = useState<RunEvent[]>([])
@@ -63,6 +147,8 @@ export function App(): ReactElement {
 
   const repos = snapshot?.config.repos ?? []
   const allRuns = snapshot?.runs.runs ?? []
+  const runningRuns = snapshot?.stats.overview.runningRuns ?? 0
+  const queuedRuns = snapshot?.stats.overview.queuedRuns ?? 0
 
   const filteredRuns = useMemo(() => {
     if (selectedRepo === 'all') return allRuns
@@ -74,6 +160,42 @@ export function App(): ReactElement {
     [allRuns, selectedRunId],
   )
   const selectedStreamRunId = selectedRun?.hasRun ? selectedRun.runId : ''
+
+  const currentState = useMemo(() => {
+    const updateInProgress = updateStatus != null && updateStatus.state !== 'idle' && updateStatus.state !== 'failed'
+    if (updateInProgress) {
+      return {
+        label: `updating ${updateStatus.state}`,
+        toneClass: 'badge-warning',
+      }
+    }
+
+    if (!socketConnected) {
+      return {
+        label: 'reconnecting',
+        toneClass: 'badge-error',
+      }
+    }
+
+    if (runningRuns > 0) {
+      return {
+        label: 'processing',
+        toneClass: 'badge-success',
+      }
+    }
+
+    if (queuedRuns > 0) {
+      return {
+        label: 'queued',
+        toneClass: 'badge-info',
+      }
+    }
+
+    return {
+      label: 'idle',
+      toneClass: 'badge-neutral',
+    }
+  }, [queuedRuns, runningRuns, socketConnected, updateStatus])
 
   const loadDashboard = useCallback(async () => {
     const response = await fetch('/api/dashboard')
@@ -349,14 +471,15 @@ export function App(): ReactElement {
   }, [deleteForce, deleteIssueNumber, deleteRepo, runOperation])
 
   return (
-    <main data-theme="business" className="min-h-screen bg-orch-admin px-4 py-5 sm:px-6 lg:px-8">
-      <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-5">
-        <DashboardHeader
-          pollIntervalSeconds={snapshot?.config.pollIntervalSeconds ?? null}
-          generatedAt={snapshot?.generatedAt ?? null}
-          socketConnected={socketConnected}
-        />
+    <main data-theme="business" className="orch-shell min-h-screen bg-orch-admin">
+      <DashboardHeader
+        activePage={activePage}
+        onPageChange={setActivePage}
+        currentStateLabel={currentState.label}
+        currentStateToneClass={currentState.toneClass}
+      />
 
+      <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-5 px-4 pb-6 pt-[var(--orch-header-offset)] sm:px-6 lg:px-8">
         {errorMessage && (
           <div className="alert alert-error shadow-sm">
             <span>{errorMessage}</span>
@@ -368,81 +491,112 @@ export function App(): ReactElement {
           </div>
         )}
 
-        <DashboardMetrics snapshot={snapshot} />
-
-        <section className="grid gap-5 xl:grid-cols-[1.65fr_1fr]">
-          <RunsPanel
-            isLoading={isLoading}
-            repos={repos}
-            selectedRepo={selectedRepo}
-            onSelectedRepoChange={setSelectedRepo}
-            filteredRuns={filteredRuns}
-            selectedRunId={selectedRunId}
-            onSelectedRunChange={setSelectedRunId}
-            statusTone={STATUS_TONE}
-          />
-
-          <OperationsPanel
-            operationsEnabled={operationsEnabled}
-            activeOperation={activeOperation}
-            updateStatus={updateStatus}
-            repos={repos}
-            retryForm={{
-              repo: retryRepo,
-              issueNumber: retryIssueNumber,
-              resetPlan: retryResetPlan,
-              fresh: retryFresh,
-            }}
-            rebaseForm={{
-              repo: rebaseRepo,
-              issueNumber: rebaseIssueNumber,
-            }}
-            deleteEntryForm={{
-              repo: deleteRepo,
-              issueNumber: deleteIssueNumber,
-              force: deleteForce,
-            }}
-            onRetryFormChange={(patch) => {
-              if (patch.repo !== undefined) setRetryRepo(patch.repo)
-              if (patch.issueNumber !== undefined) setRetryIssueNumber(patch.issueNumber)
-              if (patch.resetPlan !== undefined) setRetryResetPlan(patch.resetPlan)
-              if (patch.fresh !== undefined) setRetryFresh(patch.fresh)
-            }}
-            onRebaseFormChange={(patch) => {
-              if (patch.repo !== undefined) setRebaseRepo(patch.repo)
-              if (patch.issueNumber !== undefined) setRebaseIssueNumber(patch.issueNumber)
-            }}
-            onDeleteEntryFormChange={(patch) => {
-              if (patch.repo !== undefined) setDeleteRepo(patch.repo)
-              if (patch.issueNumber !== undefined) setDeleteIssueNumber(patch.issueNumber)
-              if (patch.force !== undefined) setDeleteForce(patch.force)
-            }}
-            onPoll={() => {
-              void runOperation('poll', '/api/operations/poll', {}, 'Manual poll requested')
-            }}
-            onSync={() => {
-              void runOperation('sync', '/api/operations/sync', {}, 'Sync completed')
-            }}
-            onCleanup={() => {
-              void runOperation('cleanup', '/api/operations/cleanup', {}, 'Cleanup completed')
-            }}
-            onRetrySubmit={(event) => {
-              void submitRetry(event)
-            }}
-            onRebaseSubmit={(event) => {
-              void submitRebase(event)
-            }}
-            onDeleteEntrySubmit={(event) => {
-              void submitDeleteEntry(event)
-            }}
-            onUpdate={() => {
-              setUpdateStatus({ state: 'draining' })
-              void runOperation('update', '/api/operations/update', {}, 'Update initiated - pulling and rebuilding...')
-            }}
-          />
+        <section className="rounded-box border border-base-300/60 bg-base-200/50 px-4 py-2 text-xs text-base-content/75 shadow-panel backdrop-blur">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span>Poll interval {snapshot?.config.pollIntervalSeconds ?? '-'}s</span>
+            <span>Last refresh {snapshot?.generatedAt ? formatTimestamp(snapshot.generatedAt) : '--'}</span>
+            <span>Stream {socketConnected ? 'online' : 'reconnecting'}</span>
+            <span>Repos {repos.length}</span>
+          </div>
         </section>
 
-        <RunEventStream selectedRunId={selectedRunId} selectedRun={selectedRun} runEvents={runEvents} />
+        {activePage === 'issues' && (
+          <div className="flex flex-col gap-5">
+            <DashboardMetrics snapshot={snapshot} />
+
+            <section className="grid gap-5 xl:grid-cols-[1.65fr_1fr]">
+              <RunsPanel
+                isLoading={isLoading}
+                repos={repos}
+                selectedRepo={selectedRepo}
+                onSelectedRepoChange={setSelectedRepo}
+                filteredRuns={filteredRuns}
+                selectedRunId={selectedRunId}
+                onSelectedRunChange={setSelectedRunId}
+                statusTone={STATUS_TONE}
+              />
+
+              <OperationsPanel
+                operationsEnabled={operationsEnabled}
+                activeOperation={activeOperation}
+                updateStatus={updateStatus}
+                repos={repos}
+                retryForm={{
+                  repo: retryRepo,
+                  issueNumber: retryIssueNumber,
+                  resetPlan: retryResetPlan,
+                  fresh: retryFresh,
+                }}
+                rebaseForm={{
+                  repo: rebaseRepo,
+                  issueNumber: rebaseIssueNumber,
+                }}
+                deleteEntryForm={{
+                  repo: deleteRepo,
+                  issueNumber: deleteIssueNumber,
+                  force: deleteForce,
+                }}
+                onRetryFormChange={(patch) => {
+                  if (patch.repo !== undefined) setRetryRepo(patch.repo)
+                  if (patch.issueNumber !== undefined) setRetryIssueNumber(patch.issueNumber)
+                  if (patch.resetPlan !== undefined) setRetryResetPlan(patch.resetPlan)
+                  if (patch.fresh !== undefined) setRetryFresh(patch.fresh)
+                }}
+                onRebaseFormChange={(patch) => {
+                  if (patch.repo !== undefined) setRebaseRepo(patch.repo)
+                  if (patch.issueNumber !== undefined) setRebaseIssueNumber(patch.issueNumber)
+                }}
+                onDeleteEntryFormChange={(patch) => {
+                  if (patch.repo !== undefined) setDeleteRepo(patch.repo)
+                  if (patch.issueNumber !== undefined) setDeleteIssueNumber(patch.issueNumber)
+                  if (patch.force !== undefined) setDeleteForce(patch.force)
+                }}
+                onPoll={() => {
+                  void runOperation('poll', '/api/operations/poll', {}, 'Manual poll requested')
+                }}
+                onSync={() => {
+                  void runOperation('sync', '/api/operations/sync', {}, 'Sync completed')
+                }}
+                onCleanup={() => {
+                  void runOperation('cleanup', '/api/operations/cleanup', {}, 'Cleanup completed')
+                }}
+                onRetrySubmit={(event) => {
+                  void submitRetry(event)
+                }}
+                onRebaseSubmit={(event) => {
+                  void submitRebase(event)
+                }}
+                onDeleteEntrySubmit={(event) => {
+                  void submitDeleteEntry(event)
+                }}
+                onUpdate={() => {
+                  setUpdateStatus({ state: 'draining' })
+                  void runOperation('update', '/api/operations/update', {}, 'Update initiated - pulling and rebuilding...')
+                }}
+              />
+            </section>
+
+            <RunEventStream selectedRunId={selectedRunId} selectedRun={selectedRun} runEvents={runEvents} />
+          </div>
+        )}
+
+        {activePage === 'stats' && <StatsPage snapshot={snapshot} socketConnected={socketConnected} />}
+
+        {activePage === 'projects' && (
+          <PlaceholderPage
+            title="projects"
+            description="Project-level controls and repository grouping will live here once project metadata and workflows are wired into the dashboard."
+            detail="No project controls are available yet."
+          />
+        )}
+
+        {activePage === 'settings' && (
+          <PlaceholderPage
+            title="settings"
+            description="Environment-level dashboard settings and web preferences will appear here."
+            detail="Settings UI is a placeholder for now."
+          />
+        )}
       </div>
     </main>
   )

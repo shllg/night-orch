@@ -1,4 +1,5 @@
 export type RunStatus = 'queued' | 'running' | 'blocked' | 'review_ready' | 'error' | 'completed'
+export type DashboardPage = 'issues' | 'stats' | 'projects' | 'settings'
 
 export interface RunListResult {
   count: number
