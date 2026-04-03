@@ -1,6 +1,12 @@
 import { type ReactElement } from 'react'
 
-import { formatMoney, formatRunTime } from '../lib/format.js'
+import { formatMoney, formatRunTime, truncate } from '../lib/format.js'
+import {
+  badgeToneForCostUsd,
+  badgeToneForIterationCount,
+  badgeToneForPhase,
+  badgeToneForPrNumber,
+} from '../lib/run-tone.js'
 import { type RunStatus, type RunSummary } from '../types/dashboard.js'
 
 interface RunsPanelProps {
@@ -73,24 +79,43 @@ export function RunsPanel({
                     : 'border-base-300/70 bg-base-100/50 hover:border-info/40 hover:bg-base-100/80'
                 }`}
               >
-                <div className="card-body gap-2 p-3">
+                <div className="card-body gap-2.5 p-3">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
-                      <p className="text-sm font-semibold text-base-content">{run.repo} #{run.issue}</p>
-                      <p className="text-xs text-base-content/60">
+                      <p className="text-xs font-medium uppercase tracking-wide text-base-content/70">
+                        {run.repo} #{run.issue}
+                      </p>
+                      <p className="mt-0.5 text-sm font-semibold text-base-content">
+                        {truncate(resolveIssueTitle(run.issueTitle), 110)}
+                      </p>
+                      <p className="mt-0.5 text-xs text-base-content/55">
                         {run.hasRun ? run.runId : 'Tracked issue (no run yet)'}
                       </p>
                     </div>
-                    <span className={`badge badge-sm badge-outline capitalize ${statusTone[run.status]}`}>
+                    <span className={`badge badge-sm capitalize ${statusTone[run.status]}`}>
                       {run.status.replaceAll('_', ' ')}
                     </span>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 text-xs text-base-content/75 md:grid-cols-4">
-                    <span>Phase: {run.phase ?? '-'}</span>
-                    <span>Iter: {run.iterations}</span>
-                    <span>Cost: ${formatMoney(run.costUsd)}</span>
-                    <span>{formatRunTime(run)}</span>
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                    <span className={`badge badge-xs ${badgeToneForPhase(run.phase)}`}>
+                      phase {truncate(resolvePhaseLabel(run.phase), 18)}
+                    </span>
+                    <span className={`badge badge-xs ${badgeToneForIterationCount(run.iterations)}`}>
+                      iter {run.iterations}
+                    </span>
+                    <span className={`badge badge-xs ${badgeToneForCostUsd(run.costUsd)}`}>
+                      ${formatMoney(run.costUsd)}
+                    </span>
+                    <span className={`badge badge-xs ${badgeToneForPrNumber(run.prNumber)}`}>
+                      {run.prNumber !== null ? `PR #${run.prNumber}` : 'no PR'}
+                    </span>
+                    <span className="ml-auto text-[11px] text-base-content/65">{formatRunTime(run)}</span>
                   </div>
+                  {run.lastError && (
+                    <p className="rounded-md border border-error/30 bg-error/10 px-2 py-1 text-xs text-error">
+                      {truncate(run.lastError, 220)}
+                    </p>
+                  )}
                 </div>
               </button>
             ))}
@@ -99,4 +124,14 @@ export function RunsPanel({
       </div>
     </div>
   )
+}
+
+function resolveIssueTitle(issueTitle: string | null): string {
+  const title = issueTitle?.trim()
+  return title && title.length > 0 ? title : '(title unavailable)'
+}
+
+function resolvePhaseLabel(phase: string | null): string {
+  const value = phase?.trim()
+  return value && value.length > 0 ? value : '-'
 }
