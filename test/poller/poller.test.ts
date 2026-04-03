@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { pollOnce } from '../../src/runner/poller.js'
+import { transitionLabels } from '../../src/labels/manager.js'
 import { initDatabase } from '../../src/state/db.js'
 import type { Config } from '../../src/config/schema.js'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -232,6 +233,42 @@ describe('pollOnce', () => {
 
     const row = db.prepare('SELECT status FROM runs ORDER BY created_at DESC LIMIT 1').get() as { status: string }
     expect(row.status).toBe('blocked')
+  })
+
+  it('propagates blockReason into blocked labels and status comments', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([{
+      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      triage: { level: 'standard', reason: '' },
+    }])
+    mockExecuteLoop.mockResolvedValue({
+      currentPhase: 'decision',
+      terminalStatus: 'blocked',
+      iteration: 2,
+      estimatedCostUsd: 1.25,
+      adjustedLimits: { maxReviewIterations: 4 },
+      blockReason: 'reviewer_blocked',
+      stepOutputs: { blockMessage: 'Reviewer blocked: needs human sign-off' },
+      reviewResult: { summary: 'needs human sign-off' },
+    })
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    await pollOnce(config, db, false)
+
+    const blockedTransition = vi.mocked(transitionLabels).mock.calls.find((call) => call[5] === 'blocked')
+    expect(blockedTransition).toBeDefined()
+    expect(blockedTransition?.[7]).toBe('reviewer_blocked')
+
+    const statusComment = mockCommentOnIssue.mock.calls.find(
+      (call) => typeof call[2] === 'string' && call[2].includes('Reviewer blocked: needs human sign-off'),
+    )
+    expect(statusComment).toBeDefined()
+
+    const row = db
+      .prepare('SELECT status, block_reason, last_error FROM runs ORDER BY created_at DESC LIMIT 1')
+      .get() as { status: string; block_reason: string | null; last_error: string | null }
+    expect(row.status).toBe('blocked')
+    expect(row.block_reason).toBe('reviewer_blocked')
+    expect(row.last_error).toContain('Reviewer blocked: needs human sign-off')
   })
 
   it('reuses existing queued run instead of creating a new run', async () => {
@@ -724,6 +761,55 @@ describe('pollOnce', () => {
     expect(mockExecuteLoop).toHaveBeenCalledTimes(1)
     const loopCtx = mockExecuteLoop.mock.calls[0]?.[0] as { issueNumber: number }
     expect(loopCtx.issueNumber).toBe(41)
+  })
+
+  it('posts a blocked status comment when rebase conflicts', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([
+      {
+        issue: { number: 13, nodeId: '', title: 'Follow-up', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        triage: { level: 'standard', reason: '' },
+      },
+    ])
+    mockExecuteRebase.mockResolvedValueOnce({
+      rebased: false,
+      verifyPassed: false,
+      conflict: true,
+    })
+
+    const runManager = new RunManager(db)
+    const existing = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 13,
+      issueNodeId: '',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(existing.id, {
+      status: 'queued',
+      phaseData: {
+        reactionType: 'merge_conflict',
+      },
+    })
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    const result = await pollOnce(config, db, false)
+
+    expect(result.processed).toBe(0)
+    expect(result.errors).toBe(1)
+    expect(mockExecuteLoop).not.toHaveBeenCalled()
+
+    const statusComment = mockCommentOnIssue.mock.calls.find(
+      (call) => typeof call[2] === 'string' && call[2].includes('Rebase failed due to merge conflicts'),
+    )
+    expect(statusComment).toBeDefined()
+    expect(statusComment?.[2]).toContain('Run /orch retry')
+
+    const run = db
+      .prepare('SELECT status, block_reason FROM runs WHERE id = ?')
+      .get(existing.id) as { status: string; block_reason: string | null }
+    expect(run.status).toBe('blocked')
+    expect(run.block_reason).toBe('merge_conflict')
   })
 
   it('processes one issue per repo in parallel by default', async () => {

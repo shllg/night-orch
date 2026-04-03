@@ -60,6 +60,12 @@ describe('computeLabelMutation', () => {
     expect(m.remove).toEqual(['orch:running'])
   })
 
+  it('running → blocked (cost_limit) removes stale needsHuman label', () => {
+    const m = computeLabelMutation('running', 'blocked', ['orch:running', 'orch:needs-human'], config, 'cost_limit')
+    expect(m.add).toEqual(['orch:blocked'])
+    expect(m.remove).toEqual(['orch:running', 'orch:needs-human'])
+  })
+
   it('running → blocked (no blockReason): add only blocked, remove running', () => {
     const m = computeLabelMutation('running', 'blocked', ['orch:running'], config)
     expect(m.add).toEqual(['orch:blocked'])

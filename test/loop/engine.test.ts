@@ -448,7 +448,38 @@ describe('executeLoop', () => {
 
     expect(result.currentPhase).toBe('decision')
     expect(result.terminalStatus).toBe('blocked')
+    expect(result.blockReason).toBe('reviewer_blocked')
+    expect(result.stepOutputs['blockMessage']).toBe('Reviewer blocked: Needs work')
     const lastPhase = result.phaseHistory[result.phaseHistory.length - 1]!
     expect(lastPhase.result).toBe('failure')
+  })
+
+  it('ambiguous review parse failure carries block message and reason', async () => {
+    const parseFailedReviewerResult: WorkerTaskResult = {
+      rawOutput: 'unparseable',
+      exitCode: 0,
+      timedOut: false,
+      durationMs: 1500,
+      parsed: null,
+      parseError: 'invalid reviewer output',
+      sessionId: null,
+    }
+
+    const deps: LoopDependencies = {
+      db,
+      config: makeConfig(),
+      adapters: {
+        planner: makeMockAdapter([makePlannerResult()]),
+        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: makeMockAdapter([parseFailedReviewerResult]),
+      },
+      workflow: DEFAULT_WORKFLOW,
+    }
+
+    const result = await executeLoop(makeCtx(), deps)
+
+    expect(result.terminalStatus).toBe('blocked')
+    expect(result.blockReason).toBe('ambiguous_review')
+    expect(result.stepOutputs['blockMessage']).toBe('Review output not parseable and blockOnAmbiguousReview is true')
   })
 })
