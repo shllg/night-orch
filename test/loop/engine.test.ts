@@ -482,4 +482,250 @@ describe('executeLoop', () => {
     expect(result.blockReason).toBe('ambiguous_review')
     expect(result.stepOutputs['blockMessage']).toBe('Review output not parseable and blockOnAmbiguousReview is true')
   })
+
+  it('re-runs plan when checkpoint only recorded phase start', async () => {
+    db.prepare('UPDATE runs SET current_phase = ?, phase_data = ? WHERE id = ?').run(
+      'plan',
+      JSON.stringify({}),
+      'run-test-1',
+    )
+
+    const plannerAdapter = makeMockAdapter([makePlannerResult('Recovered plan')])
+    const coderAdapter = makeMockAdapter([makeCoderResult()])
+    const reviewerAdapter = makeMockAdapter([makeReviewerResult('APPROVED')])
+
+    const deps: LoopDependencies = {
+      db,
+      config: makeConfig(),
+      adapters: {
+        planner: plannerAdapter,
+        coder: coderAdapter,
+        reviewer: reviewerAdapter,
+      },
+      workflow: DEFAULT_WORKFLOW,
+    }
+
+    const result = await executeLoop(makeCtx(), deps)
+
+    expect(result.terminalStatus).toBe('publish')
+    expect(plannerAdapter.runTask).toHaveBeenCalledTimes(1)
+    expect(coderAdapter.runTask).toHaveBeenCalledTimes(1)
+    expect(reviewerAdapter.runTask).toHaveBeenCalledTimes(1)
+  })
+
+  it('re-runs plan when planner checkpoint artifact is null', async () => {
+    db.prepare('UPDATE runs SET current_phase = ?, phase_data = ? WHERE id = ?').run(
+      'plan',
+      JSON.stringify({
+        plan: { plan: null },
+      }),
+      'run-test-1',
+    )
+
+    const plannerAdapter = makeMockAdapter([makePlannerResult('Recovered plan')])
+    const coderAdapter = makeMockAdapter([makeCoderResult()])
+    const reviewerAdapter = makeMockAdapter([makeReviewerResult('APPROVED')])
+
+    const deps: LoopDependencies = {
+      db,
+      config: makeConfig(),
+      adapters: {
+        planner: plannerAdapter,
+        coder: coderAdapter,
+        reviewer: reviewerAdapter,
+      },
+      workflow: DEFAULT_WORKFLOW,
+    }
+
+    const result = await executeLoop(makeCtx(), deps)
+
+    expect(result.terminalStatus).toBe('publish')
+    expect(plannerAdapter.runTask).toHaveBeenCalledTimes(1)
+    expect(coderAdapter.runTask).toHaveBeenCalledTimes(1)
+    expect(reviewerAdapter.runTask).toHaveBeenCalledTimes(1)
+  })
+
+  it('re-runs code when checkpoint has plan completion but code only started', async () => {
+    const persistedPlan = makePlannerResult('Persisted plan').parsed
+    db.prepare('UPDATE runs SET current_phase = ?, phase_data = ? WHERE id = ?').run(
+      'code',
+      JSON.stringify({
+        plan: { plan: persistedPlan },
+      }),
+      'run-test-1',
+    )
+
+    const plannerAdapter = makeMockAdapter([makePlannerResult('Should not run')])
+    const coderAdapter = makeMockAdapter([makeCoderResult()])
+    const reviewerAdapter = makeMockAdapter([makeReviewerResult('APPROVED')])
+
+    const deps: LoopDependencies = {
+      db,
+      config: makeConfig(),
+      adapters: {
+        planner: plannerAdapter,
+        coder: coderAdapter,
+        reviewer: reviewerAdapter,
+      },
+      workflow: DEFAULT_WORKFLOW,
+    }
+
+    const result = await executeLoop(makeCtx(), deps)
+
+    expect(result.terminalStatus).toBe('publish')
+    expect(plannerAdapter.runTask).not.toHaveBeenCalled()
+    expect(coderAdapter.runTask).toHaveBeenCalledTimes(1)
+    expect(reviewerAdapter.runTask).toHaveBeenCalledTimes(1)
+  })
+
+  it('re-runs code when coder checkpoint artifact is null', async () => {
+    const persistedPlan = makePlannerResult('Persisted plan').parsed
+    db.prepare('UPDATE runs SET current_phase = ?, phase_data = ? WHERE id = ?').run(
+      'code',
+      JSON.stringify({
+        plan: { plan: persistedPlan },
+        code: { codeResult: null },
+      }),
+      'run-test-1',
+    )
+
+    const plannerAdapter = makeMockAdapter([makePlannerResult('Should not run')])
+    const coderAdapter = makeMockAdapter([makeCoderResult()])
+    const reviewerAdapter = makeMockAdapter([makeReviewerResult('APPROVED')])
+
+    const deps: LoopDependencies = {
+      db,
+      config: makeConfig(),
+      adapters: {
+        planner: plannerAdapter,
+        coder: coderAdapter,
+        reviewer: reviewerAdapter,
+      },
+      workflow: DEFAULT_WORKFLOW,
+    }
+
+    const result = await executeLoop(makeCtx(), deps)
+
+    expect(result.terminalStatus).toBe('publish')
+    expect(plannerAdapter.runTask).not.toHaveBeenCalled()
+    expect(coderAdapter.runTask).toHaveBeenCalledTimes(1)
+    expect(reviewerAdapter.runTask).toHaveBeenCalledTimes(1)
+  })
+
+  it('restores verify results when resuming completed verify checkpoints', async () => {
+    const persistedPlan = makePlannerResult('Persisted plan').parsed
+    const persistedCode = makeCoderResult().parsed
+    const persistedVerifyResults = [{
+      command: 'pnpm test',
+      exitCode: 0,
+      stdout: 'ok',
+      stderr: '',
+      durationMs: 1250,
+      passed: true,
+    }]
+    db.prepare('UPDATE runs SET current_phase = ?, phase_data = ? WHERE id = ?').run(
+      'verify',
+      JSON.stringify({
+        plan: { plan: persistedPlan },
+        code: { codeResult: persistedCode },
+        verify: { verifyResults: persistedVerifyResults },
+      }),
+      'run-test-1',
+    )
+
+    const plannerAdapter = makeMockAdapter([makePlannerResult('Should not run')])
+    const coderAdapter = makeMockAdapter([makeCoderResult()])
+    const reviewerAdapter = makeMockAdapter([makeReviewerResult('APPROVED')])
+
+    const deps: LoopDependencies = {
+      db,
+      config: makeConfig(),
+      adapters: {
+        planner: plannerAdapter,
+        coder: coderAdapter,
+        reviewer: reviewerAdapter,
+      },
+      workflow: DEFAULT_WORKFLOW,
+    }
+
+    const result = await executeLoop(makeCtx(), deps)
+
+    expect(result.terminalStatus).toBe('publish')
+    expect(result.blockReason).toBeNull()
+    expect(result.verifyResults).toEqual(persistedVerifyResults)
+    expect(plannerAdapter.runTask).not.toHaveBeenCalled()
+    expect(coderAdapter.runTask).not.toHaveBeenCalled()
+    expect(reviewerAdapter.runTask).toHaveBeenCalledTimes(1)
+  })
+
+  it('resumes from checkpoint and skips completed phases', async () => {
+    const persistedPlan = makePlannerResult('Persisted plan').parsed
+    db.prepare('UPDATE runs SET current_phase = ?, phase_data = ? WHERE id = ?').run(
+      'plan',
+      JSON.stringify({
+        plan: { plan: persistedPlan },
+      }),
+      'run-test-1',
+    )
+
+    const plannerAdapter = makeMockAdapter([makePlannerResult('Should not run')])
+    const coderAdapter = makeMockAdapter([makeCoderResult()])
+    const reviewerAdapter = makeMockAdapter([makeReviewerResult('APPROVED')])
+
+    const deps: LoopDependencies = {
+      db,
+      config: makeConfig(),
+      adapters: {
+        planner: plannerAdapter,
+        coder: coderAdapter,
+        reviewer: reviewerAdapter,
+      },
+      workflow: DEFAULT_WORKFLOW,
+    }
+
+    const result = await executeLoop(makeCtx(), deps)
+
+    expect(result.terminalStatus).toBe('publish')
+    expect(result.plan).toEqual(persistedPlan)
+    expect(plannerAdapter.runTask).not.toHaveBeenCalled()
+    expect(coderAdapter.runTask).toHaveBeenCalledTimes(1)
+    expect(reviewerAdapter.runTask).toHaveBeenCalledTimes(1)
+  })
+
+  it('resumes decide checkpoints at iterate target instead of restarting', async () => {
+    const persistedPlan = makePlannerResult('Persisted plan').parsed
+    const persistedCode = makeCoderResult().parsed
+    const persistedReview = makeReviewerResult('CHANGES_REQUIRED').parsed
+    db.prepare('UPDATE runs SET current_phase = ?, phase_data = ? WHERE id = ?').run(
+      'decide',
+      JSON.stringify({
+        plan: { plan: persistedPlan },
+        code: { codeResult: persistedCode },
+        review: { reviewResult: persistedReview },
+      }),
+      'run-test-1',
+    )
+
+    const plannerAdapter = makeMockAdapter([makePlannerResult('Should not run')])
+    const coderAdapter = makeMockAdapter([makeCoderResult()])
+    const reviewerAdapter = makeMockAdapter([makeReviewerResult('APPROVED')])
+
+    const deps: LoopDependencies = {
+      db,
+      config: makeConfig(),
+      adapters: {
+        planner: plannerAdapter,
+        coder: coderAdapter,
+        reviewer: reviewerAdapter,
+      },
+      workflow: DEFAULT_WORKFLOW,
+    }
+
+    const result = await executeLoop(makeCtx(), deps)
+
+    expect(result.terminalStatus).toBe('publish')
+    expect(plannerAdapter.runTask).not.toHaveBeenCalled()
+    expect(coderAdapter.runTask).toHaveBeenCalledTimes(1)
+    expect(reviewerAdapter.runTask).toHaveBeenCalledTimes(1)
+  })
 })

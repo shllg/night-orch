@@ -21,6 +21,7 @@ const EMPTY_CURSOR: ReactionCursor = {
 }
 
 const CONTINUABLE_STATUSES = new Set(['blocked', 'review_ready', 'error'])
+const PHASE_CHECKPOINT_FALLBACK_ORDER = ['decide', 'review', 'verify', 'code', 'plan'] as const
 
 export interface QueueContinueOptions {
   issueRepo?: string
@@ -67,9 +68,10 @@ export async function queueContinue(
   })
 
   const existingPhaseData = run.phaseData ?? {}
+  const resumePhase = resolveResumePhase(run.currentPhase, existingPhaseData)
   runManager.update(run.id, {
     status: 'queued',
-    currentPhase: null,
+    currentPhase: resumePhase,
     endedAt: null,
     lastError: null,
     blockReason: null,
@@ -122,6 +124,27 @@ export async function queueContinue(
   )
 
   return { queued: true, reason: `Queued for continue pass (${followup.summary})` }
+}
+
+function resolveResumePhase(
+  currentPhase: string | null,
+  phaseData: Record<string, unknown>,
+): string | null {
+  if (typeof currentPhase === 'string' && currentPhase.trim().length > 0) {
+    return currentPhase
+  }
+
+  for (const phase of PHASE_CHECKPOINT_FALLBACK_ORDER) {
+    if (isCheckpointArtifact(phaseData[phase])) {
+      return phase
+    }
+  }
+
+  return null
+}
+
+function isCheckpointArtifact(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 interface BuildFollowupContextParams {
