@@ -544,7 +544,7 @@ export function App(): ReactElement {
         backendGitSha={snapshot?.build?.gitSha ?? null}
       />
 
-      <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-5 px-4 pb-6 pt-[var(--orch-header-offset)] sm:px-6 lg:px-8">
+      <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-5 px-4 pb-6 sm:px-6 lg:px-8">
         {errorMessage && (
           <div className="alert alert-error shadow-sm">
             <span>{errorMessage}</span>
