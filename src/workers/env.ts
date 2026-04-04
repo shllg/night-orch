@@ -5,6 +5,11 @@ import { logger } from '../utils/logger.js'
 export const ENV_WHITELIST = [
   'PATH', 'HOME', 'USER', 'SHELL', 'LANG', 'TERM', 'TMPDIR',
   'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'XDG_RUNTIME_DIR',
+  // Set by config/loader.ts to the configured storage.worktreeRoot so mise
+  // auto-trusts any `.mise.toml` / `.tool-versions` checked out in a worktree.
+  // Without this, tool invocations that go through mise shims fail with
+  // "Config files ... are not trusted" before the command even runs.
+  'MISE_TRUSTED_CONFIG_PATHS',
 ] as const
 
 export const ENV_BLACKLIST_EXACT = new Set([

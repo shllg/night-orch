@@ -65,6 +65,14 @@ describe('buildWorkerEnv', () => {
     expect(env['AWS_SECRET_ACCESS_KEY']).toBeUndefined()
   })
 
+  it('forwards MISE_TRUSTED_CONFIG_PATHS from process.env', () => {
+    process.env['MISE_TRUSTED_CONFIG_PATHS'] = '/home/test/.night-orch/worktrees'
+    const env = buildWorkerEnv(baseProfile)
+    expect(env['MISE_TRUSTED_CONFIG_PATHS']).toBe('/home/test/.night-orch/worktrees')
+    const verifierEnv = buildVerifierEnv()
+    expect(verifierEnv['MISE_TRUSTED_CONFIG_PATHS']).toBe('/home/test/.night-orch/worktrees')
+  })
+
   it('adds profile env overrides (non-blacklisted)', () => {
     const profile = { ...baseProfile, env: { CUSTOM_VAR: 'custom-value' } }
     const env = buildWorkerEnv(profile)

@@ -53,6 +53,12 @@ export function loadConfig(configPath: string): Config {
   // Expand paths
   config = expandConfigPaths(config)
 
+  // Pre-trust mise config files inside any night-orch worktree so bootstrap
+  // commands and workers can use mise-managed tools (bundle, node, rake, ...)
+  // without a manual `mise trust`. Setting this on process.env propagates to
+  // every subprocess spawned afterwards.
+  registerMiseTrustedPath(config.storage.worktreeRoot)
+
   // Validate worker profile references
   validateWorkerProfileRefs(config)
 
@@ -74,6 +80,14 @@ function expandConfigPaths(config: Config): Config {
       localPath: expandPath(repo.localPath),
     })),
   }
+}
+
+function registerMiseTrustedPath(worktreeRoot: string): void {
+  const existing = process.env['MISE_TRUSTED_CONFIG_PATHS'] ?? ''
+  const parts = existing.length > 0 ? existing.split(':') : []
+  if (parts.includes(worktreeRoot)) return
+  parts.push(worktreeRoot)
+  process.env['MISE_TRUSTED_CONFIG_PATHS'] = parts.join(':')
 }
 
 function validateWorkerProfileRefs(config: Config): void {

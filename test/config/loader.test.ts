@@ -132,4 +132,61 @@ workflows:
     const loaded = loadConfig(configPath)
     expect(loaded.workflows['fast-trivial']?.agents?.['codex']).toBe('codex-fast')
   })
+
+  describe('MISE_TRUSTED_CONFIG_PATHS registration', () => {
+    const originalTrusted = process.env['MISE_TRUSTED_CONFIG_PATHS']
+
+    afterEach(() => {
+      if (originalTrusted === undefined) delete process.env['MISE_TRUSTED_CONFIG_PATHS']
+      else process.env['MISE_TRUSTED_CONFIG_PATHS'] = originalTrusted
+    })
+
+    function writeMinimalConfig(worktreeRoot: string): string {
+      const configPath = join(tmpDir, 'config.yaml')
+      writeFileSync(configPath, `version: 1
+github:
+  tokenEnv: GITHUB_TOKEN
+workerProfiles:
+  claude-default:
+    type: claude
+    command: claude
+repos:
+  - repo: org/repo
+    localPath: /tmp/repo
+storage:
+  worktreeRoot: ${worktreeRoot}
+`)
+      return configPath
+    }
+
+    it('adds the expanded worktreeRoot to MISE_TRUSTED_CONFIG_PATHS', () => {
+      delete process.env['MISE_TRUSTED_CONFIG_PATHS']
+      const worktreeRoot = join(tmpDir, 'wt-root')
+      loadConfig(writeMinimalConfig(worktreeRoot))
+      expect(process.env['MISE_TRUSTED_CONFIG_PATHS']).toBe(worktreeRoot)
+    })
+
+    it('preserves existing MISE_TRUSTED_CONFIG_PATHS entries', () => {
+      process.env['MISE_TRUSTED_CONFIG_PATHS'] = '/some/other/path'
+      const worktreeRoot = join(tmpDir, 'wt-root')
+      loadConfig(writeMinimalConfig(worktreeRoot))
+      expect(process.env['MISE_TRUSTED_CONFIG_PATHS']).toBe(`/some/other/path:${worktreeRoot}`)
+    })
+
+    it('does not duplicate the worktreeRoot when loadConfig runs twice', () => {
+      delete process.env['MISE_TRUSTED_CONFIG_PATHS']
+      const worktreeRoot = join(tmpDir, 'wt-root')
+      const configPath = writeMinimalConfig(worktreeRoot)
+      loadConfig(configPath)
+      loadConfig(configPath)
+      expect(process.env['MISE_TRUSTED_CONFIG_PATHS']).toBe(worktreeRoot)
+    })
+
+    it('expands ~ in worktreeRoot before registering', () => {
+      delete process.env['MISE_TRUSTED_CONFIG_PATHS']
+      // HOME is already pointed at tmpDir/fake-home by the outer beforeEach
+      loadConfig(writeMinimalConfig('~/wt-root'))
+      expect(process.env['MISE_TRUSTED_CONFIG_PATHS']).toBe(join(tmpDir, 'fake-home', 'wt-root'))
+    })
+  })
 })

@@ -111,7 +111,7 @@ Update surfaces:
 | Key | Type | Required | Default | Notes |
 | --- | --- | --- | --- | --- |
 | `dbPath` | string path | no | `~/.config/night-orch/state.db` |  |
-| `worktreeRoot` | string path | no | `~/code/.night-orch/worktrees` |  |
+| `worktreeRoot` | string path | no | `~/code/.night-orch/worktrees` | night-orch exports `MISE_TRUSTED_CONFIG_PATHS` with this path at startup, so any `.mise.toml` / `mise.toml` / `.tool-versions` checked out inside a worktree is automatically trusted by mise. Required for repos whose toolchain is managed by mise — otherwise bootstrap commands that invoke mise-shimmed tools (`bundle`, `node`, `rake`, ...) fail with "Config files ... are not trusted". |
 | `logsRoot` | string path | no | `~/code/.night-orch/logs` |  |
 | `autoCleanup` | object | no | object with defaults | Automatic cleanup settings. |
 | `retention` | object | no | object with defaults | Data retention periods. |
