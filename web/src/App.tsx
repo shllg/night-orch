@@ -8,9 +8,18 @@ import { RunEventStream } from './components/RunEventStream.js'
 import { RunsPanel } from './components/RunsPanel.js'
 import { SettingsPage } from './components/SettingsPage.js'
 import { StatsPage } from './components/StatsPage.js'
+import { UpdateProgressModal } from './components/UpdateProgressModal.js'
 import { extractMessage, formatTimestamp } from './lib/format.js'
 import { STATUS_BADGE_TONE } from './lib/run-tone.js'
 import { asRunEventsPayload, mergeRunEvents } from './lib/run-events.js'
+import {
+  clearUpdateTransitionState,
+  createUpdateTransitionState,
+  isUpdateInProgress,
+  pollAndApplyUpdateStatus,
+  resolveImmediateUpdateStatusAfterAccept,
+  type UpdateTransitionState,
+} from './lib/update-status-flow.js'
 import {
   type DashboardPage,
   type DashboardSnapshot,
@@ -27,6 +36,10 @@ const MUTATION_INTENT_VALUE = 'mutate'
 const WEB_AUTH_TOKEN_HEADER = 'x-night-orch-web-token'
 const FRONTEND_BUILD_VERSION = import.meta.env.VITE_BUILD_VERSION ?? 'unknown'
 const FRONTEND_BUILD_GIT_SHA = import.meta.env.VITE_BUILD_GIT_SHA ?? 'unknown'
+
+interface RunOperationOptions {
+  refreshAfterSuccess?: boolean
+}
 
 export function App(): ReactElement {
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null)
@@ -69,11 +82,13 @@ export function App(): ReactElement {
   const reconnectTimerRef = useRef<number | null>(null)
   const selectedStreamRunIdRef = useRef('')
   const subscribedRunRef = useRef('')
+  const updateTransitionRef = useRef<UpdateTransitionState>(clearUpdateTransitionState())
 
   const repos = snapshot?.config.repos ?? []
   const allRuns = snapshot?.runs.runs ?? []
   const runningRuns = snapshot?.stats.overview.runningRuns ?? 0
   const queuedRuns = snapshot?.stats.overview.queuedRuns ?? 0
+  const updateInProgress = isUpdateInProgress(updateStatus)
 
   const filteredRuns = useMemo(() => {
     if (selectedRepo === 'all') return allRuns
@@ -87,10 +102,9 @@ export function App(): ReactElement {
   const selectedStreamRunId = selectedRun?.hasRun ? selectedRun.runId : ''
 
   const currentState = useMemo(() => {
-    const updateInProgress = updateStatus != null && updateStatus.state !== 'idle' && updateStatus.state !== 'failed'
     if (updateInProgress) {
       return {
-        label: `updating ${updateStatus.state}`,
+        label: `updating ${updateStatus?.state ?? 'starting'}`,
         toneClass: 'badge-warning',
       }
     }
@@ -120,7 +134,7 @@ export function App(): ReactElement {
       label: 'idle',
       toneClass: 'badge-neutral',
     }
-  }, [queuedRuns, runningRuns, socketConnected, updateStatus])
+  }, [queuedRuns, runningRuns, socketConnected, updateInProgress, updateStatus?.state])
 
   const loadDashboard = useCallback(async () => {
     const response = await fetch('/api/dashboard')
@@ -129,6 +143,14 @@ export function App(): ReactElement {
     }
     const payload = await response.json() as DashboardSnapshot
     setSnapshot(payload)
+  }, [])
+
+  const readUpdateStatus = useCallback(async (): Promise<UpdateStatus | null> => {
+    const response = await fetch('/api/update-status')
+    if (!response.ok) {
+      return null
+    }
+    return await response.json() as UpdateStatus
   }, [])
 
   const loadSessionToken = useCallback(async () => {
@@ -183,6 +205,30 @@ export function App(): ReactElement {
       }
     })()
   }, [loadDashboard, loadProjects, loadSessionToken, loadSettings])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const status = await readUpdateStatus()
+        if (!status || cancelled) {
+          return
+        }
+        if (isUpdateInProgress(status)) {
+          updateTransitionRef.current = { startedAtMs: null, sawActiveState: true }
+        } else {
+          updateTransitionRef.current = clearUpdateTransitionState()
+        }
+        setUpdateStatus(status)
+      } catch {
+        // Update status availability is best-effort.
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [readUpdateStatus])
 
   useEffect(() => {
     if (repos.length === 0) {
@@ -305,39 +351,53 @@ export function App(): ReactElement {
   }, [selectedStreamRunId, socketConnected])
 
   useEffect(() => {
-    if (!updateStatus || updateStatus.state === 'idle') return
+    if (!updateInProgress) return
 
-    const interval = window.setInterval(async () => {
+    let cancelled = false
+    const pollUpdateStatus = async (): Promise<void> => {
       try {
-        const res = await fetch('/api/update-status')
-        if (res.ok) {
-          const status = await res.json() as UpdateStatus
-          setUpdateStatus(status)
-          if (status.state === 'idle' || status.state === 'failed') {
-            window.clearInterval(interval)
-            if (status.state === 'failed') {
-              setErrorMessage(`Update failed: ${status.error ?? 'unknown error'}`)
-            } else {
-              setFeedbackMessage('Update complete - services restarted')
-            }
-          }
+        const nextTransition = await pollAndApplyUpdateStatus({
+          fetchUpdateStatus: readUpdateStatus,
+          transition: updateTransitionRef.current,
+          onStatus: (status) => {
+            if (cancelled) return
+            setUpdateStatus(status)
+          },
+          onError: (message) => {
+            if (cancelled) return
+            setErrorMessage(message)
+          },
+          onReload: () => {
+            if (cancelled) return
+            window.location.reload()
+          },
+        })
+        if (!cancelled) {
+          updateTransitionRef.current = nextTransition
         }
       } catch {
-        // Ignore fetch errors during update.
+        // Ignore fetch errors while services are restarting.
       }
+    }
+
+    void pollUpdateStatus()
+    const interval = window.setInterval(() => {
+      void pollUpdateStatus()
     }, 2000)
 
     return () => {
+      cancelled = true
       window.clearInterval(interval)
     }
-  }, [updateStatus?.state])
+  }, [readUpdateStatus, updateInProgress])
 
   const runOperation = useCallback(async (
     operationName: string,
     endpoint: string,
     payload: Record<string, unknown>,
     fallbackMessage: string,
-  ) => {
+    options?: RunOperationOptions,
+  ): Promise<boolean> => {
     try {
       setActiveOperation(operationName)
       setErrorMessage(null)
@@ -367,13 +427,50 @@ export function App(): ReactElement {
 
       const message = extractMessage(body) ?? fallbackMessage
       setFeedbackMessage(message)
-      await Promise.all([loadDashboard(), loadSettings()])
+      if (options?.refreshAfterSuccess ?? true) {
+        await Promise.all([loadDashboard(), loadSettings()])
+      }
+      return true
     } catch (err) {
       setErrorMessage((err as Error).message)
+      return false
     } finally {
       setActiveOperation(null)
     }
   }, [loadDashboard, loadSettings, operationsEnabled, webMutationToken])
+
+  const submitUpdate = useCallback(async () => {
+    const accepted = await runOperation(
+      'update',
+      '/api/operations/update',
+      {},
+      'Update initiated - pulling and rebuilding...',
+      { refreshAfterSuccess: false },
+    )
+    if (!accepted) {
+      return
+    }
+
+    updateTransitionRef.current = createUpdateTransitionState(Date.now())
+    setUpdateStatus({ state: 'draining' })
+
+    try {
+      const status = await readUpdateStatus()
+      if (!status) {
+        return
+      }
+      const immediateStatus = resolveImmediateUpdateStatusAfterAccept(status)
+      if (immediateStatus) {
+        updateTransitionRef.current = {
+          startedAtMs: updateTransitionRef.current.startedAtMs,
+          sawActiveState: true,
+        }
+        setUpdateStatus(immediateStatus)
+      }
+    } catch {
+      // Ignore immediate read failures while update orchestration starts.
+    }
+  }, [readUpdateStatus, runOperation])
 
   const submitRetry = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -619,8 +716,7 @@ export function App(): ReactElement {
                   void submitDeleteEntry(event)
                 }}
                 onUpdate={() => {
-                  setUpdateStatus({ state: 'draining' })
-                  void runOperation('update', '/api/operations/update', {}, 'Update initiated - pulling and rebuilding...')
+                  void submitUpdate()
                 }}
               />
             </section>
@@ -662,6 +758,8 @@ export function App(): ReactElement {
           />
         )}
       </div>
+
+      {updateInProgress && updateStatus && <UpdateProgressModal status={updateStatus} />}
     </main>
   )
 }

@@ -206,8 +206,19 @@ export interface SettingsSnapshot {
   settings: RuntimeSettingSnapshot[]
 }
 
+export type UpdateState =
+  | 'idle'
+  | 'draining'
+  | 'pulling'
+  | 'building'
+  | 'restarting'
+  | 'health-checking'
+  | 'rolling-back'
+  | 'failed'
+  | (string & {})
+
 export interface UpdateStatus {
-  state: string
+  state: UpdateState
   error?: string
 }
 
