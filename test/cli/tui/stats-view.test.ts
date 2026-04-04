@@ -42,6 +42,7 @@ describe('StatsView', () => {
         topErrorPatterns7d: [],
       },
       cost: {
+        model: 'pay-per-use',
         todayCostUsd: 3.5,
         todayRunCount: 2,
         cost7d: 12.2,
@@ -49,12 +50,24 @@ describe('StatsView', () => {
         avgDailyCost7d: 2.5,
         dailyHistory: [{ date: '2026-04-01', totalCostUsd: 3.5, runCount: 2 }],
       },
+      usage: {
+        todayPromptTokens: 1200,
+        todayCompletionTokens: 400,
+        todayTotalTokens: 1600,
+        tokens7d: 3200,
+        tokens30d: 9800,
+        avgDailyTokens7d: 900,
+        dailyHistory: [{ date: '2026-04-01', promptTokens: 1200, completionTokens: 400, totalTokens: 1600, runCount: 2 }],
+      },
       efficiency: {
         totalCostUsd7d: 12.2,
         avgCostPerRun7d: 2.4,
         avgCostPerSuccess7d: 6.1,
         avgCostPerIteration7d: 1.2,
         completedPerDollar7d: 0.16,
+        avgTokensPerRun7d: 640,
+        avgTokensPerSuccess7d: 1600,
+        avgTokensPerIteration7d: 533.33,
       },
       resources: {
         activeLeases: 1,

@@ -54,6 +54,14 @@ export interface DailyCostAggregate {
   runCount: number
 }
 
+export interface DailyUsageAggregate {
+  date: string
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  runCount: number
+}
+
 export interface ErrorPatternAggregate {
   pattern: string
   count: number
@@ -90,6 +98,7 @@ export interface TuiStatsSnapshot {
     topErrorPatterns7d: ErrorPatternAggregate[]
   }
   cost: {
+    model: 'pay-per-use' | 'subscription'
     todayCostUsd: number
     todayRunCount: number
     cost7d: number
@@ -97,12 +106,24 @@ export interface TuiStatsSnapshot {
     avgDailyCost7d: number
     dailyHistory: DailyCostAggregate[]
   }
+  usage: {
+    todayPromptTokens: number
+    todayCompletionTokens: number
+    todayTotalTokens: number
+    tokens7d: number
+    tokens30d: number
+    avgDailyTokens7d: number
+    dailyHistory: DailyUsageAggregate[]
+  }
   efficiency: {
     totalCostUsd7d: number
     avgCostPerRun7d: number
     avgCostPerSuccess7d: number
     avgCostPerIteration7d: number
     completedPerDollar7d: number
+    avgTokensPerRun7d: number
+    avgTokensPerSuccess7d: number
+    avgTokensPerIteration7d: number
   }
   resources: {
     activeLeases: number

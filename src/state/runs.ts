@@ -27,6 +27,8 @@ export interface RunRecord {
   branchSlug: string | null
   worktreePath: string | null
   estimatedCostUsd: number
+  promptTokens: number
+  completionTokens: number
   blockReason: string | null
   parentRunId: string | null
 }
@@ -114,6 +116,8 @@ export class RunManager {
       'branchSlug',
       'worktreePath',
       'estimatedCostUsd',
+      'promptTokens',
+      'completionTokens',
       'blockReason',
       'parentRunId',
     ] as const
@@ -134,6 +138,8 @@ export class RunManager {
       branchSlug: 'branch_slug',
       worktreePath: 'worktree_path',
       estimatedCostUsd: 'estimated_cost_usd',
+      promptTokens: 'prompt_tokens',
+      completionTokens: 'completion_tokens',
       blockReason: 'block_reason',
       parentRunId: 'parent_run_id',
     }
@@ -286,6 +292,8 @@ export class RunManager {
       branchSlug: row.branch_slug,
       worktreePath: row.worktree_path,
       estimatedCostUsd: row.estimated_cost_usd ?? 0,
+      promptTokens: row.prompt_tokens ?? 0,
+      completionTokens: row.completion_tokens ?? 0,
       blockReason: row.block_reason ?? null,
       parentRunId: row.parent_run_id ?? null,
     }
@@ -314,6 +322,8 @@ interface RawRunRow {
   branch_slug: string | null
   worktree_path: string | null
   estimated_cost_usd: number | null
+  prompt_tokens: number | null
+  completion_tokens: number | null
   block_reason: string | null
   parent_run_id: string | null
 }

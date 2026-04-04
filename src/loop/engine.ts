@@ -371,8 +371,8 @@ function applyEstimatedWorkerCost(
     estimatedCost = Number(((durationMs / 60_000) * rate).toFixed(6))
   }
   estimatedCost = Math.max(0, estimatedCost)
-  if (estimatedCost <= 0) return ctx
-  costTracker.recordCost(ctx.runId, estimatedCost)
+  if (estimatedCost <= 0 && !tokenUsage) return ctx
+  costTracker.recordCost(ctx.runId, estimatedCost, tokenUsage)
   return updateContext(ctx, {
     estimatedCostUsd: Number((ctx.estimatedCostUsd + estimatedCost).toFixed(6)),
   })

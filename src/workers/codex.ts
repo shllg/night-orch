@@ -86,6 +86,7 @@ export class CodexWorkerAdapter implements WorkerAdapter {
 
     // Extract thread ID from Codex streaming events for session continuity
     const sessionId = extractCodexThreadId(result.stdout)
+    const tokenUsage = extractCodexTokenUsage(result.stdout)
 
     // Parse output based on role
     const { parsed, parseError } = parseOutput(input.role, assistantText)
@@ -99,6 +100,7 @@ export class CodexWorkerAdapter implements WorkerAdapter {
       timedOut: result.timedOut,
       durationMs: result.durationMs,
       sessionId,
+      tokenUsage,
     })
 
     return {
@@ -109,6 +111,7 @@ export class CodexWorkerAdapter implements WorkerAdapter {
       parsed,
       parseError,
       sessionId,
+      tokenUsage,
     }
   }
 
@@ -253,6 +256,66 @@ function parseCodexEvents(raw: string): unknown[] {
   return events
 }
 
+function extractCodexTokenUsage(raw: string): WorkerTaskResult['tokenUsage'] {
+  const events = parseCodexEvents(raw)
+  if (events.length === 0) return undefined
+
+  const fromResponseCompleted = sumUsageForEventType(events, 'response.completed')
+  const totals = fromResponseCompleted.seen
+    ? fromResponseCompleted
+    : sumUsageForEventType(events, 'turn.completed')
+
+  if (totals.promptTokens <= 0 && totals.completionTokens <= 0) return undefined
+  return {
+    promptTokens: totals.promptTokens,
+    completionTokens: totals.completionTokens,
+  }
+}
+
+function sumUsageForEventType(
+  events: unknown[],
+  expectedType: string,
+): { seen: boolean; promptTokens: number; completionTokens: number } {
+  let promptTokens = 0
+  let completionTokens = 0
+  let seen = false
+
+  for (const event of events) {
+    if (!isRecord(event)) continue
+    if (event['type'] !== expectedType) continue
+    const usage = extractUsageFromCodexEvent(event)
+    if (usage.promptTokens <= 0 && usage.completionTokens <= 0) continue
+    seen = true
+    promptTokens += usage.promptTokens
+    completionTokens += usage.completionTokens
+  }
+
+  return { seen, promptTokens, completionTokens }
+}
+
+function extractUsageFromCodexEvent(event: Record<string, unknown>): {
+  promptTokens: number
+  completionTokens: number
+} {
+  const directUsage = event['usage']
+  if (isRecord(directUsage)) {
+    return {
+      promptTokens: parseTokenCount(directUsage['input_tokens']),
+      completionTokens: parseTokenCount(directUsage['output_tokens']),
+    }
+  }
+
+  const response = event['response']
+  if (isRecord(response) && isRecord(response['usage'])) {
+    return {
+      promptTokens: parseTokenCount(response['usage']['input_tokens']),
+      completionTokens: parseTokenCount(response['usage']['output_tokens']),
+    }
+  }
+
+  return { promptTokens: 0, completionTokens: 0 }
+}
+
 /**
  * Extract a thread/session ID from Codex streaming events.
  * Codex emits thread_id in session-related events.
@@ -278,6 +341,11 @@ function tryParseJson(line: string): unknown | null {
   } catch {
     return null
   }
+}
+
+function parseTokenCount(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0
+  return Math.max(0, Math.floor(value))
 }
 
 function parseOutput(role: string, raw: string): { parsed: WorkerTaskResult['parsed']; parseError: string | null } {

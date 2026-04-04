@@ -96,6 +96,7 @@ describe('ConfigSchema', () => {
       expect(result.data.github.pollIntervalSeconds).toBe(300)
       expect(result.data.loop.maxReviewIterations).toBe(4)
       expect(result.data.security.maxDailyCostUsd).toBe(50)
+      expect(result.data.cost.model).toBe('pay-per-use')
       expect(result.data.metrics.host).toBe('0.0.0.0')
       expect(result.data.repos[0]?.maxConcurrentRuns).toBe(1)
       expect(result.data.repos[0]?.baseBranch).toBe('main')
@@ -150,6 +151,16 @@ describe('ConfigSchema', () => {
       expect(result.data.security.maxChangedFiles).toBe(50)
       expect(result.data.security.maxChangedLines).toBe(5000)
       expect(result.data.security.maxCostPerRunUsd).toBe(10)
+    }
+  })
+
+  it('accepts subscription cost model', () => {
+    const raw = loadExampleConfig()
+    raw.cost = { model: 'subscription' }
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.cost.model).toBe('subscription')
     }
   })
 

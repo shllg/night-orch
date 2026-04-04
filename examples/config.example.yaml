@@ -55,6 +55,9 @@ security:
   maxDailyCostUsd: 50
   maxCostPerRunUsd: 10
 
+cost:
+  model: pay-per-use # or: subscription
+
 workerProfiles:
   claude-default:
     type: claude

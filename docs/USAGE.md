@@ -460,14 +460,24 @@ security:
 
 When a budget is exceeded, the run is blocked with reason `cost_limit`.
 
+### Cost model
+
+```yaml
+cost:
+  model: pay-per-use   # or: subscription
+```
+
+- `pay-per-use` keeps USD spend as the primary dashboard metric.
+- `subscription` keeps token usage as the primary dashboard metric and shows USD as an estimate.
+
 ### Cost estimation
 
 - **Token-based** (preferred) — when the agent adapter reports token counts, cost is calculated from input/output token rates
 - **Time-based** (fallback) — when token counts aren't available, cost is estimated at $0.008/minute per agent call
 
-View costs:
+View costs/usage:
 - `night-orch status` — shows daily cost summary
-- `night-orch watch` — live cost bar
+- `night-orch watch` — live cost/usage summaries
 - Prometheus metric: `night_orch_estimated_cost_dollars`
 
 ---

@@ -39,9 +39,17 @@ export async function statusCommand(globalOpts?: GlobalOpts): Promise<void> {
     .prepare("SELECT * FROM leases WHERE leased_until > datetime('now')")
     .all() as LeaseRow[]
 
-  const dailyCost = db
-    .prepare("SELECT SUM(estimated_cost_usd) as total FROM runs WHERE date(created_at) = date('now')")
-    .get() as { total: number | null } | undefined
+  const dailyUsage = db
+    .prepare(
+      `SELECT
+         total_cost_usd,
+         run_count,
+         total_prompt_tokens,
+         total_completion_tokens
+       FROM daily_costs
+       WHERE date = date('now')`,
+    )
+    .get() as DailyUsageRow | undefined
 
   // Header
   console.log('\n  night-orch status\n')
@@ -67,10 +75,19 @@ export async function statusCommand(globalOpts?: GlobalOpts): Promise<void> {
   }
 
   // Daily cost
-  const cost = dailyCost?.total ?? 0
+  const cost = dailyUsage?.total_cost_usd ?? 0
+  const promptTokens = dailyUsage?.total_prompt_tokens ?? 0
+  const completionTokens = dailyUsage?.total_completion_tokens ?? 0
+  const totalTokens = promptTokens + completionTokens
   const budget = config.security.maxDailyCostUsd
   const costPct = budget > 0 ? Math.round((cost / budget) * 100) : 0
-  console.log(`\n  Daily cost:   $${cost.toFixed(2)} / $${budget.toFixed(2)} (${costPct}%)`)
+  if (config.cost.model === 'subscription') {
+    console.log(`\n  Daily usage:  ${formatTokenCount(totalTokens)} tokens (${dailyUsage?.run_count ?? 0} runs)`)
+    console.log(`  Est. cost:    $${cost.toFixed(2)} / $${budget.toFixed(2)} (${costPct}%)`)
+  } else {
+    console.log(`\n  Daily cost:   $${cost.toFixed(2)} / $${budget.toFixed(2)} (${costPct}%)`)
+    console.log(`  Token usage:  ${formatTokenCount(totalTokens)} tokens`)
+  }
 
   // Recent runs
   console.log('\n  Recent runs:')
@@ -159,4 +176,19 @@ interface LeaseRow {
   issue_number: number
   lease_owner: string
   leased_until: string
+}
+
+interface DailyUsageRow {
+  total_cost_usd: number | null
+  run_count: number | null
+  total_prompt_tokens: number | null
+  total_completion_tokens: number | null
+}
+
+function formatTokenCount(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0'
+  if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`
+  return String(Math.round(value))
 }

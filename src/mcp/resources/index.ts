@@ -73,11 +73,15 @@ async function readStatusResource(deps: MCPDependencies): Promise<unknown> {
   const statusCounts = deps.db
     .prepare("SELECT status, COUNT(*) as count FROM runs GROUP BY status")
     .all() as Array<{ status: string; count: number }>
+  const dailyTokens = costTracker.getDailyTokenUsage()
 
   return {
     activeRuns: active.length,
     statusCounts: Object.fromEntries(statusCounts.map((r) => [r.status, r.count])),
     dailyCostUsd: costTracker.getDailyCost(),
+    dailyPromptTokens: dailyTokens.promptTokens,
+    dailyCompletionTokens: dailyTokens.completionTokens,
+    dailyTotalTokens: dailyTokens.totalTokens,
     repos: deps.config.repos.map((r) => r.repo),
     metricsEnabled: deps.config.metrics.enabled,
   }
@@ -119,6 +123,7 @@ function readConfigResource(deps: MCPDependencies): unknown {
     storage: deps.config.storage,
     loop: deps.config.loop,
     security: deps.config.security,
+    cost: deps.config.cost,
     metrics: deps.config.metrics,
     mcp: deps.config.mcp,
     workerProfiles: Object.fromEntries(

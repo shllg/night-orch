@@ -229,11 +229,21 @@ function makeStats(): TuiStatsSnapshot {
       topErrorPatterns7d: [],
     },
     cost: {
+      model: 'pay-per-use',
       todayCostUsd: 0,
       todayRunCount: 0,
       cost7d: 0,
       cost30d: 0,
       avgDailyCost7d: 0,
+      dailyHistory: [],
+    },
+    usage: {
+      todayPromptTokens: 0,
+      todayCompletionTokens: 0,
+      todayTotalTokens: 0,
+      tokens7d: 0,
+      tokens30d: 0,
+      avgDailyTokens7d: 0,
       dailyHistory: [],
     },
     efficiency: {
@@ -242,6 +252,9 @@ function makeStats(): TuiStatsSnapshot {
       avgCostPerSuccess7d: 0,
       avgCostPerIteration7d: 0,
       completedPerDollar7d: 0,
+      avgTokensPerRun7d: 0,
+      avgTokensPerSuccess7d: 0,
+      avgTokensPerIteration7d: 0,
     },
     resources: {
       activeLeases: 0,

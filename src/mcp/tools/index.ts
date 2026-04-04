@@ -365,6 +365,7 @@ async function handleStatus(args: { repo?: string }, deps: MCPDependencies): Pro
 
   const active = runManager.getActive()
   const filtered = args.repo ? active.filter((r) => r.repo === args.repo) : active
+  const dailyTokens = costTracker.getDailyTokenUsage()
 
   // Recent completed runs
   const recentSql = args.repo
@@ -392,6 +393,9 @@ async function handleStatus(args: { repo?: string }, deps: MCPDependencies): Pro
       endedAt: r.ended_at,
     })),
     dailyCostUsd: costTracker.getDailyCost(),
+    dailyPromptTokens: dailyTokens.promptTokens,
+    dailyCompletionTokens: dailyTokens.completionTokens,
+    dailyTotalTokens: dailyTokens.totalTokens,
     configuredRepos: deps.config.repos.map((r) => r.repo),
   }
 }
@@ -566,22 +570,52 @@ function normalizeListRunsLimit(limit: number | undefined): number {
 
 async function handleCostReport(args: { days?: number }, deps: MCPDependencies): Promise<unknown> {
   const days = args.days ?? 7
+  const costModel = deps.config.cost?.model ?? 'pay-per-use'
   const rows = deps.db
-    .prepare('SELECT date, total_cost_usd, run_count FROM daily_costs ORDER BY date DESC LIMIT ?')
-    .all(days) as Array<{ date: string; total_cost_usd: number; run_count: number }>
+    .prepare(
+      `SELECT
+         date,
+         total_cost_usd,
+         run_count,
+         total_prompt_tokens,
+         total_completion_tokens
+       FROM daily_costs
+       ORDER BY date DESC
+       LIMIT ?`,
+    )
+    .all(days) as Array<{
+      date: string
+      total_cost_usd: number
+      run_count: number
+      total_prompt_tokens: number
+      total_completion_tokens: number
+    }>
 
   const totalCost = rows.reduce((sum, r) => sum + r.total_cost_usd, 0)
   const totalRuns = rows.reduce((sum, r) => sum + r.run_count, 0)
+  const totalPromptTokens = rows.reduce((sum, r) => sum + r.total_prompt_tokens, 0)
+  const totalCompletionTokens = rows.reduce((sum, r) => sum + r.total_completion_tokens, 0)
 
   return {
+    model: costModel,
     period: `Last ${days} days`,
     totalCostUsd: Math.round(totalCost * 100) / 100,
     totalRuns,
+    totalPromptTokens,
+    totalCompletionTokens,
+    totalTokens: totalPromptTokens + totalCompletionTokens,
     dailyBudgetUsd: deps.config.security.maxDailyCostUsd,
     budgetUtilizationPct: rows.length > 0
       ? Math.round((rows[0]!.total_cost_usd / deps.config.security.maxDailyCostUsd) * 100)
       : 0,
-    daily: rows,
+    daily: rows.map((row) => ({
+      date: row.date,
+      totalCostUsd: row.total_cost_usd,
+      runCount: row.run_count,
+      promptTokens: row.total_prompt_tokens,
+      completionTokens: row.total_completion_tokens,
+      totalTokens: row.total_prompt_tokens + row.total_completion_tokens,
+    })),
   }
 }
 

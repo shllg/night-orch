@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import type { CostModel } from '../config/schema.js'
 import { nowUtcIso } from '../utils/time.js'
 
 export interface StatusAggregate {
@@ -33,9 +34,21 @@ export interface DailyCostAggregate {
   runCount: number
 }
 
+export interface DailyUsageAggregate {
+  date: string
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  runCount: number
+}
+
 export interface ErrorPatternAggregate {
   pattern: string
   count: number
+}
+
+export interface TuiStatsOptions {
+  costModel?: CostModel
 }
 
 export interface TuiStatsSnapshot {
@@ -69,6 +82,7 @@ export interface TuiStatsSnapshot {
     topErrorPatterns7d: ErrorPatternAggregate[]
   }
   readonly cost: {
+    model: CostModel
     todayCostUsd: number
     todayRunCount: number
     cost7d: number
@@ -76,12 +90,24 @@ export interface TuiStatsSnapshot {
     avgDailyCost7d: number
     dailyHistory: DailyCostAggregate[]
   }
+  readonly usage: {
+    todayPromptTokens: number
+    todayCompletionTokens: number
+    todayTotalTokens: number
+    tokens7d: number
+    tokens30d: number
+    avgDailyTokens7d: number
+    dailyHistory: DailyUsageAggregate[]
+  }
   readonly efficiency: {
     totalCostUsd7d: number
     avgCostPerRun7d: number
     avgCostPerSuccess7d: number
     avgCostPerIteration7d: number
     completedPerDollar7d: number
+    avgTokensPerRun7d: number
+    avgTokensPerSuccess7d: number
+    avgTokensPerIteration7d: number
   }
   readonly resources: {
     activeLeases: number
@@ -114,7 +140,12 @@ export interface TuiStatsSnapshot {
   readonly topRepos30d: RepoAggregate[]
 }
 
-export function loadTuiStats(db: Database.Database): TuiStatsSnapshot {
+export function loadTuiStats(
+  db: Database.Database,
+  options: TuiStatsOptions = {},
+): TuiStatsSnapshot {
+  const costModel = options.costModel ?? 'pay-per-use'
+
   const overviewRow = db
     .prepare(
       `SELECT
@@ -186,7 +217,9 @@ export function loadTuiStats(db: Database.Database): TuiStatsSnapshot {
          COUNT(*) AS runs_7d,
          SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed_7d,
          SUM(COALESCE(estimated_cost_usd, 0)) AS total_cost_usd_7d,
-         SUM(COALESCE(iteration_count, 0)) AS total_iterations_7d
+         SUM(COALESCE(iteration_count, 0)) AS total_iterations_7d,
+         SUM(COALESCE(prompt_tokens, 0)) AS total_prompt_tokens_7d,
+         SUM(COALESCE(completion_tokens, 0)) AS total_completion_tokens_7d
        FROM runs
        WHERE datetime(created_at) >= datetime('now', '-7 days')`,
     )
@@ -197,16 +230,21 @@ export function loadTuiStats(db: Database.Database): TuiStatsSnapshot {
       `SELECT
          SUM(CASE WHEN date = date('now') THEN total_cost_usd ELSE 0 END) AS today_cost_usd,
          SUM(CASE WHEN date = date('now') THEN run_count ELSE 0 END) AS today_run_count,
+         SUM(CASE WHEN date = date('now') THEN total_prompt_tokens ELSE 0 END) AS today_prompt_tokens,
+         SUM(CASE WHEN date = date('now') THEN total_completion_tokens ELSE 0 END) AS today_completion_tokens,
          SUM(CASE WHEN date >= date('now', '-6 days') THEN total_cost_usd ELSE 0 END) AS cost_7d,
          SUM(CASE WHEN date >= date('now', '-29 days') THEN total_cost_usd ELSE 0 END) AS cost_30d,
-         AVG(CASE WHEN date >= date('now', '-6 days') THEN total_cost_usd ELSE NULL END) AS avg_daily_cost_7d
+         AVG(CASE WHEN date >= date('now', '-6 days') THEN total_cost_usd ELSE NULL END) AS avg_daily_cost_7d,
+         SUM(CASE WHEN date >= date('now', '-6 days') THEN total_prompt_tokens + total_completion_tokens ELSE 0 END) AS tokens_7d,
+         SUM(CASE WHEN date >= date('now', '-29 days') THEN total_prompt_tokens + total_completion_tokens ELSE 0 END) AS tokens_30d,
+         AVG(CASE WHEN date >= date('now', '-6 days') THEN total_prompt_tokens + total_completion_tokens ELSE NULL END) AS avg_daily_tokens_7d
        FROM daily_costs`,
     )
     .get() as CostRow | undefined
 
   const dailyHistory = db
     .prepare(
-      `SELECT date, total_cost_usd, run_count
+      `SELECT date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens
        FROM daily_costs
        WHERE date >= date('now', '-6 days')
        ORDER BY date DESC`,
@@ -365,12 +403,18 @@ export function loadTuiStats(db: Database.Database): TuiStatsSnapshot {
   const totalCostUsd7d = toNumber(efficiencyRow?.total_cost_usd_7d)
   const completedRunsForEfficiency = toNumber(efficiencyRow?.completed_7d)
   const totalIterations7d = toNumber(efficiencyRow?.total_iterations_7d)
+  const totalPromptTokens7d = toNumber(efficiencyRow?.total_prompt_tokens_7d)
+  const totalCompletionTokens7d = toNumber(efficiencyRow?.total_completion_tokens_7d)
+  const totalTokens7d = totalPromptTokens7d + totalCompletionTokens7d
   const runsForEfficiency = toNumber(efficiencyRow?.runs_7d)
 
   const avgCostPerRun7d = runsForEfficiency > 0 ? totalCostUsd7d / runsForEfficiency : 0
   const avgCostPerSuccess7d = completedRunsForEfficiency > 0 ? totalCostUsd7d / completedRunsForEfficiency : 0
   const avgCostPerIteration7d = totalIterations7d > 0 ? totalCostUsd7d / totalIterations7d : 0
   const completedPerDollar7d = totalCostUsd7d > 0 ? completedRunsForEfficiency / totalCostUsd7d : 0
+  const avgTokensPerRun7d = runsForEfficiency > 0 ? totalTokens7d / runsForEfficiency : 0
+  const avgTokensPerSuccess7d = completedRunsForEfficiency > 0 ? totalTokens7d / completedRunsForEfficiency : 0
+  const avgTokensPerIteration7d = totalIterations7d > 0 ? totalTokens7d / totalIterations7d : 0
 
   const durations = durationRows
     .map((row) => toNumber(row.duration_minutes))
@@ -414,6 +458,7 @@ export function loadTuiStats(db: Database.Database): TuiStatsSnapshot {
       topErrorPatterns7d,
     },
     cost: {
+      model: costModel,
       todayCostUsd: toNumber(costRow?.today_cost_usd),
       todayRunCount: toNumber(costRow?.today_run_count),
       cost7d: toNumber(costRow?.cost_7d),
@@ -425,12 +470,34 @@ export function loadTuiStats(db: Database.Database): TuiStatsSnapshot {
         runCount: toNumber(row.run_count),
       })),
     },
+    usage: {
+      todayPromptTokens: toNumber(costRow?.today_prompt_tokens),
+      todayCompletionTokens: toNumber(costRow?.today_completion_tokens),
+      todayTotalTokens: toNumber(costRow?.today_prompt_tokens) + toNumber(costRow?.today_completion_tokens),
+      tokens7d: toNumber(costRow?.tokens_7d),
+      tokens30d: toNumber(costRow?.tokens_30d),
+      avgDailyTokens7d: toNumber(costRow?.avg_daily_tokens_7d),
+      dailyHistory: dailyHistory.map((row) => {
+        const promptTokens = toNumber(row.total_prompt_tokens)
+        const completionTokens = toNumber(row.total_completion_tokens)
+        return {
+          date: row.date,
+          promptTokens,
+          completionTokens,
+          totalTokens: promptTokens + completionTokens,
+          runCount: toNumber(row.run_count),
+        }
+      }),
+    },
     efficiency: {
       totalCostUsd7d,
       avgCostPerRun7d,
       avgCostPerSuccess7d,
       avgCostPerIteration7d,
       completedPerDollar7d,
+      avgTokensPerRun7d,
+      avgTokensPerSuccess7d,
+      avgTokensPerIteration7d,
     },
     resources: {
       activeLeases: toNumber(leaseHealthRow?.active_leases),
@@ -577,14 +644,21 @@ interface EfficiencyRow {
   completed_7d: number | null
   total_cost_usd_7d: number | null
   total_iterations_7d: number | null
+  total_prompt_tokens_7d: number | null
+  total_completion_tokens_7d: number | null
 }
 
 interface CostRow {
   today_cost_usd: number | null
   today_run_count: number | null
+  today_prompt_tokens: number | null
+  today_completion_tokens: number | null
   cost_7d: number | null
   cost_30d: number | null
   avg_daily_cost_7d: number | null
+  tokens_7d: number | null
+  tokens_30d: number | null
+  avg_daily_tokens_7d: number | null
 }
 
 interface AgentRow {
@@ -600,6 +674,8 @@ interface DailyCostRow {
   date: string
   total_cost_usd: number | null
   run_count: number | null
+  total_prompt_tokens: number | null
+  total_completion_tokens: number | null
 }
 
 interface ErrorMessageRow {
