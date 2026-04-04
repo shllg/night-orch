@@ -38,7 +38,8 @@ export async function executeLoop(
   const checkpoint = new Checkpoint(db)
   const costTracker = new CostTracker(db)
 
-  let ctx = checkpoint.resumeFromCheckpoint(initialCtx.runId, initialCtx) ?? initialCtx
+  const resumedCtx = checkpoint.resumeFromCheckpoint(initialCtx.runId, initialCtx)
+  let ctx = resumedCtx ?? initialCtx
 
   const stepDeps: StepDependencies = {
     adapters: deps.adapters,
@@ -49,7 +50,8 @@ export async function executeLoop(
   }
 
   const steps = deps.workflow.steps
-  let stepIndex = 0
+  const checkpointPhaseData = getCheckpointPhaseData(db, initialCtx.runId)
+  let stepIndex = resolveStartingStepIndex(steps, resumedCtx, checkpointPhaseData)
 
   while (stepIndex < steps.length) {
     const step = steps[stepIndex]!
@@ -245,6 +247,70 @@ export async function executeLoop(
 // ---------------------------------------------------------------------------
 
 import type { WorkflowStep } from './workflow.js'
+
+function resolveStartingStepIndex(
+  steps: WorkflowStep[],
+  resumedCtx: RunContext | null,
+  checkpointPhaseData: Readonly<Record<string, unknown>>,
+): number {
+  if (!resumedCtx) return 0
+
+  const resumedPhaseIndex = steps.findIndex((step) => step.id === resumedCtx.currentPhase)
+  if (resumedPhaseIndex === -1) return 0
+
+  const resumedStep = steps[resumedPhaseIndex]!
+  const isCompletedCheckpoint = isStepCheckpointComplete(resumedStep, checkpointPhaseData[resumedStep.id])
+  if (!isCompletedCheckpoint) {
+    return resumedPhaseIndex
+  }
+
+  if (resumedStep.type === 'decide') {
+    const iterateTargetIndex = steps.findIndex((step) => step.id === resumedStep.onIterate)
+    return iterateTargetIndex >= 0 ? iterateTargetIndex : 0
+  }
+
+  const nextStepIndex = resumedPhaseIndex + 1
+  return nextStepIndex < steps.length ? nextStepIndex : resumedPhaseIndex
+}
+
+function getCheckpointPhaseData(
+  db: Database.Database,
+  runId: string,
+): Record<string, unknown> {
+  const row = db
+    .prepare('SELECT phase_data FROM runs WHERE id = ?')
+    .get(runId) as { phase_data: string | null } | undefined
+  if (!row?.phase_data) return {}
+
+  try {
+    const parsed = JSON.parse(row.phase_data) as Record<string, unknown>
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return {}
+    }
+    return parsed
+  } catch {
+    return {}
+  }
+}
+
+function isStepCheckpointComplete(step: WorkflowStep, rawArtifacts: unknown): boolean {
+  if (typeof rawArtifacts !== 'object' || rawArtifacts === null || Array.isArray(rawArtifacts)) {
+    return false
+  }
+
+  const artifacts = rawArtifacts as Record<string, unknown>
+  switch (step.type) {
+    case 'worker':
+      if (step.role === 'planner') return artifacts['plan'] !== null && artifacts['plan'] !== undefined
+      if (step.role === 'coder') return artifacts['codeResult'] !== null && artifacts['codeResult'] !== undefined
+      if (step.role === 'reviewer') return artifacts['reviewResult'] !== null && artifacts['reviewResult'] !== undefined
+      return true
+    case 'verify':
+      return Array.isArray(artifacts['verifyResults'])
+    case 'decide':
+      return true
+  }
+}
 
 function determineStepSuccess(step: WorkflowStep, ctx: RunContext): boolean {
   switch (step.type) {

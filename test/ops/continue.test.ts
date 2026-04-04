@@ -104,6 +104,7 @@ describe('queueContinue', () => {
     })
     runManager.update(run.id, {
       status: 'blocked',
+      currentPhase: 'review',
       prNumber: 901,
       endedAt: '2026-02-01T12:00:00Z',
       lastError: 'Reviewer blocked: unresolved feedback',
@@ -154,6 +155,7 @@ describe('queueContinue', () => {
     expect(result.queued).toBe(true)
     const updated = runManager.getByRepoAndIssue('org/repo', 58)
     expect(updated?.status).toBe('queued')
+    expect(updated?.currentPhase).toBe('review')
     expect(updated?.blockReason).toBeNull()
     expect(updated?.phaseData?.reactionType).toBe('continue')
     expect(updated?.phaseData?.reactionContext).toContain('PR has merge conflicts with base branch')
@@ -251,6 +253,42 @@ describe('queueContinue', () => {
     expect(updated?.status).toBe('queued')
     expect(updated?.phaseData?.reactionType).toBe('continue')
     expect(updated?.phaseData?.reactionContext).toContain('No new CI failures')
+  })
+
+  it('derives resume phase from checkpoint artifacts when current phase is missing', async () => {
+    const runManager = new RunManager(db)
+    const run = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 63,
+      issueNodeId: 'node-63',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(run.id, {
+      status: 'blocked',
+      endedAt: '2026-02-01T12:00:00Z',
+      phaseData: {
+        issueRepo: 'org/repo',
+        plan: {
+          plan: { objective: 'Fix issue' },
+        },
+        code: {
+          codeResult: { summary: 'done' },
+        },
+      },
+    })
+
+    const forge = makeForge({
+      listIssueComments: vi.fn().mockResolvedValue([]),
+    })
+
+    const result = await queueContinue(db, forge, makeRepoConfig(), 63, '')
+
+    expect(result.queued).toBe(true)
+    const updated = runManager.getByRepoAndIssue('org/repo', 63)
+    expect(updated?.status).toBe('queued')
+    expect(updated?.currentPhase).toBe('code')
   })
 
   it('supports dry-run without mutating state or posting updates', async () => {

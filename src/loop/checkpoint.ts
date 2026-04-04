@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import type { LoopPhase, RunContext, PlannerOutput, CoderOutput, ReviewerOutput } from './types.js'
+import type { LoopPhase, RunContext, PlannerOutput, CoderOutput, ReviewerOutput, VerifyResult } from './types.js'
 import { IssueManager } from '../state/issues.js'
 import { nowUtcIso } from '../utils/time.js'
 
@@ -75,6 +75,7 @@ export class Checkpoint {
     const planArtifacts = phaseData['plan'] as Record<string, unknown> | undefined
     const codeArtifacts = phaseData['code'] as Record<string, unknown> | undefined
     const reviewArtifacts = phaseData['review'] as Record<string, unknown> | undefined
+    const verifyArtifacts = phaseData['verify'] as Record<string, unknown> | undefined
 
     return {
       ...baseCtx,
@@ -84,6 +85,9 @@ export class Checkpoint {
       estimatedCostUsd: row.estimated_cost_usd ?? baseCtx.estimatedCostUsd,
       plan: (planArtifacts?.plan as PlannerOutput) ?? baseCtx.plan,
       codeResult: (codeArtifacts?.codeResult as CoderOutput) ?? baseCtx.codeResult,
+      verifyResults: Array.isArray(verifyArtifacts?.verifyResults)
+        ? verifyArtifacts.verifyResults as VerifyResult[]
+        : baseCtx.verifyResults,
       reviewResult: (reviewArtifacts?.reviewResult as ReviewerOutput) ?? baseCtx.reviewResult,
     }
   }
