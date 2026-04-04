@@ -167,9 +167,16 @@ export async function webCommand(
   // Poll loop
   while (!shutdown.isShuttingDown) {
     try {
-      const runPromise = pollOnce(config, db, dryRun, metrics).then(() => {})
-      shutdown.trackRun(runPromise)
-      await runPromise
+      const runPromise = pollOnce(config, db, dryRun, metrics)
+      shutdown.trackRun(runPromise.then(() => {}))
+      const pollResult = await runPromise
+      if (pollResult.immediateFollowupRepos.length > 0) {
+        const trigger = pollerControl!.triggerPollCycle()
+        logger.info(
+          { repos: pollResult.immediateFollowupRepos, triggerState: trigger.state },
+          'Run reached terminal state — scheduling immediate follow-up poll cycle',
+        )
+      }
     } catch (err) {
       logger.error({ err }, 'Poll cycle failed')
     }

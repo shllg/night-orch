@@ -177,6 +177,7 @@ describe('pollOnce', () => {
 
     expect(result.processed).toBe(0)
     expect(result.errors).toBe(0)
+    expect(result.immediateFollowupRepos).toEqual([])
   })
 
   it('dry run logs discovered issues without processing', async () => {
@@ -210,8 +211,10 @@ describe('pollOnce', () => {
 
     expect(result).toHaveProperty('processed')
     expect(result).toHaveProperty('errors')
+    expect(result).toHaveProperty('immediateFollowupRepos')
     expect(typeof result.processed).toBe('number')
     expect(typeof result.errors).toBe('number')
+    expect(Array.isArray(result.immediateFollowupRepos)).toBe(true)
   })
 
   it('trivial issues use lightweight workflow and fallback codex profile-by-type when agent mapping is missing', async () => {
@@ -324,6 +327,7 @@ describe('pollOnce', () => {
 
     expect(result.processed).toBe(1)
     expect(result.errors).toBe(0)
+    expect(result.immediateFollowupRepos).toEqual(['org/repo'])
     expect(mockPublishPR).not.toHaveBeenCalled()
 
     const row = db.prepare('SELECT status FROM runs ORDER BY created_at DESC LIMIT 1').get() as { status: string }
@@ -624,8 +628,35 @@ describe('pollOnce', () => {
 
     expect(result.processed).toBe(0)
     expect(result.errors).toBe(1)
+    expect(result.immediateFollowupRepos).toEqual(['org/repo'])
     const row = db.prepare('SELECT status FROM runs ORDER BY created_at DESC LIMIT 1').get() as { status: string }
     expect(row.status).toBe('error')
+  })
+
+  it('marks publish success as immediate follow-up eligible', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([{
+      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      triage: { level: 'standard', reason: '' },
+    }])
+    mockExecuteLoop.mockResolvedValue({
+      currentPhase: 'completed',
+      terminalStatus: 'publish',
+    })
+    mockPublishPR.mockResolvedValueOnce({
+      prNumber: 101,
+      prTitle: 'Test PR',
+      prUrl: 'https://example.com/pr/101',
+      created: true,
+    })
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    const result = await pollOnce(config, db, false)
+
+    expect(result.processed).toBe(1)
+    expect(result.errors).toBe(0)
+    expect(result.immediateFollowupRepos).toEqual(['org/repo'])
+    const row = db.prepare('SELECT status FROM runs ORDER BY created_at DESC LIMIT 1').get() as { status: string }
+    expect(row.status).toBe('review_ready')
   })
 
   it('posts a structured auto-retry status comment when publish fails and retries remain', async () => {
