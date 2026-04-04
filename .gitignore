@@ -1,6 +1,7 @@
 coverage/
 dist/
 web/dist/
+storybook-static/
 node_modules/
 *.tsbuildinfo
 .env

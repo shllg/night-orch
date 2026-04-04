@@ -89,6 +89,8 @@ The orchestrator's job ends when the PR is ready. A human merges.
 
 ```bash
 pnpm dev doctor             # run via tsx
+pnpm storybook             # component workbench (dev only)
+pnpm storybook:build       # static Storybook build
 pnpm web:dev               # run frontend in Vite dev mode
 pnpm web:build             # build frontend assets for `night-orch web`
 pnpm test                   # vitest
@@ -96,6 +98,15 @@ pnpm lint                   # eslint
 pnpm typecheck              # tsc --noEmit
 pnpm build                  # compile to dist/
 ```
+
+## Component Structure
+
+Reusable UI components live in `src/components/`.
+
+- Use one folder per component (`src/components/<component-name>/`).
+- Keep shared prop contracts in `types.ts` and shared formatting/view-model logic in local helpers.
+- Put platform renderers in `*.web.tsx` and `*.tui.tsx`.
+- Export the component surface from a local `index.ts`.
 
 ## Commit Messages
 
