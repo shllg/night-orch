@@ -63,6 +63,7 @@ const STATUS_MARKER = markerTag('status')
 export interface PollResult {
   processed: number
   errors: number
+  immediateFollowupRepos: string[]
 }
 
 export interface PollTargetIssue {
@@ -90,6 +91,7 @@ export async function pollOnce(
 
   let processed = 0
   let errors = 0
+  const immediateFollowupRepos = new Set<string>()
   const observability = new AgentObservability(db, config)
   setActiveAgentObservability(observability)
 
@@ -116,6 +118,7 @@ export async function pollOnce(
       reposToProcess.map(async (repoConfig): Promise<PollResult> => {
         let repoProcessed = 0
         let repoErrors = 0
+        const repoImmediateFollowupRepos = new Set<string>()
         try {
           const forge = createForgeAdapter(repoConfig, config)
           const channels = createChannels(config.notifications, forge)
@@ -181,14 +184,22 @@ export async function pollOnce(
 
           if (discovered.length === 0) {
             logger.info({ repo: repoConfig.repo }, 'No eligible issues')
-            return { processed: repoProcessed, errors: repoErrors }
+            return {
+              processed: repoProcessed,
+              errors: repoErrors,
+              immediateFollowupRepos: [],
+            }
           }
 
           if (dryRun) {
             for (const d of discovered) {
               logger.info({ issue: d.issue.number, triage: d.triage.level, title: d.issue.title }, '[dry-run] Discovered issue')
             }
-            return { processed: repoProcessed, errors: repoErrors }
+            return {
+              processed: repoProcessed,
+              errors: repoErrors,
+              immediateFollowupRepos: [],
+            }
           }
 
           const maxConcurrentRuns = targetIssue ? 1 : (repoConfig.maxConcurrentRuns ?? 1)
@@ -714,6 +725,13 @@ export async function pollOnce(
                   }
                   repoErrors++
                 } finally {
+                  if (runId) {
+                    const finalRun = runManager.getById(runId)
+                    if (finalRun && isImmediateFollowupStatus(finalRun.status)) {
+                      repoImmediateFollowupRepos.add(finalRun.repo)
+                    }
+                  }
+
                   if (envSetup && activeWorktreePath) {
                     try {
                       await teardownEnvironment({
@@ -733,10 +751,18 @@ export async function pollOnce(
             }),
           )
 
-          return { processed: repoProcessed, errors: repoErrors }
+          return {
+            processed: repoProcessed,
+            errors: repoErrors,
+            immediateFollowupRepos: [...repoImmediateFollowupRepos],
+          }
         } catch (err) {
           logger.error({ repo: repoConfig.repo, err }, 'Repository poll failed')
-          return { processed: repoProcessed, errors: repoErrors + 1 }
+          return {
+            processed: repoProcessed,
+            errors: repoErrors + 1,
+            immediateFollowupRepos: [...repoImmediateFollowupRepos],
+          }
         }
       }),
     )
@@ -744,9 +770,12 @@ export async function pollOnce(
     for (const repoResult of repoResults) {
       processed += repoResult.processed
       errors += repoResult.errors
+      for (const repo of repoResult.immediateFollowupRepos) {
+        immediateFollowupRepos.add(repo)
+      }
     }
 
-    return { processed, errors }
+    return { processed, errors, immediateFollowupRepos: [...immediateFollowupRepos] }
   } finally {
     clearActiveAgentObservability(observability)
     await observability.close()
@@ -1045,6 +1074,13 @@ function coerceAgentName(
     return value
   }
   return fallback
+}
+
+function isImmediateFollowupStatus(status: RunRecord['status']): boolean {
+  return status === 'review_ready'
+    || status === 'blocked'
+    || status === 'error'
+    || status === 'completed'
 }
 
 function applyWorkflowAgentOverrides(
