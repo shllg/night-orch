@@ -2,6 +2,7 @@ import { loadConfig, resolveConfigPath, ConfigError } from '../../config/loader.
 import { initDatabase } from '../../state/db.js'
 import { RunManager } from '../../state/runs.js'
 import { formatUtcDateTime, parseUtcTimestampMs } from '../../utils/time.js'
+import { resolveConfigWithRuntimeSettings } from '../../settings/runtime.js'
 
 interface GlobalOpts {
   config?: string
@@ -10,12 +11,12 @@ interface GlobalOpts {
 }
 
 export async function statusCommand(globalOpts?: GlobalOpts): Promise<void> {
-  let config
+  let baseConfig
   try {
     const configPath = resolveConfigPath(globalOpts?.config, {
       trustWorkspace: globalOpts?.trustWorkspace ?? false,
     })
-    config = loadConfig(configPath)
+    baseConfig = loadConfig(configPath)
   } catch (err) {
     if (err instanceof ConfigError) {
       process.stderr.write(`Config error: ${err.message}\n`)
@@ -25,7 +26,8 @@ export async function statusCommand(globalOpts?: GlobalOpts): Promise<void> {
     process.exit(1)
   }
 
-  const db = initDatabase(config.storage.dbPath)
+  const db = initDatabase(baseConfig.storage.dbPath)
+  const config = resolveConfigWithRuntimeSettings(baseConfig, db)
   const runs = new RunManager(db)
 
   const active = runs.getActive()

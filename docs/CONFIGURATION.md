@@ -23,6 +23,33 @@ Recommended deployment uses a dedicated non-root user (for example `orch`) with:
 - code in `/home/orch/apps/night-orch`
 - target repos in `/home/orch/repos/*`
 
+## Runtime Settings Overrides (DB-backed)
+
+Night-orch supports a curated set of runtime overrides stored in SQLite (`settings_overrides` table).  
+Effective config precedence is:
+
+1. YAML value (or schema default when omitted)
+2. DB override (if present)
+
+Overrides are persisted in DB and survive process restarts. They are not written back to YAML.
+
+Curated runtime keys:
+
+| Key | Type | Accepted Range |
+| --- | --- | --- |
+| `github.pollIntervalSeconds` | integer | `5..3600` |
+| `security.maxDailyCostUsd` | number | `1..10000` |
+| `loop.maxReviewIterations` | integer | `1..20` |
+| `loop.maxTotalAgentPasses` | integer | `1..50` |
+| `observability.agentStreaming` | boolean | `true`/`false` |
+
+Update surfaces:
+
+- CLI: `night-orch settings list|set|unset`
+- MCP: `night-orch-list-settings`, `night-orch-set-setting`, `night-orch-clear-setting`
+- Web: Settings page (`/api/settings`, `/api/operations/settings/*`)
+- TUI: `settings` tab (hotkey `5`)
+
 ## YAML Conventions
 
 - `version` must be exactly `1`.

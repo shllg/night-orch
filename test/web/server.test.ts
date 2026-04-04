@@ -233,6 +233,152 @@ describe('startWebServer', () => {
     await expect(index.text()).resolves.toContain('<!doctype html>')
   })
 
+  it('reads and mutates runtime settings through web APIs', async () => {
+    server = await startWebServer(
+      deps,
+      {
+        host: '127.0.0.1',
+        port: 0,
+        frontendDistPath: frontendDir,
+      },
+    )
+
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Unexpected address type')
+    }
+    baseUrl = `http://127.0.0.1:${address.port}`
+    const mutationToken = await getMutationToken(baseUrl)
+
+    const initial = await fetch(`${baseUrl}/api/settings`)
+    expect(initial.status).toBe(200)
+    const initialPayload = await initial.json() as {
+      settings: Array<{ key: string; source: string; effectiveValue: number | boolean }>
+    }
+    const pollBefore = initialPayload.settings.find((setting) => setting.key === 'github.pollIntervalSeconds')
+    expect(pollBefore?.source).toBe('base')
+    expect(pollBefore?.effectiveValue).toBe(300)
+
+    const setResponse = await fetch(`${baseUrl}/api/operations/settings/set`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+        [WEB_AUTH_TOKEN_HEADER]: mutationToken,
+      },
+      body: JSON.stringify({
+        key: 'github.pollIntervalSeconds',
+        value: '120',
+      }),
+    })
+    expect(setResponse.status).toBe(200)
+    await expect(setResponse.json()).resolves.toMatchObject({
+      changed: true,
+      setting: {
+        key: 'github.pollIntervalSeconds',
+        effectiveValue: 120,
+        source: 'override',
+      },
+    })
+
+    const afterSet = await fetch(`${baseUrl}/api/settings`)
+    const afterSetPayload = await afterSet.json() as {
+      settings: Array<{ key: string; source: string; effectiveValue: number | boolean }>
+    }
+    const pollAfterSet = afterSetPayload.settings.find((setting) => setting.key === 'github.pollIntervalSeconds')
+    expect(pollAfterSet?.source).toBe('override')
+    expect(pollAfterSet?.effectiveValue).toBe(120)
+
+    const clearResponse = await fetch(`${baseUrl}/api/operations/settings/clear`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+        [WEB_AUTH_TOKEN_HEADER]: mutationToken,
+      },
+      body: JSON.stringify({
+        key: 'github.pollIntervalSeconds',
+      }),
+    })
+    expect(clearResponse.status).toBe(200)
+    await expect(clearResponse.json()).resolves.toMatchObject({
+      changed: true,
+      setting: {
+        key: 'github.pollIntervalSeconds',
+        effectiveValue: 300,
+        source: 'base',
+      },
+    })
+  })
+
+  it('returns 400 for invalid runtime settings mutations', async () => {
+    server = await startWebServer(
+      deps,
+      {
+        host: '127.0.0.1',
+        port: 0,
+        frontendDistPath: frontendDir,
+      },
+    )
+
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Unexpected address type')
+    }
+    baseUrl = `http://127.0.0.1:${address.port}`
+    const mutationToken = await getMutationToken(baseUrl)
+
+    const invalidKeySet = await fetch(`${baseUrl}/api/operations/settings/set`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+        [WEB_AUTH_TOKEN_HEADER]: mutationToken,
+      },
+      body: JSON.stringify({
+        key: 'github.notASetting',
+        value: '120',
+      }),
+    })
+    expect(invalidKeySet.status).toBe(400)
+    await expect(invalidKeySet.json()).resolves.toMatchObject({
+      error: expect.stringContaining('Unknown setting key'),
+    })
+
+    const invalidValueSet = await fetch(`${baseUrl}/api/operations/settings/set`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+        [WEB_AUTH_TOKEN_HEADER]: mutationToken,
+      },
+      body: JSON.stringify({
+        key: 'github.pollIntervalSeconds',
+        value: '120abc',
+      }),
+    })
+    expect(invalidValueSet.status).toBe(400)
+    await expect(invalidValueSet.json()).resolves.toMatchObject({
+      error: 'github.pollIntervalSeconds must be a finite number',
+    })
+
+    const invalidKeyClear = await fetch(`${baseUrl}/api/operations/settings/clear`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+        [WEB_AUTH_TOKEN_HEADER]: mutationToken,
+      },
+      body: JSON.stringify({
+        key: 'github.notASetting',
+      }),
+    })
+    expect(invalidKeyClear.status).toBe(400)
+    await expect(invalidKeyClear.json()).resolves.toMatchObject({
+      error: expect.stringContaining('Unknown setting key'),
+    })
+  })
+
   it('dashboard includes tracked issues that do not have run rows yet', async () => {
     db.prepare(
       `INSERT INTO issues (

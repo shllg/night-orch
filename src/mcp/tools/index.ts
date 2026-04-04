@@ -18,6 +18,12 @@ import { flushActiveAgentObservability } from '../../events/observability.js'
 import { createForgeAdapter } from '../../forge/factory.js'
 import { nowUtcIso } from '../../utils/time.js'
 import { loadRuns } from '../../cli/tui/data.js'
+import {
+  clearRuntimeSettingOverride,
+  listRuntimeSettings,
+  resolveConfigWithRuntimeSettings,
+  setRuntimeSettingOverride,
+} from '../../settings/runtime.js'
 
 interface ToolDefinition {
   name: string
@@ -31,6 +37,39 @@ interface ToolDefinition {
 
 export function registerTools(): ToolDefinition[] {
   return [
+    {
+      name: 'night-orch-list-settings',
+      description: 'List runtime-configurable settings with base values, DB overrides, and effective values.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+      },
+    },
+    {
+      name: 'night-orch-set-setting',
+      description: 'Set one runtime setting override in DB.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          key: { type: 'string', description: 'Setting key (for example github.pollIntervalSeconds)' },
+          value: { type: 'string', description: 'Setting value as text (for booleans use true/false)' },
+          authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
+        },
+        required: ['key', 'value'],
+      },
+    },
+    {
+      name: 'night-orch-clear-setting',
+      description: 'Clear one runtime setting override (revert to YAML/default).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          key: { type: 'string', description: 'Setting key' },
+          authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
+        },
+        required: ['key'],
+      },
+    },
     {
       name: 'night-orch-status',
       description: 'Get current night-orch operational status including active runs, eligible issues, and recent activity.',
@@ -220,39 +259,103 @@ export async function handleToolCall(
   args: Record<string, unknown>,
   deps: MCPDependencies,
 ): Promise<unknown> {
+  const runtimeDeps: MCPDependencies = {
+    ...deps,
+    config: resolveConfigWithRuntimeSettings(deps.config, deps.db),
+  }
+
   switch (name) {
+    case 'night-orch-list-settings':
+      return handleListSettings(deps)
+    case 'night-orch-set-setting':
+      return handleSetSetting(args as { key: string; value: unknown; authToken?: string }, deps)
+    case 'night-orch-clear-setting':
+      return handleClearSetting(args as { key: string; authToken?: string }, deps)
     case 'night-orch-status':
-      return handleStatus(args as { repo?: string }, deps)
+      return handleStatus(args as { repo?: string }, runtimeDeps)
     case 'night-orch-run-detail':
-      return handleRunDetail(args as { runId: string }, deps)
+      return handleRunDetail(args as { runId: string }, runtimeDeps)
     case 'night-orch-list-runs':
-      return handleListRuns(args as { repo?: string; status?: string; limit?: number }, deps)
+      return handleListRuns(args as { repo?: string; status?: string; limit?: number }, runtimeDeps)
     case 'night-orch-cost-report':
-      return handleCostReport(args as { days?: number }, deps)
+      return handleCostReport(args as { days?: number }, runtimeDeps)
     case 'night-orch-retry':
-      return handleRetry(args as { repo: string; issueNumber: number; resetPlan?: boolean; fresh?: boolean; authToken?: string }, deps)
+      return handleRetry(args as { repo: string; issueNumber: number; resetPlan?: boolean; fresh?: boolean; authToken?: string }, runtimeDeps)
     case 'night-orch-sync':
-      return handleSync(args as { dryRun?: boolean; authToken?: string }, deps)
+      return handleSync(args as { dryRun?: boolean; authToken?: string }, runtimeDeps)
     case 'night-orch-cleanup':
-      return handleCleanup(args as { dryRun?: boolean; authToken?: string }, deps)
+      return handleCleanup(args as { dryRun?: boolean; authToken?: string }, runtimeDeps)
     case 'night-orch-labels-init':
-      return handleLabelsInit(args as { repo: string; dryRun?: boolean; authToken?: string }, deps)
+      return handleLabelsInit(args as { repo: string; dryRun?: boolean; authToken?: string }, runtimeDeps)
     case 'night-orch-delete-entry':
-      return handleDeleteEntry(args as { repo: string; issueNumber: number; force?: boolean; dryRun?: boolean; authToken?: string }, deps)
+      return handleDeleteEntry(args as { repo: string; issueNumber: number; force?: boolean; dryRun?: boolean; authToken?: string }, runtimeDeps)
     case 'night-orch-poll':
-      return handlePoll(args as { dryRun?: boolean; authToken?: string }, deps)
+      return handlePoll(args as { dryRun?: boolean; authToken?: string }, runtimeDeps)
     case 'night-orch-list-issues':
-      return handleListIssues(args as { repo: string; filter?: string }, deps)
+      return handleListIssues(args as { repo: string; filter?: string }, runtimeDeps)
     case 'night-orch-stream-events':
-      return handleStreamEvents(args as { runId: string; since?: number; limit?: number }, deps)
+      return handleStreamEvents(args as { runId: string; since?: number; limit?: number }, runtimeDeps)
     case 'night-orch-rebase':
-      return handleRebase(args as { repo: string; issueNumber: number; check?: boolean; authToken?: string }, deps)
+      return handleRebase(args as { repo: string; issueNumber: number; check?: boolean; authToken?: string }, runtimeDeps)
     case 'night-orch-continue':
-      return handleContinue(args as { repo: string; issueNumber: number; authToken?: string }, deps)
+      return handleContinue(args as { repo: string; issueNumber: number; authToken?: string }, runtimeDeps)
     case 'night-orch-update':
-      return handleUpdate(args as { authToken?: string }, deps)
+      return handleUpdate(args as { authToken?: string }, runtimeDeps)
     default:
       throw new Error(`Unknown tool: ${name}`)
+  }
+}
+
+async function handleListSettings(deps: MCPDependencies): Promise<unknown> {
+  return {
+    settings: listRuntimeSettings(deps.config, deps.db),
+  }
+}
+
+async function handleSetSetting(
+  args: { key: string; value: unknown; authToken?: string },
+  deps: MCPDependencies,
+): Promise<unknown> {
+  assertMcpMutationAuth(args.authToken, deps)
+
+  if (typeof args.key !== 'string' || args.key.trim().length === 0) {
+    throw new Error('key is required')
+  }
+
+  const result = setRuntimeSettingOverride(
+    deps.config,
+    deps.db,
+    args.key.trim(),
+    args.value,
+    'mcp',
+  )
+
+  return {
+    changed: result.changed,
+    setting: result.setting,
+    message: result.changed
+      ? `Updated ${result.setting.key} to ${String(result.setting.effectiveValue)}`
+      : `${result.setting.key} unchanged`,
+  }
+}
+
+async function handleClearSetting(
+  args: { key: string; authToken?: string },
+  deps: MCPDependencies,
+): Promise<unknown> {
+  assertMcpMutationAuth(args.authToken, deps)
+
+  if (typeof args.key !== 'string' || args.key.trim().length === 0) {
+    throw new Error('key is required')
+  }
+
+  const result = clearRuntimeSettingOverride(deps.config, deps.db, args.key.trim())
+  return {
+    changed: result.changed,
+    setting: result.setting,
+    message: result.changed
+      ? `Cleared override for ${result.setting.key}`
+      : `No override found for ${result.setting.key}`,
   }
 }
 

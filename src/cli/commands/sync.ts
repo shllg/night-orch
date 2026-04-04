@@ -1,6 +1,7 @@
 import { loadConfig, resolveConfigPath, ConfigError } from '../../config/loader.js'
 import { initDatabase } from '../../state/db.js'
 import { SyncEngine } from '../../ops/sync.js'
+import { resolveConfigWithRuntimeSettings } from '../../settings/runtime.js'
 
 interface GlobalOpts {
   config?: string
@@ -12,12 +13,12 @@ interface GlobalOpts {
 export async function syncCommand(globalOpts?: GlobalOpts): Promise<void> {
   const dryRun = globalOpts?.dryRun ?? false
 
-  let config
+  let baseConfig
   try {
     const configPath = resolveConfigPath(globalOpts?.config, {
       trustWorkspace: globalOpts?.trustWorkspace ?? false,
     })
-    config = loadConfig(configPath)
+    baseConfig = loadConfig(configPath)
   } catch (err) {
     if (err instanceof ConfigError) {
       console.error(`Config error: ${err.message}`)
@@ -28,7 +29,8 @@ export async function syncCommand(globalOpts?: GlobalOpts): Promise<void> {
     return
   }
 
-  const db = initDatabase(config.storage.dbPath)
+  const db = initDatabase(baseConfig.storage.dbPath)
+  const config = resolveConfigWithRuntimeSettings(baseConfig, db)
 
   try {
     const engine = new SyncEngine(db, config)

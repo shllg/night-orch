@@ -1,6 +1,7 @@
 import type { MCPDependencies } from '../server.js'
 import { RunManager } from '../../state/runs.js'
 import { CostTracker } from '../../loop/cost.js'
+import { resolveConfigWithRuntimeSettings } from '../../settings/runtime.js'
 
 interface ResourceDefinition {
   uri: string
@@ -36,24 +37,29 @@ export async function handleResourceRead(
   uri: string,
   deps: MCPDependencies,
 ): Promise<unknown> {
+  const runtimeDeps: MCPDependencies = {
+    ...deps,
+    config: resolveConfigWithRuntimeSettings(deps.config, deps.db),
+  }
+
   // Handle parameterized URIs
   const runsMatch = uri.match(/^night-orch:\/\/runs\/(.+)$/)
   if (runsMatch) {
-    return readRunResource(runsMatch[1]!, deps)
+    return readRunResource(runsMatch[1]!, runtimeDeps)
   }
 
   const logsMatch = uri.match(/^night-orch:\/\/logs\/(.+)$/)
   if (logsMatch) {
-    return readLogsResource(logsMatch[1]!, deps)
+    return readLogsResource(logsMatch[1]!, runtimeDeps)
   }
 
   switch (uri) {
     case 'night-orch://status':
-      return readStatusResource(deps)
+      return readStatusResource(runtimeDeps)
     case 'night-orch://config':
-      return readConfigResource(deps)
+      return readConfigResource(runtimeDeps)
     case 'night-orch://metrics':
-      return readMetricsResource(deps)
+      return readMetricsResource(runtimeDeps)
     default:
       throw new Error(`Unknown resource: ${uri}`)
   }

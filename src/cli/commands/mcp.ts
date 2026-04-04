@@ -5,6 +5,7 @@ import { createForgeAdapter } from '../../forge/factory.js'
 import { createMetricsService } from '../../metrics/service.js'
 import { createLogger, logger } from '../../utils/logger.js'
 import type { ForgeAdapter } from '../../forge/types.js'
+import { resolveConfigWithRuntimeSettings } from '../../settings/runtime.js'
 
 interface GlobalOpts {
   config?: string
@@ -22,12 +23,12 @@ export async function mcpCommand(globalOpts?: GlobalOpts): Promise<void> {
   // In stdio mode stdout is reserved for JSON-RPC frames.
   logger.level = 'silent'
 
-  let config
+  let baseConfig
   try {
     const configPath = resolveConfigPath(globalOpts?.config, {
       trustWorkspace: globalOpts?.trustWorkspace ?? false,
     })
-    config = loadConfig(configPath)
+    baseConfig = loadConfig(configPath)
   } catch (err) {
     if (err instanceof ConfigError) {
       // Write to stderr — stdout is reserved for MCP stdio transport
@@ -39,17 +40,18 @@ export async function mcpCommand(globalOpts?: GlobalOpts): Promise<void> {
     return
   }
 
-  const db = initDatabase(config.storage.dbPath)
-  const metrics = config.metrics.enabled ? createMetricsService(config.metrics) : null
+  const db = initDatabase(baseConfig.storage.dbPath)
+  const runtimeConfig = resolveConfigWithRuntimeSettings(baseConfig, db)
+  const metrics = runtimeConfig.metrics.enabled ? createMetricsService(runtimeConfig.metrics) : null
 
   if (metrics) {
     await metrics.start()
   }
 
   const forgeAdapters = new Map<string, ForgeAdapter>()
-  for (const repo of config.repos) {
+  for (const repo of runtimeConfig.repos) {
     try {
-      forgeAdapters.set(repo.repo, createForgeAdapter(repo, config))
+      forgeAdapters.set(repo.repo, createForgeAdapter(repo, runtimeConfig))
     } catch (err) {
       mcpLogger.warn({ repo: repo.repo, err }, 'Failed to create forge adapter — list-issues will be unavailable for this repo')
     }
@@ -58,5 +60,5 @@ export async function mcpCommand(globalOpts?: GlobalOpts): Promise<void> {
   // All logging goes to stderr when in MCP stdio mode
   mcpLogger.info('Starting MCP server')
 
-  await startMCPStdio({ db, config, forgeAdapters, poller: null, metrics })
+  await startMCPStdio({ db, config: baseConfig, forgeAdapters, poller: null, metrics })
 }

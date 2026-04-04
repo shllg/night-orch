@@ -369,7 +369,7 @@ Options: `--config`, `--trust-workspace`, `--dry-run`, `--log-level`
 
 Start the embedded web control surface. Serves the React/Tailwind frontend, a REST API under `/api/*`, and a WebSocket stream endpoint at `/ws`.
 
-By default, `web` runs in attach mode: no poll loop, no metrics server, and no embedded MCP server are started in the web process. Manual web operations (`poll`, `sync`, `cleanup`, `retry`, `continue`, `rebase`, `delete entry`) remain available and execute in the web process.
+By default, `web` runs in attach mode: no poll loop, no metrics server, and no embedded MCP server are started in the web process. Manual web operations (`poll`, `sync`, `cleanup`, `retry`, `continue`, `rebase`, `delete entry`, runtime settings set/clear) remain available and execute in the web process.
 Use `--standalone` to run poller + metrics + embedded MCP in the same process as the web server.
 
 Default bind is `127.0.0.1:3200`. Use `--host` / `--port` to change this (for example when reverse-proxying through Caddy or nginx). Use `--allowed-host` (repeatable) to permit additional Host/Origin values when proxying.
@@ -396,7 +396,15 @@ Show current state: active runs, active leases, daily cost against budget, recen
 
 ### `night-orch tui`
 
-Live-updating terminal dashboard. Refreshes every 2 seconds. Shows active runs, merge queue, cost bar, recent history, and issue actions (`poll`, `sync`, `cleanup`, `retry`, `retry fresh`, `continue`, `rebase`, `delete entry`). Press Ctrl+C to exit.
+Live-updating terminal dashboard. Refreshes every 2 seconds. Shows active runs, merge queue, cost bar, recent history, issue actions (`poll`, `sync`, `cleanup`, `retry`, `retry fresh`, `continue`, `rebase`, `delete entry`), and a Settings tab (`5`) for curated runtime overrides. Press Ctrl+C to exit.
+
+### `night-orch settings`
+
+Manage DB-backed runtime overrides for curated config keys.
+
+- `night-orch settings list [--json]`
+- `night-orch settings set <key> <value>`
+- `night-orch settings unset <key>`
 
 ### `night-orch sync`
 
@@ -434,7 +442,7 @@ Send a test notification through all configured channels. Verifies webhook URLs,
 
 ### `night-orch mcp`
 
-Start the MCP server on stdio transport (for Claude Code integration). Exposes 15 tools and 3 resources for querying and controlling night-orch.
+Start the MCP server on stdio transport (for Claude Code integration). Exposes 18 tools and 3 resources for querying and controlling night-orch.
 
 ---
 
@@ -486,10 +494,13 @@ Key metrics:
 
 Night-orch exposes an MCP server for integration with Claude Code and other MCP clients.
 
-### Tools (15)
+### Tools (18)
 
 | Tool | Description |
 |------|-------------|
+| `night-orch-list-settings` | List curated runtime settings, overrides, and effective values |
+| `night-orch-set-setting` | Set one DB-backed runtime override |
+| `night-orch-clear-setting` | Clear one DB-backed runtime override |
 | `night-orch-status` | Operational snapshot |
 | `night-orch-run-detail` | Full run history and events |
 | `night-orch-list-runs` | Filtered run listing |

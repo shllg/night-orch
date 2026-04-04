@@ -5,6 +5,7 @@ export const TABS: Array<{ id: TabId; hotkey: string; label: string }> = [
   { id: 'projects', hotkey: '2', label: 'Projects' },
   { id: 'stats', hotkey: '3', label: 'Stats' },
   { id: 'logs', hotkey: '4', label: 'Logs' },
+  { id: 'settings', hotkey: '5', label: 'Settings' },
 ]
 
 export type TuiColor = 'white' | 'gray' | 'yellow' | 'cyan' | 'magenta' | 'green' | 'red'
