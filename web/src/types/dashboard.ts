@@ -22,6 +22,119 @@ export interface RunSummary {
   endedAt: string | null
 }
 
+export interface StatusAggregate {
+  status: string
+  count: number
+}
+
+export interface PhaseAggregate {
+  phase: string
+  count: number
+}
+
+export interface RepoAggregate {
+  repo: string
+  totalRuns: number
+  completedRuns: number
+  blockedRuns: number
+  errorRuns: number
+  totalCostUsd: number
+  avgIterations: number
+}
+
+export interface AgentRoleAggregate {
+  role: string
+  events: number
+  toolCalls: number
+}
+
+export interface DailyCostAggregate {
+  date: string
+  totalCostUsd: number
+  runCount: number
+}
+
+export interface ErrorPatternAggregate {
+  pattern: string
+  count: number
+}
+
+export interface TuiStatsSnapshot {
+  updatedAt: string
+  overview: {
+    totalRuns: number
+    activeRuns: number
+    queuedRuns: number
+    runningRuns: number
+    reviewReadyRuns: number
+    completedRuns: number
+    blockedRuns: number
+    errorRuns: number
+  }
+  statusCounts: StatusAggregate[]
+  phaseCounts: PhaseAggregate[]
+  throughput: {
+    runs24h: number
+    runs7d: number
+    runs30d: number
+    completed7d: number
+    blocked7d: number
+    error7d: number
+    successRate7d: number
+    avgDurationMinutes7d: number
+    avgIterations7d: number
+  }
+  reliability: {
+    failureCount7d: number
+    failureRate7d: number
+    topErrorPatterns7d: ErrorPatternAggregate[]
+  }
+  cost: {
+    todayCostUsd: number
+    todayRunCount: number
+    cost7d: number
+    cost30d: number
+    avgDailyCost7d: number
+    dailyHistory: DailyCostAggregate[]
+  }
+  efficiency: {
+    totalCostUsd7d: number
+    avgCostPerRun7d: number
+    avgCostPerSuccess7d: number
+    avgCostPerIteration7d: number
+    completedPerDollar7d: number
+  }
+  resources: {
+    activeLeases: number
+    expiringLeases: number
+    expiredLeases: number
+    leasedRepos: number
+    activeWorktrees: number
+    missingWorktrees: number
+    staleWorktrees: number
+  }
+  timing: {
+    sampleSize30d: number
+    p50Minutes: number
+    p90Minutes: number
+    p99Minutes: number
+  }
+  queue: {
+    activeBatches: number
+    statuses: StatusAggregate[]
+  }
+  agents: {
+    eventsTotal: number
+    events24h: number
+    events7d: number
+    toolCalls24h: number
+    thinking24h: number
+    uniqueRuns7d: number
+    roleBreakdown7d: AgentRoleAggregate[]
+  }
+  topRepos30d: RepoAggregate[]
+}
+
 export interface DashboardSnapshot {
   generatedAt: string
   status: {
@@ -40,19 +153,7 @@ export interface DashboardSnapshot {
     repos: string[]
     pollIntervalSeconds: number
   }
-  stats: {
-    throughput: {
-      runs24h: number
-      successRate7d: number
-    }
-    overview: {
-      queuedRuns: number
-      runningRuns: number
-      reviewReadyRuns: number
-      blockedRuns: number
-      errorRuns: number
-    }
-  }
+  stats: TuiStatsSnapshot
 }
 
 export interface RunEvent {

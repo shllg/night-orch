@@ -6,6 +6,7 @@ import { OperationsPanel } from './components/OperationsPanel.js'
 import { ProjectsPage } from './components/ProjectsPage.js'
 import { RunEventStream } from './components/RunEventStream.js'
 import { RunsPanel } from './components/RunsPanel.js'
+import { StatsPage } from './components/StatsPage.js'
 import { extractMessage, formatTimestamp } from './lib/format.js'
 import { STATUS_BADGE_TONE } from './lib/run-tone.js'
 import { asRunEventsPayload, mergeRunEvents } from './lib/run-events.js'
@@ -43,67 +44,6 @@ function PlaceholderPage({ title, description, detail }: PlaceholderPageProps): 
         </div>
       </div>
     </section>
-  )
-}
-
-interface StatsPageProps {
-  snapshot: DashboardSnapshot | null
-  socketConnected: boolean
-}
-
-function StatsPage({ snapshot, socketConnected }: StatsPageProps): ReactElement {
-  const overview = snapshot?.stats.overview
-
-  return (
-    <div className="flex flex-col gap-5">
-      <DashboardMetrics snapshot={snapshot} />
-
-      <section className="grid gap-5 xl:grid-cols-[1.45fr_1fr]">
-        <article className="card border border-base-300/60 bg-base-200/60 shadow-panel backdrop-blur">
-          <div className="card-body p-4 sm:p-5">
-            <h2 className="card-title text-lg">Queue Overview</h2>
-            <div className="mt-2 grid gap-3 sm:grid-cols-2">
-              {[
-                { label: 'Queued Runs', value: overview?.queuedRuns ?? 0, tone: 'text-info' },
-                { label: 'Running Runs', value: overview?.runningRuns ?? 0, tone: 'text-warning' },
-                { label: 'Review Ready', value: overview?.reviewReadyRuns ?? 0, tone: 'text-success' },
-                { label: 'Blocked Runs', value: overview?.blockedRuns ?? 0, tone: 'text-secondary' },
-                { label: 'Error Runs', value: overview?.errorRuns ?? 0, tone: 'text-error' },
-              ].map((item) => (
-                <div key={item.label} className="rounded-box border border-base-300/70 bg-base-100/70 px-3 py-2">
-                  <p className="text-xs uppercase tracking-wide text-base-content/60">{item.label}</p>
-                  <p className={`mt-1 text-2xl font-semibold ${item.tone}`}>{item.value}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </article>
-
-        <article className="card border border-base-300/60 bg-base-200/60 shadow-panel backdrop-blur">
-          <div className="card-body p-4 sm:p-5">
-            <h2 className="card-title text-lg">System Signals</h2>
-            <dl className="mt-2 space-y-2 text-sm text-base-content/80">
-              <div className="flex items-center justify-between gap-3 rounded-box border border-base-300/70 bg-base-100/70 px-3 py-2">
-                <dt className="text-base-content/70">Poll Interval</dt>
-                <dd>{snapshot?.config.pollIntervalSeconds ?? '-'}s</dd>
-              </div>
-              <div className="flex items-center justify-between gap-3 rounded-box border border-base-300/70 bg-base-100/70 px-3 py-2">
-                <dt className="text-base-content/70">Tracked Repos</dt>
-                <dd>{snapshot?.config.repos.length ?? 0}</dd>
-              </div>
-              <div className="flex items-center justify-between gap-3 rounded-box border border-base-300/70 bg-base-100/70 px-3 py-2">
-                <dt className="text-base-content/70">Websocket</dt>
-                <dd>{socketConnected ? 'Connected' : 'Reconnecting'}</dd>
-              </div>
-              <div className="flex items-center justify-between gap-3 rounded-box border border-base-300/70 bg-base-100/70 px-3 py-2">
-                <dt className="text-base-content/70">Last Refresh</dt>
-                <dd>{snapshot?.generatedAt ? formatTimestamp(snapshot.generatedAt) : '--'}</dd>
-              </div>
-            </dl>
-          </div>
-        </article>
-      </section>
-    </div>
   )
 }
 
@@ -532,7 +472,7 @@ export function App(): ReactElement {
   }, [continueIssueNumber, continueRepo, runOperation])
 
   return (
-    <main data-theme="black" className="orch-shell min-h-screen bg-orch-admin">
+    <main data-theme="black" className="min-h-screen bg-orch-admin">
       <DashboardHeader
         activePage={activePage}
         onPageChange={setActivePage}
@@ -544,7 +484,7 @@ export function App(): ReactElement {
         backendGitSha={snapshot?.build?.gitSha ?? null}
       />
 
-      <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-5 px-4 pb-6 pt-[var(--orch-header-offset)] sm:px-6 lg:px-8">
+      <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-5 px-4 pb-6 sm:px-6 lg:px-8">
         {errorMessage && (
           <div className="alert alert-error shadow-sm">
             <span>{errorMessage}</span>
