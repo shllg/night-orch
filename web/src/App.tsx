@@ -12,6 +12,7 @@ import { UpdateProgressModal } from './components/UpdateProgressModal.js'
 import { extractMessage, formatTimestamp } from './lib/format.js'
 import { STATUS_BADGE_TONE } from './lib/run-tone.js'
 import { asRunEventsPayload, mergeRunEvents } from './lib/run-events.js'
+import { confirmSelfUpdate } from './lib/update-confirmation.js'
 import {
   clearUpdateTransitionState,
   createUpdateTransitionState,
@@ -440,6 +441,10 @@ export function App(): ReactElement {
   }, [loadDashboard, loadSettings, operationsEnabled, webMutationToken])
 
   const submitUpdate = useCallback(async () => {
+    if (!confirmSelfUpdate((message) => window.confirm(message))) {
+      return
+    }
+
     const accepted = await runOperation(
       'update',
       '/api/operations/update',
