@@ -101,7 +101,7 @@ Repos are polled in parallel. By default, each repo runs one issue at a time; ra
 1. **Discovery** — the daemon polls each repo for open issues with configured labels (default: `orch:ready`)
 2. **Triage** — issues are classified as trivial, standard, or architectural based on labels and body length
 3. **Decomposition** (optional) — complex issues are split into independent sub-tasks
-4. **Pipeline execution** — each issue runs through the configured workflow (default: Plan → Code → Verify → Review → Decide) in an isolated git worktree
+4. **Pipeline execution** — each issue runs through the configured workflow in an isolated git worktree (defaults: `standard` = Plan → Code → Verify → Review → Decide, `trivial` = Code → Verify → Decide)
 5. **Publishing** — approved changes are committed, pushed, and a PR is created on the remote
 6. **Merge queue** (optional) — approved PRs are batched, tested, and merged automatically
 
@@ -127,10 +127,11 @@ night-orch retry owner/repo 42
 
 ## Workflows
 
-By default, night-orch uses this pipeline:
+By default, night-orch uses:
 
 ```
-Plan → Code → Verify → Review → Decide
+Standard:    Plan → Code → Verify → Review → Decide
+Trivial:           Code → Verify → Decide
                  ↑                  │
                  └──── iterate ─────┘
 ```
@@ -151,6 +152,8 @@ workflows:
 repos:
   - repo: org/simple-repo
     workflow: minimal    # skips planning entirely
+    workflowByTriage:
+      trivial: minimal   # optional triage-specific routing
 ```
 
 ### Adding custom steps
@@ -175,13 +178,16 @@ workflows:
 |------|---------|
 | `worker` | Invoke an AI agent (planner, coder, reviewer, or custom role) |
 | `verify` | Run configured test/lint/typecheck commands |
-| `decide` | Evaluate results and route to publish, iterate, or block |
+| `decide` | Evaluate results and route to publish, iterate, or block (`requireReview: false` supports no-review flows) |
 
 ### Step options
 
 - `skipWhen: trivial` — skip this step for trivially-triaged issues
 - `continueFrom: plan` — continue the AI session from a prior step when both steps use the same agent (reduces token usage, improves context)
 - `prompt: path/to/template.md` — use a custom system prompt instead of the default
+- `requireReview: false` — allow verification-only decisioning for lightweight workflows
+- `roles` (workflow-level) — per-workflow default role assignment (`planner`/`coder`/`reviewer`)
+- `agents` (workflow-level) — per-workflow worker profile overrides (same shape as `repos[].agents`)
 
 ---
 

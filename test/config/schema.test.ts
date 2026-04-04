@@ -226,4 +226,48 @@ describe('ConfigSchema', () => {
     const result = ConfigSchema.safeParse(raw)
     expect(result.success).toBe(false)
   })
+
+  it('accepts triage workflow routing with workflow role/profile overrides', () => {
+    const raw = loadExampleConfig()
+    raw.workflows = {
+      'fast-trivial': {
+        roles: {
+          coder: 'codex',
+          reviewer: 'codex',
+        },
+        agents: {
+          codex: 'codex-default',
+        },
+        steps: [
+          { type: 'worker', id: 'code', role: 'coder' },
+          { type: 'verify', id: 'verify' },
+          { type: 'decide', id: 'decide', onIterate: 'code', requireReview: false },
+        ],
+      },
+    }
+    raw.repos[0].workflowByTriage = { trivial: 'fast-trivial' }
+
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.repos[0]?.workflowByTriage?.trivial).toBe('fast-trivial')
+      expect(result.data.workflows['fast-trivial']?.roles?.coder).toBe('codex')
+      expect(result.data.workflows['fast-trivial']?.agents?.['codex']).toBe('codex-default')
+      const decideStep = result.data.workflows['fast-trivial']?.steps[2]
+      if (decideStep && decideStep.type === 'decide') {
+        expect(decideStep.requireReview).toBe(false)
+      }
+    }
+  })
+
+  it('rejects unsupported workflowByTriage keys', () => {
+    const raw = loadExampleConfig()
+    raw.repos[0].workflowByTriage = {
+      trivial: 'fast-trivial',
+      architectural: 'full',
+    }
+
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(false)
+  })
 })

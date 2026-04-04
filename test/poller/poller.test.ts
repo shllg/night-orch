@@ -214,6 +214,101 @@ describe('pollOnce', () => {
     expect(typeof result.errors).toBe('number')
   })
 
+  it('trivial issues use lightweight workflow and fallback codex profile-by-type when agent mapping is missing', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([{
+      issue: { number: 1, nodeId: '', title: 'Tiny fix', body: 'Fix typo', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      triage: { level: 'trivial', reason: 'Short body with trivial label' },
+    }])
+    mockExecuteLoop.mockResolvedValue({
+      currentPhase: 'publish',
+      terminalStatus: 'blocked',
+    })
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    config.workerProfiles['codex-fast'] = {
+      type: 'codex',
+      command: 'codex',
+      args: ['exec'],
+      workerTimeoutSeconds: 1200,
+      minimalEnv: true,
+      runtimeWrapper: null,
+      env: {},
+    }
+    config.repos[0]!.agents = { claude: 'claude' }
+
+    const result = await pollOnce(config, db, false)
+
+    expect(result.errors).toBe(0)
+    expect(mockExecuteLoop).toHaveBeenCalledTimes(1)
+    const initialCtx = mockExecuteLoop.mock.calls[0]?.[0] as {
+      roles: { coder: string }
+      repoConfig: { agents: Record<string, string> }
+    }
+    const loopDeps = mockExecuteLoop.mock.calls[0]?.[1] as {
+      workflow: { steps: Array<{ id: string }>; }
+    }
+    expect(initialCtx.roles.coder).toBe('codex')
+    expect(initialCtx.repoConfig.agents['codex']).toBeUndefined()
+    expect(loopDeps.workflow.steps.map((step) => step.id)).toEqual(['code', 'verify', 'decide'])
+  })
+
+  it('applies workflowByTriage role and agent overrides during run setup', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([{
+      issue: { number: 1, nodeId: '', title: 'Tiny fix', body: 'Fix typo', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      triage: { level: 'trivial', reason: 'Short body with trivial label' },
+    }])
+    mockExecuteLoop.mockResolvedValue({
+      currentPhase: 'publish',
+      terminalStatus: 'blocked',
+    })
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    config.workerProfiles['codex-fast'] = {
+      type: 'codex',
+      command: 'codex',
+      args: ['exec'],
+      workerTimeoutSeconds: 900,
+      minimalEnv: true,
+      runtimeWrapper: null,
+      env: {},
+    }
+    config.workflows = {
+      'fast-trivial': {
+        roles: {
+          coder: 'codex',
+          reviewer: 'codex',
+        },
+        agents: {
+          codex: 'codex-fast',
+        },
+        steps: [
+          { type: 'worker', id: 'code', role: 'coder' },
+          { type: 'verify', id: 'verify' },
+          { type: 'decide', id: 'decide', onIterate: 'code', requireReview: false },
+        ],
+      },
+    }
+    config.repos[0]!.workflowByTriage = { trivial: 'fast-trivial' }
+
+    const result = await pollOnce(config, db, false)
+
+    expect(result.errors).toBe(0)
+    expect(mockExecuteLoop).toHaveBeenCalledTimes(1)
+    const initialCtx = mockExecuteLoop.mock.calls[0]?.[0] as {
+      roles: { coder: string; reviewer: string }
+      repoConfig: { agents: Record<string, string> }
+    }
+    const loopDeps = mockExecuteLoop.mock.calls[0]?.[1] as {
+      workflow: { agents?: Record<string, string>; roles?: Record<string, string>; steps: Array<{ id: string }> }
+    }
+    expect(initialCtx.roles.coder).toBe('codex')
+    expect(initialCtx.roles.reviewer).toBe('codex')
+    expect(initialCtx.repoConfig.agents['codex']).toBe('codex-fast')
+    expect(loopDeps.workflow.agents?.['codex']).toBe('codex-fast')
+    expect(loopDeps.workflow.roles?.['coder']).toBe('codex')
+    expect(loopDeps.workflow.steps.map((step) => step.id)).toEqual(['code', 'verify', 'decide'])
+  })
+
   it('uses terminalStatus for blocked runs even when currentPhase is publish', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([{
       issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },

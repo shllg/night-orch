@@ -260,7 +260,10 @@ Supported commands (posted as issue comments):
 
 ## `workflows`
 
-Named workflow definitions for custom execution pipelines. When no workflow is configured, the default Plan→Code→Verify→Review→Decide pipeline is used.
+Named workflow definitions for custom execution pipelines.
+When no workflow is configured:
+- `standard` issues use Plan→Code→Verify→Review→Decide
+- `trivial` issues use a lightweight Code→Verify→Decide flow (review gate disabled)
 
 ```yaml
 workflows:
@@ -270,6 +273,17 @@ workflows:
       - { type: verify, id: verify }
       - { type: worker, id: review, role: reviewer }
       - { type: decide, id: decide, onIterate: code }
+
+  fast-trivial:
+    roles:
+      coder: codex
+      reviewer: codex
+    agents:
+      codex: codex-fast
+    steps:
+      - { type: worker, id: code, role: coder }
+      - { type: verify, id: verify }
+      - { type: decide, id: decide, onIterate: code, requireReview: false }
 
   with-security:
     steps:
@@ -287,11 +301,17 @@ workflows:
 | --- | --- | --- |
 | `worker` | `id`, `role`, `skipWhen?`, `continueFrom?`, `prompt?` | Invoke a worker adapter. Built-in roles: `planner`, `coder`, `reviewer`. |
 | `verify` | `id`, `skipWhen?` | Run configured verify commands. |
-| `decide` | `id`, `onIterate` | Evaluate review/verify results and route to publish, iterate (jump to `onIterate` step), or block. |
+| `decide` | `id`, `onIterate`, `requireReview?` | Evaluate review/verify results and route to publish, iterate (jump to `onIterate` step), or block. |
 
 - `skipWhen` — skip the step when the triage level matches (e.g., `trivial`)
 - `continueFrom` — continue the AI session from a prior step (e.g., coder continues planner's session). Session reuse is agent-specific; cross-agent handoffs (for example `planner=claude`, `coder=codex`) start a fresh session.
 - `prompt` — path to a custom system prompt template (overrides the default)
+- `requireReview` — default `true`; set to `false` for no-review workflows (for example lightweight triage paths)
+
+### Workflow-Level Overrides
+
+- `roles` — optional role defaults (`planner`/`coder`/`reviewer`) for runs using this workflow
+- `agents` — optional per-agent worker profile overrides (same shape as `repos[].agents`)
 
 Reference a workflow in `repos[].workflow` by name.
 
@@ -319,11 +339,33 @@ Reference a workflow in `repos[].workflow` by name.
 | `selectors` | object | no | object with defaults | Issue label inclusion/exclusion filters. |
 | `agents` | record | no | `{}` | Maps agent names to worker profile names. |
 | `workflow` | string | no | none | Name of a workflow from `workflows` section. Uses default pipeline if omitted. |
+| `workflowByTriage` | object | no | none | Per-triage workflow selection (`trivial`/`standard`). |
 | `mergeQueue` | object | no | object with defaults | Merge queue configuration. |
 
 Poll execution model:
 - Repos are polled in parallel.
 - Each repo runs up to `maxConcurrentRuns` issues at once (default `1`).
+
+### `repos[].workflowByTriage`
+
+Route triage levels to different named workflows:
+
+```yaml
+repos:
+  - repo: myorg/myrepo
+    workflow: full
+    workflowByTriage:
+      trivial: fast-trivial
+      standard: full
+```
+
+Resolution order:
+1. Planning-label workflow override (planning-only mode)
+2. `workflowByTriage[triageLevel]`
+3. `workflow`
+4. Built-in defaults (`trivial` -> lightweight, others -> full)
+
+Note: `architectural` issues are intentionally handled outside workflow execution and are labeled for human guidance.
 
 ### `repos[].labels`
 

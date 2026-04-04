@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { resolveWorkflow, DEFAULT_WORKFLOW, PLANNING_ONLY_WORKFLOW } from '../../src/loop/workflow.js'
+import {
+  resolveWorkflow,
+  DEFAULT_WORKFLOW,
+  LIGHTWEIGHT_WORKFLOW,
+  PLANNING_ONLY_WORKFLOW,
+} from '../../src/loop/workflow.js'
 import type { Config, RepoConfig } from '../../src/config/schema.js'
 
 function makeRepoConfig(overrides: Partial<RepoConfig> = {}): RepoConfig {
@@ -37,9 +42,14 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
 }
 
 describe('resolveWorkflow', () => {
-  it('returns DEFAULT_WORKFLOW when no workflow configured', () => {
+  it('returns DEFAULT_WORKFLOW for standard issues when no workflow configured', () => {
     const result = resolveWorkflow(makeRepoConfig(), makeConfig(), [], 'standard')
     expect(result).toBe(DEFAULT_WORKFLOW)
+  })
+
+  it('returns LIGHTWEIGHT_WORKFLOW for trivial issues when no workflow configured', () => {
+    const result = resolveWorkflow(makeRepoConfig(), makeConfig(), [], 'trivial')
+    expect(result).toBe(LIGHTWEIGHT_WORKFLOW)
   })
 
   it('returns DEFAULT_WORKFLOW when named workflow not found', () => {
@@ -68,6 +78,26 @@ describe('resolveWorkflow', () => {
     )
     expect(result.steps).toHaveLength(3)
     expect(result.steps[0]!.id).toBe('code')
+  })
+
+  it('returns triage-mapped workflow when configured', () => {
+    const fastWorkflow = {
+      steps: [
+        { type: 'worker' as const, id: 'code', role: 'coder' },
+        { type: 'decide' as const, id: 'decide', onIterate: 'code', requireReview: false },
+      ],
+      roles: { coder: 'codex' as const },
+      agents: { codex: 'codex-fast' },
+    }
+    const result = resolveWorkflow(
+      makeRepoConfig({ workflowByTriage: { trivial: 'fast-trivial' } }),
+      makeConfig({ workflows: { 'fast-trivial': fastWorkflow } }),
+      [],
+      'trivial',
+    )
+    expect(result.steps).toHaveLength(2)
+    expect(result.roles?.coder).toBe('codex')
+    expect(result.agents?.['codex']).toBe('codex-fast')
   })
 
   it('returns PLANNING_ONLY_WORKFLOW when planning label is present', () => {

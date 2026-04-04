@@ -169,10 +169,12 @@ export async function executeVerifyStep(
  */
 export async function executeDecideStep(
   ctx: RunContext,
-  _step: DecideStep,
+  step: DecideStep,
   deps: StepDependencies,
 ): Promise<StepResult> {
-  const decision = decide(ctx, deps.config.loop, deps.config.security)
+  const decision = decide(ctx, deps.config.loop, deps.config.security, {
+    requireReview: step.requireReview,
+  })
   return { ctx, decision }
 }
 

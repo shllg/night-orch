@@ -88,6 +88,16 @@ function validateWorkerProfileRefs(config: Config): void {
       }
     }
   }
+
+  for (const [workflowName, workflow] of Object.entries(config.workflows)) {
+    for (const [agentName, profileRef] of Object.entries(workflow.agents ?? {})) {
+      if (!profileNames.has(profileRef)) {
+        throw new ConfigError(
+          `Workflow ${workflowName}: agent "${agentName}" references unknown worker profile "${profileRef}". Available: ${[...profileNames].join(', ')}`,
+        )
+      }
+    }
+  }
 }
 
 /**

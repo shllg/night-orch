@@ -21,9 +21,11 @@ export function decide(
   ctx: RunContext,
   loopConfig: Config['loop'],
   securityConfig: Config['security'],
+  options: { requireReview?: boolean } = {},
 ): LoopDecision {
   const maxReviewIter = ctx.adjustedLimits.maxReviewIterations
   const maxTotalPasses = ctx.adjustedLimits.maxTotalAgentPasses
+  const requireReview = options.requireReview ?? true
 
   // Rule 1: Cost limit
   // (Caller should check before invoking, but double-check here)
@@ -55,6 +57,27 @@ export function decide(
 
   // No review result = parse failure
   if (!review) {
+    // Lightweight workflows may intentionally omit reviewer phases.
+    if (!requireReview) {
+      if (loopConfig.requireVerificationPass && !verifyCommandsConfigured) {
+        return { action: 'block', reason: 'Verification required but no verify commands are configured', blockReason: 'verify_config' }
+      }
+      if (loopConfig.requireVerificationPass && !verifyResultsAvailable) {
+        return { action: 'block', reason: 'Verification required but no verify results are available', blockReason: 'verify_config' }
+      }
+      if (verificationSatisfied) {
+        return { action: 'publish', reason: 'Verification passed in no-review workflow' }
+      }
+      if (ctx.iteration >= maxReviewIter) {
+        return { action: 'block', reason: `Max review iterations reached: ${ctx.iteration}/${maxReviewIter}`, blockReason: 'iteration_limit' }
+      }
+      return {
+        action: 'iterate',
+        reason: 'Verification failed in no-review workflow — retrying',
+        findings: [],
+      }
+    }
+
     // Rules 8, 9
     if (loopConfig.blockOnAmbiguousReview) {
       return { action: 'block', reason: 'Review output not parseable and blockOnAmbiguousReview is true', blockReason: 'ambiguous_review' }
