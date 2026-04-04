@@ -428,7 +428,7 @@ Send a test notification through all configured channels. Verifies webhook URLs,
 
 ### `night-orch mcp`
 
-Start the MCP server on stdio transport (for Claude Code integration). Exposes 14 tools and 3 resources for querying and controlling night-orch.
+Start the MCP server on stdio transport (for Claude Code integration). Exposes 15 tools and 3 resources for querying and controlling night-orch.
 
 ---
 
@@ -480,7 +480,7 @@ Key metrics:
 
 Night-orch exposes an MCP server for integration with Claude Code and other MCP clients.
 
-### Tools (14)
+### Tools (15)
 
 | Tool | Description |
 |------|-------------|
@@ -492,6 +492,7 @@ Night-orch exposes an MCP server for integration with Claude Code and other MCP 
 | `night-orch-continue` | Queue a context-aware second pass |
 | `night-orch-sync` | Reconcile DB with GitHub |
 | `night-orch-cleanup` | Remove stale resources |
+| `night-orch-labels-init` | Create/update orchestration labels for a repo |
 | `night-orch-delete-entry` | Delete local issue state |
 | `night-orch-poll` | Trigger single poll cycle |
 | `night-orch-list-issues` | List eligible/active issues |

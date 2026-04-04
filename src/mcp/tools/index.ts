@@ -9,6 +9,7 @@ import { CostTracker } from '../../loop/cost.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { CleanupEngine } from '../../ops/cleanup.js'
 import { RetryEngine } from '../../ops/retry.js'
+import { LabelsInitEngine, formatLabelsInitSummary } from '../../ops/labels-init.js'
 import { queueContinue } from '../../ops/continue.js'
 import { DeleteIssueEntryEngine } from '../../ops/delete-entry.js'
 import { isIssueEligibleForRepo } from '../../discovery/discover.js'
@@ -108,6 +109,19 @@ export function registerTools(): ToolDefinition[] {
           dryRun: { type: 'boolean', description: 'Preview changes without applying', default: false },
           authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
         },
+      },
+    },
+    {
+      name: 'night-orch-labels-init',
+      description: 'Create or update orchestration labels for a configured GitHub repository.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          repo: { type: 'string', description: 'Repository (owner/name)' },
+          dryRun: { type: 'boolean', description: 'Preview labels without creating/updating them', default: false },
+          authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
+        },
+        required: ['repo'],
       },
     },
     {
@@ -221,6 +235,8 @@ export async function handleToolCall(
       return handleSync(args as { dryRun?: boolean; authToken?: string }, deps)
     case 'night-orch-cleanup':
       return handleCleanup(args as { dryRun?: boolean; authToken?: string }, deps)
+    case 'night-orch-labels-init':
+      return handleLabelsInit(args as { repo: string; dryRun?: boolean; authToken?: string }, deps)
     case 'night-orch-delete-entry':
       return handleDeleteEntry(args as { repo: string; issueNumber: number; force?: boolean; dryRun?: boolean; authToken?: string }, deps)
     case 'night-orch-poll':
@@ -493,6 +509,27 @@ async function handleCleanup(args: { dryRun?: boolean; authToken?: string }, dep
   assertMcpMutationAuth(args.authToken, deps)
   const engine = new CleanupEngine(deps.db, deps.config)
   return engine.run({ dryRun: args.dryRun ?? false })
+}
+
+async function handleLabelsInit(
+  args: { repo: string; dryRun?: boolean; authToken?: string },
+  deps: MCPDependencies,
+): Promise<unknown> {
+  assertMcpMutationAuth(args.authToken, deps)
+  if (!args.repo) {
+    throw new Error('repo is required')
+  }
+
+  const engine = new LabelsInitEngine(deps.config)
+  const result = await engine.run({
+    targetRepo: args.repo,
+    dryRun: args.dryRun ?? false,
+  })
+
+  return {
+    ...result,
+    message: formatLabelsInitSummary(result),
+  }
 }
 
 async function handleDeleteEntry(

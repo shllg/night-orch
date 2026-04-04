@@ -199,6 +199,22 @@ describe('startWebServer', () => {
     expect(pollPayload.state).toBe('woke-sleeper')
     expect(triggerPollCycle).toHaveBeenCalledTimes(1)
 
+    const labelsInit = await fetch(`${baseUrl}/api/operations/labels-init`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+        [WEB_AUTH_TOKEN_HEADER]: mutationToken,
+      },
+      body: JSON.stringify({ repo: 'org/repo', dryRun: true }),
+    })
+    expect(labelsInit.status).toBe(200)
+    await expect(labelsInit.json()).resolves.toMatchObject({
+      targetRepo: 'org/repo',
+      dryRun: true,
+      failures: 0,
+    })
+
     const deleteEntry = await fetch(`${baseUrl}/api/operations/delete-entry`, {
       method: 'POST',
       headers: {

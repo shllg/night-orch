@@ -4,6 +4,7 @@ import type { Config } from '../../config/schema.js'
 import { RetryEngine } from '../../ops/retry.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { CleanupEngine } from '../../ops/cleanup.js'
+import { LabelsInitEngine, formatLabelsInitSummary } from '../../ops/labels-init.js'
 import { DeleteIssueEntryEngine } from '../../ops/delete-entry.js'
 import { pollOnce } from '../../runner/poller.js'
 import { queueRebase } from '../../ops/rebase-and-check.js'
@@ -145,6 +146,7 @@ export type TuiActionCommand =
   | 'refresh'
   | 'poll'
   | 'sync'
+  | 'labelsInit'
   | 'retry'
   | 'retryFresh'
   | 'continue'
@@ -170,6 +172,7 @@ export function resolveActionCommand(args: ResolveActionCommandInput): TuiAction
   const monitorOnlyActionKey = args.input === 'p'
     || args.input === 's'
     || args.input === 'D'
+    || args.input === 'L'
 
   if (args.actionBusy) return 'none'
 
@@ -178,12 +181,13 @@ export function resolveActionCommand(args: ResolveActionCommandInput): TuiAction
   }
 
   // Keep focused run detail isolated to match its legend.
-  if (isFocusedRun && (args.input === 'p' || args.input === 's' || args.input === 'D')) {
+  if (isFocusedRun && (args.input === 'p' || args.input === 's' || args.input === 'D' || args.input === 'L')) {
     return 'none'
   }
 
   if (args.input === 'p') return 'poll'
   if (args.input === 's') return 'sync'
+  if (args.input === 'L') return 'labelsInit'
 
   if (args.input === 'D') {
     return args.cleanupConfirmPending ? 'cleanupConfirm' : 'cleanupArm'
@@ -624,6 +628,25 @@ export function App({
     })
   }, [config, db, dryRun, runAction])
 
+  const runLabelsInit = useCallback(async () => {
+    await runAction('labels-init', async () => {
+      const targetRepo = activeTab === 'projects'
+        ? config.repos[selectedProjectIndex]?.repo
+        : selectedIssue?.repo ?? config.repos[0]?.repo
+
+      if (!targetRepo) {
+        throw new Error('No repositories configured')
+      }
+
+      const engine = new LabelsInitEngine(config)
+      const result = await engine.run({
+        targetRepo,
+        dryRun,
+      })
+      return `${targetRepo}: ${formatLabelsInitSummary(result)}`
+    })
+  }, [activeTab, config, dryRun, runAction, selectedIssue, selectedProjectIndex])
+
   const clearCleanupConfirmation = useCallback(() => {
     if (cleanupConfirmTimer.current) {
       clearTimeout(cleanupConfirmTimer.current)
@@ -867,7 +890,7 @@ export function App({
     }
 
     if (actionCommand === 'standaloneMessage') {
-      setStatusLine('Monitor mode: poll/sync/cleanup available via `night-orch` CLI')
+      setStatusLine('Monitor mode: poll/sync/cleanup/labels-init available via `night-orch` CLI')
       return
     }
 
@@ -877,6 +900,10 @@ export function App({
     }
     if (actionCommand === 'sync') {
       void runSync()
+      return
+    }
+    if (actionCommand === 'labelsInit') {
+      void runLabelsInit()
       return
     }
     if (actionCommand === 'cleanupArm') {
