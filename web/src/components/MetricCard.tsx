@@ -17,10 +17,10 @@ export function MetricCard({ label, value, accent, subValue }: MetricCardProps):
         : 'border-info/50 bg-info/10'
 
   return (
-    <article className={`stat rounded-box border px-4 py-3 shadow-panel ${accentClass}`}>
-      <div className="stat-title text-[11px] uppercase tracking-wider text-base-content/70">{label}</div>
-      <div className="stat-value text-2xl text-base-content">{value}</div>
-      {subValue && <div className="stat-desc text-[11px] text-base-content/70">{subValue}</div>}
+    <article className={`stat min-h-0 gap-1 rounded-box border px-3 py-2 shadow-panel ${accentClass}`}>
+      <div className="stat-title text-[10px] uppercase tracking-[0.12em] text-base-content/70">{label}</div>
+      <div className="stat-value text-xl leading-tight text-base-content">{value}</div>
+      {subValue && <div className="stat-desc text-[10px] text-base-content/70">{subValue}</div>}
     </article>
   )
 }

@@ -10,7 +10,7 @@ interface DashboardMetricsProps {
 
 export function DashboardMetrics({ snapshot }: DashboardMetricsProps): ReactElement {
   return (
-    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
       <MetricCard label="Active" value={snapshot?.status.activeRuns ?? 0} accent="cyan" />
       <MetricCard label="Running" value={snapshot?.stats.overview.runningRuns ?? 0} accent="amber" />
       <MetricCard
