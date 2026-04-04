@@ -10,6 +10,7 @@ import { RunManager } from '../../src/state/runs.js'
 import { startWebServer } from '../../src/web/server.js'
 import type { MCPDependencies } from '../../src/mcp/server.js'
 import type Database from 'better-sqlite3'
+import type { TuiStatsSnapshot } from '../../src/state/stats.js'
 
 const MUTATION_INTENT_HEADER = 'x-night-orch-intent'
 const WEB_AUTH_TOKEN_HEADER = 'x-night-orch-web-token'
@@ -282,6 +283,103 @@ describe('startWebServer', () => {
     expect(trackedIssue?.status).toBe('queued')
     expect(trackedIssue?.hasRun).toBe(false)
     expect(trackedIssue?.runId.startsWith('issue:')).toBe(true)
+  })
+
+  it('dashboard includes full stats snapshot fields for the web stats page', async () => {
+    server = await startWebServer(
+      deps,
+      {
+        host: '127.0.0.1',
+        port: 0,
+        frontendDistPath: frontendDir,
+      },
+    )
+
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Unexpected address type')
+    }
+    baseUrl = `http://127.0.0.1:${address.port}`
+
+    const dashboard = await fetch(`${baseUrl}/api/dashboard`)
+    expect(dashboard.status).toBe(200)
+    const payload = await dashboard.json() as { stats: TuiStatsSnapshot }
+
+    expect(payload.stats).toMatchObject({
+      updatedAt: expect.any(String),
+      overview: {
+        totalRuns: expect.any(Number),
+        activeRuns: expect.any(Number),
+        queuedRuns: expect.any(Number),
+        runningRuns: expect.any(Number),
+        reviewReadyRuns: expect.any(Number),
+        completedRuns: expect.any(Number),
+        blockedRuns: expect.any(Number),
+        errorRuns: expect.any(Number),
+      },
+      throughput: {
+        runs24h: expect.any(Number),
+        runs7d: expect.any(Number),
+        runs30d: expect.any(Number),
+        completed7d: expect.any(Number),
+        blocked7d: expect.any(Number),
+        error7d: expect.any(Number),
+        successRate7d: expect.any(Number),
+        avgDurationMinutes7d: expect.any(Number),
+        avgIterations7d: expect.any(Number),
+      },
+      reliability: {
+        failureCount7d: expect.any(Number),
+        failureRate7d: expect.any(Number),
+      },
+      cost: {
+        todayCostUsd: expect.any(Number),
+        todayRunCount: expect.any(Number),
+        cost7d: expect.any(Number),
+        cost30d: expect.any(Number),
+        avgDailyCost7d: expect.any(Number),
+      },
+      efficiency: {
+        totalCostUsd7d: expect.any(Number),
+        avgCostPerRun7d: expect.any(Number),
+        avgCostPerSuccess7d: expect.any(Number),
+        avgCostPerIteration7d: expect.any(Number),
+        completedPerDollar7d: expect.any(Number),
+      },
+      resources: {
+        activeLeases: expect.any(Number),
+        expiringLeases: expect.any(Number),
+        expiredLeases: expect.any(Number),
+        leasedRepos: expect.any(Number),
+        activeWorktrees: expect.any(Number),
+        missingWorktrees: expect.any(Number),
+        staleWorktrees: expect.any(Number),
+      },
+      timing: {
+        sampleSize30d: expect.any(Number),
+        p50Minutes: expect.any(Number),
+        p90Minutes: expect.any(Number),
+        p99Minutes: expect.any(Number),
+      },
+      queue: {
+        activeBatches: expect.any(Number),
+      },
+      agents: {
+        eventsTotal: expect.any(Number),
+        events24h: expect.any(Number),
+        events7d: expect.any(Number),
+        toolCalls24h: expect.any(Number),
+        thinking24h: expect.any(Number),
+        uniqueRuns7d: expect.any(Number),
+      },
+    })
+    expect(Array.isArray(payload.stats.statusCounts)).toBe(true)
+    expect(Array.isArray(payload.stats.phaseCounts)).toBe(true)
+    expect(Array.isArray(payload.stats.reliability.topErrorPatterns7d)).toBe(true)
+    expect(Array.isArray(payload.stats.cost.dailyHistory)).toBe(true)
+    expect(Array.isArray(payload.stats.queue.statuses)).toBe(true)
+    expect(Array.isArray(payload.stats.agents.roleBreakdown7d)).toBe(true)
+    expect(Array.isArray(payload.stats.topRepos30d)).toBe(true)
   })
 
   it('returns projects config snapshot for the web projects page', async () => {
