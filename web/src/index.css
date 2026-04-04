@@ -59,16 +59,6 @@ body {
   color: hsl(var(--bc));
 }
 
-.orch-shell {
-  --orch-header-offset: 8.8rem;
-}
-
-@media (min-width: 640px) {
-  .orch-shell {
-    --orch-header-offset: 9rem;
-  }
-}
-
 .bg-orch-admin {
   background-image:
     radial-gradient(circle at 15% 0%, rgb(34 211 238 / 0.16), transparent 38%),

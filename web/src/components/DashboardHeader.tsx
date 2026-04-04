@@ -34,7 +34,7 @@ export function DashboardHeader({
   const backendShortSha = backendGitSha ? backendGitSha.slice(0, 12) : 'unknown'
 
   return (
-    <header className="fixed inset-x-0 top-0 z-40 border-b border-base-300/60 bg-base-300/85 backdrop-blur">
+    <header className="sticky top-0 z-40 border-b border-base-300/60 bg-base-300/85 backdrop-blur">
       <div className="mx-auto w-full max-w-[1500px] px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between gap-3 py-3">
           <div className="flex flex-col">
