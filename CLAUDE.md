@@ -50,6 +50,7 @@ Categories: `[FIX]`, `[FEATURE]`, `[REFACTOR]`, `[INTERNAL]`, `[TEST]`, `[DOCS]`
 
 ```
 src/cli/commands/    — CLI command handlers
+src/components/      — Shared UI component contracts + web/tui renderers
 src/config/          — Zod schema, YAML loader, path expansion
 src/forge/           — ForgeAdapter interface + GitHub/Forgejo implementations
 src/discovery/       — Issue selection, role resolution, triage
@@ -69,6 +70,13 @@ src/runner/          — Polling orchestrator
 src/state/           — SQLite DB, migrations, leases, runs
 src/utils/           — Logger, IDs, time helpers
 ```
+
+## Component Structure
+
+- Reusable UI components live in `src/components/<component-name>/`.
+- Keep shared prop contracts in each component folder (`types.ts`) and optional shared view-model helpers.
+- Put platform-specific implementations in `*.web.tsx` and `*.tui.tsx`.
+- Export component APIs from a local `index.ts`.
 
 ## Specs
 

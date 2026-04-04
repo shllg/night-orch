@@ -12,6 +12,8 @@ These rules apply to React-based terminal UI code.
 - Reset or clamp view-local cursor/scroll state when source data changes.
 - Prefer derived data with `useMemo` for expensive DB-backed calculations during refresh loops.
 - Keep keyboard hint text in sync with actual keybindings.
+- Place reusable component families in `src/components/<component-name>/` with shared contracts in `types.ts`.
+- Keep cross-surface API parity by implementing sibling `*.tui.tsx` and `*.web.tsx` files that consume the same shared props.
 
 ## NEVER
 
@@ -19,3 +21,4 @@ These rules apply to React-based terminal UI code.
 - Bind `q`/`esc` globally when a focused modal/detail view needs close behavior first.
 - Trigger async work directly during render.
 - Depend on implicit shared mutable module state for UI interaction flow.
+- Split the same conceptual component into unrelated prop contracts between web and TUI implementations.

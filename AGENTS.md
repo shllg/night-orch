@@ -29,6 +29,7 @@ pnpm typecheck        # tsc --noEmit
 
 ```
 src/cli/commands/    — CLI command handlers
+src/components/      — Shared UI component contracts + web/tui renderers
 src/config/          — Zod schema, YAML loader
 src/forge/           — ForgeAdapter + GitHub/Forgejo implementations
 src/discovery/       — Issue selection, role resolution, triage
@@ -47,6 +48,13 @@ src/poller/          — Graceful shutdown handler
 src/runner/          — Polling orchestrator
 src/state/           — SQLite DB, migrations
 ```
+
+## Component Structure
+
+- Reusable UI components live in `src/components/<component-name>/`.
+- Keep shared prop contracts in each component folder (`types.ts`) and optional shared view-model helpers.
+- Put platform-specific implementations in `*.web.tsx` and `*.tui.tsx`.
+- Export component APIs from a local `index.ts`.
 
 ## Specs
 
