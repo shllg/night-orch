@@ -44,6 +44,9 @@ describe('MCP Tools', () => {
   it('registers all expected tools', () => {
     const tools = registerTools()
     const names = tools.map((t) => t.name)
+    expect(names).toContain('night-orch-list-settings')
+    expect(names).toContain('night-orch-set-setting')
+    expect(names).toContain('night-orch-clear-setting')
     expect(names).toContain('night-orch-status')
     expect(names).toContain('night-orch-run-detail')
     expect(names).toContain('night-orch-list-runs')
@@ -58,7 +61,43 @@ describe('MCP Tools', () => {
     expect(names).toContain('night-orch-stream-events')
     expect(names).toContain('night-orch-rebase')
     expect(names).toContain('night-orch-continue')
-    expect(tools.length).toBe(15)
+    expect(tools.length).toBe(18)
+  })
+
+  it('settings tools list/set/clear runtime overrides', async () => {
+    const listedBefore = await handleToolCall('night-orch-list-settings', {}, deps) as {
+      settings: Array<{ key: string; source: string; effectiveValue: number | boolean }>
+    }
+    const pollSettingBefore = listedBefore.settings.find((setting) => setting.key === 'github.pollIntervalSeconds')
+    expect(pollSettingBefore).toBeDefined()
+    expect(pollSettingBefore?.source).toBe('base')
+
+    const setResult = await handleToolCall(
+      'night-orch-set-setting',
+      { key: 'github.pollIntervalSeconds', value: '120' },
+      deps,
+    ) as { changed: boolean; setting: { key: string; effectiveValue: number; source: string } }
+    expect(setResult.changed).toBe(true)
+    expect(setResult.setting.key).toBe('github.pollIntervalSeconds')
+    expect(setResult.setting.effectiveValue).toBe(120)
+    expect(setResult.setting.source).toBe('override')
+
+    const listedAfter = await handleToolCall('night-orch-list-settings', {}, deps) as {
+      settings: Array<{ key: string; source: string; effectiveValue: number | boolean }>
+    }
+    const pollSettingAfter = listedAfter.settings.find((setting) => setting.key === 'github.pollIntervalSeconds')
+    expect(pollSettingAfter?.effectiveValue).toBe(120)
+    expect(pollSettingAfter?.source).toBe('override')
+
+    const clearResult = await handleToolCall(
+      'night-orch-clear-setting',
+      { key: 'github.pollIntervalSeconds' },
+      deps,
+    ) as { changed: boolean; setting: { key: string; effectiveValue: number; source: string } }
+    expect(clearResult.changed).toBe(true)
+    expect(clearResult.setting.key).toBe('github.pollIntervalSeconds')
+    expect(clearResult.setting.effectiveValue).toBe(300)
+    expect(clearResult.setting.source).toBe('base')
   })
 
   it('status tool returns summary', async () => {

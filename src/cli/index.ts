@@ -17,11 +17,27 @@ import { webCommand } from './commands/web.js'
 import { serveCommand } from './commands/serve.js'
 import { updateCommand } from './commands/update.js'
 import { continueCommand } from './commands/continue.js'
+import {
+  settingsListCommand,
+  settingsSetCommand,
+  settingsUnsetCommand,
+} from './commands/settings.js'
 
 const program = new Command()
 
 function collectOptionValue(value: string, previous: string[]): string[] {
   return [...previous, value]
+}
+
+interface GlobalCliOpts {
+  config?: string
+  trustWorkspace?: boolean
+  dryRun?: boolean
+  logLevel?: string
+}
+
+function resolveRootGlobalOpts(cmd: Command): GlobalCliOpts | undefined {
+  return cmd.parent?.parent?.opts<GlobalCliOpts>()
 }
 
 program
@@ -172,5 +188,37 @@ program
   .command('update')
   .description('Trigger self-update — pulls latest code, rebuilds, and restarts services')
   .action((_opts, cmd) => updateCommand(cmd.parent?.opts()))
+
+const settingsCommand = program
+  .command('settings')
+  .description('Manage DB-backed runtime settings overrides')
+
+settingsCommand
+  .command('list')
+  .description('List curated runtime settings and active overrides')
+  .option('--json', 'Output JSON')
+  .action((opts: { json?: boolean }, cmd) => {
+    const globalOpts = resolveRootGlobalOpts(cmd)
+    return settingsListCommand(globalOpts, opts.json ?? false)
+  })
+
+settingsCommand
+  .command('set')
+  .argument('<key>', 'Setting key')
+  .argument('<value>', 'Setting value')
+  .description('Set one runtime setting override')
+  .action((key: string, value: string, _opts, cmd) => {
+    const globalOpts = resolveRootGlobalOpts(cmd)
+    return settingsSetCommand(key, value, globalOpts)
+  })
+
+settingsCommand
+  .command('unset')
+  .argument('<key>', 'Setting key')
+  .description('Clear one runtime setting override')
+  .action((key: string, _opts, cmd) => {
+    const globalOpts = resolveRootGlobalOpts(cmd)
+    return settingsUnsetCommand(key, globalOpts)
+  })
 
 program.parse()

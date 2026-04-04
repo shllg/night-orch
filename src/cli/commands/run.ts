@@ -12,6 +12,7 @@ import { startMCPHttpServer } from '../../mcp/http.js'
 import type { Server } from 'node:http'
 import type { ForgeAdapter } from '../../forge/types.js'
 import { logger } from '../../utils/logger.js'
+import { resolveConfigWithRuntimeSettings } from '../../settings/runtime.js'
 
 interface GlobalOpts {
   config?: string
@@ -34,12 +35,12 @@ export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
     return
   }
 
-  let config
+  let baseConfig
   try {
     const configPath = resolveConfigPath(globalOpts?.config, {
       trustWorkspace: globalOpts?.trustWorkspace ?? false,
     })
-    config = loadConfig(configPath)
+    baseConfig = loadConfig(configPath)
   } catch (err) {
     if (err instanceof ConfigError) {
       process.stderr.write(`Config error: ${err.message}\n`)
@@ -51,13 +52,13 @@ export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
     return
   }
 
-  const db = initDatabase(config.storage.dbPath)
-  const intervalMs = config.github.pollIntervalSeconds * 1000
+  const db = initDatabase(baseConfig.storage.dbPath)
+  let runtimeConfig = resolveConfigWithRuntimeSettings(baseConfig, db)
 
   // Start metrics service
   let metrics: MetricsService | undefined
-  if (config.metrics) {
-    metrics = createMetricsService(config.metrics)
+  if (runtimeConfig.metrics) {
+    metrics = createMetricsService(runtimeConfig.metrics)
     try {
       await metrics.start()
     } catch (err) {
@@ -76,7 +77,7 @@ export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
       logger.info({ releasedLeases }, 'Released orphaned leases from previous run')
     }
 
-    const syncEngine = new SyncEngine(db, config)
+    const syncEngine = new SyncEngine(db, runtimeConfig)
     const syncResult = await syncEngine.reconcile(dryRun)
     if (syncResult.reconciledRuns.length > 0 || syncResult.expiredLeases > 0) {
       logger.info(
@@ -91,27 +92,34 @@ export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
   // Start embedded MCP HTTP/SSE server
   let mcpServer: Server | undefined
   const pollerControl = new PollCycleController()
-  if (config.mcp.enabled) {
+  if (runtimeConfig.mcp.enabled) {
     const forgeAdapters = new Map<string, ForgeAdapter>()
-    for (const repo of config.repos) {
+    for (const repo of runtimeConfig.repos) {
       try {
-        forgeAdapters.set(repo.repo, createForgeAdapter(repo, config))
+        forgeAdapters.set(repo.repo, createForgeAdapter(repo, runtimeConfig))
       } catch (err) {
         logger.warn({ repo: repo.repo, err }, 'Failed to create forge adapter for MCP')
       }
     }
     try {
       mcpServer = await startMCPHttpServer(
-        { db, config, forgeAdapters, poller: pollerControl, metrics: metrics ?? null },
-        config.mcp.httpHost,
-        config.mcp.httpPort,
+        { db, config: baseConfig, forgeAdapters, poller: pollerControl, metrics: metrics ?? null },
+        runtimeConfig.mcp.httpHost,
+        runtimeConfig.mcp.httpPort,
       )
     } catch (err) {
       logger.warn({ err }, 'Failed to start MCP HTTP server — continuing without MCP')
     }
   }
 
-  logger.info({ intervalMs, dryRun, repos: config.repos.length }, 'Starting poller')
+  logger.info(
+    {
+      intervalMs: runtimeConfig.github.pollIntervalSeconds * 1000,
+      dryRun,
+      repos: runtimeConfig.repos.length,
+    },
+    'Starting poller',
+  )
 
   // Graceful shutdown
   const shutdown = new ShutdownHandler(db)
@@ -128,7 +136,8 @@ export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
   // Poll loop
   while (!shutdown.isShuttingDown) {
     try {
-      const runPromise = pollOnce(config, db, dryRun, metrics)
+      runtimeConfig = resolveConfigWithRuntimeSettings(baseConfig, db)
+      const runPromise = pollOnce(runtimeConfig, db, dryRun, metrics)
       shutdown.trackRun(runPromise.then(() => {}))
       const pollResult = await runPromise
       if (pollResult.immediateFollowupRepos.length > 0) {
@@ -144,7 +153,8 @@ export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
 
     if (shutdown.isShuttingDown) break
 
-    const waitResult = await pollerControl.waitForNextCycle(intervalMs)
+    runtimeConfig = resolveConfigWithRuntimeSettings(baseConfig, db)
+    const waitResult = await pollerControl.waitForNextCycle(runtimeConfig.github.pollIntervalSeconds * 1000)
     if (waitResult === 'manual') {
       logger.info('Manual poll trigger received — running next cycle immediately')
     }

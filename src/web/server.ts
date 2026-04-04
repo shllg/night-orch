@@ -14,6 +14,11 @@ import { loadTuiStats } from '../state/stats.js'
 import { getBuildInfo } from '../utils/build-info.js'
 import { logger } from '../utils/logger.js'
 import { nowUtcIso } from '../utils/time.js'
+import {
+  listRuntimeSettings,
+  resolveConfigWithRuntimeSettings,
+  RuntimeSettingInputError,
+} from '../settings/runtime.js'
 
 export interface WebServerOptions {
   host: string
@@ -42,6 +47,11 @@ interface DashboardSnapshot {
     pollIntervalSeconds: number
   }
   stats: ReturnType<typeof loadTuiStats>
+}
+
+interface SettingsSnapshot {
+  generatedAt: string
+  settings: ReturnType<typeof listRuntimeSettings>
 }
 
 type CommandSpec = string | string[]
@@ -369,6 +379,10 @@ async function handleApiRequest(
 ): Promise<void> {
   const method = req.method ?? 'GET'
   const { pathname, searchParams } = requestUrl
+  const runtimeDeps: MCPDependencies = {
+    ...deps,
+    config: resolveConfigWithRuntimeSettings(deps.config, deps.db),
+  }
 
   if (method === 'POST' && pathname.startsWith('/api/operations/')) {
     // Update is a supervisor operation — always allowed regardless of attach/standalone mode
@@ -390,13 +404,19 @@ async function handleApiRequest(
   }
 
   if (method === 'GET' && pathname === '/api/dashboard') {
-    const snapshot = await buildDashboardSnapshot(deps)
+    const snapshot = await buildDashboardSnapshot(runtimeDeps)
     writeJson(res, 200, snapshot)
     return
   }
 
   if (method === 'GET' && pathname === '/api/projects') {
-    const snapshot = buildProjectsSnapshot(deps)
+    const snapshot = buildProjectsSnapshot(runtimeDeps)
+    writeJson(res, 200, snapshot)
+    return
+  }
+
+  if (method === 'GET' && pathname === '/api/settings') {
+    const snapshot = buildSettingsSnapshot(deps)
     writeJson(res, 200, snapshot)
     return
   }
@@ -411,7 +431,7 @@ async function handleApiRequest(
 
   if (method === 'GET' && pathname === '/api/status') {
     const repo = searchParams.get('repo') ?? undefined
-    const result = await handleToolCall('night-orch-status', { repo }, deps)
+    const result = await handleToolCall('night-orch-status', { repo }, runtimeDeps)
     writeJson(res, 200, result)
     return
   }
@@ -420,25 +440,25 @@ async function handleApiRequest(
     const repo = searchParams.get('repo') ?? undefined
     const status = searchParams.get('status') ?? undefined
     const limit = toBoundedInt(searchParams.get('limit'), 50, 1, 500)
-    const result = await handleToolCall('night-orch-list-runs', { repo, status, limit }, deps)
+    const result = await handleToolCall('night-orch-list-runs', { repo, status, limit }, runtimeDeps)
     writeJson(res, 200, result)
     return
   }
 
   if (method === 'GET' && pathname === '/api/cost') {
     const days = toBoundedInt(searchParams.get('days'), 7, 1, 30)
-    const result = await handleToolCall('night-orch-cost-report', { days }, deps)
+    const result = await handleToolCall('night-orch-cost-report', { days }, runtimeDeps)
     writeJson(res, 200, result)
     return
   }
 
   if (method === 'GET' && pathname === '/api/stats') {
-    writeJson(res, 200, loadTuiStats(deps.db))
+    writeJson(res, 200, loadTuiStats(runtimeDeps.db))
     return
   }
 
   if (method === 'GET' && pathname === '/api/config') {
-    const result = await handleResourceRead('night-orch://config', deps)
+    const result = await handleResourceRead('night-orch://config', runtimeDeps)
     writeJson(res, 200, result)
     return
   }
@@ -447,7 +467,7 @@ async function handleApiRequest(
     const runDetailMatch = pathname.match(/^\/api\/runs\/([^/]+)$/)
     if (runDetailMatch) {
       const runId = decodeURIComponent(runDetailMatch[1] ?? '')
-      const result = await handleToolCall('night-orch-run-detail', { runId }, deps)
+      const result = await handleToolCall('night-orch-run-detail', { runId }, runtimeDeps)
       writeJson(res, 200, result)
       return
     }
@@ -457,7 +477,7 @@ async function handleApiRequest(
       const runId = decodeURIComponent(runEventsMatch[1] ?? '')
       const since = toBoundedInt(searchParams.get('since'), 0, 0, Number.MAX_SAFE_INTEGER)
       const limit = toBoundedInt(searchParams.get('limit'), 100, 1, 200)
-      const result = await handleToolCall('night-orch-stream-events', { runId, since, limit }, deps)
+      const result = await handleToolCall('night-orch-stream-events', { runId, since, limit }, runtimeDeps)
       writeJson(res, 200, result)
       return
     }
@@ -466,7 +486,7 @@ async function handleApiRequest(
     if (repoIssuesMatch) {
       const repo = decodeURIComponent(repoIssuesMatch[1] ?? '')
       const filter = searchParams.get('filter') ?? 'all'
-      const result = await handleToolCall('night-orch-list-issues', { repo, filter }, deps)
+      const result = await handleToolCall('night-orch-list-issues', { repo, filter }, runtimeDeps)
       writeJson(res, 200, result)
       return
     }
@@ -477,7 +497,7 @@ async function handleApiRequest(
     const result = await handleToolCall(
       'night-orch-poll',
       withMcpMutationAuth({ dryRun: Boolean(body['dryRun']) }, security),
-      deps,
+      runtimeDeps,
     )
     writeJson(res, 200, result)
     return
@@ -488,7 +508,7 @@ async function handleApiRequest(
     const result = await handleToolCall(
       'night-orch-sync',
       withMcpMutationAuth({ dryRun: Boolean(body['dryRun']) }, security),
-      deps,
+      runtimeDeps,
     )
     writeJson(res, 200, result)
     return
@@ -499,7 +519,7 @@ async function handleApiRequest(
     const result = await handleToolCall(
       'night-orch-cleanup',
       withMcpMutationAuth({ dryRun: Boolean(body['dryRun']) }, security),
-      deps,
+      runtimeDeps,
     )
     writeJson(res, 200, result)
     return
@@ -523,7 +543,7 @@ async function handleApiRequest(
         },
         security,
       ),
-      deps,
+      runtimeDeps,
     )
     writeJson(res, 200, result)
     return
@@ -550,7 +570,7 @@ async function handleApiRequest(
         },
         security,
       ),
-      deps,
+      runtimeDeps,
     )
     writeJson(res, 200, result)
     return
@@ -576,7 +596,7 @@ async function handleApiRequest(
         },
         security,
       ),
-      deps,
+      runtimeDeps,
     )
     writeJson(res, 200, result)
     return
@@ -601,7 +621,7 @@ async function handleApiRequest(
         },
         security,
       ),
-      deps,
+      runtimeDeps,
     )
     writeJson(res, 200, result)
     return
@@ -628,9 +648,62 @@ async function handleApiRequest(
         },
         security,
       ),
-      deps,
+      runtimeDeps,
     )
     writeJson(res, 200, result)
+    return
+  }
+
+  if (method === 'POST' && pathname === '/api/operations/settings/set') {
+    const body = await readJsonBody(req)
+    const key = toNonEmptyString(body['key'])
+    const value = body['value']
+
+    if (!key || value === undefined) {
+      writeJson(res, 400, { error: 'key and value are required' })
+      return
+    }
+
+    try {
+      const result = await handleToolCall(
+        'night-orch-set-setting',
+        withMcpMutationAuth({ key, value }, security),
+        deps,
+      )
+      writeJson(res, 200, result)
+    } catch (err) {
+      if (isRuntimeSettingInputError(err)) {
+        writeJson(res, 400, { error: (err as Error).message })
+        return
+      }
+      throw err
+    }
+    return
+  }
+
+  if (method === 'POST' && pathname === '/api/operations/settings/clear') {
+    const body = await readJsonBody(req)
+    const key = toNonEmptyString(body['key'])
+
+    if (!key) {
+      writeJson(res, 400, { error: 'key is required' })
+      return
+    }
+
+    try {
+      const result = await handleToolCall(
+        'night-orch-clear-setting',
+        withMcpMutationAuth({ key }, security),
+        deps,
+      )
+      writeJson(res, 200, result)
+    } catch (err) {
+      if (isRuntimeSettingInputError(err)) {
+        writeJson(res, 400, { error: (err as Error).message })
+        return
+      }
+      throw err
+    }
     return
   }
 
@@ -1015,10 +1088,15 @@ function toNonEmptyString(value: unknown): string | null {
 }
 
 async function buildDashboardSnapshot(deps: MCPDependencies): Promise<DashboardSnapshot> {
+  const runtimeConfig = resolveConfigWithRuntimeSettings(deps.config, deps.db)
+  const runtimeDeps: MCPDependencies = {
+    ...deps,
+    config: runtimeConfig,
+  }
   const [status, runs, cost] = await Promise.all([
-    handleToolCall('night-orch-status', {}, deps),
-    handleToolCall('night-orch-list-runs', { limit: 100 }, deps),
-    handleToolCall('night-orch-cost-report', { days: 7 }, deps),
+    handleToolCall('night-orch-status', {}, runtimeDeps),
+    handleToolCall('night-orch-list-runs', { limit: 100 }, runtimeDeps),
+    handleToolCall('night-orch-cost-report', { days: 7 }, runtimeDeps),
   ])
 
   return {
@@ -1028,10 +1106,10 @@ async function buildDashboardSnapshot(deps: MCPDependencies): Promise<DashboardS
     cost,
     build: BUILD_INFO,
     config: {
-      repos: deps.config.repos.map((repo) => repo.repo),
-      pollIntervalSeconds: deps.config.github.pollIntervalSeconds,
+      repos: runtimeConfig.repos.map((repo) => repo.repo),
+      pollIntervalSeconds: runtimeConfig.github.pollIntervalSeconds,
     },
-    stats: loadTuiStats(deps.db),
+    stats: loadTuiStats(runtimeDeps.db),
   }
 }
 
@@ -1049,6 +1127,13 @@ function buildProjectsSnapshot(deps: MCPDependencies): ProjectsSnapshot {
       ]),
     ),
     repos: deps.config.repos.map((repo) => sanitizeProjectRepo(repo)),
+  }
+}
+
+function buildSettingsSnapshot(deps: MCPDependencies): SettingsSnapshot {
+  return {
+    generatedAt: nowUtcIso(),
+    settings: listRuntimeSettings(deps.config, deps.db),
   }
 }
 
@@ -1319,6 +1404,13 @@ function isClientRequestError(message: string): boolean {
 
 function isAuthorizationError(message: string): boolean {
   return message.startsWith('Unauthorized:')
+}
+
+function isRuntimeSettingInputError(err: unknown): err is RuntimeSettingInputError {
+  if (err instanceof RuntimeSettingInputError) {
+    return true
+  }
+  return err instanceof Error && err.name === 'RuntimeSettingInputError'
 }
 
 function decodeWsMessage(raw: unknown): string | null {

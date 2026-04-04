@@ -6,6 +6,7 @@ import { OperationsPanel } from './components/OperationsPanel.js'
 import { ProjectsPage } from './components/ProjectsPage.js'
 import { RunEventStream } from './components/RunEventStream.js'
 import { RunsPanel } from './components/RunsPanel.js'
+import { SettingsPage } from './components/SettingsPage.js'
 import { StatsPage } from './components/StatsPage.js'
 import { extractMessage, formatTimestamp } from './lib/format.js'
 import { STATUS_BADGE_TONE } from './lib/run-tone.js'
@@ -15,6 +16,7 @@ import {
   type DashboardSnapshot,
   type ProjectsSnapshot,
   type RunEvent,
+  type SettingsSnapshot,
   type SessionResponse,
   type UpdateStatus,
   type WsEnvelope,
@@ -26,32 +28,13 @@ const WEB_AUTH_TOKEN_HEADER = 'x-night-orch-web-token'
 const FRONTEND_BUILD_VERSION = import.meta.env.VITE_BUILD_VERSION ?? 'unknown'
 const FRONTEND_BUILD_GIT_SHA = import.meta.env.VITE_BUILD_GIT_SHA ?? 'unknown'
 
-interface PlaceholderPageProps {
-  title: string
-  description: string
-  detail: string
-}
-
-function PlaceholderPage({ title, description, detail }: PlaceholderPageProps): ReactElement {
-  return (
-    <section className="card border border-base-300/60 bg-base-200/60 shadow-panel backdrop-blur">
-      <div className="card-body p-6 sm:p-8">
-        <h2 className="card-title text-2xl font-semibold capitalize text-base-content">{title}</h2>
-        <p className="max-w-3xl text-sm text-base-content/75">{description}</p>
-        <div className="mt-3 rounded-box border border-dashed border-base-300/70 bg-base-100/50 p-4">
-          <p className="text-xs uppercase tracking-[0.18em] text-base-content/60">Placeholder</p>
-          <p className="mt-1 text-sm text-base-content/80">{detail}</p>
-        </div>
-      </div>
-    </section>
-  )
-}
-
 export function App(): ReactElement {
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null)
   const [projectsSnapshot, setProjectsSnapshot] = useState<ProjectsSnapshot | null>(null)
+  const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsSnapshot | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isProjectsLoading, setIsProjectsLoading] = useState(true)
+  const [isSettingsLoading, setIsSettingsLoading] = useState(true)
   const [socketConnected, setSocketConnected] = useState(false)
   const [activePage, setActivePage] = useState<DashboardPage>('issues')
   const [selectedRepo, setSelectedRepo] = useState('all')
@@ -63,6 +46,7 @@ export function App(): ReactElement {
   const [activeOperation, setActiveOperation] = useState<string | null>(null)
   const [webMutationToken, setWebMutationToken] = useState<string | null>(null)
   const [operationsEnabled, setOperationsEnabled] = useState(true)
+  const [settingsDrafts, setSettingsDrafts] = useState<Record<string, string>>({})
 
   const [retryRepo, setRetryRepo] = useState('')
   const [retryIssueNumber, setRetryIssueNumber] = useState('')
@@ -169,20 +153,36 @@ export function App(): ReactElement {
     setProjectsSnapshot(payload)
   }, [])
 
+  const loadSettings = useCallback(async () => {
+    const response = await fetch('/api/settings')
+    if (!response.ok) {
+      throw new Error(`Failed to load settings (${response.status})`)
+    }
+    const payload = await response.json() as SettingsSnapshot
+    setSettingsSnapshot(payload)
+    setSettingsDrafts(
+      Object.fromEntries(
+        payload.settings.map((setting) => [setting.key, String(setting.effectiveValue)]),
+      ),
+    )
+  }, [])
+
   useEffect(() => {
     void (async () => {
       try {
         setIsLoading(true)
         setIsProjectsLoading(true)
-        await Promise.all([loadDashboard(), loadSessionToken(), loadProjects()])
+        setIsSettingsLoading(true)
+        await Promise.all([loadDashboard(), loadSessionToken(), loadProjects(), loadSettings()])
       } catch (err) {
         setErrorMessage((err as Error).message)
       } finally {
         setIsLoading(false)
         setIsProjectsLoading(false)
+        setIsSettingsLoading(false)
       }
     })()
-  }, [loadDashboard, loadProjects, loadSessionToken])
+  }, [loadDashboard, loadProjects, loadSessionToken, loadSettings])
 
   useEffect(() => {
     if (repos.length === 0) {
@@ -367,13 +367,13 @@ export function App(): ReactElement {
 
       const message = extractMessage(body) ?? fallbackMessage
       setFeedbackMessage(message)
-      await loadDashboard()
+      await Promise.all([loadDashboard(), loadSettings()])
     } catch (err) {
       setErrorMessage((err as Error).message)
     } finally {
       setActiveOperation(null)
     }
-  }, [loadDashboard, operationsEnabled, webMutationToken])
+  }, [loadDashboard, loadSettings, operationsEnabled, webMutationToken])
 
   const submitRetry = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -470,6 +470,30 @@ export function App(): ReactElement {
       `Continue pass queued for ${continueRepo}#${issueNumber}`,
     )
   }, [continueIssueNumber, continueRepo, runOperation])
+
+  const applySetting = useCallback(async (key: string) => {
+    const value = settingsDrafts[key]
+    if (value === undefined) {
+      setErrorMessage(`No draft value found for ${key}`)
+      return
+    }
+
+    await runOperation(
+      `setting:set:${key}`,
+      '/api/operations/settings/set',
+      { key, value },
+      `Updated ${key}`,
+    )
+  }, [runOperation, settingsDrafts])
+
+  const clearSetting = useCallback(async (key: string) => {
+    await runOperation(
+      `setting:clear:${key}`,
+      '/api/operations/settings/clear',
+      { key },
+      `Cleared override for ${key}`,
+    )
+  }, [runOperation])
 
   return (
     <main data-theme="black" className="min-h-screen bg-orch-admin">
@@ -617,10 +641,24 @@ export function App(): ReactElement {
         )}
 
         {activePage === 'settings' && (
-          <PlaceholderPage
-            title="settings"
-            description="Environment-level dashboard settings and web preferences will appear here."
-            detail="Settings UI is a placeholder for now."
+          <SettingsPage
+            settings={settingsSnapshot?.settings ?? []}
+            generatedAt={settingsSnapshot?.generatedAt ?? null}
+            isLoading={isSettingsLoading}
+            activeOperation={activeOperation}
+            drafts={settingsDrafts}
+            onDraftChange={(key, value) => {
+              setSettingsDrafts((current) => ({
+                ...current,
+                [key]: value,
+              }))
+            }}
+            onApply={(key) => {
+              void applySetting(key)
+            }}
+            onClear={(key) => {
+              void clearSetting(key)
+            }}
           />
         )}
       </div>

@@ -17,6 +17,7 @@ describe('tui app input helpers', () => {
     expect(resolveTabHotkey('2')).toBe('projects')
     expect(resolveTabHotkey('3')).toBe('stats')
     expect(resolveTabHotkey('4')).toBe('logs')
+    expect(resolveTabHotkey('5')).toBe('settings')
     expect(resolveTabHotkey('x')).toBeNull()
   })
 

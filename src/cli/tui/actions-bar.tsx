@@ -25,18 +25,21 @@ function joinHintGroups(...groups: Array<string | null>): string {
 
 function navigationHints(activeTab: TabId, runFocused: boolean): string {
   if (activeTab === 'runs' && runFocused) {
-    return '[1-4]tabs [h/l]tabs [j/k]scroll run'
+    return '[1-5]tabs [h/l]tabs [j/k]scroll run'
   }
   if (activeTab === 'runs') {
-    return '[1-4]tabs [h/l]tabs [j/k]select issue [o/enter]open'
+    return '[1-5]tabs [h/l]tabs [j/k]select issue [o/enter]open'
   }
   if (activeTab === 'projects') {
-    return '[1-4]tabs [h/l]tabs [j/k]select project'
+    return '[1-5]tabs [h/l]tabs [j/k]select project'
   }
   if (activeTab === 'logs') {
-    return '[1-4]tabs [h/l]tabs [j/k]select log [J/K]scroll raw'
+    return '[1-5]tabs [h/l]tabs [j/k]select log [J/K]scroll raw'
   }
-  return '[1-4]tabs [h/l]tabs'
+  if (activeTab === 'settings') {
+    return '[1-5]tabs [h/l]tabs [j/k]select setting'
+  }
+  return '[1-5]tabs [h/l]tabs'
 }
 
 function globalHints(options: {
@@ -61,6 +64,9 @@ function issueHints(options: {
   runFocused: boolean
 }): string {
   const { activeTab, busy, runFocused } = options
+  if (activeTab === 'settings') {
+    return '[+/-]adjust number [space]toggle bool [u]unset override'
+  }
   if (activeTab !== 'runs') {
     return 'n/a (issue actions on runs tab)'
   }

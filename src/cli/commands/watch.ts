@@ -4,6 +4,7 @@ import { App } from '../tui/app.js'
 import { initDatabase } from '../../state/db.js'
 import { resolveConfigPath, loadConfig, ConfigError } from '../../config/loader.js'
 import { logger } from '../../utils/logger.js'
+import { resolveConfigWithRuntimeSettings } from '../../settings/runtime.js'
 
 interface GlobalOpts {
   config?: string
@@ -13,12 +14,12 @@ interface GlobalOpts {
 }
 
 export async function runWatch(globalOpts?: GlobalOpts): Promise<void> {
-  let config
+  let baseConfig
   try {
     const configPath = resolveConfigPath(globalOpts?.config, {
       trustWorkspace: globalOpts?.trustWorkspace ?? false,
     })
-    config = loadConfig(configPath)
+    baseConfig = loadConfig(configPath)
   } catch (err) {
     if (err instanceof ConfigError) {
       process.stderr.write(`Config error: ${err.message}\n`)
@@ -28,8 +29,9 @@ export async function runWatch(globalOpts?: GlobalOpts): Promise<void> {
     process.exit(1)
   }
 
-  const db = initDatabase(config.storage.dbPath)
-  const pollIntervalMs = config.github.pollIntervalSeconds * 1000
+  const db = initDatabase(baseConfig.storage.dbPath)
+  const runtimeConfig = resolveConfigWithRuntimeSettings(baseConfig, db)
+  const pollIntervalMs = runtimeConfig.github.pollIntervalSeconds * 1000
   const useAltScreen = Boolean(process.stdout.isTTY)
 
   if (useAltScreen) {
@@ -44,7 +46,7 @@ export async function runWatch(globalOpts?: GlobalOpts): Promise<void> {
     const { waitUntilExit } = render(
       React.createElement(App, {
         db,
-        config,
+        config: baseConfig,
         pollIntervalMs,
         dryRun: globalOpts?.dryRun ?? false,
         enableBackgroundPoller: true,

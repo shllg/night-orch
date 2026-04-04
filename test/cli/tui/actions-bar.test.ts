@@ -14,7 +14,7 @@ describe('buildActionHints', () => {
       autoRefresh: true,
     }))
 
-    expect(sections.navigation).toContain('[1-4]tabs [h/l]tabs [j/k]select issue [o/enter]open')
+    expect(sections.navigation).toContain('[1-5]tabs [h/l]tabs [j/k]select issue [o/enter]open')
     expect(sections.global).toContain('[q]quit [r]refresh [p]poll [s]sync [L]labels-init [D]cleanup(confirm)')
     expect(sections.issue).toContain('[t]retry [T]retry fresh [c]continue [_]rebase [X]delete entry')
   })
@@ -40,7 +40,7 @@ describe('buildActionHints', () => {
       autoRefresh: true,
     }))
 
-    expect(sections.navigation).toContain('[1-4]tabs [h/l]tabs [j/k]scroll run')
+    expect(sections.navigation).toContain('[1-5]tabs [h/l]tabs [j/k]scroll run')
     expect(sections.global).toContain('[q/esc]close [r]refresh')
     expect(sections.issue).toContain('focused run detail')
   })
@@ -53,7 +53,7 @@ describe('buildActionHints', () => {
       autoRefresh: false,
     }))
 
-    expect(sections.navigation).toBe('[1-4]tabs [h/l]tabs')
+    expect(sections.navigation).toBe('[1-5]tabs [h/l]tabs')
     expect(sections.global).toContain('[q]quit [r]refresh [a]toggle auto-refresh')
     expect(sections.issue).not.toContain('retry')
     expect(sections.issue).not.toContain('rebase')
@@ -95,5 +95,17 @@ describe('buildActionHints', () => {
     expect(sections.navigation).toContain('[j/k]select log [J/K]scroll raw')
     expect(sections.global).toContain('[q]quit [r]refresh')
     expect(sections.issue).toContain('runs tab')
+  })
+
+  it('shows settings controls on settings tab', () => {
+    const sections = sectionMap(buildActionHints({
+      activeTab: 'settings',
+      busy: false,
+      runFocused: false,
+      autoRefresh: true,
+    }))
+
+    expect(sections.navigation).toContain('[1-5]tabs [h/l]tabs [j/k]select setting')
+    expect(sections.issue).toContain('[+/-]adjust number [space]toggle bool [u]unset override')
   })
 })

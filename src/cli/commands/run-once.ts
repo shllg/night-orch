@@ -3,6 +3,7 @@ import { initDatabase } from '../../state/db.js'
 import { pollOnce } from '../../runner/poller.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { logger } from '../../utils/logger.js'
+import { resolveConfigWithRuntimeSettings } from '../../settings/runtime.js'
 
 interface GlobalOpts {
   config?: string
@@ -14,12 +15,12 @@ interface GlobalOpts {
 export async function runOnceCommand(globalOpts?: GlobalOpts): Promise<void> {
   const dryRun = globalOpts?.dryRun ?? false
 
-  let config
+  let baseConfig
   try {
     const configPath = resolveConfigPath(globalOpts?.config, {
       trustWorkspace: globalOpts?.trustWorkspace ?? false,
     })
-    config = loadConfig(configPath)
+    baseConfig = loadConfig(configPath)
   } catch (err) {
     if (err instanceof ConfigError) {
       console.error(`Config error: ${err.message}`)
@@ -31,7 +32,8 @@ export async function runOnceCommand(globalOpts?: GlobalOpts): Promise<void> {
     return
   }
 
-  const db = initDatabase(config.storage.dbPath)
+  const db = initDatabase(baseConfig.storage.dbPath)
+  const runtimeConfig = resolveConfigWithRuntimeSettings(baseConfig, db)
 
   try {
     // Crash recovery: release orphaned leases and reconcile stale runs.
@@ -43,7 +45,7 @@ export async function runOnceCommand(globalOpts?: GlobalOpts): Promise<void> {
         logger.info({ releasedLeases }, 'Released orphaned leases from previous run')
       }
 
-      const syncEngine = new SyncEngine(db, config)
+      const syncEngine = new SyncEngine(db, runtimeConfig)
       const syncResult = await syncEngine.reconcile(dryRun)
       if (syncResult.reconciledRuns.length > 0 || syncResult.expiredLeases > 0) {
         logger.info(
@@ -55,7 +57,7 @@ export async function runOnceCommand(globalOpts?: GlobalOpts): Promise<void> {
       logger.warn({ err }, 'Startup sync failed — continuing')
     }
 
-    const result = await pollOnce(config, db, dryRun)
+    const result = await pollOnce(runtimeConfig, db, dryRun)
     logger.info({ processed: result.processed, errors: result.errors }, 'Run-once complete')
 
     if (result.errors > 0) {

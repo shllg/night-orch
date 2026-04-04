@@ -183,6 +183,29 @@ export interface SessionResponse {
   operationsEnabled?: boolean
 }
 
+export type RuntimeSettingType = 'number' | 'boolean'
+
+export interface RuntimeSettingSnapshot {
+  key: string
+  label: string
+  description: string
+  type: RuntimeSettingType
+  min?: number
+  max?: number
+  step?: number
+  baseValue: number | boolean
+  overrideValue: number | boolean | null
+  effectiveValue: number | boolean
+  source: 'base' | 'override'
+  updatedBy: string | null
+  updatedAt: string | null
+}
+
+export interface SettingsSnapshot {
+  generatedAt: string
+  settings: RuntimeSettingSnapshot[]
+}
+
 export interface UpdateStatus {
   state: string
   error?: string

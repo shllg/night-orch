@@ -18,12 +18,19 @@ import { Header } from './header.js'
 import { LogsView } from './logs-view.js'
 import { ProjectsView } from './projects-view.js'
 import { RunsView } from './runs-view.js'
+import { SettingsView } from './settings-view.js'
 import { StatsView } from './stats-view.js'
 import { collectMissingTitleTargets, hasReadableTitle, type TitleLookup } from './titles.js'
 import { TABS } from './constants.js'
 import type { RunsViewMode, TabId, TuiLogLine } from './types.js'
 import { formatUtcClock, nowUtcIso } from '../../utils/time.js'
 import { getBuildInfo } from '../../utils/build-info.js'
+import {
+  clearRuntimeSettingOverride,
+  listRuntimeSettings,
+  resolveConfigWithRuntimeSettings,
+  setRuntimeSettingOverride,
+} from '../../settings/runtime.js'
 
 interface AppProps {
   db: Database.Database
@@ -46,11 +53,17 @@ const EXIT_GRACE_TIMEOUT_MS = 15_000
 const CLEANUP_CONFIRM_TIMEOUT_MS = 5_000
 const BUILD_INFO = getBuildInfo()
 
+function formatSettingValue(value: string | number | boolean): string {
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  return String(value)
+}
+
 export function resolveTabHotkey(input: string): TabId | null {
   if (input === '1') return 'runs'
   if (input === '2') return 'projects'
   if (input === '3') return 'stats'
   if (input === '4') return 'logs'
+  if (input === '5') return 'settings'
   return null
 }
 
@@ -223,6 +236,7 @@ export function App({
   const [activeTab, setActiveTab] = useState<TabId>('runs')
   const [runsViewMode, setRunsViewMode] = useState<RunsViewMode>('list')
   const [selectedProjectIndex, setSelectedProjectIndex] = useState(0)
+  const [selectedSettingIndex, setSelectedSettingIndex] = useState(0)
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [cleanupConfirmPending, setCleanupConfirmPending] = useState(false)
   const [lastRefreshAt, setLastRefreshAt] = useState(nowUtcIso())
@@ -268,6 +282,18 @@ export function App({
     })
   }, [])
 
+  const runtimeConfig = useMemo(
+    () => resolveConfigWithRuntimeSettings(config, db),
+    [config, db, tick],
+  )
+  const effectivePollIntervalMs = runtimeConfig.github.pollIntervalSeconds > 0
+    ? runtimeConfig.github.pollIntervalSeconds * 1000
+    : pollIntervalMs
+  const runtimeSettings = useMemo(
+    () => listRuntimeSettings(config, db),
+    [config, db, tick],
+  )
+
   const forgeByRepo = useMemo(() => {
     const map = new Map<string, ReturnType<typeof createForgeAdapter>>()
     for (const repoConfig of config.repos) {
@@ -280,9 +306,9 @@ export function App({
     if (!autoRefresh) return
     const timer = setInterval(() => {
       setTick((t) => t + 1)
-    }, pollIntervalMs)
+    }, effectivePollIntervalMs)
     return () => clearInterval(timer)
-  }, [autoRefresh, pollIntervalMs])
+  }, [autoRefresh, effectivePollIntervalMs])
 
   useEffect(() => {
     setLastRefreshAt(nowUtcIso())
@@ -306,7 +332,8 @@ export function App({
       }
 
       try {
-        const syncEngine = new SyncEngine(db, config)
+        const startupConfig = resolveConfigWithRuntimeSettings(config, db)
+        const syncEngine = new SyncEngine(db, startupConfig)
         const syncResult = await syncEngine.reconcile(dryRun)
         appendLog(
           'info',
@@ -375,6 +402,11 @@ export function App({
     const maxIndex = Math.max(0, config.repos.length - 1)
     setSelectedProjectIndex((current) => Math.max(0, Math.min(current, maxIndex)))
   }, [config.repos])
+
+  useEffect(() => {
+    const maxIndex = Math.max(0, runtimeSettings.length - 1)
+    setSelectedSettingIndex((current) => Math.max(0, Math.min(current, maxIndex)))
+  }, [runtimeSettings.length])
 
   useEffect(() => {
     const now = Date.now()
@@ -492,7 +524,8 @@ export function App({
       const target = trigger === 'manual' && targetIssue
         ? { repo: targetIssue.repo, issueNumber: targetIssue.issue_number }
         : undefined
-      const result = await pollOnce(config, db, dryRun, undefined, target)
+      const currentRuntimeConfig = resolveConfigWithRuntimeSettings(config, db)
+      const result = await pollOnce(currentRuntimeConfig, db, dryRun, undefined, target)
       const targetSuffix = target ? ` for ${target.repo}#${target.issueNumber}` : ''
       const summary = `${result.processed} processed, ${result.errors} error(s)${targetSuffix}${dryRun ? ' (dry-run)' : ''}`
       appendLog('info', `${trigger} poll: ${summary}`)
@@ -528,13 +561,13 @@ export function App({
     void cycle()
     const timer = setInterval(() => {
       void cycle()
-    }, pollIntervalMs)
+    }, effectivePollIntervalMs)
 
     return () => {
       stopped = true
       clearInterval(timer)
     }
-  }, [autoRefresh, enableBackgroundPoller, pollIntervalMs, runPollCycle, startupReady])
+  }, [autoRefresh, effectivePollIntervalMs, enableBackgroundPoller, runPollCycle, startupReady])
 
   const moveSelection = useCallback((direction: -1 | 1) => {
     if (issues.length === 0) return
@@ -556,6 +589,11 @@ export function App({
     const next = TABS[nextIndex]
     if (next) setActiveTab(next.id)
   }, [activeTab])
+
+  const moveSettingSelection = useCallback((direction: -1 | 1) => {
+    const maxIndex = Math.max(0, runtimeSettings.length - 1)
+    setSelectedSettingIndex((current) => Math.max(0, Math.min(maxIndex, current + direction)))
+  }, [runtimeSettings.length])
 
   const forceRefresh = useCallback(() => {
     setTick((t) => t + 1)
@@ -593,7 +631,8 @@ export function App({
     const label = fresh ? 'retry-fresh' : 'retry'
     await runAction(label, async () => {
       if (!selectedIssue) throw new Error('No issue selected')
-      const engine = new RetryEngine(db, config)
+      const currentRuntimeConfig = resolveConfigWithRuntimeSettings(config, db)
+      const engine = new RetryEngine(db, currentRuntimeConfig)
       await engine.retry(selectedIssue.repo, selectedIssue.issue_number, {
         immediate: false,
         resetPlan: fresh,
@@ -607,7 +646,8 @@ export function App({
 
   const runSync = useCallback(async () => {
     await runAction('sync', async () => {
-      const engine = new SyncEngine(db, config)
+      const currentRuntimeConfig = resolveConfigWithRuntimeSettings(config, db)
+      const engine = new SyncEngine(db, currentRuntimeConfig)
       const result = await engine.reconcile(dryRun)
       return `${result.reconciledRuns.length} reconciled, ${result.labelCorrections.length} label fixes, ${result.expiredLeases} expired lease(s), ${result.orphanedWorktrees.length} orphaned worktree(s)${dryRun ? ' (dry-run)' : ''}`
     })
@@ -615,7 +655,8 @@ export function App({
 
   const runCleanup = useCallback(async () => {
     await runAction('cleanup', async () => {
-      const engine = new CleanupEngine(db, config)
+      const currentRuntimeConfig = resolveConfigWithRuntimeSettings(config, db)
+      const engine = new CleanupEngine(db, currentRuntimeConfig)
       const result = await engine.run({
         completedWorktrees: true,
         errorWorktreeAgeDays: 7,
@@ -630,15 +671,16 @@ export function App({
 
   const runLabelsInit = useCallback(async () => {
     await runAction('labels-init', async () => {
+      const currentRuntimeConfig = resolveConfigWithRuntimeSettings(config, db)
       const targetRepo = activeTab === 'projects'
-        ? config.repos[selectedProjectIndex]?.repo
-        : selectedIssue?.repo ?? config.repos[0]?.repo
+        ? currentRuntimeConfig.repos[selectedProjectIndex]?.repo
+        : selectedIssue?.repo ?? currentRuntimeConfig.repos[0]?.repo
 
       if (!targetRepo) {
         throw new Error('No repositories configured')
       }
 
-      const engine = new LabelsInitEngine(config)
+      const engine = new LabelsInitEngine(currentRuntimeConfig)
       const result = await engine.run({
         targetRepo,
         dryRun,
@@ -663,9 +705,10 @@ export function App({
     await runAction('rebase', async () => {
       const target = selectedIssue ?? issues.find((issue) => issue.status === 'review_ready')
       if (!target) throw new Error('No issue selected')
-      const repoConfig = config.repos.find((r) => r.repo === target.repo)
+      const currentRuntimeConfig = resolveConfigWithRuntimeSettings(config, db)
+      const repoConfig = currentRuntimeConfig.repos.find((r) => r.repo === target.repo)
       if (!repoConfig) throw new Error(`Repo not found in config: ${target.repo}`)
-      const forge = createForgeAdapter(repoConfig, config)
+      const forge = createForgeAdapter(repoConfig, currentRuntimeConfig)
       let botUser = ''
       try {
         const auth = await forge.validateAuth()
@@ -682,9 +725,10 @@ export function App({
     await runAction('continue', async () => {
       const target = selectedIssue ?? issues.find((issue) => issue.status === 'blocked' || issue.status === 'review_ready' || issue.status === 'error')
       if (!target) throw new Error('No issue selected')
-      const repoConfig = config.repos.find((r) => r.repo === target.repo)
+      const currentRuntimeConfig = resolveConfigWithRuntimeSettings(config, db)
+      const repoConfig = currentRuntimeConfig.repos.find((r) => r.repo === target.repo)
       if (!repoConfig) throw new Error(`Repo not found in config: ${target.repo}`)
-      const forge = createForgeAdapter(repoConfig, config)
+      const forge = createForgeAdapter(repoConfig, currentRuntimeConfig)
       let botUser = ''
       try {
         const auth = await forge.validateAuth()
@@ -700,7 +744,8 @@ export function App({
   const runDeleteEntry = useCallback(async () => {
     await runAction('delete-entry', async () => {
       if (!selectedIssue) throw new Error('No issue selected')
-      const engine = new DeleteIssueEntryEngine(db, config)
+      const currentRuntimeConfig = resolveConfigWithRuntimeSettings(config, db)
+      const engine = new DeleteIssueEntryEngine(db, currentRuntimeConfig)
       const result = await engine.deleteEntry(selectedIssue.repo, selectedIssue.issue_number, {
         dryRun,
         force: false,
@@ -714,6 +759,80 @@ export function App({
       return `${selectedIssue.repo}#${selectedIssue.issue_number}: ${result.runsDeleted} run(s), ${result.issuesDeleted} issue row(s), ${result.worktreesRemoved.length} worktree(s)${warningSuffix}${dryRun ? ' (dry-run)' : ''}`
     })
   }, [config, db, dryRun, runAction, selectedIssue])
+
+  const runSetSetting = useCallback(async (nextValue: string | number | boolean) => {
+    const target = runtimeSettings[selectedSettingIndex]
+    if (!target) {
+      setStatusLine('No setting selected')
+      return
+    }
+
+    await runAction('setting-set', async () => {
+      const result = setRuntimeSettingOverride(config, db, target.key, nextValue, 'tui')
+      return `${result.setting.key} => ${formatSettingValue(result.setting.effectiveValue)}`
+    })
+  }, [config, db, runAction, runtimeSettings, selectedSettingIndex])
+
+  const runClearSetting = useCallback(async () => {
+    const target = runtimeSettings[selectedSettingIndex]
+    if (!target) {
+      setStatusLine('No setting selected')
+      return
+    }
+
+    await runAction('setting-unset', async () => {
+      const result = clearRuntimeSettingOverride(config, db, target.key)
+      return `${result.setting.key} => ${formatSettingValue(result.setting.effectiveValue)} (${result.setting.source})`
+    })
+  }, [config, db, runAction, runtimeSettings, selectedSettingIndex])
+
+  const runAdjustSelectedSetting = useCallback(async (direction: -1 | 1) => {
+    const target = runtimeSettings[selectedSettingIndex]
+    if (!target) {
+      setStatusLine('No setting selected')
+      return
+    }
+    if (target.type !== 'number') {
+      setStatusLine(`"${target.key}" is boolean. Use space to toggle.`)
+      return
+    }
+
+    const current = target.effectiveValue
+    if (typeof current !== 'number') {
+      setStatusLine(`"${target.key}" has non-numeric effective value`)
+      return
+    }
+    const step = target.step ?? 1
+    const min = target.min ?? Number.NEGATIVE_INFINITY
+    const max = target.max ?? Number.POSITIVE_INFINITY
+    const next = Math.max(min, Math.min(max, current + direction * step))
+    if (next === current) {
+      setStatusLine(`"${target.key}" already at bound`)
+      return
+    }
+
+    await runSetSetting(next)
+  }, [runSetSetting, runtimeSettings, selectedSettingIndex])
+
+  const runToggleSelectedSetting = useCallback(async () => {
+    const target = runtimeSettings[selectedSettingIndex]
+    if (!target) {
+      setStatusLine('No setting selected')
+      return
+    }
+    if (target.type !== 'boolean') {
+      setStatusLine(`"${target.key}" is numeric. Use +/- to adjust.`)
+      return
+    }
+
+    const current = target.effectiveValue
+    if (typeof current !== 'boolean') {
+      setStatusLine(`"${target.key}" has non-boolean effective value`)
+      return
+    }
+
+    await runSetSetting(!current)
+  }, [runSetSetting, runtimeSettings, selectedSettingIndex])
 
   const gracefulExit = useCallback(() => {
     if (shuttingDown.current) {
@@ -833,11 +952,11 @@ export function App({
 
     if (activeTab === 'projects') {
       if (key.downArrow || input === 'j') {
-        setSelectedProjectIndex((current) => moveProjectSelection(current, 1, config.repos.length))
+        setSelectedProjectIndex((current) => moveProjectSelection(current, 1, runtimeConfig.repos.length))
         return
       }
       if (key.upArrow || input === 'k') {
-        setSelectedProjectIndex((current) => moveProjectSelection(current, -1, config.repos.length))
+        setSelectedProjectIndex((current) => moveProjectSelection(current, -1, runtimeConfig.repos.length))
         return
       }
     }
@@ -861,6 +980,33 @@ export function App({
       }
       if (input === 'K') {
         setLogDetailScrollOffset((current) => Math.max(0, current - 1))
+        return
+      }
+    }
+
+    if (activeTab === 'settings') {
+      if (key.downArrow || input === 'j') {
+        moveSettingSelection(1)
+        return
+      }
+      if (key.upArrow || input === 'k') {
+        moveSettingSelection(-1)
+        return
+      }
+      if (input === '+' || input === '=') {
+        void runAdjustSelectedSetting(1)
+        return
+      }
+      if (input === '-') {
+        void runAdjustSelectedSetting(-1)
+        return
+      }
+      if (input === 'u') {
+        void runClearSetting()
+        return
+      }
+      if (input === ' ') {
+        void runToggleSelectedSetting()
         return
       }
     }
@@ -963,7 +1109,7 @@ export function App({
     <Box flexDirection="column" height={termRows}>
       <Header
         activeTab={activeTab}
-        pollIntervalMs={pollIntervalMs}
+        pollIntervalMs={effectivePollIntervalMs}
         dryRun={dryRun}
         status={stats}
         autoRefresh={autoRefresh}
@@ -997,17 +1143,17 @@ export function App({
         <StatsView
           stats={stats}
           autoRefresh={autoRefresh}
-          pollIntervalMs={pollIntervalMs}
+          pollIntervalMs={effectivePollIntervalMs}
           lastRefreshAt={lastRefreshAt}
         />
       )}
       {activeTab === 'projects' && (
         <ProjectsView
-          repos={config.repos}
+          repos={runtimeConfig.repos}
           selectedIndex={selectedProjectIndex}
-          workerProfiles={config.workerProfiles}
-          globalGithubTokenEnv={config.github.tokenEnv}
-          globalGithubApiBaseUrl={config.github.apiBaseUrl}
+          workerProfiles={runtimeConfig.workerProfiles}
+          globalGithubTokenEnv={runtimeConfig.github.tokenEnv}
+          globalGithubApiBaseUrl={runtimeConfig.github.apiBaseUrl}
         />
       )}
       {activeTab === 'logs' && (
@@ -1019,6 +1165,12 @@ export function App({
             detailScrollOffset={logDetailScrollOffset}
           />
         </Box>
+      )}
+      {activeTab === 'settings' && (
+        <SettingsView
+          settings={runtimeSettings}
+          selectedIndex={selectedSettingIndex}
+        />
       )}
 
       <ActionsBar
