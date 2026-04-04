@@ -80,6 +80,13 @@ describe('Checkpoint', () => {
       expect(event?.phase).toBe('plan')
       expect(event?.data).toBeNull()
     })
+
+    it('updates iteration_count when provided', () => {
+      checkpoint.phaseStarted('run-test-1', 'plan', 3)
+
+      const row = db.prepare('SELECT iteration_count FROM runs WHERE id = ?').get('run-test-1') as { iteration_count: number | null }
+      expect(row.iteration_count).toBe(3)
+    })
   })
 
   describe('phaseCompleted', () => {
@@ -112,6 +119,13 @@ describe('Checkpoint', () => {
       const data = JSON.parse(row.phase_data)
       expect(data.plan).toBeDefined()
       expect(data.code).toBeDefined()
+    })
+
+    it('updates iteration_count when provided', () => {
+      checkpoint.phaseCompleted('run-test-1', 'plan', { plan: { objective: 'Fix login' } }, 2)
+
+      const row = db.prepare('SELECT iteration_count FROM runs WHERE id = ?').get('run-test-1') as { iteration_count: number | null }
+      expect(row.iteration_count).toBe(2)
     })
   })
 

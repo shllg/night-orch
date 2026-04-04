@@ -58,7 +58,7 @@ export async function executeLoop(
 
     // Skip step if skipWhen matches triage level
     if ('skipWhen' in step && step.skipWhen === ctx.triageResult.level) {
-      checkpoint.phaseCompleted(ctx.runId, step.id, {})
+      checkpoint.phaseCompleted(ctx.runId, step.id, {}, ctx.iteration)
       ctx = recordPhase(ctx, step.id, 'skipped')
       stepIndex++
       continue
@@ -87,7 +87,7 @@ export async function executeLoop(
     const stepStart = Date.now()
     const stepStartedAt = utcIsoFromMs(stepStart)
     ctx = updateContext(ctx, { currentPhase: step.id })
-    checkpoint.phaseStarted(ctx.runId, step.id)
+    checkpoint.phaseStarted(ctx.runId, step.id, ctx.iteration)
 
     const result = await executeStep(ctx, step, stepDeps)
     ctx = result.ctx
@@ -114,7 +114,7 @@ export async function executeLoop(
     if (step.type === 'worker' && step.role === 'planner' && !stepSuccess && config.loop.stopOnPlannerFailure) {
       logger.error({ runId: ctx.runId }, 'Planner failed and stopOnPlannerFailure is true')
       const artifacts = buildStepArtifacts(step, ctx)
-      checkpoint.phaseCompleted(ctx.runId, step.id, artifacts)
+      checkpoint.phaseCompleted(ctx.runId, step.id, artifacts, ctx.iteration)
       return recordPhase(
         updateContext(ctx, { currentPhase: 'error', terminalStatus: 'error' }),
         step.id,
@@ -126,7 +126,7 @@ export async function executeLoop(
 
     // Checkpoint and record
     const artifacts = buildStepArtifacts(step, ctx)
-    checkpoint.phaseCompleted(ctx.runId, step.id, artifacts)
+    checkpoint.phaseCompleted(ctx.runId, step.id, artifacts, ctx.iteration)
     ctx = recordPhase(ctx, step.id, stepSuccess ? 'success' : 'failure', {}, stepStartedAt)
 
     // Fire onPlanReady after plan step completes with a plan

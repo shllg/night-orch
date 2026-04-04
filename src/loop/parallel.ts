@@ -137,13 +137,14 @@ export async function executeParallelSubtasks(
             },
           }
 
-          runManager.update(subRun.id, { status: 'running', branchName: subBranch, worktreePath: subWorktreePath })
+          runManager.update(subRun.id, { status: 'running', iterationCount: 1, branchName: subBranch, worktreePath: subWorktreePath })
 
           const finalCtx = await executeLoop(subCtx, deps)
           const success = finalCtx.terminalStatus === 'publish'
 
           runManager.update(subRun.id, {
             status: success ? 'review_ready' : 'blocked',
+            iterationCount: finalCtx.iteration,
             endedAt: nowUtcIso(),
           })
 

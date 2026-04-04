@@ -10,16 +10,16 @@ export class Checkpoint {
     this.issueManager = new IssueManager(db)
   }
 
-  phaseStarted(runId: string, phase: LoopPhase): void {
+  phaseStarted(runId: string, phase: LoopPhase, iteration?: number): void {
     const now = nowUtcIso()
     this.db
-      .prepare('UPDATE runs SET current_phase = ?, updated_at = ? WHERE id = ?')
-      .run(phase, now, runId)
+      .prepare('UPDATE runs SET current_phase = ?, iteration_count = COALESCE(?, iteration_count), updated_at = ? WHERE id = ?')
+      .run(phase, iteration ?? null, now, runId)
     this.issueManager.syncFromRunId(runId)
     this.recordEvent(runId, 'phase_started', phase, null)
   }
 
-  phaseCompleted(runId: string, phase: LoopPhase, artifacts: Record<string, unknown>): void {
+  phaseCompleted(runId: string, phase: LoopPhase, artifacts: Record<string, unknown>, iteration?: number): void {
     // Merge artifacts with existing phase_data
     const existing = this.getPhaseData(runId)
     const merged = { ...existing, [phase]: artifacts }
@@ -27,9 +27,9 @@ export class Checkpoint {
 
     this.db
       .prepare(
-        'UPDATE runs SET current_phase = ?, phase_data = ?, updated_at = ? WHERE id = ?',
+        'UPDATE runs SET current_phase = ?, phase_data = ?, iteration_count = COALESCE(?, iteration_count), updated_at = ? WHERE id = ?',
       )
-      .run(phase, JSON.stringify(merged), now, runId)
+      .run(phase, JSON.stringify(merged), iteration ?? null, now, runId)
     this.issueManager.syncFromRunId(runId)
     this.recordEvent(runId, 'phase_completed', phase, artifacts)
   }
