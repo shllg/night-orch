@@ -40,18 +40,23 @@ export function StatsPage({ snapshot, socketConnected }: StatsPageProps): ReactE
   const blockedThroughputTone = toneForPresence(stats.throughput.blocked7d, 1, 2)
   const errorThroughputTone = toneForPresence(stats.throughput.error7d, 1, 2)
   const todayCostTone = toneForRatioToBaseline(stats.cost.todayCostUsd, stats.cost.avgDailyCost7d, 1.05, 1.35)
+  const todayUsageTone = toneForRatioToBaseline(stats.usage.todayTotalTokens, stats.usage.avgDailyTokens7d, 1.05, 1.35)
   const costPerRunTone = toneForLowerIsBetter(stats.efficiency.avgCostPerRun7d, 1.5, 3)
   const costPerSuccessTone = toneForLowerIsBetter(stats.efficiency.avgCostPerSuccess7d, 3, 6)
+  const tokensPerRunTone = toneForLowerIsBetter(stats.efficiency.avgTokensPerRun7d, 8_000, 16_000)
+  const tokensPerSuccessTone = toneForLowerIsBetter(stats.efficiency.avgTokensPerSuccess7d, 16_000, 32_000)
   const expiringLeaseTone = toneForPresence(stats.resources.expiringLeases, 1, 3)
   const expiredLeaseTone = toneForPresence(stats.resources.expiredLeases, 1, 2)
   const missingWorktreeTone = toneForPresence(stats.resources.missingWorktrees, 1, 2)
   const staleWorktreeTone = toneForPresence(stats.resources.staleWorktrees, 1, 2)
+  const usageFirst = stats.cost.model === 'subscription'
 
   const hasLatencySample = stats.timing.sampleSize30d > 0 && stats.timing.p50Minutes > 0
   const tailLatencyRatio = hasLatencySample ? stats.timing.p90Minutes / stats.timing.p50Minutes : 0
   const tailLatencyTone = toneForLowerIsBetter(tailLatencyRatio, 2.5, 4.5)
 
   const costTrend = buildAsciiSparkline(stats.cost.dailyHistory.slice().reverse().map((row) => row.totalCostUsd))
+  const usageTrend = buildAsciiSparkline(stats.usage.dailyHistory.slice().reverse().map((row) => row.totalTokens))
 
   return (
     <div className="flex flex-col gap-5">
@@ -145,41 +150,86 @@ export function StatsPage({ snapshot, socketConnected }: StatsPageProps): ReactE
 
         <article className="card border border-base-300/60 bg-base-200/60 shadow-panel backdrop-blur">
           <div className="card-body p-4 sm:p-5">
-            <h2 className="card-title text-lg">Cost</h2>
-            <div className="mt-2 space-y-2 text-sm">
-              <SignalRow
-                label="Today"
-                value={`$${formatMoney(stats.cost.todayCostUsd)} (${stats.cost.todayRunCount} runs)`}
-                valueClassName={toTextClass(todayCostTone)}
-              />
-              <SignalRow label="Cost (7d)" value={`$${formatMoney(stats.cost.cost7d)}`} />
-              <SignalRow label="Cost (30d)" value={`$${formatMoney(stats.cost.cost30d)}`} />
-              <SignalRow label="Average Daily Cost (7d)" value={`$${formatMoney(stats.cost.avgDailyCost7d)}`} />
-              <SignalRow label="Total Cost (7d)" value={`$${formatMoney(stats.efficiency.totalCostUsd7d)}`} />
-              <SignalRow
-                label="Cost Per Run (7d)"
-                value={`$${formatMoney(stats.efficiency.avgCostPerRun7d)}`}
-                valueClassName={toTextClass(costPerRunTone)}
-              />
-              <SignalRow
-                label="Cost Per Success (7d)"
-                value={`$${formatMoney(stats.efficiency.avgCostPerSuccess7d)}`}
-                valueClassName={toTextClass(costPerSuccessTone)}
-              />
-              <SignalRow label="Cost Per Iteration (7d)" value={`$${formatMoney(stats.efficiency.avgCostPerIteration7d)}`} />
-              <SignalRow label="Completed Per Dollar (7d)" value={stats.efficiency.completedPerDollar7d.toFixed(2)} />
-              <SignalRow label="Cost Trend (7d)" value={costTrend} />
-            </div>
-            <div className="mt-3 space-y-1">
-              {stats.cost.dailyHistory.length === 0 && (
-                <p className="text-xs text-base-content/60">No daily cost rows in the last 7 days.</p>
-              )}
-              {stats.cost.dailyHistory.map((row) => (
-                <p key={row.date} className="text-xs text-base-content/70">
-                  {row.date} ${formatMoney(row.totalCostUsd)} ({row.runCount})
-                </p>
-              ))}
-            </div>
+            <h2 className="card-title text-lg">Cost & Usage</h2>
+            {usageFirst ? (
+              <>
+                <div className="mt-2 space-y-2 text-sm">
+                  <SignalRow label="Cost Model" value="subscription" />
+                  <SignalRow
+                    label="Today Tokens"
+                    value={`${formatTokenCount(stats.usage.todayTotalTokens)} (${stats.cost.todayRunCount} runs)`}
+                    valueClassName={toTextClass(todayUsageTone)}
+                  />
+                  <SignalRow label="Tokens (7d)" value={formatTokenCount(stats.usage.tokens7d)} />
+                  <SignalRow label="Tokens (30d)" value={formatTokenCount(stats.usage.tokens30d)} />
+                  <SignalRow label="Average Daily Tokens (7d)" value={formatTokenCount(stats.usage.avgDailyTokens7d)} />
+                  <SignalRow
+                    label="Tokens Per Run (7d)"
+                    value={formatTokenCount(stats.efficiency.avgTokensPerRun7d)}
+                    valueClassName={toTextClass(tokensPerRunTone)}
+                  />
+                  <SignalRow
+                    label="Tokens Per Success (7d)"
+                    value={formatTokenCount(stats.efficiency.avgTokensPerSuccess7d)}
+                    valueClassName={toTextClass(tokensPerSuccessTone)}
+                  />
+                  <SignalRow label="Tokens Per Iteration (7d)" value={formatTokenCount(stats.efficiency.avgTokensPerIteration7d)} />
+                  <SignalRow label="Est. Cost Today" value={`$${formatMoney(stats.cost.todayCostUsd)}`} valueClassName={toTextClass(todayCostTone)} />
+                  <SignalRow label="Est. Cost (7d)" value={`$${formatMoney(stats.cost.cost7d)}`} />
+                  <SignalRow label="Usage Trend (7d)" value={usageTrend} />
+                </div>
+                <div className="mt-3 space-y-1">
+                  {stats.usage.dailyHistory.length === 0 && (
+                    <p className="text-xs text-base-content/60">No daily usage rows in the last 7 days.</p>
+                  )}
+                  {stats.usage.dailyHistory.map((row) => (
+                    <p key={row.date} className="text-xs text-base-content/70">
+                      {row.date} {formatTokenCount(row.totalTokens)} ({row.runCount})
+                    </p>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="mt-2 space-y-2 text-sm">
+                  <SignalRow label="Cost Model" value="pay-per-use" />
+                  <SignalRow
+                    label="Today"
+                    value={`$${formatMoney(stats.cost.todayCostUsd)} (${stats.cost.todayRunCount} runs)`}
+                    valueClassName={toTextClass(todayCostTone)}
+                  />
+                  <SignalRow label="Cost (7d)" value={`$${formatMoney(stats.cost.cost7d)}`} />
+                  <SignalRow label="Cost (30d)" value={`$${formatMoney(stats.cost.cost30d)}`} />
+                  <SignalRow label="Average Daily Cost (7d)" value={`$${formatMoney(stats.cost.avgDailyCost7d)}`} />
+                  <SignalRow label="Total Cost (7d)" value={`$${formatMoney(stats.efficiency.totalCostUsd7d)}`} />
+                  <SignalRow
+                    label="Cost Per Run (7d)"
+                    value={`$${formatMoney(stats.efficiency.avgCostPerRun7d)}`}
+                    valueClassName={toTextClass(costPerRunTone)}
+                  />
+                  <SignalRow
+                    label="Cost Per Success (7d)"
+                    value={`$${formatMoney(stats.efficiency.avgCostPerSuccess7d)}`}
+                    valueClassName={toTextClass(costPerSuccessTone)}
+                  />
+                  <SignalRow label="Cost Per Iteration (7d)" value={`$${formatMoney(stats.efficiency.avgCostPerIteration7d)}`} />
+                  <SignalRow label="Completed Per Dollar (7d)" value={stats.efficiency.completedPerDollar7d.toFixed(2)} />
+                  <SignalRow label="Today Tokens" value={formatTokenCount(stats.usage.todayTotalTokens)} valueClassName={toTextClass(todayUsageTone)} />
+                  <SignalRow label="Tokens (7d)" value={formatTokenCount(stats.usage.tokens7d)} />
+                  <SignalRow label="Cost Trend (7d)" value={costTrend} />
+                </div>
+                <div className="mt-3 space-y-1">
+                  {stats.cost.dailyHistory.length === 0 && (
+                    <p className="text-xs text-base-content/60">No daily cost rows in the last 7 days.</p>
+                  )}
+                  {stats.cost.dailyHistory.map((row) => (
+                    <p key={row.date} className="text-xs text-base-content/70">
+                      {row.date} ${formatMoney(row.totalCostUsd)} ({row.runCount})
+                    </p>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </article>
       </section>
@@ -376,6 +426,14 @@ function formatMinutes(minutes: number): string {
   const hours = Math.floor(minutes / 60)
   const mins = Math.round(minutes % 60)
   return `${hours}h${String(mins).padStart(2, '0')}m`
+}
+
+function formatTokenCount(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0'
+  if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`
+  return String(Math.round(value))
 }
 
 function toneForHigherIsBetter(value: number, greenAt: number, yellowAt: number): Tone {

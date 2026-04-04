@@ -48,8 +48,19 @@ export function Header({
         ))}
       </Box>
       <Text dimColor>
-        runs {status.overview.totalRuns}  active {status.overview.activeRuns}  queued {status.overview.queuedRuns}  running {status.overview.runningRuns}  cost today ${status.cost.todayCostUsd.toFixed(2)}
+        runs {status.overview.totalRuns}  active {status.overview.activeRuns}  queued {status.overview.queuedRuns}  running {status.overview.runningRuns}
+        {status.cost.model === 'subscription'
+          ? `  tokens today ${formatTokenCount(status.usage.todayTotalTokens)}`
+          : `  cost today $${status.cost.todayCostUsd.toFixed(2)}`}
       </Text>
     </Box>
   )
+}
+
+function formatTokenCount(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0'
+  if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`
+  return String(Math.round(value))
 }

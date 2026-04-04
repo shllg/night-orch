@@ -62,6 +62,7 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
     // With --output-format json, extract assistant text and session ID from the JSON envelope.
     // Fall back to raw text if not parseable as JSON.
     const { assistantText, sessionId } = extractFromJsonOutput(result.stdout)
+    const tokenUsage = extractClaudeTokenUsage(result.stdout)
 
     logger.info({ role: input.role, rawLength: result.stdout.length, textLength: assistantText.length, sessionId }, 'Claude output received')
 
@@ -81,6 +82,7 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
       timedOut: result.timedOut,
       durationMs: result.durationMs,
       sessionId,
+      tokenUsage,
     })
 
     return {
@@ -91,6 +93,7 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
       parsed,
       parseError,
       sessionId,
+      tokenUsage,
     }
   }
 
@@ -281,6 +284,47 @@ function tryParseJson(line: string): unknown | null {
   } catch {
     return null
   }
+}
+
+function extractClaudeTokenUsage(raw: string): WorkerTaskResult['tokenUsage'] {
+  const parsed = tryParseJson(raw)
+  if (!parsed) return undefined
+
+  let promptTokens = 0
+  let completionTokens = 0
+
+  const addUsage = (usageCandidate: unknown) => {
+    if (!isRecord(usageCandidate)) return
+    const inputTokens = parseTokenCount(usageCandidate['input_tokens'])
+      + parseTokenCount(usageCandidate['cache_creation_input_tokens'])
+      + parseTokenCount(usageCandidate['cache_read_input_tokens'])
+    const outputTokens = parseTokenCount(usageCandidate['output_tokens'])
+    promptTokens += inputTokens
+    completionTokens += outputTokens
+  }
+
+  if (Array.isArray(parsed)) {
+    for (const event of parsed) {
+      if (!isRecord(event)) continue
+      if (event['type'] !== 'result') continue
+      addUsage(event['usage'])
+    }
+  } else if (isRecord(parsed)) {
+    if (parsed['type'] === 'result') {
+      addUsage(parsed['usage'])
+    }
+  }
+
+  if (promptTokens <= 0 && completionTokens <= 0) return undefined
+  return {
+    promptTokens,
+    completionTokens,
+  }
+}
+
+function parseTokenCount(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0
+  return Math.max(0, Math.floor(value))
 }
 
 function getTextBlock(value: unknown): string | null {

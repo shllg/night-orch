@@ -19,6 +19,7 @@ interface StatsViewProps {
 
 export function StatsView({ stats, autoRefresh, pollIntervalMs, lastRefreshAt }: StatsViewProps): React.ReactElement {
   const costSeries = stats.cost.dailyHistory.slice().reverse().map((row) => row.totalCostUsd)
+  const usageSeries = stats.usage.dailyHistory.slice().reverse().map((row) => row.totalTokens)
   const successColor = colorForHigherIsBetter(stats.throughput.successRate7d, 80, 60)
   const failureRateColor = colorForLowerIsBetter(stats.reliability.failureRate7d, 10, 25)
   const overviewBlockedColor = colorForPresence(stats.overview.blockedRuns, 1, 2)
@@ -26,14 +27,18 @@ export function StatsView({ stats, autoRefresh, pollIntervalMs, lastRefreshAt }:
   const throughputBlockedColor = colorForPresence(stats.throughput.blocked7d, 1, 2)
   const throughputErrorColor = colorForPresence(stats.throughput.error7d, 1, 2)
   const todayCostColor = colorForRatioToBaseline(stats.cost.todayCostUsd, stats.cost.avgDailyCost7d, 1.05, 1.35)
+  const todayUsageColor = colorForRatioToBaseline(stats.usage.todayTotalTokens, stats.usage.avgDailyTokens7d, 1.05, 1.35)
   const costPerRunColor = colorForLowerIsBetter(stats.efficiency.avgCostPerRun7d, 1.5, 3)
   const costPerSuccessColor = colorForLowerIsBetter(stats.efficiency.avgCostPerSuccess7d, 3, 6)
+  const tokensPerRunColor = colorForLowerIsBetter(stats.efficiency.avgTokensPerRun7d, 8_000, 16_000)
+  const tokensPerSuccessColor = colorForLowerIsBetter(stats.efficiency.avgTokensPerSuccess7d, 16_000, 32_000)
   const expiredLeaseColor = colorForPresence(stats.resources.expiredLeases, 1, 2)
   const expiringLeaseColor = colorForPresence(stats.resources.expiringLeases, 1, 3)
   const missingWorktreeColor = colorForPresence(stats.resources.missingWorktrees, 1, 2)
   const staleWorktreeColor = colorForPresence(stats.resources.staleWorktrees, 1, 2)
   const tailLatencyRatio = stats.timing.p50Minutes > 0 ? stats.timing.p90Minutes / stats.timing.p50Minutes : 1
   const tailLatencyColor = colorForLowerIsBetter(tailLatencyRatio, 2.5, 4.5)
+  const usageFirst = stats.cost.model === 'subscription'
 
   return (
     <Box flexDirection="column" marginBottom={1}>
@@ -83,32 +88,68 @@ export function StatsView({ stats, autoRefresh, pollIntervalMs, lastRefreshAt }:
       </Box>
 
       <Box marginBottom={1}>
-        <StatCard title="Cost" width="50%" marginRight={1}>
-          <Text>
-            today <Text color={todayCostColor}>${stats.cost.todayCostUsd.toFixed(2)}</Text> ({stats.cost.todayRunCount} runs)
-          </Text>
-          <Text>7d ${stats.cost.cost7d.toFixed(2)}  30d ${stats.cost.cost30d.toFixed(2)}</Text>
-          <Text>avg/day 7d ${stats.cost.avgDailyCost7d.toFixed(2)}</Text>
-          <Text>
-            cost/run 7d <Text color={costPerRunColor}>${stats.efficiency.avgCostPerRun7d.toFixed(2)}</Text>
-            {'  '}
-            cost/success <Text color={costPerSuccessColor}>${stats.efficiency.avgCostPerSuccess7d.toFixed(2)}</Text>
-          </Text>
-          <Text>
-            cost/iter <Text color={costPerRunColor}>${stats.efficiency.avgCostPerIteration7d.toFixed(2)}</Text>
-            {'  '}
-            completed/$ <Text color={successColor}>{stats.efficiency.completedPerDollar7d.toFixed(2)}</Text>
-          </Text>
-          <Text>trend {buildSparkline(costSeries)}</Text>
-          {stats.cost.dailyHistory.slice(0, 4).map((row) => (
-            <Text key={row.date} dimColor>
-              <Text color={colorForRatioToBaseline(row.totalCostUsd, stats.cost.avgDailyCost7d, 1.05, 1.35)}>
-                {row.date}: ${row.totalCostUsd.toFixed(2)}
+        <StatCard title="Cost & Usage" width="50%" marginRight={1}>
+          {usageFirst ? (
+            <>
+              <Text>model subscription</Text>
+              <Text>
+                today tokens <Text color={todayUsageColor}>{formatTokenCount(stats.usage.todayTotalTokens)}</Text> ({stats.cost.todayRunCount} runs)
               </Text>
-              {'  '}
-              ({row.runCount})
-            </Text>
-          ))}
+              <Text>7d {formatTokenCount(stats.usage.tokens7d)}  30d {formatTokenCount(stats.usage.tokens30d)}</Text>
+              <Text>avg/day 7d {formatTokenCount(stats.usage.avgDailyTokens7d)}</Text>
+              <Text>
+                tokens/run 7d <Text color={tokensPerRunColor}>{formatTokenCount(stats.efficiency.avgTokensPerRun7d)}</Text>
+                {'  '}
+                tokens/success <Text color={tokensPerSuccessColor}>{formatTokenCount(stats.efficiency.avgTokensPerSuccess7d)}</Text>
+              </Text>
+              <Text>tokens/iter {formatTokenCount(stats.efficiency.avgTokensPerIteration7d)}</Text>
+              <Text dimColor>estimated cost today ${stats.cost.todayCostUsd.toFixed(2)}  7d ${stats.cost.cost7d.toFixed(2)}</Text>
+              <Text>trend {buildSparkline(usageSeries)}</Text>
+              {stats.usage.dailyHistory.slice(0, 4).map((row) => (
+                <Text key={row.date} dimColor>
+                  <Text color={colorForRatioToBaseline(row.totalTokens, stats.usage.avgDailyTokens7d, 1.05, 1.35)}>
+                    {row.date}: {formatTokenCount(row.totalTokens)}
+                  </Text>
+                  {'  '}
+                  ({row.runCount})
+                </Text>
+              ))}
+            </>
+          ) : (
+            <>
+              <Text>model pay-per-use</Text>
+              <Text>
+                today <Text color={todayCostColor}>${stats.cost.todayCostUsd.toFixed(2)}</Text> ({stats.cost.todayRunCount} runs)
+              </Text>
+              <Text>7d ${stats.cost.cost7d.toFixed(2)}  30d ${stats.cost.cost30d.toFixed(2)}</Text>
+              <Text>avg/day 7d ${stats.cost.avgDailyCost7d.toFixed(2)}</Text>
+              <Text>
+                cost/run 7d <Text color={costPerRunColor}>${stats.efficiency.avgCostPerRun7d.toFixed(2)}</Text>
+                {'  '}
+                cost/success <Text color={costPerSuccessColor}>${stats.efficiency.avgCostPerSuccess7d.toFixed(2)}</Text>
+              </Text>
+              <Text>
+                cost/iter <Text color={costPerRunColor}>${stats.efficiency.avgCostPerIteration7d.toFixed(2)}</Text>
+                {'  '}
+                completed/$ <Text color={successColor}>{stats.efficiency.completedPerDollar7d.toFixed(2)}</Text>
+              </Text>
+              <Text>
+                tokens today <Text color={todayUsageColor}>{formatTokenCount(stats.usage.todayTotalTokens)}</Text>
+                {'  '}
+                tokens 7d {formatTokenCount(stats.usage.tokens7d)}
+              </Text>
+              <Text>trend {buildSparkline(costSeries)}</Text>
+              {stats.cost.dailyHistory.slice(0, 4).map((row) => (
+                <Text key={row.date} dimColor>
+                  <Text color={colorForRatioToBaseline(row.totalCostUsd, stats.cost.avgDailyCost7d, 1.05, 1.35)}>
+                    {row.date}: ${row.totalCostUsd.toFixed(2)}
+                  </Text>
+                  {'  '}
+                  ({row.runCount})
+                </Text>
+              ))}
+            </>
+          )}
         </StatCard>
 
         <StatCard title="Agent Activity" width="50%">
@@ -226,4 +267,12 @@ function StatCard({ title, width, marginRight = 0, children }: StatCardProps): R
       {children}
     </Box>
   )
+}
+
+function formatTokenCount(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0'
+  if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`
+  return String(Math.round(value))
 }

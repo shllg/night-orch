@@ -207,6 +207,33 @@ describe('ClaudeWorkerAdapter', () => {
     expect(result.rawOutput).toBe(rawOutput)
   })
 
+  it('extracts token usage from Claude result usage payload', async () => {
+    mockStreamingExec.mockResolvedValue({
+      stdout: JSON.stringify([
+        {
+          type: 'assistant',
+          message: {
+            content: [{ type: 'text', text: '```json\n{"objective":"Plan"}\n```' }],
+          },
+        },
+        {
+          type: 'result',
+          usage: {
+            input_tokens: 120,
+            output_tokens: 45,
+          },
+        },
+      ]),
+      stderr: '',
+      exitCode: 0,
+      timedOut: false,
+      durationMs: 1000,
+    })
+
+    const result = await adapter.runTask(makeTaskInput({ role: 'planner' }))
+    expect(result.tokenUsage).toEqual({ promptTokens: 120, completionTokens: 45 })
+  })
+
   it('checkAvailability returns available when command succeeds', async () => {
     mockExecWithTimeout.mockResolvedValue({
       stdout: 'claude v1.2.3\n',
@@ -352,6 +379,37 @@ describe('CodexWorkerAdapter', () => {
     expect(call?.args).toEqual(expect.arrayContaining(['--json', '--output-last-message']))
     expect(call?.args).not.toContain('resume')
     expect(call?.args).not.toContain('--resume')
+  })
+
+  it('extracts token usage from Codex completion events', async () => {
+    mockStreamingExec.mockResolvedValue({
+      stdout: [
+        JSON.stringify({
+          type: 'response.completed',
+          usage: {
+            input_tokens: 321,
+            output_tokens: 123,
+          },
+        }),
+        JSON.stringify({
+          type: 'item.completed',
+          item: {
+            type: 'agent_message',
+            text: '```json\n{"objective":"Codex plan"}\n```',
+          },
+        }),
+      ].join('\n'),
+      stderr: '',
+      exitCode: 0,
+      timedOut: false,
+      durationMs: 2000,
+    })
+
+    const result = await adapter.runTask(makeTaskInput({
+      role: 'planner',
+      profile: { ...baseProfile, type: 'codex', command: 'codex' },
+    }))
+    expect(result.tokenUsage).toEqual({ promptTokens: 321, completionTokens: 123 })
   })
 })
 

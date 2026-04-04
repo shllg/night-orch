@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { CostTracker } from '../../src/loop/cost.js'
 import { initDatabase } from '../../src/state/db.js'
 import { RunManager } from '../../src/state/runs.js'
@@ -51,6 +51,21 @@ describe('CostTracker', () => {
     expect(costTracker.getDailyCost()).toBe(2.0)
   })
 
+  it('tracks token usage per run and per day', () => {
+    costTracker.recordCost(runId, 0, { promptTokens: 120, completionTokens: 45 })
+
+    expect(costTracker.getRunTokenUsage(runId)).toEqual({
+      promptTokens: 120,
+      completionTokens: 45,
+      totalTokens: 165,
+    })
+    expect(costTracker.getDailyTokenUsage()).toEqual({
+      promptTokens: 120,
+      completionTokens: 45,
+      totalTokens: 165,
+    })
+  })
+
   it('increments daily run_count once per run', () => {
     costTracker.recordCost(runId, 1.0)
     costTracker.recordCost(runId, 0.5)
@@ -61,6 +76,42 @@ describe('CostTracker', () => {
       .get(today) as { run_count: number } | undefined
 
     expect(row?.run_count).toBe(1)
+  })
+
+  it('increments daily run_count once for token-only updates', () => {
+    costTracker.recordCost(runId, 0, { promptTokens: 10, completionTokens: 5 })
+    costTracker.recordCost(runId, 0, { promptTokens: 20, completionTokens: 2 })
+
+    const today = new Date().toISOString().split('T')[0]
+    const row = db
+      .prepare('SELECT run_count FROM daily_costs WHERE date = ?')
+      .get(today) as { run_count: number } | undefined
+
+    expect(row?.run_count).toBe(1)
+  })
+
+  it('increments daily run_count once per UTC day for long-running runs', () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-04-01T23:59:00.000Z'))
+      costTracker.recordCost(runId, 1.0, { promptTokens: 10, completionTokens: 5 })
+      costTracker.recordCost(runId, 0.5, { promptTokens: 20, completionTokens: 2 })
+
+      vi.setSystemTime(new Date('2026-04-02T00:01:00.000Z'))
+      costTracker.recordCost(runId, 0.25, { promptTokens: 7, completionTokens: 3 })
+
+      const firstDay = db
+        .prepare('SELECT run_count FROM daily_costs WHERE date = ?')
+        .get('2026-04-01') as { run_count: number } | undefined
+      const secondDay = db
+        .prepare('SELECT run_count FROM daily_costs WHERE date = ?')
+        .get('2026-04-02') as { run_count: number } | undefined
+
+      expect(firstDay?.run_count).toBe(1)
+      expect(secondDay?.run_count).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('detects per-run budget exceeded', () => {

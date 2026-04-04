@@ -249,6 +249,14 @@ const SecuritySchema = z.object({
   maxCostPerRunUsd: z.number().positive().default(10),
 })
 
+// --- Cost schema ---
+
+const CostModelSchema = z.enum(['pay-per-use', 'subscription'])
+
+const CostSchema = z.object({
+  model: CostModelSchema.default('pay-per-use'),
+})
+
 // --- Metrics schema ---
 
 const MetricsSchema = z.object({
@@ -317,6 +325,8 @@ export const ConfigSchema = z.object({
 
   security: SecuritySchema.default({}),
 
+  cost: CostSchema.default({}),
+
   workerProfiles: z.record(WorkerProfileSchema).default({}),
 
   metrics: MetricsSchema.default({}),
@@ -345,3 +355,4 @@ export type Config = z.infer<typeof ConfigSchema>
 export type RepoConfig = z.infer<typeof RepoConfigSchema>
 export type WorkerProfile = z.infer<typeof WorkerProfileSchema>
 export type EnvironmentConfig = z.infer<typeof EnvironmentConfigSchema>
+export type CostModel = z.infer<typeof CostModelSchema>

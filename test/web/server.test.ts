@@ -54,6 +54,9 @@ function makeMinimalConfig() {
       maxDailyCostUsd: 50,
       maxCostPerRunUsd: 10,
     },
+    cost: {
+      model: 'pay-per-use' as const,
+    },
     workerProfiles: {},
     metrics: { enabled: false, port: 9090, host: '127.0.0.1' },
     observability: {

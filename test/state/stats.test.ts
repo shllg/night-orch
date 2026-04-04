@@ -27,8 +27,11 @@ describe('loadTuiStats', () => {
     expect(stats.overview.activeRuns).toBe(0)
     expect(stats.throughput.runs7d).toBe(0)
     expect(stats.reliability.failureCount7d).toBe(0)
+    expect(stats.cost.model).toBe('pay-per-use')
     expect(stats.cost.todayCostUsd).toBe(0)
+    expect(stats.usage.todayTotalTokens).toBe(0)
     expect(stats.efficiency.avgCostPerRun7d).toBe(0)
+    expect(stats.efficiency.avgTokensPerRun7d).toBe(0)
     expect(stats.resources.activeLeases).toBe(0)
     expect(stats.timing.sampleSize30d).toBe(0)
     expect(stats.queue.activeBatches).toBe(0)
@@ -50,9 +53,9 @@ describe('loadTuiStats', () => {
 
     const insertRun = db.prepare(
       `INSERT INTO runs (
-        id, repo, issue_number, status, current_phase, iteration_count, estimated_cost_usd, started_at, ended_at,
+        id, repo, issue_number, status, current_phase, iteration_count, estimated_cost_usd, prompt_tokens, completion_tokens, started_at, ended_at,
         last_error, block_reason, worktree_path, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
 
     insertRun.run(
@@ -63,6 +66,8 @@ describe('loadTuiStats', () => {
       'publish',
       2,
       4.2,
+      900,
+      300,
       twoDaysAgo,
       twoDaysAgoPlusFortyFiveMinutes,
       null,
@@ -79,6 +84,8 @@ describe('loadTuiStats', () => {
       'code',
       1,
       1.5,
+      200,
+      100,
       oneDayAgo,
       oneDayAgoPlusThirtyMinutes,
       'API timeout after 30s while calling provider',
@@ -95,6 +102,8 @@ describe('loadTuiStats', () => {
       'plan',
       0,
       0.4,
+      100,
+      50,
       oneHourAgo,
       null,
       null,
@@ -109,6 +118,8 @@ describe('loadTuiStats', () => {
       4,
       'queued',
       'plan',
+      0,
+      0,
       0,
       0,
       oneHourAgo,
@@ -127,6 +138,8 @@ describe('loadTuiStats', () => {
       'review',
       3,
       2,
+      50,
+      25,
       thirtyFiveDaysAgo,
       oneDayAgo,
       null,
@@ -138,8 +151,12 @@ describe('loadTuiStats', () => {
 
     const today = dateOnly(now)
     const yesterday = dateOnly(now - (24 * 60 * 60 * 1000))
-    db.prepare('INSERT INTO daily_costs (date, total_cost_usd, run_count) VALUES (?, ?, ?)').run(today, 12.5, 2)
-    db.prepare('INSERT INTO daily_costs (date, total_cost_usd, run_count) VALUES (?, ?, ?)').run(yesterday, 3.5, 1)
+    db.prepare(
+      'INSERT INTO daily_costs (date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens) VALUES (?, ?, ?, ?, ?)',
+    ).run(today, 12.5, 2, 1500, 500)
+    db.prepare(
+      'INSERT INTO daily_costs (date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens) VALUES (?, ?, ?, ?, ?)',
+    ).run(yesterday, 3.5, 1, 400, 100)
 
     const insertLease = db.prepare(
       'INSERT INTO leases (repo, issue_number, lease_owner, leased_until) VALUES (?, ?, ?, ?)',
@@ -192,11 +209,18 @@ describe('loadTuiStats', () => {
     expect(stats.cost.cost7d).toBeCloseTo(16, 5)
     expect(stats.cost.todayRunCount).toBe(2)
     expect(stats.cost.dailyHistory.length).toBe(2)
+    expect(stats.usage.todayTotalTokens).toBe(2000)
+    expect(stats.usage.tokens7d).toBe(2500)
+    expect(stats.usage.avgDailyTokens7d).toBe(1250)
+    expect(stats.usage.dailyHistory.length).toBe(2)
     expect(stats.efficiency.totalCostUsd7d).toBeCloseTo(6.1, 5)
     expect(stats.efficiency.avgCostPerRun7d).toBeCloseTo(1.525, 5)
     expect(stats.efficiency.avgCostPerSuccess7d).toBeCloseTo(6.1, 5)
     expect(stats.efficiency.avgCostPerIteration7d).toBeCloseTo(6.1 / 3, 5)
     expect(stats.efficiency.completedPerDollar7d).toBeCloseTo(1 / 6.1, 5)
+    expect(stats.efficiency.avgTokensPerRun7d).toBeCloseTo(1650 / 4, 5)
+    expect(stats.efficiency.avgTokensPerSuccess7d).toBeCloseTo(1650, 5)
+    expect(stats.efficiency.avgTokensPerIteration7d).toBeCloseTo(1650 / 3, 5)
 
     expect(stats.resources.activeLeases).toBe(2)
     expect(stats.resources.expiringLeases).toBe(1)

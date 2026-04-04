@@ -363,7 +363,10 @@ export function App({
     [db, tick, selectedRun?.id, runsViewMode],
   )
   const mergeBatches = useMemo(() => loadMergeBatches(db), [db, tick])
-  const stats = useMemo(() => loadTuiStats(db), [db, tick])
+  const stats = useMemo(
+    () => loadTuiStats(db, { costModel: runtimeConfig.cost.model }),
+    [db, runtimeConfig.cost.model, tick],
+  )
   const logWindowSize = useMemo(() => resolveLogWindowSize(termRows), [termRows])
   const selectedLogIndex = useMemo(() => resolveSelectedLogIndex(logLines, selectedLogId), [logLines, selectedLogId])
 

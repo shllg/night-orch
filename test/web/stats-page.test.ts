@@ -70,6 +70,7 @@ const FULL_SNAPSHOT: DashboardSnapshot = {
       ],
     },
     cost: {
+      model: 'pay-per-use',
       todayCostUsd: 8.1,
       todayRunCount: 3,
       cost7d: 36.2,
@@ -81,12 +82,28 @@ const FULL_SNAPSHOT: DashboardSnapshot = {
         { date: '2026-03-30', totalCostUsd: 1.4, runCount: 1 },
       ],
     },
+    usage: {
+      todayPromptTokens: 3000,
+      todayCompletionTokens: 1200,
+      todayTotalTokens: 4200,
+      tokens7d: 15000,
+      tokens30d: 62000,
+      avgDailyTokens7d: 2200,
+      dailyHistory: [
+        { date: '2026-04-01', promptTokens: 3000, completionTokens: 1200, totalTokens: 4200, runCount: 3 },
+        { date: '2026-03-31', promptTokens: 1800, completionTokens: 400, totalTokens: 2200, runCount: 2 },
+        { date: '2026-03-30', promptTokens: 900, completionTokens: 250, totalTokens: 1150, runCount: 1 },
+      ],
+    },
     efficiency: {
       totalCostUsd7d: 36.2,
       avgCostPerRun7d: 3.62,
       avgCostPerSuccess7d: 6.03,
       avgCostPerIteration7d: 1.2,
       completedPerDollar7d: 0.17,
+      avgTokensPerRun7d: 1500,
+      avgTokensPerSuccess7d: 2500,
+      avgTokensPerIteration7d: 750,
     },
     resources: {
       activeLeases: 3,

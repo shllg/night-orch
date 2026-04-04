@@ -453,7 +453,7 @@ async function handleApiRequest(
   }
 
   if (method === 'GET' && pathname === '/api/stats') {
-    writeJson(res, 200, loadTuiStats(runtimeDeps.db))
+    writeJson(res, 200, loadTuiStats(runtimeDeps.db, { costModel: runtimeDeps.config.cost.model }))
     return
   }
 
@@ -1109,7 +1109,7 @@ async function buildDashboardSnapshot(deps: MCPDependencies): Promise<DashboardS
       repos: runtimeConfig.repos.map((repo) => repo.repo),
       pollIntervalSeconds: runtimeConfig.github.pollIntervalSeconds,
     },
-    stats: loadTuiStats(runtimeDeps.db),
+    stats: loadTuiStats(runtimeDeps.db, { costModel: runtimeConfig.cost.model }),
   }
 }
 

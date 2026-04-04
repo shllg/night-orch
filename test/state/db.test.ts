@@ -37,6 +37,7 @@ describe('initDatabase', () => {
     expect(tables).toContain('events')
     expect(tables).toContain('agent_events')
     expect(tables).toContain('daily_costs')
+    expect(tables).toContain('daily_run_usage')
     expect(tables).toContain('schema_migrations')
   })
 
