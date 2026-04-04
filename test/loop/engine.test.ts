@@ -300,6 +300,9 @@ describe('executeLoop', () => {
     expect(result.terminalStatus).toBe('publish')
     expect(result.iteration).toBe(2) // bounced once
     expect(result.totalAgentPasses).toBe(5)
+
+    const row = db.prepare('SELECT iteration_count FROM runs WHERE id = ?').get('run-test-1') as { iteration_count: number | null }
+    expect(row.iteration_count).toBe(2)
   })
 
   it('max iterations → blocked', async () => {

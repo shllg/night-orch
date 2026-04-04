@@ -276,6 +276,7 @@ export async function pollOnce(
                     coder: roles.coder,
                     reviewer: roles.reviewer,
                   })
+                  const startingIteration = activeRun ? Math.max(activeRun.iterationCount, 1) : 1
                   const previousRunStatus = run.status
                   if (replayableRun) {
                     logger.info(
@@ -286,6 +287,7 @@ export async function pollOnce(
                   runId = run.id
                   runManager.update(run.id, {
                     status: 'running',
+                    iterationCount: startingIteration,
                     issueTitle: discoveredIssue.issue.title,
                     branchName: branch,
                     branchSlug: slug,
@@ -499,7 +501,7 @@ export async function pollOnce(
                   verifyResults: [],
                   reviewResult: null,
                   reviewFindings: [],
-                  iteration: 1,
+                  iteration: startingIteration,
                   totalAgentPasses: 0,
                   estimatedCostUsd: 0,
                   currentPhase: workflow.steps[0]?.id ?? 'plan',
@@ -827,6 +829,7 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
       const publishResult = await publishPR(finalCtx, forge, db)
       runManager.update(runId, {
         status: 'review_ready',
+        iterationCount: finalCtx.iteration,
         prNumber: publishResult.prNumber,
         prTitle: publishResult.prTitle,
         endedAt: nowUtcIso(),
@@ -863,6 +866,7 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
       if (err instanceof MergeConflictError) {
         runManager.update(runId, {
           status: 'blocked',
+          iterationCount: finalCtx.iteration,
           blockReason: 'merge_conflict',
           lastError: err.message,
           endedAt: nowUtcIso(),
@@ -896,7 +900,7 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
         return 'error'
       }
 
-      runManager.update(runId, { status: 'error', lastError: errorMessage, endedAt: nowUtcIso() })
+      runManager.update(runId, { status: 'error', iterationCount: finalCtx.iteration, lastError: errorMessage, endedAt: nowUtcIso() })
       const recentErrors = new RunManager(db).countRecentErrors(repo, issueNumber)
       const latestIssue = await forge.getIssue(issueRepo, issueNumber)
       if (recentErrors < maxAutoRetries) {
@@ -963,6 +967,7 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
     const blockReason = buildBlockReason(finalCtx)
     runManager.update(runId, {
       status: 'blocked',
+      iterationCount: finalCtx.iteration,
       lastError: blockReason,
       blockReason: finalCtx.blockReason ?? null,
       endedAt: nowUtcIso(),
@@ -1012,7 +1017,7 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
   }
 
   const unexpectedError = `Loop ended in unexpected state: ${finalCtx.terminalStatus}/${finalCtx.currentPhase}`
-  runManager.update(runId, { status: 'error', lastError: unexpectedError, endedAt: nowUtcIso() })
+  runManager.update(runId, { status: 'error', iterationCount: finalCtx.iteration, lastError: unexpectedError, endedAt: nowUtcIso() })
   const recentErrors = new RunManager(db).countRecentErrors(repo, issueNumber)
   const latestIssue = await forge.getIssue(issueRepo, issueNumber)
   if (recentErrors < maxAutoRetries) {

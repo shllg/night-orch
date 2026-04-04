@@ -431,6 +431,51 @@ describe('pollOnce', () => {
     expect(rows[0]!.id).toBe(existing.id)
   })
 
+  it('preserves queued run iteration_count when resuming execution', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([{
+      issue: { number: 3, nodeId: '', title: 'Resume iteration', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      triage: { level: 'standard', reason: '' },
+    }])
+    mockExecuteLoop.mockImplementationOnce(async (ctx: { iteration: number }) => ({
+      currentPhase: 'decision',
+      terminalStatus: 'blocked',
+      iteration: ctx.iteration,
+      estimatedCostUsd: 0,
+      adjustedLimits: { maxReviewIterations: 4 },
+      blockReason: 'reviewer_blocked',
+      stepOutputs: { blockMessage: 'Reviewer blocked: follow-up required' },
+      reviewResult: null,
+    }))
+
+    const runManager = new RunManager(db)
+    const existing = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 3,
+      issueNodeId: '',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(existing.id, {
+      status: 'queued',
+      iterationCount: 4,
+      currentPhase: 'code',
+      phaseData: { code: { codeResult: { summary: 'partial' } } },
+    })
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    await pollOnce(config, db, false)
+
+    const executeCtx = mockExecuteLoop.mock.calls[0]?.[0] as { iteration?: number } | undefined
+    expect(executeCtx?.iteration).toBe(4)
+
+    const row = db
+      .prepare('SELECT status, iteration_count FROM runs WHERE id = ?')
+      .get(existing.id) as { status: string; iteration_count: number | null }
+    expect(row.status).toBe('blocked')
+    expect(row.iteration_count).toBe(4)
+  })
+
   it('denies /orch retry from non-collaborator when requireCollaborator=true', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([])
     mockListIssueComments.mockResolvedValue([
