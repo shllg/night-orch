@@ -51,7 +51,7 @@ function globalHints(options: {
   }
 
   const autoRefreshHint = activeTab === 'stats' ? ' [a]toggle auto-refresh' : ''
-  const actionHints = controlsEnabled && !busy ? ' [p]poll [s]sync [D]cleanup(confirm)' : ''
+  const actionHints = controlsEnabled && !busy ? ' [p]poll [s]sync [L]labels-init [D]cleanup(confirm)' : ''
   return `[q]quit [r]refresh${autoRefreshHint}${actionHints}`
 }
 

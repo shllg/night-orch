@@ -52,9 +52,9 @@ describe('MCP Integration', () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  it('lists all 14 tools', async () => {
+  it('lists all 15 tools', async () => {
     const result = await client.listTools()
-    expect(result.tools.length).toBe(14)
+    expect(result.tools.length).toBe(15)
     const names = result.tools.map((t) => t.name)
     expect(names).toContain('night-orch-status')
     expect(names).toContain('night-orch-poll')
@@ -63,6 +63,7 @@ describe('MCP Integration', () => {
     expect(names).toContain('night-orch-rebase')
     expect(names).toContain('night-orch-continue')
     expect(names).toContain('night-orch-delete-entry')
+    expect(names).toContain('night-orch-labels-init')
   })
 
   it('calls status tool and gets valid response', async () => {

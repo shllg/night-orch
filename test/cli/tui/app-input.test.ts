@@ -158,6 +158,15 @@ describe('tui action key dispatch', () => {
     })).toBe('deleteEntry')
     expect(resolveActionCommand({
       ...baseArgs,
+      input: 'L',
+    })).toBe('labelsInit')
+    expect(resolveActionCommand({
+      ...baseArgs,
+      activeTab: 'stats',
+      input: 'L',
+    })).toBe('labelsInit')
+    expect(resolveActionCommand({
+      ...baseArgs,
       activeTab: 'stats',
       input: 't',
     })).toBe('none')
@@ -181,6 +190,10 @@ describe('tui action key dispatch', () => {
       input: 'D',
       cleanupConfirmPending: true,
     })).toBe('none')
+    expect(resolveActionCommand({
+      ...focusedArgs,
+      input: 'L',
+    })).toBe('none')
   })
 
   it('does not treat non-runs tabs as focused even when runsViewMode is focus', () => {
@@ -194,6 +207,10 @@ describe('tui action key dispatch', () => {
       ...nonRunsFocusedArgs,
       input: 'p',
     })).toBe('poll')
+    expect(resolveActionCommand({
+      ...nonRunsFocusedArgs,
+      input: 'L',
+    })).toBe('labelsInit')
     expect(resolveActionCommand({
       ...nonRunsFocusedArgs,
       input: 'D',
@@ -234,6 +251,11 @@ describe('tui action key dispatch', () => {
       controlsEnabled: false,
       input: 'D',
       cleanupConfirmPending: false,
+    })).toBe('standaloneMessage')
+    expect(resolveActionCommand({
+      ...baseArgs,
+      controlsEnabled: false,
+      input: 'L',
     })).toBe('standaloneMessage')
 
     expect(resolveActionCommand({

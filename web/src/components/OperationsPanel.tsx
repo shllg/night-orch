@@ -26,6 +26,10 @@ interface DeleteEntryFormState {
   force: boolean
 }
 
+interface LabelsInitFormState {
+  repo: string
+}
+
 interface OperationsPanelProps {
   operationsEnabled: boolean
   activeOperation: string | null
@@ -35,13 +39,16 @@ interface OperationsPanelProps {
   rebaseForm: RebaseFormState
   continueForm: ContinueFormState
   deleteEntryForm: DeleteEntryFormState
+  labelsInitForm: LabelsInitFormState
   onRetryFormChange: (patch: Partial<RetryFormState>) => void
   onRebaseFormChange: (patch: Partial<RebaseFormState>) => void
   onContinueFormChange: (patch: Partial<ContinueFormState>) => void
   onDeleteEntryFormChange: (patch: Partial<DeleteEntryFormState>) => void
+  onLabelsInitFormChange: (patch: Partial<LabelsInitFormState>) => void
   onPoll: () => void
   onSync: () => void
   onCleanup: () => void
+  onLabelsInitSubmit: (event: FormEvent<HTMLFormElement>) => void
   onRetrySubmit: (event: FormEvent<HTMLFormElement>) => void
   onRebaseSubmit: (event: FormEvent<HTMLFormElement>) => void
   onContinueSubmit: (event: FormEvent<HTMLFormElement>) => void
@@ -58,13 +65,16 @@ export function OperationsPanel({
   rebaseForm,
   continueForm,
   deleteEntryForm,
+  labelsInitForm,
   onRetryFormChange,
   onRebaseFormChange,
   onContinueFormChange,
   onDeleteEntryFormChange,
+  onLabelsInitFormChange,
   onPoll,
   onSync,
   onCleanup,
+  onLabelsInitSubmit,
   onRetrySubmit,
   onRebaseSubmit,
   onContinueSubmit,
@@ -93,6 +103,27 @@ export function OperationsPanel({
             <ActionButton busy={activeOperation === 'sync'} onClick={onSync} label="Run Sync" />
             <ActionButton busy={activeOperation === 'cleanup'} onClick={onCleanup} label="Run Cleanup" />
           </div>
+
+          <form className="rounded-box border border-base-300/70 bg-base-100/60 p-3" onSubmit={onLabelsInitSubmit}>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-info">Labels Init</h3>
+            <div className="mt-2 space-y-2">
+              <label className="form-control">
+                <div className="label py-0 pb-1">
+                  <span className="label-text text-xs">Repo</span>
+                </div>
+                <select
+                  className="select select-bordered select-sm w-full bg-base-100/90"
+                  value={labelsInitForm.repo}
+                  onChange={(event) => onLabelsInitFormChange({ repo: event.target.value })}
+                >
+                  {repos.map((repo) => (
+                    <option key={repo} value={repo}>{repo}</option>
+                  ))}
+                </select>
+              </label>
+              <ActionButton busy={activeOperation === 'labels-init'} label="Bootstrap Labels" submit />
+            </div>
+          </form>
 
           <form className="rounded-box border border-base-300/70 bg-base-100/60 p-3" onSubmit={onRetrySubmit}>
             <h3 className="text-sm font-semibold uppercase tracking-wide text-info">Retry</h3>

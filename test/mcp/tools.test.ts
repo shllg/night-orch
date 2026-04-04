@@ -51,13 +51,14 @@ describe('MCP Tools', () => {
     expect(names).toContain('night-orch-retry')
     expect(names).toContain('night-orch-sync')
     expect(names).toContain('night-orch-cleanup')
+    expect(names).toContain('night-orch-labels-init')
     expect(names).toContain('night-orch-delete-entry')
     expect(names).toContain('night-orch-poll')
     expect(names).toContain('night-orch-list-issues')
     expect(names).toContain('night-orch-stream-events')
     expect(names).toContain('night-orch-rebase')
     expect(names).toContain('night-orch-continue')
-    expect(tools.length).toBe(14)
+    expect(tools.length).toBe(15)
   })
 
   it('status tool returns summary', async () => {
@@ -188,6 +189,26 @@ describe('MCP Tools', () => {
     const result = await handleToolCall('night-orch-cost-report', { days: 7 }, deps) as { totalCostUsd: number; dailyBudgetUsd: number }
     expect(result.totalCostUsd).toBe(0)
     expect(result.dailyBudgetUsd).toBe(50)
+  })
+
+  it('labels-init tool supports dry-run for a configured repo', async () => {
+    const result = await handleToolCall(
+      'night-orch-labels-init',
+      { repo: 'org/repo', dryRun: true },
+      deps,
+    ) as {
+      dryRun: boolean
+      targetRepo: string | null
+      labelsProcessed: number
+      failures: number
+      message: string
+    }
+
+    expect(result.dryRun).toBe(true)
+    expect(result.targetRepo).toBe('org/repo')
+    expect(result.labelsProcessed).toBeGreaterThan(0)
+    expect(result.failures).toBe(0)
+    expect(result.message).toContain('labels-init complete')
   })
 
   it('delete-entry tool removes local issue state', async () => {

@@ -133,6 +133,7 @@ export function App(): ReactElement {
   const [rebaseIssueNumber, setRebaseIssueNumber] = useState('')
   const [continueRepo, setContinueRepo] = useState('')
   const [continueIssueNumber, setContinueIssueNumber] = useState('')
+  const [labelsInitRepo, setLabelsInitRepo] = useState('')
 
   const [deleteRepo, setDeleteRepo] = useState('')
   const [deleteIssueNumber, setDeleteIssueNumber] = useState('')
@@ -248,6 +249,7 @@ export function App(): ReactElement {
       setRetryRepo('')
       setRebaseRepo('')
       setContinueRepo('')
+      setLabelsInitRepo('')
       setDeleteRepo('')
       return
     }
@@ -255,6 +257,7 @@ export function App(): ReactElement {
     setRetryRepo((prev) => (prev && repos.includes(prev) ? prev : repos[0] ?? ''))
     setRebaseRepo((prev) => (prev && repos.includes(prev) ? prev : repos[0] ?? ''))
     setContinueRepo((prev) => (prev && repos.includes(prev) ? prev : repos[0] ?? ''))
+    setLabelsInitRepo((prev) => (prev && repos.includes(prev) ? prev : repos[0] ?? ''))
     setDeleteRepo((prev) => (prev && repos.includes(prev) ? prev : repos[0] ?? ''))
     setSelectedRepo((prev) => (prev === 'all' || repos.includes(prev) ? prev : 'all'))
   }, [repos])
@@ -492,6 +495,23 @@ export function App(): ReactElement {
     )
   }, [deleteForce, deleteIssueNumber, deleteRepo, runOperation])
 
+  const submitLabelsInit = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!labelsInitRepo) {
+      setErrorMessage('Labels init requires a repo')
+      return
+    }
+
+    await runOperation(
+      'labels-init',
+      '/api/operations/labels-init',
+      {
+        repo: labelsInitRepo,
+      },
+      `Labels initialized for ${labelsInitRepo}`,
+    )
+  }, [labelsInitRepo, runOperation])
+
   const submitContinue = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const issueNumber = Number.parseInt(continueIssueNumber, 10)
@@ -585,6 +605,9 @@ export function App(): ReactElement {
                   issueNumber: deleteIssueNumber,
                   force: deleteForce,
                 }}
+                labelsInitForm={{
+                  repo: labelsInitRepo,
+                }}
                 onRetryFormChange={(patch) => {
                   if (patch.repo !== undefined) setRetryRepo(patch.repo)
                   if (patch.issueNumber !== undefined) setRetryIssueNumber(patch.issueNumber)
@@ -604,6 +627,9 @@ export function App(): ReactElement {
                   if (patch.issueNumber !== undefined) setDeleteIssueNumber(patch.issueNumber)
                   if (patch.force !== undefined) setDeleteForce(patch.force)
                 }}
+                onLabelsInitFormChange={(patch) => {
+                  if (patch.repo !== undefined) setLabelsInitRepo(patch.repo)
+                }}
                 onPoll={() => {
                   void runOperation('poll', '/api/operations/poll', {}, 'Manual poll requested')
                 }}
@@ -612,6 +638,9 @@ export function App(): ReactElement {
                 }}
                 onCleanup={() => {
                   void runOperation('cleanup', '/api/operations/cleanup', {}, 'Cleanup completed')
+                }}
+                onLabelsInitSubmit={(event) => {
+                  void submitLabelsInit(event)
                 }}
                 onRetrySubmit={(event) => {
                   void submitRetry(event)

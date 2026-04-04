@@ -501,6 +501,30 @@ async function handleApiRequest(
     return
   }
 
+  if (method === 'POST' && pathname === '/api/operations/labels-init') {
+    const body = await readJsonBody(req)
+    const repo = toNonEmptyString(body['repo'])
+
+    if (!repo) {
+      writeJson(res, 400, { error: 'repo is required' })
+      return
+    }
+
+    const result = await handleToolCall(
+      'night-orch-labels-init',
+      withMcpMutationAuth(
+        {
+          repo,
+          dryRun: Boolean(body['dryRun']),
+        },
+        security,
+      ),
+      deps,
+    )
+    writeJson(res, 200, result)
+    return
+  }
+
   if (method === 'POST' && pathname === '/api/operations/retry') {
     const body = await readJsonBody(req)
     const repo = toNonEmptyString(body['repo'])
