@@ -170,6 +170,24 @@ describe('decide', () => {
     expect(d.action).toBe('iterate')
   })
 
+  it('no-review workflow + verify pass → publish', () => {
+    const ctx = makeCtx({
+      reviewResult: null,
+      verifyResults: [{ command: 'test', exitCode: 0, stdout: '', stderr: '', durationMs: 100, passed: true }],
+    })
+    const d = decide(ctx, loopConfig, securityConfig, { requireReview: false })
+    expect(d.action).toBe('publish')
+  })
+
+  it('no-review workflow + verify fail → iterate', () => {
+    const ctx = makeCtx({
+      reviewResult: null,
+      verifyResults: [{ command: 'test', exitCode: 1, stdout: '', stderr: 'FAIL', durationMs: 100, passed: false }],
+    })
+    const d = decide(ctx, loopConfig, securityConfig, { requireReview: false })
+    expect(d.action).toBe('iterate')
+  })
+
   it('cost over budget → block', () => {
     const ctx = makeCtx({
       estimatedCostUsd: 15,

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { resolveConfigPath } from '../../src/config/loader.js'
+import { loadConfig, resolveConfigPath } from '../../src/config/loader.js'
 
 describe('resolveConfigPath', () => {
   const originalCwd = process.cwd()
@@ -71,5 +71,65 @@ describe('resolveConfigPath', () => {
     const expected = join(tmpDir, '.night-orch.yaml')
     writeFileSync(expected, 'version: 1\nrepos: []\n')
     expect(resolveConfigPath(undefined, { trustWorkspace: true })).toBe(expected)
+  })
+
+  it('loadConfig rejects unknown workflow agent profile references', () => {
+    const configPath = join(tmpDir, 'config.yaml')
+    writeFileSync(configPath, `version: 1
+github:
+  tokenEnv: GITHUB_TOKEN
+workerProfiles:
+  claude-default:
+    type: claude
+    command: claude
+repos:
+  - repo: org/repo
+    localPath: /tmp/repo
+workflows:
+  fast-trivial:
+    agents:
+      codex: codex-fast
+    steps:
+      - type: worker
+        id: code
+        role: coder
+      - type: decide
+        id: decide
+        onIterate: code
+`)
+
+    expect(() => loadConfig(configPath)).toThrow('Workflow fast-trivial: agent "codex" references unknown worker profile "codex-fast"')
+  })
+
+  it('loadConfig accepts workflow agent profile references when profiles exist', () => {
+    const configPath = join(tmpDir, 'config.yaml')
+    writeFileSync(configPath, `version: 1
+github:
+  tokenEnv: GITHUB_TOKEN
+workerProfiles:
+  claude-default:
+    type: claude
+    command: claude
+  codex-fast:
+    type: codex
+    command: codex
+repos:
+  - repo: org/repo
+    localPath: /tmp/repo
+workflows:
+  fast-trivial:
+    agents:
+      codex: codex-fast
+    steps:
+      - type: worker
+        id: code
+        role: coder
+      - type: decide
+        id: decide
+        onIterate: code
+`)
+
+    const loaded = loadConfig(configPath)
+    expect(loaded.workflows['fast-trivial']?.agents?.['codex']).toBe('codex-fast')
   })
 })

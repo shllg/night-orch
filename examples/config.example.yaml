@@ -101,6 +101,16 @@ commentCommands:
 #       - { type: verify, id: verify }
 #       - { type: worker, id: review, role: reviewer }
 #       - { type: decide, id: decide, onIterate: code }
+#   fast-trivial:
+#     roles:
+#       coder: codex
+#       reviewer: codex
+#     agents:
+#       codex: codex-fast
+#     steps:
+#       - { type: worker, id: code, role: coder }
+#       - { type: verify, id: verify }
+#       - { type: decide, id: decide, onIterate: code, requireReview: false }
 #   with-security-review:
 #     steps:
 #       - { type: worker, id: plan, role: planner, skipWhen: trivial }
@@ -208,6 +218,9 @@ repos:
       claude: claude-default
       codex: codex-default
     # workflow: minimal           # Reference a named workflow
+    # workflowByTriage:
+    #   trivial: fast-trivial
+    #   standard: minimal
     # mergeQueue:
     #   enabled: true
     #   batchSize: 5

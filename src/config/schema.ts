@@ -176,6 +176,7 @@ const WorkflowDecideStepSchema = z.object({
   type: z.literal('decide'),
   id: z.string(),
   onIterate: z.string(),
+  requireReview: z.boolean().optional(),
 })
 
 const WorkflowStepSchema = z.discriminatedUnion('type', [
@@ -184,9 +185,22 @@ const WorkflowStepSchema = z.discriminatedUnion('type', [
   WorkflowDecideStepSchema,
 ])
 
+const WorkflowRoleOverridesSchema = z.object({
+  planner: z.enum(['claude', 'codex']).optional(),
+  coder: z.enum(['claude', 'codex']).optional(),
+  reviewer: z.enum(['claude', 'codex']).optional(),
+})
+
 const WorkflowSchema = z.object({
   steps: z.array(WorkflowStepSchema).min(1),
+  roles: WorkflowRoleOverridesSchema.optional(),
+  agents: z.record(z.string()).optional(),
 })
+
+const WorkflowByTriageSchema = z.object({
+  trivial: z.string().optional(),
+  standard: z.string().optional(),
+}).strict()
 
 // --- Merge queue schema ---
 
@@ -222,6 +236,7 @@ const RepoConfigSchema = z.object({
   selectors: SelectorsSchema.default({}),
   agents: z.record(z.string()).default({}),
   workflow: z.string().optional(),
+  workflowByTriage: WorkflowByTriageSchema.optional(),
   mergeQueue: MergeQueueSchema.default({}),
 })
 

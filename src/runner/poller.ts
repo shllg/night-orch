@@ -18,7 +18,7 @@ import {
 } from '../environment/manager.js'
 import { createWorkerAdapter } from '../workers/factory.js'
 import { executeLoop } from '../loop/engine.js'
-import { resolveWorkflow } from '../loop/workflow.js'
+import { resolveWorkflow, type ResolvedWorkflow } from '../loop/workflow.js'
 import { publishPR } from '../publishing/publisher.js'
 import { MergeConflictError } from '../publishing/push.js'
 import { transitionLabels } from '../labels/manager.js'
@@ -225,92 +225,105 @@ export async function pollOnce(
                 let activeWorktreePath: string | null = null
 
                 try {
-                const resolvedRoles = resolveRoles(discoveredIssue.issue.labels, repoConfig.defaults)
-                const queuedRun = runManager.getLatestQueuedByIssue(repoConfig.repo, discoveredIssue.issue.number)
-                const replayableRun = queuedRun
-                  ? null
-                  : selectReplayableRun(runManager.getByRepoAndIssue(repoConfig.repo, discoveredIssue.issue.number))
-                const activeRun = queuedRun ?? replayableRun
-                const roles = activeRun
-                  ? {
-                      planner: coerceAgentName(activeRun.planner, resolvedRoles.planner),
-                      coder: coerceAgentName(activeRun.coder, resolvedRoles.coder),
-                      reviewer: coerceAgentName(activeRun.reviewer, resolvedRoles.reviewer),
-                    }
-                  : resolvedRoles
-                const slug = getOrPinSlug(db, repoConfig.repo, discoveredIssue.issue.number, discoveredIssue.issue.title)
-                const branch = branchName(repoConfig.branchPrefix, discoveredIssue.issue.number, slug)
-                const worktreePath = buildWorktreePath(config.storage.worktreeRoot, repoConfig.repo, discoveredIssue.issue.number)
-                activeWorktreePath = worktreePath
-
-                const run = activeRun ?? runManager.create({
-                  repo: repoConfig.repo,
-                  issueNumber: discoveredIssue.issue.number,
-                  issueTitle: discoveredIssue.issue.title,
-                  issueNodeId: discoveredIssue.issue.nodeId,
-                  planner: roles.planner,
-                  coder: roles.coder,
-                  reviewer: roles.reviewer,
-                })
-                const previousRunStatus = run.status
-                if (replayableRun) {
-                  logger.info(
-                    { repo: repoConfig.repo, issue: discoveredIssue.issue.number, runId: run.id, status: replayableRun.status },
-                    'Re-queuing active run for rediscovered ready issue',
+                  const workflow = resolveWorkflow(
+                    repoConfig,
+                    config,
+                    discoveredIssue.issue.labels,
+                    discoveredIssue.triage.level,
                   )
-                }
-                runId = run.id
-                runManager.update(run.id, {
-                  status: 'running',
-                  issueTitle: discoveredIssue.issue.title,
-                  branchName: branch,
-                  branchSlug: slug,
-                  worktreePath,
-                  phaseData: {
-                    ...(run.phaseData ?? {}),
+                  const repoConfigForRun = applyWorkflowAgentOverrides(repoConfig, workflow)
+                  const roleDefaults = applyWorkflowRoleDefaults(
+                    repoConfigForRun.defaults,
+                    workflow,
+                    repoConfigForRun,
+                    config,
+                  )
+                  const resolvedRoles = resolveRoles(discoveredIssue.issue.labels, roleDefaults)
+                  const queuedRun = runManager.getLatestQueuedByIssue(repoConfig.repo, discoveredIssue.issue.number)
+                  const replayableRun = queuedRun
+                    ? null
+                    : selectReplayableRun(runManager.getByRepoAndIssue(repoConfig.repo, discoveredIssue.issue.number))
+                  const activeRun = queuedRun ?? replayableRun
+                  const roles = activeRun
+                    ? {
+                        planner: coerceAgentName(activeRun.planner, resolvedRoles.planner),
+                        coder: coerceAgentName(activeRun.coder, resolvedRoles.coder),
+                        reviewer: coerceAgentName(activeRun.reviewer, resolvedRoles.reviewer),
+                      }
+                    : resolvedRoles
+                  const slug = getOrPinSlug(db, repoConfig.repo, discoveredIssue.issue.number, discoveredIssue.issue.title)
+                  const branch = branchName(repoConfig.branchPrefix, discoveredIssue.issue.number, slug)
+                  const worktreePath = buildWorktreePath(config.storage.worktreeRoot, repoConfig.repo, discoveredIssue.issue.number)
+                  activeWorktreePath = worktreePath
+
+                  const run = activeRun ?? runManager.create({
+                    repo: repoConfig.repo,
+                    issueNumber: discoveredIssue.issue.number,
+                    issueTitle: discoveredIssue.issue.title,
+                    issueNodeId: discoveredIssue.issue.nodeId,
+                    planner: roles.planner,
+                    coder: roles.coder,
+                    reviewer: roles.reviewer,
+                  })
+                  const previousRunStatus = run.status
+                  if (replayableRun) {
+                    logger.info(
+                      { repo: repoConfig.repo, issue: discoveredIssue.issue.number, runId: run.id, status: replayableRun.status },
+                      'Re-queuing active run for rediscovered ready issue',
+                    )
+                  }
+                  runId = run.id
+                  runManager.update(run.id, {
+                    status: 'running',
+                    issueTitle: discoveredIssue.issue.title,
+                    branchName: branch,
+                    branchSlug: slug,
+                    worktreePath,
+                    phaseData: {
+                      ...(run.phaseData ?? {}),
+                      issueRepo,
+                    },
+                    endedAt: null,
+                    lastError: null,
+                    blockReason: null,
+                  })
+
+                  // Label transition
+                  await transitionLabels(
+                    forge,
                     issueRepo,
-                  },
-                  endedAt: null,
-                  lastError: null,
-                  blockReason: null,
-                })
+                    discoveredIssue.issue.number,
+                    discoveredIssue.issue.labels,
+                    previousRunStatus,
+                    'running',
+                    buildLabelConfig(repoConfig, discoveredIssue.issue.labels),
+                  )
 
-                // Label transition
-                await transitionLabels(
-                  forge,
-                  issueRepo,
-                  discoveredIssue.issue.number,
-                  discoveredIssue.issue.labels,
-                  previousRunStatus,
-                  'running',
-                  buildLabelConfig(repoConfig, discoveredIssue.issue.labels),
-                )
+                  // Notify
+                  await notifier.dispatch(makePayload('run_started', repoConfig.repo, discoveredIssue.issue))
 
-                // Notify
-                await notifier.dispatch(makePayload('run_started', repoConfig.repo, discoveredIssue.issue))
+                  // Detect if this queued run needs a forced branch reset (e.g., after merge conflict)
+                  const forceReset = activeRun?.blockReason === 'merge_conflict'
 
-                // Detect if this queued run needs a forced branch reset (e.g., after merge conflict)
-                const forceReset = activeRun?.blockReason === 'merge_conflict'
+                  // Detect rebase mode from queued run's phaseData
+                  // If force-resetting, ignore stale rebase context — we're starting fresh
+                  const reactionType = activeRun?.phaseData?.reactionType
+                  const isRebaseRun = !forceReset && (reactionType === 'rebase' || reactionType === 'merge_conflict')
+                  const followupPromptFeedback = extractFollowupPromptFeedback(activeRun?.phaseData)
 
-                // Detect rebase mode from queued run's phaseData
-                // If force-resetting, ignore stale rebase context — we're starting fresh
-                const reactionType = activeRun?.phaseData?.reactionType
-                const isRebaseRun = !forceReset && (reactionType === 'rebase' || reactionType === 'merge_conflict')
-                const followupPromptFeedback = extractFollowupPromptFeedback(activeRun?.phaseData)
+                  // Check if prior run left tainted work that should be discarded
+                  // Never reset to base for rebase runs — we need the existing branch
+                  const planningMode = isPlanningIssue(discoveredIssue.issue.labels, repoConfigForRun)
+                  const resetToBase = forceReset || (!isRebaseRun && (planningMode || shouldResetBranch(runManager, repoConfig.repo, discoveredIssue.issue.number, run.id)))
 
-                // Check if prior run left tainted work that should be discarded
-                // Never reset to base for rebase runs — we need the existing branch
-                const planningMode = isPlanningIssue(discoveredIssue.issue.labels, repoConfig)
-                const resetToBase = forceReset || (!isRebaseRun && (planningMode || shouldResetBranch(runManager, repoConfig.repo, discoveredIssue.issue.number, run.id)))
-
-                // Create worktree
-                await worktreeManager.ensure({
-                  repoLocalPath: repoConfig.localPath,
-                  baseBranch: repoConfig.baseBranch,
-                  branchName: branch,
-                  worktreePath,
-                  resetToBase,
-                })
+                  // Create worktree
+                  await worktreeManager.ensure({
+                    repoLocalPath: repoConfig.localPath,
+                    baseBranch: repoConfig.baseBranch,
+                    branchName: branch,
+                    worktreePath,
+                    resetToBase,
+                  })
 
                 // Execute rebase if this is a rebase-queued run
                 if (isRebaseRun) {
@@ -419,27 +432,39 @@ export async function pollOnce(
                   logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number }, 'Rebase done but verify failed — entering code loop to fix')
                 }
 
-                if (repoConfig.environment) {
-                  const mode = resolveEnvironmentMode(discoveredIssue.issue.labels, repoConfig)
+                if (repoConfigForRun.environment) {
+                  const mode = resolveEnvironmentMode(discoveredIssue.issue.labels, repoConfigForRun)
                   envSetup = await setupEnvironment({
                     worktreePath,
                     issueNumber: discoveredIssue.issue.number,
-                    repoConfig,
+                    repoConfig: repoConfigForRun,
                     mode,
                     usedPorts: usedPortsInPass,
                   })
                 }
 
                 // Get worker adapters
-                const adjustedLimits = adjustLimitsForTriage(
-                  config.loop,
-                  config.workerProfiles[repoConfig.agents[roles.planner] ?? '']?.workerTimeoutSeconds ?? 1800,
-                  discoveredIssue.triage,
+                const plannerProfile = resolveWorkerProfileForAgent(
+                  roles.planner,
+                  repoConfigForRun,
+                  config,
+                )
+                const coderProfile = resolveWorkerProfileForAgent(
+                  roles.coder,
+                  repoConfigForRun,
+                  config,
+                )
+                const reviewerProfile = resolveWorkerProfileForAgent(
+                  roles.reviewer,
+                  repoConfigForRun,
+                  config,
                 )
 
-                const plannerProfile = config.workerProfiles[repoConfig.agents[roles.planner] ?? '']
-                const coderProfile = config.workerProfiles[repoConfig.agents[roles.coder] ?? '']
-                const reviewerProfile = config.workerProfiles[repoConfig.agents[roles.reviewer] ?? '']
+                const adjustedLimits = adjustLimitsForTriage(
+                  config.loop,
+                  plannerProfile?.workerTimeoutSeconds ?? 1800,
+                  discoveredIssue.triage,
+                )
 
                 if (!plannerProfile || !coderProfile || !reviewerProfile) {
                   throw new Error('Missing worker profiles for resolved roles')
@@ -451,7 +476,7 @@ export async function pollOnce(
                   issueRepo,
                   issueNumber: discoveredIssue.issue.number,
                   issue: discoveredIssue.issue,
-                  repoConfig,
+                  repoConfig: repoConfigForRun,
                   roles,
                   triageResult: discoveredIssue.triage,
                   adjustedLimits,
@@ -466,7 +491,7 @@ export async function pollOnce(
                   iteration: 1,
                   totalAgentPasses: 0,
                   estimatedCostUsd: 0,
-                  currentPhase: 'plan',
+                  currentPhase: workflow.steps[0]?.id ?? 'plan',
                   terminalStatus: 'running',
                   phaseHistory: [],
                   dryRun: false,
@@ -507,7 +532,7 @@ export async function pollOnce(
                         coder: createWorkerAdapter(coderProfile),
                         reviewer: createWorkerAdapter(reviewerProfile),
                       },
-                      workflow: resolveWorkflow(repoConfig, config, discoveredIssue.issue.labels, discoveredIssue.triage.level),
+                      workflow,
                       envOverrides: envSetup?.envOverrides ?? {},
                       metrics,
                       onAgentEvent: (event: AgentEvent) => observability.record(event),
@@ -570,7 +595,7 @@ export async function pollOnce(
                     coder: createWorkerAdapter(coderProfile),
                     reviewer: createWorkerAdapter(reviewerProfile),
                   },
-                  workflow: resolveWorkflow(repoConfig, config, discoveredIssue.issue.labels, discoveredIssue.triage.level),
+                  workflow,
                   envOverrides: envSetup?.envOverrides ?? {},
                   metrics,
                   onAgentEvent: (event) => observability.record(event),
@@ -1020,6 +1045,69 @@ function coerceAgentName(
     return value
   }
   return fallback
+}
+
+function applyWorkflowAgentOverrides(
+  repoConfig: Config['repos'][number],
+  workflow: ResolvedWorkflow,
+): Config['repos'][number] {
+  if (!workflow.agents || Object.keys(workflow.agents).length === 0) {
+    return repoConfig
+  }
+
+  return {
+    ...repoConfig,
+    agents: {
+      ...repoConfig.agents,
+      ...workflow.agents,
+    },
+  }
+}
+
+function applyWorkflowRoleDefaults(
+  repoDefaults: Config['repos'][number]['defaults'],
+  workflow: ResolvedWorkflow,
+  repoConfig: Config['repos'][number],
+  config: Config,
+): Config['repos'][number]['defaults'] {
+  if (!workflow.roles) {
+    return repoDefaults
+  }
+
+  const merged: Config['repos'][number]['defaults'] = {
+    ...repoDefaults,
+    ...workflow.roles,
+  }
+
+  for (const role of ['planner', 'coder', 'reviewer'] as const) {
+    const preferredAgent = merged[role]
+    if (canResolveAgent(preferredAgent, repoConfig, config)) continue
+    merged[role] = repoDefaults[role]
+  }
+
+  return merged
+}
+
+function canResolveAgent(
+  agent: Config['repos'][number]['defaults']['planner'],
+  repoConfig: Config['repos'][number],
+  config: Config,
+): boolean {
+  return resolveWorkerProfileForAgent(agent, repoConfig, config) !== null
+}
+
+function resolveWorkerProfileForAgent(
+  agent: Config['repos'][number]['defaults']['planner'],
+  repoConfig: Config['repos'][number],
+  config: Config,
+): Config['workerProfiles'][string] | null {
+  const mappedProfileName = repoConfig.agents[agent]
+  if (mappedProfileName) {
+    const mappedProfile = config.workerProfiles[mappedProfileName]
+    if (mappedProfile) return mappedProfile
+  }
+
+  return Object.values(config.workerProfiles).find((profile) => profile.type === agent) ?? null
 }
 
 function buildBlockReason(ctx: RunContext): string {

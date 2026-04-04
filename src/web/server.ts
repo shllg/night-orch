@@ -143,6 +143,10 @@ interface ProjectRepoSummary {
   }
   agents: Record<string, string>
   workflow?: string
+  workflowByTriage?: {
+    trivial?: string
+    standard?: string
+  }
   mergeQueue: {
     enabled: boolean
     batchSize: number
@@ -1113,6 +1117,7 @@ function sanitizeProjectRepo(repo: RepoConfig): ProjectRepoSummary {
     },
     agents: { ...repo.agents },
     ...(repo.workflow ? { workflow: repo.workflow } : {}),
+    ...(repo.workflowByTriage ? { workflowByTriage: { ...repo.workflowByTriage } } : {}),
     mergeQueue: {
       enabled: repo.mergeQueue.enabled,
       batchSize: repo.mergeQueue.batchSize,
