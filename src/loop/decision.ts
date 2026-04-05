@@ -1,6 +1,7 @@
 import type { RunContext, LoopDecision } from './types.js'
 import type { Config } from '../config/schema.js'
 import { isPlanningIssue } from '../planning/mode.js'
+import { costLimitRecoveryHint } from './cost.js'
 
 /**
  * Determine next action based on review verdict, verify results,
@@ -27,10 +28,15 @@ export function decide(
   const maxTotalPasses = ctx.adjustedLimits.maxTotalAgentPasses
   const requireReview = options.requireReview ?? true
 
-  // Rule 1: Cost limit
-  // (Caller should check before invoking, but double-check here)
+  // Rule 1: Per-run cost limit
+  // (Primary check lives in the engine via CostTracker.checkBudget which also
+  // covers the daily cap; this is a pure-function fallback that only sees the
+  // run-local estimate, so it can only catch the per-run overrun here.)
   if (ctx.estimatedCostUsd > securityConfig.maxCostPerRunUsd) {
-    return { action: 'block', reason: `Per-run cost limit exceeded: $${ctx.estimatedCostUsd.toFixed(2)} > $${securityConfig.maxCostPerRunUsd}`, blockReason: 'cost_limit' }
+    const reason =
+      `Per-run cost limit exceeded: $${ctx.estimatedCostUsd.toFixed(2)} >= ` +
+      `$${securityConfig.maxCostPerRunUsd.toFixed(2)}. ${costLimitRecoveryHint('per-run')}`
+    return { action: 'block', reason, blockReason: 'cost_limit' }
   }
 
   // Rule 2: Max total passes

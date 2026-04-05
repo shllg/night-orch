@@ -112,8 +112,8 @@ export function RunsPanel({
                     <span className="ml-auto text-[11px] text-base-content/65">{formatRunTime(run)}</span>
                   </div>
                   {run.lastError && (
-                    <p className="rounded-md border border-error/30 bg-error/10 px-2 py-1 text-xs text-error">
-                      {truncate(run.lastError, 220)}
+                    <p className="whitespace-pre-wrap rounded-md border border-error/30 bg-error/10 px-2 py-1 text-xs text-error">
+                      {truncate(run.lastError, 500)}
                     </p>
                   )}
                 </div>

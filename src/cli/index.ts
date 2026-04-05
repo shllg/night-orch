@@ -17,6 +17,7 @@ import { webCommand } from './commands/web.js'
 import { serveCommand } from './commands/serve.js'
 import { updateCommand } from './commands/update.js'
 import { continueCommand } from './commands/continue.js'
+import { costOverrideCommand } from './commands/cost-override.js'
 import {
   settingsListCommand,
   settingsSetCommand,
@@ -106,6 +107,20 @@ program
   .argument('<issue-number>', 'Issue number')
   .description('Queue a context-aware continue pass for blocked/review_ready/error work')
   .action((repo, issueNumber, _opts, cmd) => continueCommand(repo, issueNumber, cmd.parent?.opts()))
+
+program
+  .command('cost-override')
+  .argument('<repo>', 'Repository (owner/name)')
+  .argument('<issue-number>', 'Issue number')
+  .argument('[amount]', 'Override budget in USD (positive number). Omit with --clear.')
+  .option('--clear', 'Remove any existing cost override from the latest run')
+  .description(
+    'Grant a cost budget override to the latest run for an issue. ' +
+      'The override replaces the per-run cap and exempts the run from the daily cap.',
+  )
+  .action((repo, issueNumber, amount, opts, cmd) =>
+    costOverrideCommand(repo, issueNumber, amount, { ...cmd.parent?.opts(), ...opts }),
+  )
 
 program
   .command('cleanup')

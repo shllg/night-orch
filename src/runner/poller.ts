@@ -1177,7 +1177,11 @@ function buildBlockReason(ctx: RunContext): string {
 function blockReasonSummary(reason: BlockReason, ctx: RunContext): string {
   switch (reason) {
     case 'cost_limit':
-      return `Per-run cost limit exceeded: estimated cost is $${ctx.estimatedCostUsd.toFixed(4)}`
+      // The engine writes a precise, limit-specific message into stepOutputs.blockMessage
+      // (see src/loop/engine.ts cost check). This branch is only reached when that
+      // structured message is missing — keep it vague so we do not claim the per-run
+      // limit tripped when it might have been the daily cap.
+      return `Cost limit exceeded for this run (estimated run cost: $${ctx.estimatedCostUsd.toFixed(4)})`
     case 'iteration_limit':
       return `Maximum review iterations reached (${ctx.iteration}/${ctx.adjustedLimits.maxReviewIterations})`
     case 'agent_pass_limit':

@@ -16,6 +16,7 @@ import { up as migration011 } from './migrations/011-rebuild-issues-from-latest-
 import { up as migration012 } from './migrations/012-settings-overrides.js'
 import { up as migration013 } from './migrations/013-token-usage.js'
 import { up as migration014 } from './migrations/014-daily-run-usage.js'
+import { up as migration015 } from './migrations/015-run-cost-override.js'
 
 const MIGRATIONS = [
   { version: 1, name: '001-initial', up: migration001 },
@@ -32,6 +33,7 @@ const MIGRATIONS = [
   { version: 12, name: '012-settings-overrides', up: migration012 },
   { version: 13, name: '013-token-usage', up: migration013 },
   { version: 14, name: '014-daily-run-usage', up: migration014 },
+  { version: 15, name: '015-run-cost-override', up: migration015 },
 ]
 
 export function initDatabase(dbPath: string): Database.Database {

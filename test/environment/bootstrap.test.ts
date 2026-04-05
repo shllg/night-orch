@@ -17,8 +17,10 @@ vi.mock('../../src/utils/logger.js', () => ({
 }))
 
 import { execa } from 'execa'
+import { logger } from '../../src/utils/logger.js'
 
 const mockExeca = vi.mocked(execa)
+const mockLoggerError = vi.mocked(logger.error)
 
 describe('runBootstrapCommands', () => {
   beforeEach(() => {
@@ -128,15 +130,121 @@ describe('runBootstrapCommands', () => {
     )
   })
 
-  it('includes exit code and stderr in error message', async () => {
-    mockExeca.mockResolvedValue({ exitCode: 127, stderr: 'command not found' } as never)
+  it('includes exit code, stdout and stderr in error message when both streams are present', async () => {
+    mockExeca.mockResolvedValue({
+      exitCode: 127,
+      stdout: 'psql: command not found',
+      stderr: 'bin/rails aborted!',
+    } as never)
 
     const commands: BootstrapCommand[] = [
-      { command: 'nonexistent-cmd', when: 'always' },
+      { command: 'bundle exec rails db:prepare', when: 'always' },
     ]
 
     await expect(runBootstrapCommands('/tmp/wt', commands, 'shared')).rejects.toThrow(
-      /Exit code: 127/,
+      /Exit code: 127[\s\S]*stdout:[\s\S]*psql: command not found[\s\S]*stderr:[\s\S]*bin\/rails aborted!/,
     )
+  })
+
+  it('omits the stderr section when stderr is empty', async () => {
+    mockExeca.mockResolvedValue({
+      exitCode: 1,
+      stdout: 'some diagnostic',
+      stderr: '',
+    } as never)
+
+    const commands: BootstrapCommand[] = [
+      { command: 'rake build', when: 'always' },
+    ]
+
+    let caught: Error | null = null
+    try {
+      await runBootstrapCommands('/tmp/wt', commands, 'shared')
+    } catch (err) {
+      caught = err as Error
+    }
+
+    expect(caught).not.toBeNull()
+    expect(caught?.message).toContain('stdout:')
+    expect(caught?.message).toContain('some diagnostic')
+    expect(caught?.message).not.toContain('stderr:')
+  })
+
+  it('omits the stdout section when stdout is empty', async () => {
+    mockExeca.mockResolvedValue({
+      exitCode: 2,
+      stdout: '',
+      stderr: 'boom',
+    } as never)
+
+    const commands: BootstrapCommand[] = [
+      { command: 'rake test', when: 'always' },
+    ]
+
+    let caught: Error | null = null
+    try {
+      await runBootstrapCommands('/tmp/wt', commands, 'shared')
+    } catch (err) {
+      caught = err as Error
+    }
+
+    expect(caught).not.toBeNull()
+    expect(caught?.message).toContain('stderr:')
+    expect(caught?.message).toContain('boom')
+    expect(caught?.message).not.toContain('stdout:')
+  })
+
+  it('truncates stdout tail longer than 4000 characters and keeps the last 4000 chars', async () => {
+    const longStdout = 'x'.repeat(10000)
+    mockExeca.mockResolvedValue({
+      exitCode: 1,
+      stdout: longStdout,
+      stderr: '',
+    } as never)
+
+    const commands: BootstrapCommand[] = [
+      { command: 'bundle install', when: 'always' },
+    ]
+
+    let caught: Error | null = null
+    try {
+      await runBootstrapCommands('/tmp/wt', commands, 'shared')
+    } catch (err) {
+      caught = err as Error
+    }
+
+    expect(caught).not.toBeNull()
+    expect(caught?.message).toContain('... (truncated, 6000 chars omitted)')
+    expect(caught?.message.endsWith('x'.repeat(4000))).toBe(true)
+  })
+
+  it('logs full untruncated stdout and stderr on failure', async () => {
+    const longStdout = 'a'.repeat(10000)
+    const stderr = 'stderr line'
+    mockExeca.mockResolvedValue({
+      exitCode: 3,
+      stdout: longStdout,
+      stderr,
+    } as never)
+
+    const commands: BootstrapCommand[] = [
+      { command: 'noisy-command', when: 'always' },
+    ]
+
+    await expect(runBootstrapCommands('/tmp/wt', commands, 'shared')).rejects.toThrow(
+      /Bootstrap command failed/,
+    )
+
+    expect(mockLoggerError).toHaveBeenCalledTimes(1)
+    const loggedFields = mockLoggerError.mock.calls[0]?.[0] as {
+      command: string
+      exitCode: number
+      stdout: string
+      stderr: string
+    }
+    expect(loggedFields.command).toBe('noisy-command')
+    expect(loggedFields.exitCode).toBe(3)
+    expect(loggedFields.stdout).toBe(longStdout)
+    expect(loggedFields.stderr).toBe(stderr)
   })
 })

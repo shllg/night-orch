@@ -7,7 +7,7 @@ import { updateContext, recordPhase } from './context.js'
 import { commitChanges } from './commit.js'
 import { executeStep, type StepDependencies } from './step-executor.js'
 import { Checkpoint } from './checkpoint.js'
-import { CostTracker } from './cost.js'
+import { CostTracker, describeBudgetBlock, costLimitRecoveryHint } from './cost.js'
 import { logger } from '../utils/logger.js'
 import { utcIsoFromMs } from '../utils/time.js'
 import type Database from 'better-sqlite3'
@@ -65,22 +65,33 @@ export async function executeLoop(
     }
 
     // Cost check before worker steps
-    if (step.type === 'worker' && costTracker.isOverBudget(ctx.runId, config.security)) {
-      const blockMessage = `Per-run cost limit exceeded: $${ctx.estimatedCostUsd.toFixed(2)} > $${config.security.maxCostPerRunUsd.toFixed(2)}`
-      logger.warn({ runId: ctx.runId }, 'Cost limit exceeded')
-      return recordPhase(
-        updateContext(ctx, {
-          currentPhase: 'blocked',
-          terminalStatus: 'blocked',
-          blockReason: 'cost_limit',
-          stepOutputs: {
-            ...ctx.stepOutputs,
-            blockMessage,
+    if (step.type === 'worker') {
+      const budget = costTracker.checkBudget(ctx.runId, config.security)
+      if (budget.overBudget) {
+        const blockMessage = `${describeBudgetBlock(budget)}. ${costLimitRecoveryHint(budget.limit)}`
+        logger.warn(
+          {
+            runId: ctx.runId,
+            limit: budget.limit,
+            actualUsd: budget.actualUsd,
+            limitUsd: budget.limitUsd,
           },
-        }),
-        step.id,
-        'failure',
-      )
+          'Cost limit exceeded',
+        )
+        return recordPhase(
+          updateContext(ctx, {
+            currentPhase: 'blocked',
+            terminalStatus: 'blocked',
+            blockReason: 'cost_limit',
+            stepOutputs: {
+              ...ctx.stepOutputs,
+              blockMessage,
+            },
+          }),
+          step.id,
+          'failure',
+        )
+      }
     }
 
     // Execute step

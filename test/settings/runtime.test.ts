@@ -157,7 +157,8 @@ describe('runtime settings', () => {
 
   it('lists curated settings with base values by default', () => {
     const settings = listRuntimeSettings(baseConfig, db)
-    expect(settings).toHaveLength(5)
+    expect(settings).toHaveLength(6)
+    expect(settings.map((s) => s.key)).toContain('security.maxCostPerRunUsd')
 
     const poll = settings.find((setting) => setting.key === 'github.pollIntervalSeconds')
     expect(poll).toMatchObject({

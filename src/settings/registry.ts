@@ -3,6 +3,7 @@ import type { Config } from '../config/schema.js'
 export type SettingKey =
   | 'github.pollIntervalSeconds'
   | 'security.maxDailyCostUsd'
+  | 'security.maxCostPerRunUsd'
   | 'loop.maxReviewIterations'
   | 'loop.maxTotalAgentPasses'
   | 'observability.agentStreaming'
@@ -95,6 +96,36 @@ const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
       integer: false,
       min: 1,
       max: 10000,
+    }),
+    serialize: (value) => JSON.stringify(value),
+  },
+  'security.maxCostPerRunUsd': {
+    key: 'security.maxCostPerRunUsd',
+    label: 'Per-Run Cost Budget (USD)',
+    description: 'Maximum allowed spend for a single run before it is blocked.',
+    type: 'number',
+    min: 0.1,
+    max: 1000,
+    step: 0.5,
+    read: (config) => config.security.maxCostPerRunUsd,
+    apply: (config, value) => ({
+      ...config,
+      security: {
+        ...config.security,
+        maxCostPerRunUsd: value,
+      },
+    }),
+    parseInput: (raw) => parseNumberInput(raw, {
+      key: 'security.maxCostPerRunUsd',
+      integer: false,
+      min: 0.1,
+      max: 1000,
+    }),
+    parseStored: (raw) => parseStoredNumber(raw, {
+      key: 'security.maxCostPerRunUsd',
+      integer: false,
+      min: 0.1,
+      max: 1000,
     }),
     serialize: (value) => JSON.stringify(value),
   },

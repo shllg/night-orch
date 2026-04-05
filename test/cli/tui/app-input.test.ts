@@ -159,6 +159,15 @@ describe('tui action key dispatch', () => {
     })).toBe('deleteEntry')
     expect(resolveActionCommand({
       ...baseArgs,
+      input: '$',
+    })).toBe('costOverride')
+    expect(resolveActionCommand({
+      ...baseArgs,
+      activeTab: 'stats',
+      input: '$',
+    })).toBe('none')
+    expect(resolveActionCommand({
+      ...baseArgs,
       input: 'L',
     })).toBe('labelsInit')
     expect(resolveActionCommand({

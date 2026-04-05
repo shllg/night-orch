@@ -36,12 +36,15 @@ export async function runBootstrapCommands(
 
     if (result.exitCode !== 0) {
       logger.error(
-        { command: commandLabel, exitCode: result.exitCode, stderr: result.stderr },
+        {
+          command: commandLabel,
+          exitCode: result.exitCode,
+          stdout: result.stdout,
+          stderr: result.stderr,
+        },
         'Bootstrap command failed',
       )
-      throw new Error(
-        `Bootstrap command failed: ${commandLabel}\nExit code: ${result.exitCode}\n${result.stderr}`,
-      )
+      throw new Error(formatBootstrapFailure(commandLabel, result))
     }
 
     logger.debug({ command: commandLabel }, 'Bootstrap command succeeded')
@@ -50,4 +53,32 @@ export async function runBootstrapCommands(
 
 function formatCommand(command: CommandSpec): string {
   return Array.isArray(command) ? command.join(' ') : command
+}
+
+const OUTPUT_TAIL_LIMIT = 4000
+
+function formatBootstrapFailure(
+  commandLabel: string,
+  result: { exitCode?: number | undefined; stdout?: string; stderr?: string },
+): string {
+  const lines: string[] = [
+    `Bootstrap command failed: ${commandLabel}`,
+    `Exit code: ${result.exitCode}`,
+  ]
+  const stdoutTail = tail(result.stdout)
+  if (stdoutTail) {
+    lines.push('stdout:', stdoutTail)
+  }
+  const stderrTail = tail(result.stderr)
+  if (stderrTail) {
+    lines.push('stderr:', stderrTail)
+  }
+  return lines.join('\n')
+}
+
+function tail(output: string | undefined): string {
+  if (!output) return ''
+  if (output.length <= OUTPUT_TAIL_LIMIT) return output
+  const omitted = output.length - OUTPUT_TAIL_LIMIT
+  return `... (truncated, ${omitted} chars omitted)\n${output.slice(-OUTPUT_TAIL_LIMIT)}`
 }

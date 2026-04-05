@@ -9,6 +9,7 @@ import { CostTracker } from '../../loop/cost.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { CleanupEngine } from '../../ops/cleanup.js'
 import { RetryEngine } from '../../ops/retry.js'
+import { setIssueCostOverride } from '../../ops/cost-override.js'
 import { LabelsInitEngine, formatLabelsInitSummary } from '../../ops/labels-init.js'
 import { queueContinue } from '../../ops/continue.js'
 import { DeleteIssueEntryEngine } from '../../ops/delete-entry.js'
@@ -123,6 +124,31 @@ export function registerTools(): ToolDefinition[] {
           issueNumber: { type: 'number', description: 'Issue number to retry' },
           resetPlan: { type: 'boolean', description: 'Re-run planner instead of reusing existing plan', default: false },
           fresh: { type: 'boolean', description: 'Reset branch to base and re-implement from scratch (use after merge conflicts)', default: false },
+          authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
+        },
+        required: ['repo', 'issueNumber'],
+      },
+    },
+    {
+      name: 'night-orch-cost-override',
+      description:
+        'Grant a per-run cost budget override on the latest run for an issue. ' +
+        'When set, the override replaces the per-run cap and exempts the run from the daily cap. ' +
+        'Pass clear:true to remove an existing override.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          repo: { type: 'string', description: 'Repository (owner/name)' },
+          issueNumber: { type: 'number', description: 'Issue number' },
+          amountUsd: {
+            type: 'number',
+            description: 'Override budget in USD (positive number). Omit when clearing.',
+          },
+          clear: {
+            type: 'boolean',
+            description: 'Remove any existing cost override from the latest run for this issue.',
+            default: false,
+          },
           authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
         },
         required: ['repo', 'issueNumber'],
@@ -281,6 +307,11 @@ export async function handleToolCall(
       return handleCostReport(args as { days?: number }, runtimeDeps)
     case 'night-orch-retry':
       return handleRetry(args as { repo: string; issueNumber: number; resetPlan?: boolean; fresh?: boolean; authToken?: string }, runtimeDeps)
+    case 'night-orch-cost-override':
+      return handleCostOverride(
+        args as { repo: string; issueNumber: number; amountUsd?: number; clear?: boolean; authToken?: string },
+        runtimeDeps,
+      )
     case 'night-orch-sync':
       return handleSync(args as { dryRun?: boolean; authToken?: string }, runtimeDeps)
     case 'night-orch-cleanup':
@@ -634,6 +665,32 @@ async function handleRetry(
   })
   const suffix = fresh ? ' (fresh start — branch will be reset)' : ''
   return { success: true, message: `Retry queued for ${args.repo}#${args.issueNumber}${suffix}` }
+}
+
+async function handleCostOverride(
+  args: { repo: string; issueNumber: number; amountUsd?: number; clear?: boolean; authToken?: string },
+  deps: MCPDependencies,
+): Promise<unknown> {
+  assertMcpMutationAuth(args.authToken, deps)
+  const clear = args.clear ?? false
+  if (clear && args.amountUsd !== undefined) {
+    throw new Error('cost-override: cannot pass amountUsd together with clear:true')
+  }
+  if (!clear && (typeof args.amountUsd !== 'number' || !Number.isFinite(args.amountUsd) || args.amountUsd <= 0)) {
+    throw new Error('cost-override: amountUsd must be a positive finite number (or set clear:true to remove)')
+  }
+  const overrideUsd = clear ? null : (args.amountUsd as number)
+  const result = setIssueCostOverride(deps.db, args.repo, args.issueNumber, overrideUsd)
+  return {
+    success: true,
+    runId: result.runId,
+    previousOverrideUsd: result.previousOverrideUsd,
+    overrideUsd: result.overrideUsd,
+    message:
+      overrideUsd === null
+        ? `Cleared cost override for ${args.repo}#${args.issueNumber} (run ${result.runId})`
+        : `Set cost override for ${args.repo}#${args.issueNumber} (run ${result.runId}) to $${overrideUsd.toFixed(2)}; daily cap bypassed for this run.`,
+  }
 }
 
 async function handleSync(args: { dryRun?: boolean; authToken?: string }, deps: MCPDependencies): Promise<unknown> {

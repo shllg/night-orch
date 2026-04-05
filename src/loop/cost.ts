@@ -109,15 +109,106 @@ export class CostTracker {
     }
   }
 
-  isOverBudget(runId: string, limits: Config['security']): boolean {
-    const dailyCost = this.getDailyCost()
-    if (dailyCost >= limits.maxDailyCostUsd) return true
-
+  /**
+   * Evaluate whether a run has crossed any spend limit.
+   * Returns a discriminated status so callers can build messages that name
+   * the specific limit that tripped (daily vs per-run) instead of guessing.
+   *
+   * A non-null `cost_budget_override_usd` on the run row overrides the
+   * per-run cap with the stored value AND exempts the run from the daily
+   * cap. Operators grant this override to push a specific run through when
+   * they accept the extra spend.
+   */
+  checkBudget(runId: string, limits: Config['security']): BudgetStatus {
+    const override = this.getRunBudgetOverride(runId)
     const runCost = this.getRunCost(runId)
-    if (runCost >= limits.maxCostPerRunUsd) return true
 
-    return false
+    const effectivePerRunLimit = override ?? limits.maxCostPerRunUsd
+    if (runCost >= effectivePerRunLimit) {
+      return {
+        overBudget: true,
+        limit: 'per-run',
+        actualUsd: runCost,
+        limitUsd: effectivePerRunLimit,
+      }
+    }
+
+    // Override grants a one-time bypass of the daily cap so a stuck run can
+    // make forward progress even if the day has already blown past the limit.
+    if (override !== null) {
+      return { overBudget: false }
+    }
+
+    const dailyCost = this.getDailyCost()
+    if (dailyCost >= limits.maxDailyCostUsd) {
+      return {
+        overBudget: true,
+        limit: 'daily',
+        actualUsd: dailyCost,
+        limitUsd: limits.maxDailyCostUsd,
+      }
+    }
+
+    return { overBudget: false }
   }
+
+  /**
+   * Read the cost budget override for a run, or null if no override is set.
+   */
+  getRunBudgetOverride(runId: string): number | null {
+    const row = this.db
+      .prepare('SELECT cost_budget_override_usd FROM runs WHERE id = ?')
+      .get(runId) as { cost_budget_override_usd: number | null } | undefined
+    if (!row) return null
+    return row.cost_budget_override_usd ?? null
+  }
+
+  /**
+   * Grant a per-run cost override. Pass null to clear it.
+   * When set, the value becomes the run's per-run cap and the daily cap
+   * is bypassed for this run.
+   */
+  setRunBudgetOverride(runId: string, overrideUsd: number | null): void {
+    if (overrideUsd !== null) {
+      if (!Number.isFinite(overrideUsd) || overrideUsd <= 0) {
+        throw new Error(`cost budget override must be a positive finite number, got ${overrideUsd}`)
+      }
+    }
+    this.db
+      .prepare('UPDATE runs SET cost_budget_override_usd = ? WHERE id = ?')
+      .run(overrideUsd, runId)
+  }
+}
+
+export type BudgetStatus =
+  | { overBudget: false }
+  | {
+      overBudget: true
+      limit: 'daily' | 'per-run'
+      actualUsd: number
+      limitUsd: number
+    }
+
+/** Human-readable message naming the specific limit that tripped. */
+export function describeBudgetBlock(
+  status: Extract<BudgetStatus, { overBudget: true }>,
+): string {
+  const label = status.limit === 'daily' ? 'Daily cost limit' : 'Per-run cost limit'
+  return `${label} exceeded: $${status.actualUsd.toFixed(2)} >= $${status.limitUsd.toFixed(2)}`
+}
+
+/** Actionable recovery hint shown alongside the block reason. */
+export function costLimitRecoveryHint(limit: 'daily' | 'per-run'): string {
+  if (limit === 'daily') {
+    return (
+      'Raise `security.maxDailyCostUsd` in Settings (TUI/web/CLI `night-orch settings set`), ' +
+      'grant this run a budget override, or wait until 00:00 UTC for the daily counter to reset.'
+    )
+  }
+  return (
+    'Raise `security.maxCostPerRunUsd` in Settings (TUI/web/CLI `night-orch settings set`) ' +
+    'or grant this run a budget override to continue.'
+  )
 }
 
 function normalizeTokenUsage(tokenUsage: TokenUsageInput | undefined): TokenUsageTotals {

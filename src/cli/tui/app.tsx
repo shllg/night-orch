@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Box, Text, useApp, useInput, useStdout } from 'ink'
 import type { Config } from '../../config/schema.js'
 import { RetryEngine } from '../../ops/retry.js'
+import { setIssueCostOverride } from '../../ops/cost-override.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { CleanupEngine } from '../../ops/cleanup.js'
 import { LabelsInitEngine, formatLabelsInitSummary } from '../../ops/labels-init.js'
@@ -165,6 +166,7 @@ export type TuiActionCommand =
   | 'continue'
   | 'rebase'
   | 'deleteEntry'
+  | 'costOverride'
   | 'cleanupArm'
   | 'cleanupConfirm'
   | 'standaloneMessage'
@@ -215,6 +217,7 @@ export function resolveActionCommand(args: ResolveActionCommandInput): TuiAction
   if (args.input === 'c') return 'continue'
   if (args.input === '_') return 'rebase'
   if (args.input === 'X') return 'deleteEntry'
+  if (args.input === '$') return 'costOverride'
   return 'none'
 }
 
@@ -763,6 +766,28 @@ export function App({
     })
   }, [config, db, dryRun, runAction, selectedIssue])
 
+  const runCostOverride = useCallback(async () => {
+    if (!selectedIssue) {
+      setStatusLine('No issue selected')
+      return
+    }
+    await runAction('cost-override', async () => {
+      // TUI grants a deterministic headroom boost: double the current per-run
+      // cap. For a bespoke amount, use CLI `night-orch cost-override` or MCP.
+      const override = Math.max(
+        config.security.maxCostPerRunUsd * 2,
+        (selectedIssue.estimated_cost_usd ?? 0) + config.security.maxCostPerRunUsd,
+      )
+      const result = setIssueCostOverride(
+        db,
+        selectedIssue.repo,
+        selectedIssue.issue_number,
+        override,
+      )
+      return `${selectedIssue.repo}#${selectedIssue.issue_number}: cost override $${override.toFixed(2)} (daily cap bypassed for run ${result.runId})`
+    })
+  }, [config, db, runAction, selectedIssue])
+
   const runSetSetting = useCallback(async (nextValue: string | number | boolean) => {
     const target = runtimeSettings[selectedSettingIndex]
     if (!target) {
@@ -1099,6 +1124,10 @@ export function App({
     }
     if (actionCommand === 'deleteEntry') {
       void runDeleteEntry()
+      return
+    }
+    if (actionCommand === 'costOverride') {
+      void runCostOverride()
       return
     }
     if (actionCommand === 'none') {

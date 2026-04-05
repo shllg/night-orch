@@ -61,7 +61,8 @@ describe('MCP Tools', () => {
     expect(names).toContain('night-orch-stream-events')
     expect(names).toContain('night-orch-rebase')
     expect(names).toContain('night-orch-continue')
-    expect(tools.length).toBe(18)
+    expect(names).toContain('night-orch-cost-override')
+    expect(tools.length).toBe(19)
   })
 
   it('settings tools list/set/clear runtime overrides', async () => {

@@ -39,6 +39,7 @@ Curated runtime keys:
 | --- | --- | --- |
 | `github.pollIntervalSeconds` | integer | `5..3600` |
 | `security.maxDailyCostUsd` | number | `1..10000` |
+| `security.maxCostPerRunUsd` | number | `0.1..1000` |
 | `loop.maxReviewIterations` | integer | `1..20` |
 | `loop.maxTotalAgentPasses` | integer | `1..50` |
 | `observability.agentStreaming` | boolean | `true`/`false` |

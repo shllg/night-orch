@@ -282,7 +282,7 @@ function FocusedIssueView({
                 <Text color={colorForCostUsd(selectedIssue.estimated_cost_usd)}>${(selectedIssue.estimated_cost_usd ?? 0).toFixed(2)}</Text>
               </Text>
               <Text dimColor>updated {formatTime(selectedIssue.updated_at)}</Text>
-              {selectedIssue.last_error && <Text color="red">error: {truncate(selectedIssue.last_error, 90)}</Text>}
+              {selectedIssue.last_error && <Text color="red">error: {truncate(selectedIssue.last_error, 500)}</Text>}
               <Box marginTop={1} flexDirection="column">
                 <Text bold>Runs ({selectedIssue.runs.length})</Text>
                 {selectedIssue.runs.slice(0, 10).map((run) => (

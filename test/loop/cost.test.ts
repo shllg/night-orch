@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { CostTracker } from '../../src/loop/cost.js'
+import { CostTracker, describeBudgetBlock, costLimitRecoveryHint } from '../../src/loop/cost.js'
 import { initDatabase } from '../../src/state/db.js'
 import { RunManager } from '../../src/state/runs.js'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -114,33 +114,163 @@ describe('CostTracker', () => {
     }
   })
 
-  it('detects per-run budget exceeded', () => {
+  it('checkBudget detects per-run budget exceeded and reports per-run limit', () => {
     costTracker.recordCost(runId, 11.0)
-    expect(costTracker.isOverBudget(runId, {
+    const status = costTracker.checkBudget(runId, {
       maxDailyCostUsd: 50,
       maxCostPerRunUsd: 10,
       maxChangedFiles: 50,
       maxChangedLines: 5000,
-    })).toBe(true)
+    })
+    expect(status.overBudget).toBe(true)
+    if (status.overBudget) {
+      expect(status.limit).toBe('per-run')
+      expect(status.actualUsd).toBe(11.0)
+      expect(status.limitUsd).toBe(10)
+    }
   })
 
-  it('detects daily budget exceeded', () => {
-    costTracker.recordCost(runId, 51.0)
-    expect(costTracker.isOverBudget(runId, {
+  it('checkBudget detects daily budget exceeded and reports daily limit', () => {
+    // Put the run at $0 so the per-run check does not pre-empt the daily one.
+    // We need daily cost to grow without the run cost — seed daily_costs directly.
+    const today = new Date().toISOString().split('T')[0]
+    db.prepare(
+      `INSERT INTO daily_costs (date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens)
+       VALUES (?, ?, 0, 0, 0)`,
+    ).run(today, 51.0)
+
+    const status = costTracker.checkBudget(runId, {
       maxDailyCostUsd: 50,
       maxCostPerRunUsd: 100,
       maxChangedFiles: 50,
       maxChangedLines: 5000,
-    })).toBe(true)
+    })
+    expect(status.overBudget).toBe(true)
+    if (status.overBudget) {
+      expect(status.limit).toBe('daily')
+      expect(status.actualUsd).toBe(51.0)
+      expect(status.limitUsd).toBe(50)
+    }
   })
 
-  it('under budget returns false', () => {
-    costTracker.recordCost(runId, 5.0)
-    expect(costTracker.isOverBudget(runId, {
+  it('checkBudget reports per-run limit first when both caps are tripped', () => {
+    costTracker.recordCost(runId, 11.0)
+    const today = new Date().toISOString().split('T')[0]
+    db.prepare(
+      `UPDATE daily_costs SET total_cost_usd = 200 WHERE date = ?`,
+    ).run(today)
+
+    const status = costTracker.checkBudget(runId, {
       maxDailyCostUsd: 50,
       maxCostPerRunUsd: 10,
       maxChangedFiles: 50,
       maxChangedLines: 5000,
-    })).toBe(false)
+    })
+    expect(status.overBudget).toBe(true)
+    if (status.overBudget) {
+      // Per-run tripped first — it is the more specific and actionable signal.
+      expect(status.limit).toBe('per-run')
+    }
+  })
+
+  it('checkBudget returns under-budget when both caps have headroom', () => {
+    costTracker.recordCost(runId, 5.0)
+    const status = costTracker.checkBudget(runId, {
+      maxDailyCostUsd: 50,
+      maxCostPerRunUsd: 10,
+      maxChangedFiles: 50,
+      maxChangedLines: 5000,
+    })
+    expect(status.overBudget).toBe(false)
+  })
+
+  it('describeBudgetBlock names the daily limit when that is what tripped', () => {
+    const msg = describeBudgetBlock({
+      overBudget: true,
+      limit: 'daily',
+      actualUsd: 30.7455,
+      limitUsd: 25,
+    })
+    expect(msg).toBe('Daily cost limit exceeded: $30.75 >= $25.00')
+  })
+
+  it('describeBudgetBlock names the per-run limit when that is what tripped', () => {
+    const msg = describeBudgetBlock({
+      overBudget: true,
+      limit: 'per-run',
+      actualUsd: 8.12,
+      limitUsd: 8,
+    })
+    expect(msg).toBe('Per-run cost limit exceeded: $8.12 >= $8.00')
+  })
+
+  it('costLimitRecoveryHint mentions the matching setting key', () => {
+    expect(costLimitRecoveryHint('daily')).toContain('security.maxDailyCostUsd')
+    expect(costLimitRecoveryHint('per-run')).toContain('security.maxCostPerRunUsd')
+  })
+
+  describe('run cost budget override', () => {
+    const limits = {
+      maxDailyCostUsd: 25,
+      maxCostPerRunUsd: 8,
+      maxChangedFiles: 50,
+      maxChangedLines: 5000,
+    }
+
+    it('returns null override when none is set', () => {
+      expect(costTracker.getRunBudgetOverride(runId)).toBeNull()
+    })
+
+    it('lets a run with an override exceed the original per-run cap', () => {
+      costTracker.recordCost(runId, 9.0)
+      expect(costTracker.checkBudget(runId, limits).overBudget).toBe(true)
+
+      costTracker.setRunBudgetOverride(runId, 15)
+      const status = costTracker.checkBudget(runId, limits)
+      expect(status.overBudget).toBe(false)
+      expect(costTracker.getRunBudgetOverride(runId)).toBe(15)
+    })
+
+    it('enforces the override as the new per-run cap', () => {
+      costTracker.setRunBudgetOverride(runId, 10)
+      costTracker.recordCost(runId, 11)
+      const status = costTracker.checkBudget(runId, limits)
+      expect(status.overBudget).toBe(true)
+      if (status.overBudget) {
+        expect(status.limit).toBe('per-run')
+        expect(status.limitUsd).toBe(10)
+      }
+    })
+
+    it('bypasses the daily cap for runs with an override', () => {
+      const today = new Date().toISOString().split('T')[0]
+      db.prepare(
+        `INSERT INTO daily_costs (date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens)
+         VALUES (?, ?, 0, 0, 0)`,
+      ).run(today, 200)
+
+      // Without override — blocked by daily cap.
+      expect(costTracker.checkBudget(runId, limits).overBudget).toBe(true)
+
+      // With override — under its own per-run cap and daily check is skipped.
+      costTracker.setRunBudgetOverride(runId, 15)
+      expect(costTracker.checkBudget(runId, limits).overBudget).toBe(false)
+    })
+
+    it('clears the override when set to null', () => {
+      costTracker.setRunBudgetOverride(runId, 20)
+      expect(costTracker.getRunBudgetOverride(runId)).toBe(20)
+      costTracker.setRunBudgetOverride(runId, null)
+      expect(costTracker.getRunBudgetOverride(runId)).toBeNull()
+    })
+
+    it('rejects non-positive or non-finite override values', () => {
+      expect(() => costTracker.setRunBudgetOverride(runId, 0)).toThrow(/positive finite/)
+      expect(() => costTracker.setRunBudgetOverride(runId, -5)).toThrow(/positive finite/)
+      expect(() => costTracker.setRunBudgetOverride(runId, Number.NaN)).toThrow(/positive finite/)
+      expect(() => costTracker.setRunBudgetOverride(runId, Number.POSITIVE_INFINITY)).toThrow(
+        /positive finite/,
+      )
+    })
   })
 })
