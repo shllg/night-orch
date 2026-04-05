@@ -382,6 +382,173 @@ describe('startWebServer', () => {
     })
   })
 
+  it('raises, reports, and clears the daily cost cap override via web APIs', async () => {
+    server = await startWebServer(
+      deps,
+      {
+        host: '127.0.0.1',
+        port: 0,
+        frontendDistPath: frontendDir,
+      },
+    )
+
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Unexpected address type')
+    }
+    baseUrl = `http://127.0.0.1:${address.port}`
+    const mutationToken = await getMutationToken(baseUrl)
+
+    // Baseline dashboard: override is null, effective == base.
+    const before = await fetch(`${baseUrl}/api/dashboard`)
+    const beforePayload = await before.json() as {
+      cost: { dailyBudgetUsd: number; dailyBudgetOverrideUsd: number | null; effectiveDailyBudgetUsd: number }
+    }
+    expect(beforePayload.cost.dailyBudgetUsd).toBe(50)
+    expect(beforePayload.cost.dailyBudgetOverrideUsd).toBeNull()
+    expect(beforePayload.cost.effectiveDailyBudgetUsd).toBe(50)
+
+    // Raise today's cap.
+    const setResponse = await fetch(`${baseUrl}/api/operations/daily-cost-override/set`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+        [WEB_AUTH_TOKEN_HEADER]: mutationToken,
+      },
+      body: JSON.stringify({ amountUsd: 250 }),
+    })
+    expect(setResponse.status).toBe(200)
+    await expect(setResponse.json()).resolves.toMatchObject({
+      success: true,
+      overrideUsd: 250,
+      previousUsd: null,
+    })
+
+    // Dashboard now reports the override.
+    const after = await fetch(`${baseUrl}/api/dashboard`)
+    const afterPayload = await after.json() as {
+      cost: { dailyBudgetOverrideUsd: number | null; effectiveDailyBudgetUsd: number }
+    }
+    expect(afterPayload.cost.dailyBudgetOverrideUsd).toBe(250)
+    expect(afterPayload.cost.effectiveDailyBudgetUsd).toBe(250)
+
+    // Clear the override.
+    const clearResponse = await fetch(`${baseUrl}/api/operations/daily-cost-override/clear`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+        [WEB_AUTH_TOKEN_HEADER]: mutationToken,
+      },
+      body: JSON.stringify({}),
+    })
+    expect(clearResponse.status).toBe(200)
+    await expect(clearResponse.json()).resolves.toMatchObject({
+      success: true,
+      overrideUsd: null,
+      previousUsd: 250,
+    })
+
+    const finalDashboard = await fetch(`${baseUrl}/api/dashboard`)
+    const finalPayload = await finalDashboard.json() as {
+      cost: { dailyBudgetOverrideUsd: number | null; effectiveDailyBudgetUsd: number }
+    }
+    expect(finalPayload.cost.dailyBudgetOverrideUsd).toBeNull()
+    expect(finalPayload.cost.effectiveDailyBudgetUsd).toBe(50)
+  })
+
+  it('rejects invalid daily cost override amounts', async () => {
+    server = await startWebServer(
+      deps,
+      {
+        host: '127.0.0.1',
+        port: 0,
+        frontendDistPath: frontendDir,
+      },
+    )
+
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Unexpected address type')
+    }
+    baseUrl = `http://127.0.0.1:${address.port}`
+    const mutationToken = await getMutationToken(baseUrl)
+
+    const invalid = await fetch(`${baseUrl}/api/operations/daily-cost-override/set`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+        [WEB_AUTH_TOKEN_HEADER]: mutationToken,
+      },
+      body: JSON.stringify({ amountUsd: -10 }),
+    })
+    expect(invalid.status).toBe(400)
+    await expect(invalid.json()).resolves.toMatchObject({
+      error: expect.stringContaining('positive finite'),
+    })
+  })
+
+  it('sets and clears a per-issue cost override via web APIs', async () => {
+    const runManager = new RunManager(db)
+    runManager.create({
+      repo: 'org/repo',
+      issueNumber: 77,
+      issueNodeId: 'node-77',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+
+    server = await startWebServer(
+      deps,
+      {
+        host: '127.0.0.1',
+        port: 0,
+        frontendDistPath: frontendDir,
+      },
+    )
+
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Unexpected address type')
+    }
+    baseUrl = `http://127.0.0.1:${address.port}`
+    const mutationToken = await getMutationToken(baseUrl)
+
+    const setResponse = await fetch(`${baseUrl}/api/operations/cost-override/set`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+        [WEB_AUTH_TOKEN_HEADER]: mutationToken,
+      },
+      body: JSON.stringify({ repo: 'org/repo', issueNumber: 77, amountUsd: 42 }),
+    })
+    expect(setResponse.status).toBe(200)
+    await expect(setResponse.json()).resolves.toMatchObject({
+      success: true,
+      overrideUsd: 42,
+    })
+
+    const clearResponse = await fetch(`${baseUrl}/api/operations/cost-override/clear`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+        [WEB_AUTH_TOKEN_HEADER]: mutationToken,
+      },
+      body: JSON.stringify({ repo: 'org/repo', issueNumber: 77 }),
+    })
+    expect(clearResponse.status).toBe(200)
+    await expect(clearResponse.json()).resolves.toMatchObject({
+      success: true,
+      overrideUsd: null,
+      previousOverrideUsd: 42,
+    })
+  })
+
   it('dashboard includes tracked issues that do not have run rows yet', async () => {
     db.prepare(
       `INSERT INTO issues (

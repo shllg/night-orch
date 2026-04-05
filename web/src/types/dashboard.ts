@@ -165,6 +165,8 @@ export interface DashboardSnapshot {
   runs: RunListResult
   cost: {
     dailyBudgetUsd: number
+    dailyBudgetOverrideUsd: number | null
+    effectiveDailyBudgetUsd: number
   }
   build?: {
     version: string

@@ -10,6 +10,11 @@ interface DashboardMetricsProps {
 
 export function DashboardMetrics({ snapshot }: DashboardMetricsProps): ReactElement {
   const usageFirst = snapshot?.stats.cost.model === 'subscription'
+  const dailyOverride = snapshot?.cost.dailyBudgetOverrideUsd ?? null
+  const effectiveBudget = snapshot?.cost.effectiveDailyBudgetUsd ?? snapshot?.cost.dailyBudgetUsd ?? 0
+  const budgetLabel = dailyOverride !== null
+    ? `Budget $${formatMoney(effectiveBudget)} (override)`
+    : `Budget $${formatMoney(snapshot?.cost.dailyBudgetUsd ?? 0)}`
 
   return (
     <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
@@ -21,7 +26,7 @@ export function DashboardMetrics({ snapshot }: DashboardMetricsProps): ReactElem
         accent="emerald"
         subValue={usageFirst
           ? `Est. $${formatMoney(snapshot?.status.dailyCostUsd ?? 0)} today`
-          : `Budget $${formatMoney(snapshot?.cost.dailyBudgetUsd ?? 0)}`}
+          : budgetLabel}
       />
       <MetricCard
         label="24h Throughput"

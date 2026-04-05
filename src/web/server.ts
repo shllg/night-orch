@@ -654,6 +654,92 @@ async function handleApiRequest(
     return
   }
 
+  if (method === 'POST' && pathname === '/api/operations/daily-cost-override/set') {
+    const body = await readJsonBody(req)
+    const amountUsd = toFiniteNumber(body['amountUsd'])
+    if (amountUsd === null || amountUsd <= 0) {
+      writeJson(res, 400, { error: 'amountUsd must be a positive finite number' })
+      return
+    }
+
+    try {
+      const result = await handleToolCall(
+        'night-orch-daily-cost-override',
+        withMcpMutationAuth({ amountUsd }, security),
+        runtimeDeps,
+      )
+      writeJson(res, 200, result)
+    } catch (err) {
+      writeJson(res, 400, { error: (err as Error).message })
+    }
+    return
+  }
+
+  if (method === 'POST' && pathname === '/api/operations/daily-cost-override/clear') {
+    try {
+      const result = await handleToolCall(
+        'night-orch-daily-cost-override',
+        withMcpMutationAuth({ clear: true }, security),
+        runtimeDeps,
+      )
+      writeJson(res, 200, result)
+    } catch (err) {
+      writeJson(res, 400, { error: (err as Error).message })
+    }
+    return
+  }
+
+  if (method === 'POST' && pathname === '/api/operations/cost-override/set') {
+    const body = await readJsonBody(req)
+    const repo = toNonEmptyString(body['repo'])
+    const issueNumber = toBoundedInt(body['issueNumber'], NaN, 1, Number.MAX_SAFE_INTEGER)
+    const amountUsd = toFiniteNumber(body['amountUsd'])
+
+    if (!repo || Number.isNaN(issueNumber)) {
+      writeJson(res, 400, { error: 'repo and issueNumber are required' })
+      return
+    }
+    if (amountUsd === null || amountUsd <= 0) {
+      writeJson(res, 400, { error: 'amountUsd must be a positive finite number' })
+      return
+    }
+
+    try {
+      const result = await handleToolCall(
+        'night-orch-cost-override',
+        withMcpMutationAuth({ repo, issueNumber, amountUsd }, security),
+        runtimeDeps,
+      )
+      writeJson(res, 200, result)
+    } catch (err) {
+      writeJson(res, 400, { error: (err as Error).message })
+    }
+    return
+  }
+
+  if (method === 'POST' && pathname === '/api/operations/cost-override/clear') {
+    const body = await readJsonBody(req)
+    const repo = toNonEmptyString(body['repo'])
+    const issueNumber = toBoundedInt(body['issueNumber'], NaN, 1, Number.MAX_SAFE_INTEGER)
+
+    if (!repo || Number.isNaN(issueNumber)) {
+      writeJson(res, 400, { error: 'repo and issueNumber are required' })
+      return
+    }
+
+    try {
+      const result = await handleToolCall(
+        'night-orch-cost-override',
+        withMcpMutationAuth({ repo, issueNumber, clear: true }, security),
+        runtimeDeps,
+      )
+      writeJson(res, 200, result)
+    } catch (err) {
+      writeJson(res, 400, { error: (err as Error).message })
+    }
+    return
+  }
+
   if (method === 'POST' && pathname === '/api/operations/settings/set') {
     const body = await readJsonBody(req)
     const key = toNonEmptyString(body['key'])
@@ -1085,6 +1171,15 @@ function toNonEmptyString(value: unknown): string | null {
   }
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+function toFiniteNumber(value: unknown): number | null {
+  const parsed = typeof value === 'number'
+    ? value
+    : typeof value === 'string'
+      ? Number.parseFloat(value)
+      : NaN
+  return Number.isFinite(parsed) ? parsed : null
 }
 
 async function buildDashboardSnapshot(deps: MCPDependencies): Promise<DashboardSnapshot> {

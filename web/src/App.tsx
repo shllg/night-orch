@@ -1,5 +1,6 @@
 import { type FormEvent, type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { BudgetOverridesPanel } from './components/BudgetOverridesPanel.js'
 import { DashboardHeader } from './components/DashboardHeader.js'
 import { DashboardMetrics } from './components/DashboardMetrics.js'
 import { OperationsPanel } from './components/OperationsPanel.js'
@@ -61,6 +62,12 @@ export function App(): ReactElement {
   const [webMutationToken, setWebMutationToken] = useState<string | null>(null)
   const [operationsEnabled, setOperationsEnabled] = useState(true)
   const [settingsDrafts, setSettingsDrafts] = useState<Record<string, string>>({})
+  const [dailyOverrideDraft, setDailyOverrideDraft] = useState('')
+  const [costOverrideDraft, setCostOverrideDraft] = useState<{ repo: string; issueNumber: string; amount: string }>({
+    repo: '',
+    issueNumber: '',
+    amount: '',
+  })
 
   const [retryRepo, setRetryRepo] = useState('')
   const [retryIssueNumber, setRetryIssueNumber] = useState('')
@@ -597,6 +604,67 @@ export function App(): ReactElement {
     )
   }, [runOperation])
 
+  const submitDailyCostOverride = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const amount = Number.parseFloat(dailyOverrideDraft)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setErrorMessage('Daily override requires a positive number (USD)')
+      return
+    }
+
+    await runOperation(
+      'daily-cost-override:set',
+      '/api/operations/daily-cost-override/set',
+      { amountUsd: amount },
+      `Raised today's daily cap to $${amount.toFixed(2)}`,
+    )
+  }, [dailyOverrideDraft, runOperation])
+
+  const clearDailyCostOverride = useCallback(async () => {
+    await runOperation(
+      'daily-cost-override:clear',
+      '/api/operations/daily-cost-override/clear',
+      {},
+      "Cleared today's daily cap override",
+    )
+  }, [runOperation])
+
+  const submitCostOverride = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const issueNumber = Number.parseInt(costOverrideDraft.issueNumber, 10)
+    const amount = Number.parseFloat(costOverrideDraft.amount)
+    if (!costOverrideDraft.repo || !Number.isFinite(issueNumber) || issueNumber <= 0) {
+      setErrorMessage('Per-issue override requires a repo and a positive issue number')
+      return
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setErrorMessage('Per-issue override requires a positive amount (USD)')
+      return
+    }
+
+    await runOperation(
+      'cost-override:set',
+      '/api/operations/cost-override/set',
+      { repo: costOverrideDraft.repo, issueNumber, amountUsd: amount },
+      `Set cost override for ${costOverrideDraft.repo}#${issueNumber} to $${amount.toFixed(2)}`,
+    )
+  }, [costOverrideDraft, runOperation])
+
+  const clearCostOverride = useCallback(async () => {
+    const issueNumber = Number.parseInt(costOverrideDraft.issueNumber, 10)
+    if (!costOverrideDraft.repo || !Number.isFinite(issueNumber) || issueNumber <= 0) {
+      setErrorMessage('Clearing a per-issue override requires a repo and a positive issue number')
+      return
+    }
+
+    await runOperation(
+      'cost-override:clear',
+      '/api/operations/cost-override/clear',
+      { repo: costOverrideDraft.repo, issueNumber },
+      `Cleared cost override for ${costOverrideDraft.repo}#${issueNumber}`,
+    )
+  }, [costOverrideDraft, runOperation])
+
   return (
     <main data-theme="black" className="min-h-screen bg-orch-admin">
       <DashboardHeader
@@ -742,25 +810,45 @@ export function App(): ReactElement {
         )}
 
         {activePage === 'settings' && (
-          <SettingsPage
-            settings={settingsSnapshot?.settings ?? []}
-            generatedAt={settingsSnapshot?.generatedAt ?? null}
-            isLoading={isSettingsLoading}
-            activeOperation={activeOperation}
-            drafts={settingsDrafts}
-            onDraftChange={(key, value) => {
-              setSettingsDrafts((current) => ({
-                ...current,
-                [key]: value,
-              }))
-            }}
-            onApply={(key) => {
-              void applySetting(key)
-            }}
-            onClear={(key) => {
-              void clearSetting(key)
-            }}
-          />
+          <div className="flex flex-col gap-5">
+            <BudgetOverridesPanel
+              baseDailyBudgetUsd={snapshot?.cost.dailyBudgetUsd ?? 0}
+              dailyBudgetOverrideUsd={snapshot?.cost.dailyBudgetOverrideUsd ?? null}
+              effectiveDailyBudgetUsd={snapshot?.cost.effectiveDailyBudgetUsd ?? snapshot?.cost.dailyBudgetUsd ?? 0}
+              todayCostUsd={snapshot?.status.dailyCostUsd ?? 0}
+              activeOperation={activeOperation}
+              dailyDraft={dailyOverrideDraft}
+              onDailyDraftChange={setDailyOverrideDraft}
+              onDailySubmit={(event) => { void submitDailyCostOverride(event) }}
+              onDailyClear={() => { void clearDailyCostOverride() }}
+              issueDraft={costOverrideDraft}
+              repos={repos}
+              onIssueDraftChange={(patch) => {
+                setCostOverrideDraft((current) => ({ ...current, ...patch }))
+              }}
+              onIssueSubmit={(event) => { void submitCostOverride(event) }}
+              onIssueClear={() => { void clearCostOverride() }}
+            />
+            <SettingsPage
+              settings={settingsSnapshot?.settings ?? []}
+              generatedAt={settingsSnapshot?.generatedAt ?? null}
+              isLoading={isSettingsLoading}
+              activeOperation={activeOperation}
+              drafts={settingsDrafts}
+              onDraftChange={(key, value) => {
+                setSettingsDrafts((current) => ({
+                  ...current,
+                  [key]: value,
+                }))
+              }}
+              onApply={(key) => {
+                void applySetting(key)
+              }}
+              onClear={(key) => {
+                void clearSetting(key)
+              }}
+            />
+          </div>
         )}
       </div>
 

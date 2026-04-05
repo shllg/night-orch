@@ -630,6 +630,9 @@ function normalizeListRunsLimit(limit: number | undefined): number {
 async function handleCostReport(args: { days?: number }, deps: MCPDependencies): Promise<unknown> {
   const days = args.days ?? 7
   const costModel = deps.config.cost?.model ?? 'pay-per-use'
+  const costTracker = new CostTracker(deps.db)
+  const dailyBudgetOverrideUsd = costTracker.getDailyCapOverride()
+  const effectiveDailyBudgetUsd = dailyBudgetOverrideUsd ?? deps.config.security.maxDailyCostUsd
   const rows = deps.db
     .prepare(
       `SELECT
@@ -664,8 +667,10 @@ async function handleCostReport(args: { days?: number }, deps: MCPDependencies):
     totalCompletionTokens,
     totalTokens: totalPromptTokens + totalCompletionTokens,
     dailyBudgetUsd: deps.config.security.maxDailyCostUsd,
+    dailyBudgetOverrideUsd,
+    effectiveDailyBudgetUsd,
     budgetUtilizationPct: rows.length > 0
-      ? Math.round((rows[0]!.total_cost_usd / deps.config.security.maxDailyCostUsd) * 100)
+      ? Math.round((rows[0]!.total_cost_usd / effectiveDailyBudgetUsd) * 100)
       : 0,
     daily: rows.map((row) => ({
       date: row.date,
