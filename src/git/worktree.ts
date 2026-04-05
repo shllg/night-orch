@@ -52,8 +52,9 @@ export function createWorktreeManager(): WorktreeManager {
           logger.info({ branchName }, 'Creating local tracking branch from remote')
           await createTrackingBranch(repoLocalPath, branchName)
         } else {
-          logger.info({ branchName, baseBranch }, 'Creating new branch from base')
-          await createBranch(repoLocalPath, branchName, baseBranch)
+          const remoteBaseRef = `origin/${baseBranch}`
+          logger.info({ branchName, baseBranch: remoteBaseRef }, 'Creating new branch from base')
+          await createBranch(repoLocalPath, branchName, remoteBaseRef)
         }
       }
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createWorktreeManager } from '../../src/git/worktree.js'
 import { execa } from 'execa'
-import { mkdtempSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -115,5 +115,29 @@ describe('WorktreeManager lifecycle', () => {
 
     const list = await manager.list(repoPath, worktreeRoot)
     expect(list.length).toBe(2)
+  })
+
+  it('creates new branch from origin/base even when local base has extra commits', async () => {
+    // Create a local-only commit on main that is not pushed to origin.
+    const localOnlyFile = join(repoPath, 'local-only.txt')
+    writeFileSync(localOnlyFile, 'local only')
+    await execa('git', ['-C', repoPath, 'add', 'local-only.txt'])
+    await execa('git', ['-C', repoPath, 'commit', '-m', 'local-only-main-commit'])
+
+    const worktreePath = join(worktreeRoot, 'test-wt')
+    const branchName = 'orch/3-remote-base'
+    await manager.ensure({
+      repoLocalPath: repoPath,
+      baseBranch: 'main',
+      branchName,
+      worktreePath,
+    })
+
+    const { stdout: branchSha } = await execa('git', ['-C', repoPath, 'rev-parse', branchName])
+    const { stdout: localMainSha } = await execa('git', ['-C', repoPath, 'rev-parse', 'main'])
+    const { stdout: remoteMainSha } = await execa('git', ['-C', repoPath, 'rev-parse', 'origin/main'])
+
+    expect(branchSha.trim()).toBe(remoteMainSha.trim())
+    expect(branchSha.trim()).not.toBe(localMainSha.trim())
   })
 })
