@@ -3,6 +3,7 @@ import { type FormEvent, type ReactElement, useCallback, useEffect, useMemo, use
 import { BudgetOverridesPanel } from './components/BudgetOverridesPanel.js'
 import { DashboardHeader } from './components/DashboardHeader.js'
 import { DashboardMetrics } from './components/DashboardMetrics.js'
+import { DashboardNavigation } from './components/DashboardNavigation.js'
 import { OperationsPanel } from './components/OperationsPanel.js'
 import { ProjectsPage } from './components/ProjectsPage.js'
 import { RunEventStream } from './components/RunEventStream.js'
@@ -10,7 +11,7 @@ import { RunsPanel } from './components/RunsPanel.js'
 import { SettingsPage } from './components/SettingsPage.js'
 import { StatsPage } from './components/StatsPage.js'
 import { UpdateProgressModal } from './components/UpdateProgressModal.js'
-import { extractMessage, formatTimestamp } from './lib/format.js'
+import { extractMessage } from './lib/format.js'
 import { STATUS_BADGE_TONE } from './lib/run-tone.js'
 import { asRunEventsPayload, mergeRunEvents } from './lib/run-events.js'
 import { confirmSelfUpdate } from './lib/update-confirmation.js'
@@ -59,6 +60,7 @@ export function App(): ReactElement {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null)
   const [activeOperation, setActiveOperation] = useState<string | null>(null)
+  const [isHeaderRefreshing, setIsHeaderRefreshing] = useState(false)
   const [webMutationToken, setWebMutationToken] = useState<string | null>(null)
   const [operationsEnabled, setOperationsEnabled] = useState(true)
   const [settingsDrafts, setSettingsDrafts] = useState<Record<string, string>>({})
@@ -447,6 +449,33 @@ export function App(): ReactElement {
     }
   }, [loadDashboard, loadSettings, operationsEnabled, webMutationToken])
 
+  const refreshDashboardData = useCallback(async () => {
+    try {
+      setIsHeaderRefreshing(true)
+      setErrorMessage(null)
+      await Promise.all([loadDashboard(), loadProjects(), loadSettings()])
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'refresh' }))
+      }
+    } catch (err) {
+      setErrorMessage((err as Error).message)
+    } finally {
+      setIsHeaderRefreshing(false)
+    }
+  }, [loadDashboard, loadProjects, loadSettings])
+
+  const triggerPoll = useCallback(() => {
+    void runOperation('poll', '/api/operations/poll', {}, 'Manual poll requested')
+  }, [runOperation])
+
+  const triggerSync = useCallback(() => {
+    void runOperation('sync', '/api/operations/sync', {}, 'Sync completed')
+  }, [runOperation])
+
+  const triggerCleanup = useCallback(() => {
+    void runOperation('cleanup', '/api/operations/cleanup', {}, 'Cleanup completed')
+  }, [runOperation])
+
   const submitUpdate = useCallback(async () => {
     if (!confirmSelfUpdate((message) => window.confirm(message))) {
       return
@@ -668,17 +697,33 @@ export function App(): ReactElement {
   return (
     <main data-theme="black" className="min-h-screen bg-orch-admin">
       <DashboardHeader
-        activePage={activePage}
-        onPageChange={setActivePage}
         currentStateLabel={currentState.label}
         currentStateToneClass={currentState.toneClass}
+        socketConnected={socketConnected}
+        lastRefreshAt={snapshot?.generatedAt ?? null}
+        pollIntervalSeconds={snapshot?.config.pollIntervalSeconds ?? null}
+        reposCount={repos.length}
+        activeRuns={snapshot?.status.activeRuns ?? 0}
+        runningRuns={runningRuns}
+        queuedRuns={queuedRuns}
         frontendVersion={FRONTEND_BUILD_VERSION}
         frontendGitSha={FRONTEND_BUILD_GIT_SHA}
         backendVersion={snapshot?.build?.version ?? 'unknown'}
         backendGitSha={snapshot?.build?.gitSha ?? null}
+        operationsEnabled={operationsEnabled}
+        activeOperation={activeOperation}
+        isRefreshing={isHeaderRefreshing}
+        onRefresh={() => {
+          void refreshDashboardData()
+        }}
+        onPoll={triggerPoll}
+        onSync={triggerSync}
+        onGoToSettings={() => {
+          setActivePage('settings')
+        }}
       />
 
-      <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-5 px-4 pb-6 sm:px-6 lg:px-8">
+      <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-5 px-4 pb-24 pt-5 sm:px-6 md:pb-6 lg:px-8">
         {errorMessage && (
           <div className="alert alert-error shadow-sm">
             <span>{errorMessage}</span>
@@ -690,166 +735,157 @@ export function App(): ReactElement {
           </div>
         )}
 
-        <section className="rounded-box border border-base-300/60 bg-base-200/50 px-4 py-2 text-xs text-base-content/75 shadow-panel backdrop-blur">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <span>Poll interval {snapshot?.config.pollIntervalSeconds ?? '-'}s</span>
-            <span>Last refresh {snapshot?.generatedAt ? formatTimestamp(snapshot.generatedAt) : '--'}</span>
-            <span>Stream {socketConnected ? 'online' : 'reconnecting'}</span>
-            <span>Repos {repos.length}</span>
-          </div>
-        </section>
+        <div className="grid gap-5 md:grid-cols-[auto_minmax(0,1fr)] md:items-start">
+          <DashboardNavigation activePage={activePage} onPageChange={setActivePage} />
 
-        {activePage === 'issues' && (
-          <div className="flex flex-col gap-5">
-            <DashboardMetrics snapshot={snapshot} />
+          <div className="flex min-w-0 flex-col gap-5">
+            {activePage === 'issues' && (
+              <div className="flex flex-col gap-5">
+                <DashboardMetrics snapshot={snapshot} />
 
-            <section className="grid gap-5 xl:grid-cols-[1.65fr_1fr]">
-              <RunsPanel
-                isLoading={isLoading}
-                repos={repos}
-                selectedRepo={selectedRepo}
-                onSelectedRepoChange={setSelectedRepo}
-                filteredRuns={filteredRuns}
-                selectedRunId={selectedRunId}
-                onSelectedRunChange={setSelectedRunId}
-                statusTone={STATUS_BADGE_TONE}
+                <section className="grid gap-5 xl:grid-cols-[1.65fr_1fr]">
+                  <RunsPanel
+                    isLoading={isLoading}
+                    repos={repos}
+                    selectedRepo={selectedRepo}
+                    onSelectedRepoChange={setSelectedRepo}
+                    filteredRuns={filteredRuns}
+                    selectedRunId={selectedRunId}
+                    onSelectedRunChange={setSelectedRunId}
+                    statusTone={STATUS_BADGE_TONE}
+                  />
+
+                  <OperationsPanel
+                    operationsEnabled={operationsEnabled}
+                    activeOperation={activeOperation}
+                    updateStatus={updateStatus}
+                    repos={repos}
+                    retryForm={{
+                      repo: retryRepo,
+                      issueNumber: retryIssueNumber,
+                      resetPlan: retryResetPlan,
+                      fresh: retryFresh,
+                    }}
+                    rebaseForm={{
+                      repo: rebaseRepo,
+                      issueNumber: rebaseIssueNumber,
+                    }}
+                    continueForm={{
+                      repo: continueRepo,
+                      issueNumber: continueIssueNumber,
+                    }}
+                    deleteEntryForm={{
+                      repo: deleteRepo,
+                      issueNumber: deleteIssueNumber,
+                      force: deleteForce,
+                    }}
+                    labelsInitForm={{
+                      repo: labelsInitRepo,
+                    }}
+                    onRetryFormChange={(patch) => {
+                      if (patch.repo !== undefined) setRetryRepo(patch.repo)
+                      if (patch.issueNumber !== undefined) setRetryIssueNumber(patch.issueNumber)
+                      if (patch.resetPlan !== undefined) setRetryResetPlan(patch.resetPlan)
+                      if (patch.fresh !== undefined) setRetryFresh(patch.fresh)
+                    }}
+                    onRebaseFormChange={(patch) => {
+                      if (patch.repo !== undefined) setRebaseRepo(patch.repo)
+                      if (patch.issueNumber !== undefined) setRebaseIssueNumber(patch.issueNumber)
+                    }}
+                    onContinueFormChange={(patch) => {
+                      if (patch.repo !== undefined) setContinueRepo(patch.repo)
+                      if (patch.issueNumber !== undefined) setContinueIssueNumber(patch.issueNumber)
+                    }}
+                    onDeleteEntryFormChange={(patch) => {
+                      if (patch.repo !== undefined) setDeleteRepo(patch.repo)
+                      if (patch.issueNumber !== undefined) setDeleteIssueNumber(patch.issueNumber)
+                      if (patch.force !== undefined) setDeleteForce(patch.force)
+                    }}
+                    onLabelsInitFormChange={(patch) => {
+                      if (patch.repo !== undefined) setLabelsInitRepo(patch.repo)
+                    }}
+                    onPoll={triggerPoll}
+                    onSync={triggerSync}
+                    onCleanup={triggerCleanup}
+                    onLabelsInitSubmit={(event) => {
+                      void submitLabelsInit(event)
+                    }}
+                    onRetrySubmit={(event) => {
+                      void submitRetry(event)
+                    }}
+                    onRebaseSubmit={(event) => {
+                      void submitRebase(event)
+                    }}
+                    onContinueSubmit={(event) => {
+                      void submitContinue(event)
+                    }}
+                    onDeleteEntrySubmit={(event) => {
+                      void submitDeleteEntry(event)
+                    }}
+                    onUpdate={() => {
+                      void submitUpdate()
+                    }}
+                  />
+                </section>
+
+                <RunEventStream selectedRunId={selectedRunId} selectedRun={selectedRun} runEvents={runEvents} />
+              </div>
+            )}
+
+            {activePage === 'stats' && <StatsPage snapshot={snapshot} socketConnected={socketConnected} />}
+
+            {activePage === 'projects' && (
+              <ProjectsPage
+                snapshot={projectsSnapshot}
+                isLoading={isProjectsLoading}
+                selectedRepo={selectedProjectRepo}
+                onSelectedRepoChange={setSelectedProjectRepo}
               />
+            )}
 
-              <OperationsPanel
-                operationsEnabled={operationsEnabled}
-                activeOperation={activeOperation}
-                updateStatus={updateStatus}
-                repos={repos}
-                retryForm={{
-                  repo: retryRepo,
-                  issueNumber: retryIssueNumber,
-                  resetPlan: retryResetPlan,
-                  fresh: retryFresh,
-                }}
-                rebaseForm={{
-                  repo: rebaseRepo,
-                  issueNumber: rebaseIssueNumber,
-                }}
-                continueForm={{
-                  repo: continueRepo,
-                  issueNumber: continueIssueNumber,
-                }}
-                deleteEntryForm={{
-                  repo: deleteRepo,
-                  issueNumber: deleteIssueNumber,
-                  force: deleteForce,
-                }}
-                labelsInitForm={{
-                  repo: labelsInitRepo,
-                }}
-                onRetryFormChange={(patch) => {
-                  if (patch.repo !== undefined) setRetryRepo(patch.repo)
-                  if (patch.issueNumber !== undefined) setRetryIssueNumber(patch.issueNumber)
-                  if (patch.resetPlan !== undefined) setRetryResetPlan(patch.resetPlan)
-                  if (patch.fresh !== undefined) setRetryFresh(patch.fresh)
-                }}
-                onRebaseFormChange={(patch) => {
-                  if (patch.repo !== undefined) setRebaseRepo(patch.repo)
-                  if (patch.issueNumber !== undefined) setRebaseIssueNumber(patch.issueNumber)
-                }}
-                onContinueFormChange={(patch) => {
-                  if (patch.repo !== undefined) setContinueRepo(patch.repo)
-                  if (patch.issueNumber !== undefined) setContinueIssueNumber(patch.issueNumber)
-                }}
-                onDeleteEntryFormChange={(patch) => {
-                  if (patch.repo !== undefined) setDeleteRepo(patch.repo)
-                  if (patch.issueNumber !== undefined) setDeleteIssueNumber(patch.issueNumber)
-                  if (patch.force !== undefined) setDeleteForce(patch.force)
-                }}
-                onLabelsInitFormChange={(patch) => {
-                  if (patch.repo !== undefined) setLabelsInitRepo(patch.repo)
-                }}
-                onPoll={() => {
-                  void runOperation('poll', '/api/operations/poll', {}, 'Manual poll requested')
-                }}
-                onSync={() => {
-                  void runOperation('sync', '/api/operations/sync', {}, 'Sync completed')
-                }}
-                onCleanup={() => {
-                  void runOperation('cleanup', '/api/operations/cleanup', {}, 'Cleanup completed')
-                }}
-                onLabelsInitSubmit={(event) => {
-                  void submitLabelsInit(event)
-                }}
-                onRetrySubmit={(event) => {
-                  void submitRetry(event)
-                }}
-                onRebaseSubmit={(event) => {
-                  void submitRebase(event)
-                }}
-                onContinueSubmit={(event) => {
-                  void submitContinue(event)
-                }}
-                onDeleteEntrySubmit={(event) => {
-                  void submitDeleteEntry(event)
-                }}
-                onUpdate={() => {
-                  void submitUpdate()
-                }}
-              />
-            </section>
-
-            <RunEventStream selectedRunId={selectedRunId} selectedRun={selectedRun} runEvents={runEvents} />
+            {activePage === 'settings' && (
+              <div className="flex flex-col gap-5">
+                <BudgetOverridesPanel
+                  baseDailyBudgetUsd={snapshot?.cost.dailyBudgetUsd ?? 0}
+                  dailyBudgetOverrideUsd={snapshot?.cost.dailyBudgetOverrideUsd ?? null}
+                  effectiveDailyBudgetUsd={snapshot?.cost.effectiveDailyBudgetUsd ?? snapshot?.cost.dailyBudgetUsd ?? 0}
+                  todayCostUsd={snapshot?.status.dailyCostUsd ?? 0}
+                  activeOperation={activeOperation}
+                  dailyDraft={dailyOverrideDraft}
+                  onDailyDraftChange={setDailyOverrideDraft}
+                  onDailySubmit={(event) => { void submitDailyCostOverride(event) }}
+                  onDailyClear={() => { void clearDailyCostOverride() }}
+                  issueDraft={costOverrideDraft}
+                  repos={repos}
+                  onIssueDraftChange={(patch) => {
+                    setCostOverrideDraft((current) => ({ ...current, ...patch }))
+                  }}
+                  onIssueSubmit={(event) => { void submitCostOverride(event) }}
+                  onIssueClear={() => { void clearCostOverride() }}
+                />
+                <SettingsPage
+                  settings={settingsSnapshot?.settings ?? []}
+                  generatedAt={settingsSnapshot?.generatedAt ?? null}
+                  isLoading={isSettingsLoading}
+                  activeOperation={activeOperation}
+                  drafts={settingsDrafts}
+                  onDraftChange={(key, value) => {
+                    setSettingsDrafts((current) => ({
+                      ...current,
+                      [key]: value,
+                    }))
+                  }}
+                  onApply={(key) => {
+                    void applySetting(key)
+                  }}
+                  onClear={(key) => {
+                    void clearSetting(key)
+                  }}
+                />
+              </div>
+            )}
           </div>
-        )}
-
-        {activePage === 'stats' && <StatsPage snapshot={snapshot} socketConnected={socketConnected} />}
-
-        {activePage === 'projects' && (
-          <ProjectsPage
-            snapshot={projectsSnapshot}
-            isLoading={isProjectsLoading}
-            selectedRepo={selectedProjectRepo}
-            onSelectedRepoChange={setSelectedProjectRepo}
-          />
-        )}
-
-        {activePage === 'settings' && (
-          <div className="flex flex-col gap-5">
-            <BudgetOverridesPanel
-              baseDailyBudgetUsd={snapshot?.cost.dailyBudgetUsd ?? 0}
-              dailyBudgetOverrideUsd={snapshot?.cost.dailyBudgetOverrideUsd ?? null}
-              effectiveDailyBudgetUsd={snapshot?.cost.effectiveDailyBudgetUsd ?? snapshot?.cost.dailyBudgetUsd ?? 0}
-              todayCostUsd={snapshot?.status.dailyCostUsd ?? 0}
-              activeOperation={activeOperation}
-              dailyDraft={dailyOverrideDraft}
-              onDailyDraftChange={setDailyOverrideDraft}
-              onDailySubmit={(event) => { void submitDailyCostOverride(event) }}
-              onDailyClear={() => { void clearDailyCostOverride() }}
-              issueDraft={costOverrideDraft}
-              repos={repos}
-              onIssueDraftChange={(patch) => {
-                setCostOverrideDraft((current) => ({ ...current, ...patch }))
-              }}
-              onIssueSubmit={(event) => { void submitCostOverride(event) }}
-              onIssueClear={() => { void clearCostOverride() }}
-            />
-            <SettingsPage
-              settings={settingsSnapshot?.settings ?? []}
-              generatedAt={settingsSnapshot?.generatedAt ?? null}
-              isLoading={isSettingsLoading}
-              activeOperation={activeOperation}
-              drafts={settingsDrafts}
-              onDraftChange={(key, value) => {
-                setSettingsDrafts((current) => ({
-                  ...current,
-                  [key]: value,
-                }))
-              }}
-              onApply={(key) => {
-                void applySetting(key)
-              }}
-              onClear={(key) => {
-                void clearSetting(key)
-              }}
-            />
-          </div>
-        )}
+        </div>
       </div>
 
       {updateInProgress && updateStatus && <UpdateProgressModal status={updateStatus} />}
