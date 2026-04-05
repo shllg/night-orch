@@ -83,7 +83,7 @@ Update surfaces:
 | `notifications` | object | no | object with defaults | Channel/event notification config. |
 | `loop` | object | no | object with defaults | Loop decision limits and behavior. |
 | `security` | object | no | object with defaults | Diff/cost safety limits. |
-| `cost` | object | no | object with defaults | Cost display model (`pay-per-use` or `subscription`). |
+| `cost` | object | no | object with defaults | Cost model (`pay-per-use` enforces USD caps; `subscription` treats USD as advisory). |
 | `workerProfiles` | record | no | `{}` | Named CLI profiles for agents. |
 | `metrics` | object | no | object with defaults | Prometheus exporter config. |
 | `observability` | object | no | object with defaults | Live agent event streaming/persistence settings. |
@@ -196,10 +196,14 @@ When `decompose: true`, issues classified as `standard` triage level with a body
 | --- | --- | --- | --- |
 | `maxChangedFiles` | positive number | `50` | Diff guard threshold. |
 | `maxChangedLines` | positive number | `5000` | Diff guard threshold. |
-| `maxDailyCostUsd` | positive number | `50` | Daily budget cap used by decision logic. |
-| `maxCostPerRunUsd` | positive number | `10` | Per-run budget cap used by decision logic. |
+| `maxDailyCostUsd` | positive number | `50` | Daily budget cap, enforced when `cost.model` is `pay-per-use`. |
+| `maxCostPerRunUsd` | positive number | `10` | Per-run budget cap, enforced when `cost.model` is `pay-per-use`. |
 
 ### Unblocking a run hit by a cost cap
+
+These controls apply only when `cost.model: pay-per-use`. In
+`subscription` mode, estimated USD is advisory and runs are never blocked with
+`cost_limit`, so these overrides do not affect loop gating.
 
 When a run is blocked by a cost limit, there are three escape hatches — pick
 whichever matches the scope of the situation:
@@ -225,7 +229,7 @@ whichever matches the scope of the situation:
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `model` | `pay-per-use` or `subscription` | `pay-per-use` | Controls whether dashboards emphasize USD or token usage while still tracking both. |
+| `model` | `pay-per-use` or `subscription` | `pay-per-use` | `pay-per-use` enforces `security.maxDailyCostUsd`/`security.maxCostPerRunUsd`; `subscription` bypasses cost-limit blocking and treats USD as advisory while emphasizing token usage. |
 
 ## `workerProfiles`
 

@@ -1,4 +1,5 @@
 import { type ReactElement } from 'react'
+import { ButtonWeb } from '../../../src/components/button/button.web.js'
 import type { RuntimeSettingSnapshot } from '../types/dashboard.js'
 
 interface SettingsPageProps {
@@ -97,22 +98,24 @@ export function SettingsPage({
                       </td>
                       <td>
                         <div className="flex gap-2">
-                          <button
+                          <ButtonWeb
                             type="button"
-                            className="btn btn-xs btn-info"
+                            tone="info"
+                            size="xs"
                             onClick={() => onApply(setting.key)}
                             disabled={rowBusy}
                           >
                             apply
-                          </button>
-                          <button
+                          </ButtonWeb>
+                          <ButtonWeb
                             type="button"
-                            className="btn btn-xs btn-ghost"
+                            tone="ghost"
+                            size="xs"
                             onClick={() => onClear(setting.key)}
                             disabled={rowBusy}
                           >
                             clear
-                          </button>
+                          </ButtonWeb>
                         </div>
                       </td>
                     </tr>

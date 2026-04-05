@@ -1,4 +1,5 @@
 import { type ReactElement } from 'react'
+import { ButtonWeb } from '../../../src/components/button/button.web.js'
 
 interface ActionButtonProps {
   label: string
@@ -9,13 +10,17 @@ interface ActionButtonProps {
 
 export function ActionButton({ label, busy, onClick, submit = false }: ActionButtonProps): ReactElement {
   return (
-    <button
+    <ButtonWeb
       type={submit ? 'submit' : 'button'}
       onClick={onClick}
-      className={`btn btn-info btn-sm w-full justify-between ${submit ? '' : 'btn-outline'}`}
+      tone="info"
+      size="sm"
+      variant={submit ? 'solid' : 'outline'}
+      fullWidth
+      className="justify-between"
       disabled={busy}
     >
       {busy ? 'Working...' : label}
-    </button>
+    </ButtonWeb>
   )
 }

@@ -1,4 +1,5 @@
 import { type ReactElement } from 'react'
+import { ButtonWeb } from '../../../src/components/button/button.web.js'
 
 import { type DashboardPage } from '../types/dashboard.js'
 
@@ -86,18 +87,20 @@ export function DashboardHeader({
         <div className="-mx-1 overflow-x-auto pb-3">
           <nav className="flex min-w-max gap-2 px-1" aria-label="Dashboard pages">
             {PAGES.map((page) => (
-              <button
+              <ButtonWeb
                 key={page.id}
                 type="button"
                 onClick={() => onPageChange(page.id)}
-                className={`btn btn-sm rounded-full px-4 font-medium capitalize ${
+                tone={activePage === page.id ? 'info' : 'ghost'}
+                size="sm"
+                className={`rounded-full px-4 font-medium capitalize ${
                   activePage === page.id
-                    ? 'btn-info text-info-content'
-                    : 'btn-ghost border border-base-100/40 bg-base-100/35 hover:bg-base-100/55'
+                    ? 'text-info-content'
+                    : 'border border-base-100/40 bg-base-100/35 hover:bg-base-100/55'
                 }`}
               >
                 {page.label}
-              </button>
+              </ButtonWeb>
             ))}
           </nav>
         </div>

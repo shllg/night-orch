@@ -1,4 +1,5 @@
 import { type ReactElement, useCallback, useEffect, useId } from 'react'
+import { ButtonWeb } from '../button/button.web.js'
 import type { ModalProps } from './types.js'
 
 const DEFAULT_WIDTH_CLASS = 'max-w-xl'
@@ -73,14 +74,17 @@ export function ModalWeb(props: ModalProps): ReactElement | null {
         className={`modal-box relative w-full ${widthClassName} rounded-box border border-base-300/80 bg-base-100/95 p-5 shadow-2xl`}
       >
         {dismissState.canRequestClose ? (
-          <button
+          <ButtonWeb
             type="button"
-            className="btn btn-circle btn-ghost btn-sm absolute right-3 top-3"
+            tone="ghost"
+            size="sm"
+            shape="circle"
+            className="absolute right-3 top-3"
             onClick={requestClose}
-            aria-label={closeButtonLabel}
+            ariaLabel={closeButtonLabel}
           >
             x
-          </button>
+          </ButtonWeb>
         ) : null}
 
         {props.title ? <h2 id={titleId} className="pr-10 text-lg font-semibold">{props.title}</h2> : null}

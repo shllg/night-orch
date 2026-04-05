@@ -465,6 +465,27 @@ describe('executeDecideStep', () => {
 
     expect(result.decision!.action).toBe('block')
   })
+
+  it('propagates subscription cost model from config to decide()', async () => {
+    const ctx = makeCtx({
+      estimatedCostUsd: 250,
+      reviewResult: {
+        verdict: 'APPROVED',
+        summary: 'Good',
+        findings: [],
+        definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+      },
+      verifyResults: [{ command: 'pnpm test', exitCode: 0, stdout: '', stderr: '', durationMs: 100, passed: true }],
+    })
+    const step: DecideStep = { type: 'decide', id: 'decide', onIterate: 'code' }
+    const config = makeConfig()
+    config.cost = { model: 'subscription' }
+    const deps: StepDependencies = { adapters: {}, config }
+
+    const result = await executeDecideStep(ctx, step, deps)
+
+    expect(result.decision!.action).toBe('publish')
+  })
 })
 
 describe('buildPromptContext', () => {

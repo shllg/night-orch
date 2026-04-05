@@ -1,4 +1,5 @@
 import { type FormEvent, type ReactElement } from 'react'
+import { ButtonWeb } from '../../../src/components/button/button.web.js'
 
 import { formatMoney } from '../lib/format.js'
 
@@ -86,21 +87,23 @@ export function BudgetOverridesPanel({
                   required
                 />
               </label>
-              <button
+              <ButtonWeb
                 type="submit"
-                className="btn btn-xs btn-info"
+                tone="info"
+                size="xs"
                 disabled={dailyBusy}
               >
                 raise cap
-              </button>
-              <button
+              </ButtonWeb>
+              <ButtonWeb
                 type="button"
-                className="btn btn-xs btn-ghost"
+                tone="ghost"
+                size="xs"
                 onClick={onDailyClear}
                 disabled={dailyBusy || !hasDailyOverride}
               >
                 clear
-              </button>
+              </ButtonWeb>
             </form>
             <p className="mt-2 text-xs text-base-content/60">
               Scoped to the current UTC day. Blocks every queued run until today&apos;s spend hits the new cap.
@@ -159,16 +162,18 @@ export function BudgetOverridesPanel({
                 />
               </label>
               <div className="flex gap-2">
-                <button
+                <ButtonWeb
                   type="submit"
-                  className="btn btn-xs btn-info"
+                  tone="info"
+                  size="xs"
                   disabled={issueBusy}
                 >
                   set
-                </button>
-                <button
+                </ButtonWeb>
+                <ButtonWeb
                   type="button"
-                  className="btn btn-xs btn-ghost"
+                  tone="ghost"
+                  size="xs"
                   onClick={(event) => {
                     event.preventDefault()
                     onIssueClear(event as unknown as FormEvent<HTMLFormElement>)
@@ -176,7 +181,7 @@ export function BudgetOverridesPanel({
                   disabled={issueBusy}
                 >
                   clear
-                </button>
+                </ButtonWeb>
               </div>
             </form>
           </div>
