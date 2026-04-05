@@ -205,6 +205,21 @@ describe('decide', () => {
     }
   })
 
+  it('subscription mode skips cost-over-budget block', () => {
+    const ctx = makeCtx({
+      estimatedCostUsd: 500,
+      reviewResult: {
+        verdict: 'APPROVED',
+        summary: 'Good',
+        findings: [],
+        definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+      },
+      verifyResults: [{ command: 'test', exitCode: 0, stdout: '', stderr: '', durationMs: 100, passed: true }],
+    })
+    const d = decide(ctx, loopConfig, securityConfig, { costModel: 'subscription' })
+    expect(d.action).not.toBe('block')
+  })
+
   it('max total passes → block', () => {
     const ctx = makeCtx({
       totalAgentPasses: 10,

@@ -213,6 +213,37 @@ describe('CostTracker', () => {
     expect(costLimitRecoveryHint('daily')).toContain('daily-cost-override')
   })
 
+  describe('subscription cost model', () => {
+    const limits = {
+      maxDailyCostUsd: 50,
+      maxCostPerRunUsd: 10,
+      maxChangedFiles: 50,
+      maxChangedLines: 5000,
+    }
+
+    it('never reports over-budget when the per-run cap would otherwise trip', () => {
+      costTracker.recordCost(runId, 500)
+      const status = costTracker.checkBudget(runId, limits, 'subscription')
+      expect(status.overBudget).toBe(false)
+    })
+
+    it('never reports over-budget when the daily cap would otherwise trip', () => {
+      const today = new Date().toISOString().split('T')[0]
+      db.prepare(
+        `INSERT INTO daily_costs (date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens)
+         VALUES (?, ?, 0, 0, 0)`,
+      ).run(today, 9999)
+      const status = costTracker.checkBudget(runId, limits, 'subscription')
+      expect(status.overBudget).toBe(false)
+    })
+
+    it('pay-per-use remains the default when cost model is omitted', () => {
+      costTracker.recordCost(runId, 500)
+      const status = costTracker.checkBudget(runId, limits)
+      expect(status.overBudget).toBe(true)
+    })
+  })
+
   describe('run cost budget override', () => {
     const limits = {
       maxDailyCostUsd: 25,

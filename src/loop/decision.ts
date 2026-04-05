@@ -22,17 +22,20 @@ export function decide(
   ctx: RunContext,
   loopConfig: Config['loop'],
   securityConfig: Config['security'],
-  options: { requireReview?: boolean } = {},
+  options: { requireReview?: boolean; costModel?: Config['cost']['model'] } = {},
 ): LoopDecision {
   const maxReviewIter = ctx.adjustedLimits.maxReviewIterations
   const maxTotalPasses = ctx.adjustedLimits.maxTotalAgentPasses
   const requireReview = options.requireReview ?? true
+  const costModel = options.costModel ?? 'pay-per-use'
 
   // Rule 1: Per-run cost limit
   // (Primary check lives in the engine via CostTracker.checkBudget which also
   // covers the daily cap; this is a pure-function fallback that only sees the
   // run-local estimate, so it can only catch the per-run overrun here.)
-  if (ctx.estimatedCostUsd > securityConfig.maxCostPerRunUsd) {
+  // Skipped in subscription mode — the USD numbers are advisory-only estimates
+  // and don't correspond to what the operator actually pays.
+  if (costModel !== 'subscription' && ctx.estimatedCostUsd > securityConfig.maxCostPerRunUsd) {
     const reason =
       `Per-run cost limit exceeded: $${ctx.estimatedCostUsd.toFixed(2)} >= ` +
       `$${securityConfig.maxCostPerRunUsd.toFixed(2)}. ${costLimitRecoveryHint('per-run')}`

@@ -174,6 +174,7 @@ export async function executeDecideStep(
 ): Promise<StepResult> {
   const decision = decide(ctx, deps.config.loop, deps.config.security, {
     requireReview: step.requireReview,
+    costModel: deps.config.cost?.model ?? 'pay-per-use',
   })
   return { ctx, decision }
 }

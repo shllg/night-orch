@@ -114,6 +114,11 @@ export class CostTracker {
    * Returns a discriminated status so callers can build messages that name
    * the specific limit that tripped (daily vs per-run) instead of guessing.
    *
+   * When `costModel === 'subscription'` (Claude Pro/Max, Codex Pro, etc.) the
+   * USD estimate is advisory only — the operator pays a flat subscription fee,
+   * not per-token — so enforcement is skipped entirely. Tokens and the
+   * advisory USD estimate continue to be written to the DB for analytics.
+   *
    * A non-null `cost_budget_override_usd` on the run row overrides the
    * per-run cap with the stored value AND exempts the run from the daily
    * cap. Operators grant this override to push a specific run through when
@@ -123,7 +128,18 @@ export class CostTracker {
    * replaces `limits.maxDailyCostUsd` for today only. It auto-expires when
    * the UTC day rolls over (next day's row starts NULL).
    */
-  checkBudget(runId: string, limits: Config['security']): BudgetStatus {
+  checkBudget(
+    runId: string,
+    limits: Config['security'],
+    costModel: Config['cost']['model'] = 'pay-per-use',
+  ): BudgetStatus {
+    // Subscription plans are flat-rate. The per-token USD numbers the worker
+    // adapters report are "what this would have cost on the API" estimates and
+    // have no relationship to what the operator actually pays, so enforcing
+    // them would block every run the moment tokens add up.
+    if (costModel === 'subscription') {
+      return { overBudget: false }
+    }
     const override = this.getRunBudgetOverride(runId)
     const runCost = this.getRunCost(runId)
 

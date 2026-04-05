@@ -66,7 +66,7 @@ export async function executeLoop(
 
     // Cost check before worker steps
     if (step.type === 'worker') {
-      const budget = costTracker.checkBudget(ctx.runId, config.security)
+      const budget = costTracker.checkBudget(ctx.runId, config.security, config.cost?.model ?? 'pay-per-use')
       if (budget.overBudget) {
         const blockMessage = `${describeBudgetBlock(budget)}. ${costLimitRecoveryHint(budget.limit)}`
         logger.warn(
