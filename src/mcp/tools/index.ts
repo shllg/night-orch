@@ -10,6 +10,7 @@ import { SyncEngine } from '../../ops/sync.js'
 import { CleanupEngine } from '../../ops/cleanup.js'
 import { RetryEngine } from '../../ops/retry.js'
 import { setIssueCostOverride } from '../../ops/cost-override.js'
+import { setDailyCostCapOverride } from '../../ops/daily-cost-override.js'
 import { LabelsInitEngine, formatLabelsInitSummary } from '../../ops/labels-init.js'
 import { queueContinue } from '../../ops/continue.js'
 import { DeleteIssueEntryEngine } from '../../ops/delete-entry.js'
@@ -152,6 +153,28 @@ export function registerTools(): ToolDefinition[] {
           authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
         },
         required: ['repo', 'issueNumber'],
+      },
+    },
+    {
+      name: 'night-orch-daily-cost-override',
+      description:
+        "Raise today's daily cost cap (UTC). Auto-expires at 00:00 UTC. " +
+        'Use when the whole day is blocked and granting per-run overrides to each queued issue would be impractical. ' +
+        'Pass clear:true to remove the override and fall back to the base cap.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          amountUsd: {
+            type: 'number',
+            description: "Override budget in USD (positive number) for today's daily cap. Omit when clearing.",
+          },
+          clear: {
+            type: 'boolean',
+            description: "Remove today's daily cost cap override.",
+            default: false,
+          },
+          authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
+        },
       },
     },
     {
@@ -310,6 +333,11 @@ export async function handleToolCall(
     case 'night-orch-cost-override':
       return handleCostOverride(
         args as { repo: string; issueNumber: number; amountUsd?: number; clear?: boolean; authToken?: string },
+        runtimeDeps,
+      )
+    case 'night-orch-daily-cost-override':
+      return handleDailyCostOverride(
+        args as { amountUsd?: number; clear?: boolean; authToken?: string },
         runtimeDeps,
       )
     case 'night-orch-sync':
@@ -690,6 +718,32 @@ async function handleCostOverride(
       overrideUsd === null
         ? `Cleared cost override for ${args.repo}#${args.issueNumber} (run ${result.runId})`
         : `Set cost override for ${args.repo}#${args.issueNumber} (run ${result.runId}) to $${overrideUsd.toFixed(2)}; daily cap bypassed for this run.`,
+  }
+}
+
+async function handleDailyCostOverride(
+  args: { amountUsd?: number; clear?: boolean; authToken?: string },
+  deps: MCPDependencies,
+): Promise<unknown> {
+  assertMcpMutationAuth(args.authToken, deps)
+  const clear = args.clear ?? false
+  if (clear && args.amountUsd !== undefined) {
+    throw new Error('daily-cost-override: cannot pass amountUsd together with clear:true')
+  }
+  if (!clear && (typeof args.amountUsd !== 'number' || !Number.isFinite(args.amountUsd) || args.amountUsd <= 0)) {
+    throw new Error('daily-cost-override: amountUsd must be a positive finite number (or set clear:true to remove)')
+  }
+  const overrideUsd = clear ? null : (args.amountUsd as number)
+  const result = setDailyCostCapOverride(deps.db, overrideUsd)
+  return {
+    success: true,
+    date: result.date,
+    previousUsd: result.previousUsd,
+    overrideUsd: result.overrideUsd,
+    message:
+      overrideUsd === null
+        ? `Cleared daily cost cap override for ${result.date}; base cap applies.`
+        : `Set daily cost cap override for ${result.date} to $${overrideUsd.toFixed(2)}; auto-expires at 00:00 UTC.`,
   }
 }
 

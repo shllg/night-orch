@@ -18,6 +18,7 @@ import { serveCommand } from './commands/serve.js'
 import { updateCommand } from './commands/update.js'
 import { continueCommand } from './commands/continue.js'
 import { costOverrideCommand } from './commands/cost-override.js'
+import { dailyCostOverrideCommand } from './commands/daily-cost-override.js'
 import {
   settingsListCommand,
   settingsSetCommand,
@@ -120,6 +121,18 @@ program
   )
   .action((repo, issueNumber, amount, opts, cmd) =>
     costOverrideCommand(repo, issueNumber, amount, { ...cmd.parent?.opts(), ...opts }),
+  )
+
+program
+  .command('daily-cost-override')
+  .argument('[amount]', 'Override daily cap in USD (positive number). Omit with --clear.')
+  .option('--clear', "Remove today's daily cost cap override")
+  .description(
+    "Raise today's daily cost cap. Auto-expires at 00:00 UTC. " +
+      'Use this when the whole day is blocked and per-run overrides would be impractical.',
+  )
+  .action((amount, opts, cmd) =>
+    dailyCostOverrideCommand(amount, { ...cmd.parent?.opts(), ...opts }),
   )
 
 program

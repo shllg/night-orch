@@ -3,6 +3,7 @@ import { Box, Text, useApp, useInput, useStdout } from 'ink'
 import type { Config } from '../../config/schema.js'
 import { RetryEngine } from '../../ops/retry.js'
 import { setIssueCostOverride } from '../../ops/cost-override.js'
+import { setDailyCostCapOverride } from '../../ops/daily-cost-override.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { CleanupEngine } from '../../ops/cleanup.js'
 import { LabelsInitEngine, formatLabelsInitSummary } from '../../ops/labels-init.js'
@@ -167,6 +168,7 @@ export type TuiActionCommand =
   | 'rebase'
   | 'deleteEntry'
   | 'costOverride'
+  | 'dailyCostOverride'
   | 'cleanupArm'
   | 'cleanupConfirm'
   | 'standaloneMessage'
@@ -203,6 +205,7 @@ export function resolveActionCommand(args: ResolveActionCommandInput): TuiAction
   if (args.input === 'p') return 'poll'
   if (args.input === 's') return 'sync'
   if (args.input === 'L') return 'labelsInit'
+  if (args.input === '%') return 'dailyCostOverride'
 
   if (args.input === 'D') {
     return args.cleanupConfirmPending ? 'cleanupConfirm' : 'cleanupArm'
@@ -788,6 +791,16 @@ export function App({
     })
   }, [config, db, runAction, selectedIssue])
 
+  const runDailyCostOverride = useCallback(async () => {
+    await runAction('daily-cost-override', async () => {
+      // Deterministic headroom boost: double today's effective daily cap.
+      // For a bespoke amount, use CLI `night-orch daily-cost-override` or MCP.
+      const override = config.security.maxDailyCostUsd * 2
+      const result = setDailyCostCapOverride(db, override)
+      return `daily cap override for ${result.date}: $${override.toFixed(2)} (auto-expires at 00:00 UTC)`
+    })
+  }, [config, db, runAction])
+
   const runSetSetting = useCallback(async (nextValue: string | number | boolean) => {
     const target = runtimeSettings[selectedSettingIndex]
     if (!target) {
@@ -1128,6 +1141,10 @@ export function App({
     }
     if (actionCommand === 'costOverride') {
       void runCostOverride()
+      return
+    }
+    if (actionCommand === 'dailyCostOverride') {
+      void runDailyCostOverride()
       return
     }
     if (actionCommand === 'none') {

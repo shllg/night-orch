@@ -118,6 +118,10 @@ export class CostTracker {
    * per-run cap with the stored value AND exempts the run from the daily
    * cap. Operators grant this override to push a specific run through when
    * they accept the extra spend.
+   *
+   * A non-null `daily_cost_cap_override_usd` on today's `daily_costs` row
+   * replaces `limits.maxDailyCostUsd` for today only. It auto-expires when
+   * the UTC day rolls over (next day's row starts NULL).
    */
   checkBudget(runId: string, limits: Config['security']): BudgetStatus {
     const override = this.getRunBudgetOverride(runId)
@@ -140,12 +144,14 @@ export class CostTracker {
     }
 
     const dailyCost = this.getDailyCost()
-    if (dailyCost >= limits.maxDailyCostUsd) {
+    const dailyCapOverride = this.getDailyCapOverride()
+    const effectiveDailyLimit = dailyCapOverride ?? limits.maxDailyCostUsd
+    if (dailyCost >= effectiveDailyLimit) {
       return {
         overBudget: true,
         limit: 'daily',
         actualUsd: dailyCost,
-        limitUsd: limits.maxDailyCostUsd,
+        limitUsd: effectiveDailyLimit,
       }
     }
 
@@ -178,6 +184,39 @@ export class CostTracker {
       .prepare('UPDATE runs SET cost_budget_override_usd = ? WHERE id = ?')
       .run(overrideUsd, runId)
   }
+
+  /**
+   * Read the daily cost cap override for a UTC day (defaults to today).
+   * Returns null when no override is set.
+   */
+  getDailyCapOverride(date: string = utcDayKey()): number | null {
+    const row = this.db
+      .prepare('SELECT daily_cost_cap_override_usd FROM daily_costs WHERE date = ?')
+      .get(date) as { daily_cost_cap_override_usd: number | null } | undefined
+    if (!row) return null
+    return row.daily_cost_cap_override_usd ?? null
+  }
+
+  /**
+   * Set or clear the daily cost cap override for a UTC day (defaults to
+   * today). Upserts the `daily_costs` row so the override works even on a
+   * day with no recorded spend yet. The override auto-expires when the UTC
+   * day rolls over — operators do not need to clear it manually.
+   */
+  setDailyCapOverride(overrideUsd: number | null, date: string = utcDayKey()): void {
+    if (overrideUsd !== null) {
+      if (!Number.isFinite(overrideUsd) || overrideUsd <= 0) {
+        throw new Error(`daily cap override must be a positive finite number, got ${overrideUsd}`)
+      }
+    }
+    this.db
+      .prepare(
+        `INSERT INTO daily_costs (date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens, daily_cost_cap_override_usd)
+         VALUES (?, 0, 0, 0, 0, ?)
+         ON CONFLICT(date) DO UPDATE SET daily_cost_cap_override_usd = excluded.daily_cost_cap_override_usd`,
+      )
+      .run(date, overrideUsd)
+  }
 }
 
 export type BudgetStatus =
@@ -201,8 +240,10 @@ export function describeBudgetBlock(
 export function costLimitRecoveryHint(limit: 'daily' | 'per-run'): string {
   if (limit === 'daily') {
     return (
-      'Raise `security.maxDailyCostUsd` in Settings (TUI/web/CLI `night-orch settings set`), ' +
-      'grant this run a budget override, or wait until 00:00 UTC for the daily counter to reset.'
+      'Run `night-orch daily-cost-override <amount>` to raise today\'s cap (auto-expires at 00:00 UTC), ' +
+      'grant this specific run a budget override via `night-orch cost-override <repo> <issue> <amount>`, ' +
+      'permanently raise `security.maxDailyCostUsd` via `night-orch settings set`, ' +
+      'or wait until 00:00 UTC for the daily counter to reset.'
     )
   }
   return (

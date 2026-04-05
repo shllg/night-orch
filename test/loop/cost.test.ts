@@ -209,6 +209,10 @@ describe('CostTracker', () => {
     expect(costLimitRecoveryHint('per-run')).toContain('security.maxCostPerRunUsd')
   })
 
+  it('costLimitRecoveryHint for daily mentions the daily-cost-override command', () => {
+    expect(costLimitRecoveryHint('daily')).toContain('daily-cost-override')
+  })
+
   describe('run cost budget override', () => {
     const limits = {
       maxDailyCostUsd: 25,
@@ -271,6 +275,107 @@ describe('CostTracker', () => {
       expect(() => costTracker.setRunBudgetOverride(runId, Number.POSITIVE_INFINITY)).toThrow(
         /positive finite/,
       )
+    })
+  })
+
+  describe('daily cost cap override', () => {
+    const limits = {
+      maxDailyCostUsd: 50,
+      maxCostPerRunUsd: 100,
+      maxChangedFiles: 50,
+      maxChangedLines: 5000,
+    }
+
+    const today = (): string => new Date().toISOString().split('T')[0] as string
+
+    it('returns null when no daily cap override is set', () => {
+      expect(costTracker.getDailyCapOverride()).toBeNull()
+    })
+
+    it('lets the day exceed the base daily cap when override is higher', () => {
+      db.prepare(
+        `INSERT INTO daily_costs (date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens)
+         VALUES (?, ?, 0, 0, 0)`,
+      ).run(today(), 75)
+
+      // Without override → blocked by base $50 cap.
+      expect(costTracker.checkBudget(runId, limits).overBudget).toBe(true)
+
+      // With override $200 → now under the effective cap.
+      costTracker.setDailyCapOverride(200)
+      const status = costTracker.checkBudget(runId, limits)
+      expect(status.overBudget).toBe(false)
+      expect(costTracker.getDailyCapOverride()).toBe(200)
+    })
+
+    it('reports the override value as limitUsd when the override is still exceeded', () => {
+      db.prepare(
+        `INSERT INTO daily_costs (date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens)
+         VALUES (?, ?, 0, 0, 0)`,
+      ).run(today(), 300)
+
+      costTracker.setDailyCapOverride(200)
+      const status = costTracker.checkBudget(runId, limits)
+      expect(status.overBudget).toBe(true)
+      if (status.overBudget) {
+        expect(status.limit).toBe('daily')
+        expect(status.limitUsd).toBe(200)
+        expect(status.actualUsd).toBe(300)
+      }
+    })
+
+    it('setDailyCapOverride creates a row when none exists', () => {
+      costTracker.setDailyCapOverride(150)
+      expect(costTracker.getDailyCapOverride()).toBe(150)
+      expect(costTracker.getDailyCost()).toBe(0)
+    })
+
+    it('clears the override when set to null', () => {
+      costTracker.setDailyCapOverride(150)
+      expect(costTracker.getDailyCapOverride()).toBe(150)
+      costTracker.setDailyCapOverride(null)
+      expect(costTracker.getDailyCapOverride()).toBeNull()
+    })
+
+    it('recording cost does not wipe an existing daily cap override', () => {
+      costTracker.setDailyCapOverride(150)
+      costTracker.recordCost(runId, 3.0)
+      expect(costTracker.getDailyCapOverride()).toBe(150)
+      expect(costTracker.getDailyCost()).toBe(3.0)
+    })
+
+    it('does not leak override across UTC day rollover', () => {
+      vi.useFakeTimers()
+      try {
+        vi.setSystemTime(new Date('2026-04-01T12:00:00.000Z'))
+        costTracker.setDailyCapOverride(500)
+        expect(costTracker.getDailyCapOverride('2026-04-01')).toBe(500)
+
+        vi.setSystemTime(new Date('2026-04-02T12:00:00.000Z'))
+        // Tomorrow has no override row yet → null.
+        expect(costTracker.getDailyCapOverride()).toBeNull()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('per-run override still bypasses daily cap when a daily override is also set', () => {
+      db.prepare(
+        `INSERT INTO daily_costs (date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens)
+         VALUES (?, ?, 0, 0, 0)`,
+      ).run(today(), 1000)
+      costTracker.setDailyCapOverride(100) // still under 1000, so would block
+      costTracker.setRunBudgetOverride(runId, 20)
+
+      const status = costTracker.checkBudget(runId, limits)
+      expect(status.overBudget).toBe(false)
+    })
+
+    it('rejects non-positive or non-finite override values', () => {
+      expect(() => costTracker.setDailyCapOverride(0)).toThrow(/positive finite/)
+      expect(() => costTracker.setDailyCapOverride(-5)).toThrow(/positive finite/)
+      expect(() => costTracker.setDailyCapOverride(Number.NaN)).toThrow(/positive finite/)
+      expect(() => costTracker.setDailyCapOverride(Number.POSITIVE_INFINITY)).toThrow(/positive finite/)
     })
   })
 })

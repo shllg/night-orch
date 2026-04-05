@@ -199,6 +199,28 @@ When `decompose: true`, issues classified as `standard` triage level with a body
 | `maxDailyCostUsd` | positive number | `50` | Daily budget cap used by decision logic. |
 | `maxCostPerRunUsd` | positive number | `10` | Per-run budget cap used by decision logic. |
 
+### Unblocking a run hit by a cost cap
+
+When a run is blocked by a cost limit, there are three escape hatches — pick
+whichever matches the scope of the situation:
+
+1. **Whole day over budget** → raise today's cap with
+   `night-orch daily-cost-override <amount>`. Scoped to the current UTC day;
+   auto-expires at 00:00 UTC. Use this when multiple queued issues would
+   otherwise need individual overrides. Clear early with
+   `night-orch daily-cost-override --clear`. Also exposed via MCP
+   (`night-orch-daily-cost-override`) and TUI (`%` hotkey — doubles the
+   current cap).
+2. **One expensive run stuck** → grant a per-run override with
+   `night-orch cost-override <repo> <issue> <amount>`. Replaces the per-run
+   cap for that one run *and* exempts it from the daily cap. Use when a
+   single heavyweight issue needs more headroom than the daily cap would
+   normally permit.
+3. **Permanently raise the cap** → `night-orch settings set
+   security.maxDailyCostUsd <amount>` (or `security.maxCostPerRunUsd`). This
+   persists until explicitly cleared with `night-orch settings unset`, so
+   reserve it for deliberate budget increases — not incident response.
+
 ## `cost`
 
 | Key | Type | Default | Notes |
