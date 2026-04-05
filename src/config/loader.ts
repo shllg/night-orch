@@ -15,27 +15,22 @@ export class ConfigError extends Error {
   }
 }
 
+export interface LoadedConfig {
+  raw: unknown
+  config: Config
+}
+
 /**
  * Load and validate config from a YAML file.
  * Expands all path fields (~, $ENV).
  */
 export function loadConfig(configPath: string): Config {
+  return loadConfigWithRaw(configPath).config
+}
+
+export function loadConfigWithRaw(configPath: string): LoadedConfig {
   const resolvedPath = expandPath(configPath)
-
-  if (!existsSync(resolvedPath)) {
-    throw new ConfigError(`Config file not found: ${resolvedPath}`)
-  }
-
-  let raw: unknown
-  try {
-    const content = readFileSync(resolvedPath, 'utf-8')
-    raw = parseYaml(content)
-  } catch (err) {
-    throw new ConfigError(
-      `Failed to parse YAML config: ${resolvedPath}`,
-      [(err as Error).message],
-    )
-  }
+  const raw = loadRawConfig(resolvedPath)
 
   let config: Config
   try {
@@ -63,7 +58,28 @@ export function loadConfig(configPath: string): Config {
   validateWorkerProfileRefs(config)
 
   logger.debug({ configPath: resolvedPath }, 'Config loaded successfully')
-  return config
+  return {
+    raw,
+    config,
+  }
+}
+
+export function loadRawConfig(configPath: string): unknown {
+  const resolvedPath = expandPath(configPath)
+
+  if (!existsSync(resolvedPath)) {
+    throw new ConfigError(`Config file not found: ${resolvedPath}`)
+  }
+
+  try {
+    const content = readFileSync(resolvedPath, 'utf-8')
+    return parseYaml(content)
+  } catch (err) {
+    throw new ConfigError(
+      `Failed to parse YAML config: ${resolvedPath}`,
+      [(err as Error).message],
+    )
+  }
 }
 
 function expandConfigPaths(config: Config): Config {

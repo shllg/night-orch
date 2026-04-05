@@ -243,6 +243,11 @@ describe('startWebServer', () => {
         host: '127.0.0.1',
         port: 0,
         frontendDistPath: frontendDir,
+        rawConfig: {
+          github: {
+            pollIntervalSeconds: 300,
+          },
+        },
       },
     )
 
@@ -256,11 +261,25 @@ describe('startWebServer', () => {
     const initial = await fetch(`${baseUrl}/api/settings`)
     expect(initial.status).toBe(200)
     const initialPayload = await initial.json() as {
-      settings: Array<{ key: string; source: string; effectiveValue: number | boolean }>
+      settings: Array<{
+        key: string
+        source: string
+        effectiveValue: number | boolean
+        defaultValue: number | boolean
+        hasYamlValue: boolean
+        yamlValue: number | boolean | null
+      }>
     }
     const pollBefore = initialPayload.settings.find((setting) => setting.key === 'github.pollIntervalSeconds')
     expect(pollBefore?.source).toBe('base')
     expect(pollBefore?.effectiveValue).toBe(300)
+    expect(pollBefore?.defaultValue).toBe(300)
+    expect(pollBefore?.hasYamlValue).toBe(true)
+    expect(pollBefore?.yamlValue).toBe(300)
+
+    const maxReviewBefore = initialPayload.settings.find((setting) => setting.key === 'loop.maxReviewIterations')
+    expect(maxReviewBefore?.hasYamlValue).toBe(false)
+    expect(maxReviewBefore?.yamlValue).toBeNull()
 
     const setResponse = await fetch(`${baseUrl}/api/operations/settings/set`, {
       method: 'POST',
@@ -311,6 +330,54 @@ describe('startWebServer', () => {
         effectiveValue: 300,
         source: 'base',
       },
+    })
+  })
+
+  it('keeps yaml presence for schema-valid values outside runtime override bounds', async () => {
+    const config = makeMinimalConfig()
+    config.github.pollIntervalSeconds = 7200
+    deps.config = config as MCPDependencies['config']
+
+    server = await startWebServer(
+      deps,
+      {
+        host: '127.0.0.1',
+        port: 0,
+        frontendDistPath: frontendDir,
+        rawConfig: {
+          github: {
+            pollIntervalSeconds: 7200,
+          },
+        },
+      },
+    )
+
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Unexpected address type')
+    }
+    baseUrl = `http://127.0.0.1:${address.port}`
+
+    const response = await fetch(`${baseUrl}/api/settings`)
+    expect(response.status).toBe(200)
+    const payload = await response.json() as {
+      settings: Array<{
+        key: string
+        baseValue: number | boolean
+        effectiveValue: number | boolean
+        defaultValue: number | boolean
+        hasYamlValue: boolean
+        yamlValue: number | boolean | null
+      }>
+    }
+
+    const pollSetting = payload.settings.find((setting) => setting.key === 'github.pollIntervalSeconds')
+    expect(pollSetting).toMatchObject({
+      baseValue: 7200,
+      effectiveValue: 7200,
+      defaultValue: 300,
+      hasYamlValue: true,
+      yamlValue: 7200,
     })
   })
 

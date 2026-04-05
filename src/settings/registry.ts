@@ -15,7 +15,10 @@ interface SettingDefinitionBase<K extends SettingKey, V extends SettingValue> {
   key: K
   label: string
   description: string
+  details: string
   type: SettingType
+  defaultValue: V
+  yamlPath: readonly [string, ...string[]]
   read: (config: Config) => V
   apply: (config: Config, value: V) => Config
   parseInput: (raw: unknown) => V
@@ -38,12 +41,20 @@ export interface BooleanSettingDefinition<K extends SettingKey = SettingKey>
 
 export type SettingDefinition = NumberSettingDefinition | BooleanSettingDefinition
 
+export interface SettingYamlValue {
+  hasYamlValue: boolean
+  yamlValue: SettingValue | null
+}
+
 const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
   'github.pollIntervalSeconds': {
     key: 'github.pollIntervalSeconds',
     label: 'Poll Interval (seconds)',
     description: 'Delay between automatic poll cycles.',
+    details: 'Controls how often night-orch checks configured repos for work. Lower values react faster but increase API traffic; higher values reduce background load.',
     type: 'number',
+    defaultValue: 300,
+    yamlPath: ['github', 'pollIntervalSeconds'],
     min: 5,
     max: 3600,
     step: 5,
@@ -73,7 +84,10 @@ const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     key: 'security.maxDailyCostUsd',
     label: 'Daily Cost Budget (USD)',
     description: 'Maximum allowed spend per UTC day before new runs are blocked.',
+    details: 'Sets the global daily spend cap for pay-per-use mode. When the cap is reached, new runs are blocked until the next UTC day or until you raise the limit.',
     type: 'number',
+    defaultValue: 50,
+    yamlPath: ['security', 'maxDailyCostUsd'],
     min: 1,
     max: 10000,
     step: 1,
@@ -103,7 +117,10 @@ const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     key: 'security.maxCostPerRunUsd',
     label: 'Per-Run Cost Budget (USD)',
     description: 'Maximum allowed spend for a single run before it is blocked.',
+    details: 'Sets the per-issue run cost ceiling. Useful for preventing one expensive issue from consuming most of the daily budget.',
     type: 'number',
+    defaultValue: 10,
+    yamlPath: ['security', 'maxCostPerRunUsd'],
     min: 0.1,
     max: 1000,
     step: 0.5,
@@ -133,7 +150,10 @@ const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     key: 'loop.maxReviewIterations',
     label: 'Max Review Iterations',
     description: 'Maximum review correction loops per run.',
+    details: 'Limits how many review-fix-review cycles a run can execute before stopping. Higher values can improve completion rate, but may increase runtime and cost.',
     type: 'number',
+    defaultValue: 4,
+    yamlPath: ['loop', 'maxReviewIterations'],
     min: 1,
     max: 20,
     step: 1,
@@ -163,7 +183,10 @@ const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     key: 'loop.maxTotalAgentPasses',
     label: 'Max Total Agent Passes',
     description: 'Hard cap on planner/coder/reviewer passes in one run.',
+    details: 'Caps total planner/coder/reviewer passes across the full run. This is a safety guard against long loops and runaway spend.',
     type: 'number',
+    defaultValue: 10,
+    yamlPath: ['loop', 'maxTotalAgentPasses'],
     min: 1,
     max: 50,
     step: 1,
@@ -193,7 +216,10 @@ const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     key: 'observability.agentStreaming',
     label: 'Agent Streaming',
     description: 'Enable in-flight agent event streaming to TUI/Web.',
+    details: 'Turns live agent event streaming on or off for terminal and web views. Disable this if you want quieter live output while runs are active.',
     type: 'boolean',
+    defaultValue: true,
+    yamlPath: ['observability', 'agentStreaming'],
     read: (config) => config.observability?.agentStreaming ?? true,
     apply: (config, value) => ({
       ...config,
@@ -216,6 +242,24 @@ export function listSettingDefinitions(): SettingDefinition[] {
 
 export function getSettingDefinition(key: string): SettingDefinition | null {
   return SETTING_DEFINITIONS[key as SettingKey] ?? null
+}
+
+export function resolveSettingYamlValue(
+  definition: SettingDefinition,
+  rawConfig: unknown,
+  baseConfig: Config,
+): SettingYamlValue {
+  if (!hasValueAtPath(rawConfig, definition.yamlPath)) {
+    return {
+      hasYamlValue: false,
+      yamlValue: null,
+    }
+  }
+
+  return {
+    hasYamlValue: true,
+    yamlValue: definition.read(baseConfig),
+  }
 }
 
 function parseNumberInput(
@@ -316,4 +360,24 @@ function buildDefaultObservability(config: Config): Config['observability'] {
     sessionLogs: config.observability?.sessionLogs ?? true,
     sessionLogRetention: config.observability?.sessionLogRetention ?? 7,
   }
+}
+
+function hasValueAtPath(
+  source: unknown,
+  path: readonly string[],
+): boolean {
+  let current: unknown = source
+
+  for (const segment of path) {
+    if (!isRecord(current) || !(segment in current)) {
+      return false
+    }
+    current = current[segment]
+  }
+
+  return true
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
 }

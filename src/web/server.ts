@@ -17,8 +17,10 @@ import { nowUtcIso } from '../utils/time.js'
 import {
   listRuntimeSettings,
   resolveConfigWithRuntimeSettings,
+  type RuntimeSettingSnapshot,
   RuntimeSettingInputError,
 } from '../settings/runtime.js'
+import { getSettingDefinition, resolveSettingYamlValue, type SettingValue } from '../settings/registry.js'
 
 export interface WebServerOptions {
   host: string
@@ -27,6 +29,7 @@ export interface WebServerOptions {
   frontendDistPath?: string
   snapshotIntervalMs?: number
   operationsEnabled?: boolean
+  rawConfig?: unknown
 }
 
 interface WsClientState {
@@ -51,7 +54,12 @@ interface DashboardSnapshot {
 
 interface SettingsSnapshot {
   generatedAt: string
-  settings: ReturnType<typeof listRuntimeSettings>
+  settings: SettingsSnapshotEntry[]
+}
+
+interface SettingsSnapshotEntry extends RuntimeSettingSnapshot {
+  hasYamlValue: boolean
+  yamlValue: SettingValue | null
 }
 
 type CommandSpec = string | string[]
@@ -236,7 +244,7 @@ export async function startWebServer(
           writeJson(res, 403, { error: 'Forbidden host' })
           return
         }
-        await handleApiRequest(req, res, requestUrl, deps, security, operationsEnabled)
+        await handleApiRequest(req, res, requestUrl, deps, security, operationsEnabled, options.rawConfig)
         return
       }
 
@@ -376,6 +384,7 @@ async function handleApiRequest(
   deps: MCPDependencies,
   security: WebSecurityContext,
   operationsEnabled: boolean,
+  rawConfig: unknown,
 ): Promise<void> {
   const method = req.method ?? 'GET'
   const { pathname, searchParams } = requestUrl
@@ -416,7 +425,7 @@ async function handleApiRequest(
   }
 
   if (method === 'GET' && pathname === '/api/settings') {
-    const snapshot = buildSettingsSnapshot(deps)
+    const snapshot = buildSettingsSnapshot(deps, rawConfig)
     writeJson(res, 200, snapshot)
     return
   }
@@ -1225,10 +1234,28 @@ function buildProjectsSnapshot(deps: MCPDependencies): ProjectsSnapshot {
   }
 }
 
-function buildSettingsSnapshot(deps: MCPDependencies): SettingsSnapshot {
+function buildSettingsSnapshot(deps: MCPDependencies, rawConfig: unknown): SettingsSnapshot {
+  const runtimeSettings = listRuntimeSettings(deps.config, deps.db)
+
   return {
     generatedAt: nowUtcIso(),
-    settings: listRuntimeSettings(deps.config, deps.db),
+    settings: runtimeSettings.map((setting) => {
+      const definition = getSettingDefinition(setting.key)
+      if (!definition) {
+        return {
+          ...setting,
+          hasYamlValue: false,
+          yamlValue: null,
+        }
+      }
+
+      const { hasYamlValue, yamlValue } = resolveSettingYamlValue(definition, rawConfig, deps.config)
+      return {
+        ...setting,
+        hasYamlValue,
+        yamlValue,
+      }
+    }),
   }
 }
 
