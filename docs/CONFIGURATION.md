@@ -230,6 +230,22 @@ whichever matches the scope of the situation:
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `model` | `pay-per-use` or `subscription` | `pay-per-use` | `pay-per-use` enforces `security.maxDailyCostUsd`/`security.maxCostPerRunUsd`; `subscription` bypasses cost-limit blocking and treats USD as advisory while emphasizing token usage. |
+| `pricing` | object | unset | Optional model-aware pricing table. When unset, `pay-per-use` uses built-in defaults (input `$3/M`, output `$15/M`, fallback `$0.008/min`) and `subscription` defaults to `$0` USD estimates. |
+
+### `cost.pricing`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `defaultModel` | string | `"default"` | Fallback key when a worker's `pricingModel`/`type` has no direct pricing entry. |
+| `models` | record | `{}` | Per-model pricing map keyed by model name. |
+
+### `cost.pricing.models.<model>`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `inputUsdPerMillionTokens` | non-negative number | `3` | Prompt/input token price in USD per 1,000,000 tokens. |
+| `outputUsdPerMillionTokens` | non-negative number | `15` | Completion/output token price in USD per 1,000,000 tokens. |
+| `minuteUsd` | non-negative number | `0.008` | Time-based fallback price per minute when token counts are unavailable. |
 
 ## `workerProfiles`
 
@@ -250,6 +266,7 @@ workerProfiles:
 | Key | Type | Required | Default | Notes |
 | --- | --- | --- | --- | --- |
 | `type` | string | yes | none | Adapter type. Built-in: `claude`, `codex`, `acp`. |
+| `pricingModel` | string | no | none | Optional model key used by `cost.pricing.models` for cost estimation. Falls back to `type` when omitted. |
 | `command` | string | yes | none | Binary to execute. |
 | `args` | string[] | no | `[]` | Base CLI args for every task invocation. |
 | `workerTimeoutSeconds` | positive number | no | `1800` | Base timeout before triage scaling. |

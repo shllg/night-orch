@@ -321,6 +321,11 @@ describe('executeWorkerStep', () => {
     const result = await executeWorkerStep(makeCtx(), step, deps)
 
     expect(result.tokenUsage).toEqual({ promptTokens: 100, completionTokens: 50 })
+    expect(result.pricingIdentity).toEqual({
+      role: 'planner',
+      workerType: 'claude',
+      pricingModel: null,
+    })
   })
 
   it('throws when worker times out', async () => {

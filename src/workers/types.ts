@@ -20,6 +20,7 @@ export interface WorkerTaskInput {
 
 export interface WorkerProfileInput {
   type: string
+  pricingModel?: string
   command: string
   args: string[]
   workerTimeoutSeconds: number

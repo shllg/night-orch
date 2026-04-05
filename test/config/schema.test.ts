@@ -164,6 +164,55 @@ describe('ConfigSchema', () => {
     }
   })
 
+  it('accepts configurable cost pricing by model', () => {
+    const raw = loadExampleConfig()
+    raw.cost = {
+      model: 'pay-per-use',
+      pricing: {
+        defaultModel: 'claude-sonnet-4',
+        models: {
+          'claude-sonnet-4': {
+            inputUsdPerMillionTokens: 3,
+            outputUsdPerMillionTokens: 15,
+            minuteUsd: 0.01,
+          },
+          'gpt-5': {
+            inputUsdPerMillionTokens: 1.25,
+            outputUsdPerMillionTokens: 10,
+            minuteUsd: 0.02,
+          },
+        },
+      },
+    }
+    raw.workerProfiles['claude-default'].pricingModel = 'claude-sonnet-4'
+
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.cost.pricing?.defaultModel).toBe('claude-sonnet-4')
+      expect(result.data.cost.pricing?.models['gpt-5']?.outputUsdPerMillionTokens).toBe(10)
+      expect(result.data.workerProfiles['claude-default']?.pricingModel).toBe('claude-sonnet-4')
+    }
+  })
+
+  it('rejects negative configured pricing rates', () => {
+    const raw = loadExampleConfig()
+    raw.cost = {
+      model: 'pay-per-use',
+      pricing: {
+        models: {
+          default: {
+            inputUsdPerMillionTokens: -1,
+            outputUsdPerMillionTokens: 15,
+            minuteUsd: 0.008,
+          },
+        },
+      },
+    }
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(false)
+  })
+
   it('excludes orch:needs-human by default', () => {
     const minimal = {
       version: 1,

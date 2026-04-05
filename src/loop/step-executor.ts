@@ -25,6 +25,11 @@ export interface StepDependencies {
 export interface StepResult {
   ctx: RunContext
   tokenUsage?: { promptTokens: number; completionTokens: number }
+  pricingIdentity?: {
+    role: string
+    workerType: string
+    pricingModel: string | null
+  }
   /** For decide steps: the decision action. */
   decision?: LoopDecision
 }
@@ -135,6 +140,11 @@ export async function executeWorkerStep(
   return {
     ctx: updatedCtx,
     tokenUsage: result.tokenUsage,
+    pricingIdentity: {
+      role: step.role,
+      workerType: profile.type,
+      pricingModel: profile.pricingModel ?? null,
+    },
   }
 }
 

@@ -46,6 +46,7 @@ const AppMentionSchema = z.object({
 
 const WorkerProfileSchema = z.object({
   type: z.string().min(1, 'Worker type must not be empty'),
+  pricingModel: z.string().min(1).optional(),
   command: z.string(),
   args: z.array(z.string()).default([]),
   workerTimeoutSeconds: z.number().positive().default(1800),
@@ -260,8 +261,20 @@ const SecuritySchema = z.object({
 
 const CostModelSchema = z.enum(['pay-per-use', 'subscription'])
 
+const CostPricingModelSchema = z.object({
+  inputUsdPerMillionTokens: z.number().nonnegative().default(3),
+  outputUsdPerMillionTokens: z.number().nonnegative().default(15),
+  minuteUsd: z.number().nonnegative().default(0.008),
+})
+
+const CostPricingSchema = z.object({
+  defaultModel: z.string().min(1).default('default'),
+  models: z.record(CostPricingModelSchema).default({}),
+})
+
 const CostSchema = z.object({
   model: CostModelSchema.default('pay-per-use'),
+  pricing: CostPricingSchema.optional(),
 })
 
 // --- Metrics schema ---
