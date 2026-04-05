@@ -1,5 +1,6 @@
 import { type ReactElement, useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { ButtonWeb } from '../button/button.web.js'
 import { ModalWeb } from './modal.web.js'
 import type { ModalProps } from './types.js'
 
@@ -52,9 +53,9 @@ function DismissiblePreview(args: ModalProps): ReactElement {
 
   return (
     <div className="flex min-h-[26rem] items-center justify-center">
-      <button type="button" className="btn btn-primary btn-sm" onClick={() => setOpen(true)}>
+      <ButtonWeb type="button" tone="primary" size="sm" onClick={() => setOpen(true)}>
         Open modal
-      </button>
+      </ButtonWeb>
       <ModalWeb
         {...args}
         open={open}
@@ -63,12 +64,12 @@ function DismissiblePreview(args: ModalProps): ReactElement {
         }}
         actions={
           <>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setOpen(false)}>
+            <ButtonWeb type="button" tone="ghost" size="sm" onClick={() => setOpen(false)}>
               Cancel
-            </button>
-            <button type="button" className="btn btn-error btn-sm" onClick={() => setOpen(false)}>
+            </ButtonWeb>
+            <ButtonWeb type="button" tone="error" size="sm" onClick={() => setOpen(false)}>
               Remove worktrees
-            </button>
+            </ButtonWeb>
           </>
         }
       />

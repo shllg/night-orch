@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { ButtonWeb } from '../button/button.web.js'
 import { CardWeb } from './card.web.js'
 import type { CardTone } from './types.js'
 
@@ -22,12 +23,12 @@ export const WithActions: Story = {
   args: {
     actions: (
       <>
-        <button type="button" className="btn btn-ghost btn-sm">
+        <ButtonWeb tone="ghost" size="sm">
           Re-run
-        </button>
-        <button type="button" className="btn btn-primary btn-sm">
+        </ButtonWeb>
+        <ButtonWeb tone="primary" size="sm">
           Open PR
-        </button>
+        </ButtonWeb>
       </>
     ),
   },
