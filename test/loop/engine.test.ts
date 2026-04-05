@@ -468,6 +468,7 @@ describe('executeLoop', () => {
 
     expect(result.terminalStatus).toBe('publish')
     expect(result.blockReason).toBeNull()
+    expect(result.estimatedCostUsd).toBe(250)
   })
 
   it('BLOCKED verdict → blocked', async () => {

@@ -8,6 +8,7 @@ import { commitChanges } from './commit.js'
 import { executeStep, type StepDependencies } from './step-executor.js'
 import { Checkpoint } from './checkpoint.js'
 import { CostTracker, describeBudgetBlock, costLimitRecoveryHint } from './cost.js'
+import { estimateWorkerCostUsd } from './pricing.js'
 import { logger } from '../utils/logger.js'
 import { utcIsoFromMs } from '../utils/time.js'
 import type Database from 'better-sqlite3'
@@ -106,7 +107,15 @@ export async function executeLoop(
 
     // Cost tracking for worker steps
     if (step.type === 'worker') {
-      ctx = applyEstimatedWorkerCost(ctx, costTracker, step.role, stepDurationMs, result.tokenUsage)
+      ctx = applyEstimatedWorkerCost(
+        ctx,
+        costTracker,
+        config.cost,
+        step.role,
+        result.pricingIdentity,
+        stepDurationMs,
+        result.tokenUsage,
+      )
       try { metrics?.observePhaseDuration(step.id, stepDurationMs / 1000) } catch { /* best-effort */ }
     }
     if (step.type === 'verify') {
@@ -355,35 +364,34 @@ function buildStepArtifacts(step: WorkflowStep, ctx: RunContext): Record<string,
 // Cost estimation
 // ---------------------------------------------------------------------------
 
-const ESTIMATED_USD_PER_INPUT_TOKEN = 0.000003
-const ESTIMATED_USD_PER_OUTPUT_TOKEN = 0.000015
-
-const ESTIMATED_USD_PER_MINUTE: Record<string, number> = {
-  planner: 0.008,
-  coder: 0.008,
-  reviewer: 0.008,
-}
-
 function applyEstimatedWorkerCost(
   ctx: RunContext,
   costTracker: CostTracker,
+  costConfig: Config['cost'] | undefined,
   role: string,
+  pricingIdentity: {
+    role: string
+    workerType: string
+    pricingModel: string | null
+  } | undefined,
   durationMs: number,
   tokenUsage?: { promptTokens: number; completionTokens: number },
 ): RunContext {
-  let estimatedCost: number
-  if (tokenUsage) {
-    estimatedCost = Number((
-      tokenUsage.promptTokens * ESTIMATED_USD_PER_INPUT_TOKEN +
-      tokenUsage.completionTokens * ESTIMATED_USD_PER_OUTPUT_TOKEN
-    ).toFixed(6))
-  } else {
-    const rate = ESTIMATED_USD_PER_MINUTE[role] ?? 0.008
-    estimatedCost = Number(((durationMs / 60_000) * rate).toFixed(6))
-  }
-  estimatedCost = Math.max(0, estimatedCost)
+  const estimatedCost = estimateWorkerCostUsd({
+    cost: costConfig,
+    identity: {
+      role,
+      workerType: pricingIdentity?.workerType,
+      pricingModel: pricingIdentity?.pricingModel,
+    },
+    durationMs,
+    tokenUsage,
+  })
+
   if (estimatedCost <= 0 && !tokenUsage) return ctx
   costTracker.recordCost(ctx.runId, estimatedCost, tokenUsage)
+  if (estimatedCost <= 0) return ctx
+
   return updateContext(ctx, {
     estimatedCostUsd: Number((ctx.estimatedCostUsd + estimatedCost).toFixed(6)),
   })

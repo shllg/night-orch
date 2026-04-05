@@ -467,15 +467,23 @@ blocking is skipped.
 ```yaml
 cost:
   model: pay-per-use   # or: subscription
+  # pricing:
+  #   defaultModel: claude-sonnet-4
+  #   models:
+  #     claude-sonnet-4:
+  #       inputUsdPerMillionTokens: 3
+  #       outputUsdPerMillionTokens: 15
+  #       minuteUsd: 0.008
 ```
 
 - `pay-per-use` keeps USD spend as the primary dashboard metric and enforces `security.maxCostPerRunUsd` + `security.maxDailyCostUsd`.
-- `subscription` keeps token usage as the primary dashboard metric, shows USD as an estimate, and bypasses `cost_limit` enforcement (override commands do not affect loop gating in this mode).
+- `subscription` keeps token usage as the primary dashboard metric, defaults USD estimates to `$0.00`, and bypasses `cost_limit` enforcement (override commands do not affect loop gating in this mode).
+- `cost.pricing.models` optionally enables model-aware USD estimation keyed by `workerProfiles.<name>.pricingModel` (or worker `type` when unset).
 
 ### Cost estimation
 
-- **Token-based** (preferred) — when the agent adapter reports token counts, cost is calculated from input/output token rates
-- **Time-based** (fallback) — when token counts aren't available, cost is estimated at $0.008/minute per agent call
+- **Token-based** (preferred) — when the agent adapter reports token counts, cost is calculated from per-model input/output token rates
+- **Time-based** (fallback) — when token counts aren't available, cost is estimated from each model's `minuteUsd`
 
 View costs/usage:
 - `night-orch status` — shows daily cost summary
