@@ -794,7 +794,15 @@ describe('startWebServer', () => {
       },
       environment: {
         defaultMode: 'dedicated',
-        bootstrap: [{ when: 'always', command: ['pnpm', 'install'] }],
+        bootstrap: [{
+          when: 'always',
+          command: ['pnpm', 'install'],
+          failureHints: [{
+            contains: 'not found',
+            message: 'Install dependencies first.',
+            output: 'stderr' as const,
+          }],
+        }],
         cleanup: [{ when: 'always', command: 'pnpm clean' }],
         shared: {
           requireRunning: true,
@@ -845,6 +853,13 @@ describe('startWebServer', () => {
         labels: { blocked: string }
         prompts: { plannerSystem: boolean; coderSystem: boolean; reviewerSystem: boolean }
         environment?: {
+          bootstrap?: Array<{
+            failureHints?: Array<{
+              contains: string
+              message: string
+              output: string
+            }>
+          }>
           dedicated?: {
             env: { copyFrom: string; overrideKeys: string[]; overrideFiles: string[]; overrides?: unknown }
           }
@@ -867,6 +882,11 @@ describe('startWebServer', () => {
       plannerSystem: true,
       coderSystem: false,
       reviewerSystem: false,
+    })
+    expect(payload.repos[0]?.environment?.bootstrap?.[0]?.failureHints?.[0]).toMatchObject({
+      contains: 'not found',
+      message: 'Install dependencies first.',
+      output: 'stderr',
     })
     expect(payload.repos[0]?.environment?.dedicated?.env).toMatchObject({
       copyFrom: '.env',

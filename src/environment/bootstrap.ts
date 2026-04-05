@@ -7,6 +7,13 @@ export type BootstrapWhen = 'always' | 'dedicated' | 'shared'
 export interface BootstrapCommand {
   command: CommandSpec
   when: BootstrapWhen
+  failureHints?: BootstrapFailureHint[]
+}
+
+interface BootstrapFailureHint {
+  contains: string
+  message: string
+  output?: 'combined' | 'stdout' | 'stderr'
 }
 
 /**
@@ -44,7 +51,7 @@ export async function runBootstrapCommands(
         },
         'Bootstrap command failed',
       )
-      throw new Error(formatBootstrapFailure(commandLabel, result))
+      throw new Error(formatBootstrapFailure(commandLabel, result, cmd.failureHints))
     }
 
     logger.debug({ command: commandLabel }, 'Bootstrap command succeeded')
@@ -60,6 +67,7 @@ const OUTPUT_TAIL_LIMIT = 4000
 function formatBootstrapFailure(
   commandLabel: string,
   result: { exitCode?: number | undefined; stdout?: string; stderr?: string },
+  failureHints: BootstrapFailureHint[] | undefined,
 ): string {
   const lines: string[] = [
     `Bootstrap command failed: ${commandLabel}`,
@@ -73,6 +81,10 @@ function formatBootstrapFailure(
   if (stderrTail) {
     lines.push('stderr:', stderrTail)
   }
+  const hint = detectBootstrapHint(result, failureHints)
+  if (hint) {
+    lines.push('hint:', hint)
+  }
   return lines.join('\n')
 }
 
@@ -81,4 +93,26 @@ function tail(output: string | undefined): string {
   if (output.length <= OUTPUT_TAIL_LIMIT) return output
   const omitted = output.length - OUTPUT_TAIL_LIMIT
   return `... (truncated, ${omitted} chars omitted)\n${output.slice(-OUTPUT_TAIL_LIMIT)}`
+}
+
+function detectBootstrapHint(
+  result: { stdout?: string; stderr?: string },
+  failureHints: BootstrapFailureHint[] | undefined,
+): string | null {
+  if (!failureHints || failureHints.length === 0) return null
+
+  for (const hint of failureHints) {
+    const output = hint.output ?? 'combined'
+    const haystack =
+      output === 'stdout'
+        ? result.stdout ?? ''
+        : output === 'stderr'
+          ? result.stderr ?? ''
+          : [result.stdout, result.stderr].filter(Boolean).join('\n')
+    if (haystack.includes(hint.contains)) {
+      return hint.message
+    }
+  }
+
+  return null
 }

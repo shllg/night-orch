@@ -143,8 +143,24 @@ interface ProjectRepoSummary {
       requireRunning: boolean
       healthcheck?: CommandSpec
     }
-    bootstrap: Array<{ command: CommandSpec; when: CommandWhen }>
-    cleanup: Array<{ command: CommandSpec; when: CommandWhen }>
+    bootstrap: Array<{
+      command: CommandSpec
+      when: CommandWhen
+      failureHints?: Array<{
+        contains: string
+        message: string
+        output: 'combined' | 'stdout' | 'stderr'
+      }>
+    }>
+    cleanup: Array<{
+      command: CommandSpec
+      when: CommandWhen
+      failureHints?: Array<{
+        contains: string
+        message: string
+        output: 'combined' | 'stdout' | 'stderr'
+      }>
+    }>
   }
   verify: CommandSpec[]
   prompts: {
@@ -1372,10 +1388,28 @@ function sanitizeEnvironment(environment: NonNullable<RepoConfig['environment']>
     bootstrap: environment.bootstrap.map((step) => ({
       when: step.when,
       command: copyCommandSpec(step.command),
+      ...(step.failureHints && step.failureHints.length > 0
+        ? {
+            failureHints: step.failureHints.map((hint) => ({
+              contains: hint.contains,
+              message: hint.message,
+              output: hint.output,
+            })),
+          }
+        : {}),
     })),
     cleanup: environment.cleanup.map((step) => ({
       when: step.when,
       command: copyCommandSpec(step.command),
+      ...(step.failureHints && step.failureHints.length > 0
+        ? {
+            failureHints: step.failureHints.map((hint) => ({
+              contains: hint.contains,
+              message: hint.message,
+              output: hint.output,
+            })),
+          }
+        : {}),
     })),
   }
 }

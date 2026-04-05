@@ -281,4 +281,27 @@ describe('ConfigSchema', () => {
     const result = ConfigSchema.safeParse(raw)
     expect(result.success).toBe(false)
   })
+
+  it('accepts bootstrap failureHints and applies default output mode', () => {
+    const raw = loadExampleConfig()
+    raw.repos[0].environment.bootstrap = [
+      {
+        command: 'bundle exec rails db:prepare',
+        when: 'always',
+        failureHints: [
+          {
+            contains: 'role "app_user" does not exist',
+            message: 'Create PostgreSQL role "app_user".',
+          },
+        ],
+      },
+    ]
+
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      const hint = result.data.repos[0]?.environment?.bootstrap[0]?.failureHints[0]
+      expect(hint?.output).toBe('combined')
+    }
+  })
 })

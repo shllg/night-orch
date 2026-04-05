@@ -146,6 +146,60 @@ describe('runBootstrapCommands', () => {
     )
   })
 
+  it('adds a configured failure hint when output contains a matching pattern', async () => {
+    mockExeca.mockResolvedValue({
+      exitCode: 1,
+      stdout: 'psql:/tmp/wt/db/structure.sql:1688: ERROR:  role "app_user" does not exist',
+      stderr: 'bin/rails aborted!',
+    } as never)
+
+    const commands: BootstrapCommand[] = [
+      {
+        command: 'bundle exec rails db:prepare',
+        when: 'always',
+        failureHints: [{
+          contains: 'role "app_user" does not exist',
+          message: 'Create PostgreSQL role "app_user" before running bootstrap.',
+          output: 'combined',
+        }],
+      },
+    ]
+
+    await expect(runBootstrapCommands('/tmp/wt', commands, 'shared')).rejects.toThrow(
+      /hint:[\s\S]*Create PostgreSQL role "app_user" before running bootstrap/i,
+    )
+  })
+
+  it('does not include configured failure hints when patterns do not match output', async () => {
+    mockExeca.mockResolvedValue({
+      exitCode: 1,
+      stdout: 'generic failure output',
+      stderr: 'bin/rails aborted!',
+    } as never)
+
+    const commands: BootstrapCommand[] = [
+      {
+        command: 'bundle exec rails db:prepare',
+        when: 'always',
+        failureHints: [{
+          contains: 'role "app_user" does not exist',
+          message: 'Create PostgreSQL role "app_user" before running bootstrap.',
+          output: 'combined',
+        }],
+      },
+    ]
+
+    let caught: Error | null = null
+    try {
+      await runBootstrapCommands('/tmp/wt', commands, 'shared')
+    } catch (err) {
+      caught = err as Error
+    }
+
+    expect(caught).not.toBeNull()
+    expect(caught?.message).not.toContain('hint:')
+  })
+
   it('omits the stderr section when stderr is empty', async () => {
     mockExeca.mockResolvedValue({
       exitCode: 1,

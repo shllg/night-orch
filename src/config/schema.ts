@@ -61,9 +61,16 @@ const CommandSpecSchema = z.union([
 
 // --- Environment schemas ---
 
+const BootstrapFailureHintSchema = z.object({
+  contains: z.string().min(1),
+  message: z.string().min(1),
+  output: z.enum(['combined', 'stdout', 'stderr']).default('combined'),
+})
+
 const BootstrapCommandSchema = z.object({
   command: CommandSpecSchema,
   when: z.enum(['always', 'dedicated', 'shared']).default('always'),
+  failureHints: z.array(BootstrapFailureHintSchema).default([]),
 })
 
 const DedicatedEnvSchema = z.object({

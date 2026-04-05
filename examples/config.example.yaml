@@ -203,6 +203,12 @@ repos:
       bootstrap:
         - command: pnpm install --frozen-lockfile
           when: always
+        # - command: bundle exec rails db:prepare
+        #   when: always
+        #   failureHints:
+        #     - contains: 'role "app_user" does not exist'
+        #       message: 'Create PostgreSQL role "app_user" locally before rerunning bootstrap.'
+        #       output: combined
     verify:
       - pnpm lint
       - pnpm typecheck

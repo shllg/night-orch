@@ -566,6 +566,15 @@ Issue labels can force mode per run:
 | --- | --- | --- | --- | --- |
 | `command` | `CommandSpec` | yes | none | Executed in worktree directory. |
 | `when` | `always` \| `shared` \| `dedicated` | no | `always` | Mode filter. |
+| `failureHints` | object[] | no | `[]` | Optional pattern-based hints appended to bootstrap error output. |
+
+##### `failureHints[]`
+
+| Key | Type | Required | Default | Notes |
+| --- | --- | --- | --- | --- |
+| `contains` | string | yes | none | Substring to match against command output. |
+| `message` | string | yes | none | Hint text shown when the pattern matches. |
+| `output` | `combined` \| `stdout` \| `stderr` | no | `combined` | Which output stream(s) to inspect. |
 
 ### `repos[].verify`
 
