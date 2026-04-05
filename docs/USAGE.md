@@ -458,7 +458,9 @@ security:
   maxDailyCostUsd: 50     # max total daily spend
 ```
 
-When a budget is exceeded, the run is blocked with reason `cost_limit`.
+When a budget is exceeded in `pay-per-use` mode, the run is blocked with
+reason `cost_limit`. In `subscription` mode, USD is advisory and cost-based
+blocking is skipped.
 
 ### Cost model
 
@@ -467,8 +469,8 @@ cost:
   model: pay-per-use   # or: subscription
 ```
 
-- `pay-per-use` keeps USD spend as the primary dashboard metric.
-- `subscription` keeps token usage as the primary dashboard metric and shows USD as an estimate.
+- `pay-per-use` keeps USD spend as the primary dashboard metric and enforces `security.maxCostPerRunUsd` + `security.maxDailyCostUsd`.
+- `subscription` keeps token usage as the primary dashboard metric, shows USD as an estimate, and bypasses `cost_limit` enforcement (override commands do not affect loop gating in this mode).
 
 ### Cost estimation
 

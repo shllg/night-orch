@@ -435,6 +435,41 @@ describe('executeLoop', () => {
     expect(result.terminalStatus).toBe('publish')
   })
 
+  it('subscription model bypasses over-budget checks in executeLoop', async () => {
+    db.prepare('UPDATE runs SET estimated_cost_usd = ? WHERE id = ?').run(250, 'run-test-1')
+    const today = new Date().toISOString().split('T')[0]
+    db.prepare(
+      `INSERT INTO daily_costs (date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens)
+       VALUES (?, ?, 0, 0, 0)
+       ON CONFLICT(date) DO UPDATE SET total_cost_usd = excluded.total_cost_usd`,
+    ).run(today, 1000)
+
+    const config = makeConfig()
+    config.cost = { model: 'subscription' }
+
+    const deps: LoopDependencies = {
+      db,
+      config,
+      adapters: {
+        planner: makeMockAdapter([makePlannerResult()]),
+        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: makeMockAdapter([makeReviewerResult('APPROVED')]),
+      },
+      workflow: DEFAULT_WORKFLOW,
+    }
+
+    const result = await executeLoop(
+      makeCtx({
+        estimatedCostUsd: 250,
+        verifyResults: [{ command: 'pnpm test', exitCode: 0, stdout: '', stderr: '', durationMs: 100, passed: true }],
+      }),
+      deps,
+    )
+
+    expect(result.terminalStatus).toBe('publish')
+    expect(result.blockReason).toBeNull()
+  })
+
   it('BLOCKED verdict → blocked', async () => {
     const deps: LoopDependencies = {
       db,
