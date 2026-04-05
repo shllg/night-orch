@@ -1,5 +1,6 @@
-import { type ReactElement } from 'react'
+import { type ReactElement, useEffect, useMemo, useState } from 'react'
 import { ButtonWeb } from '../../../src/components/button/button.web.js'
+import { ModalWeb } from '../../../src/components/modal/modal.web.js'
 import type { RuntimeSettingSnapshot } from '../types/dashboard.js'
 
 interface SettingsPageProps {
@@ -23,115 +24,229 @@ export function SettingsPage({
   onApply,
   onClear,
 }: SettingsPageProps): ReactElement {
+  const [selectedSettingKey, setSelectedSettingKey] = useState<string | null>(null)
+  const [overwriteEnabled, setOverwriteEnabled] = useState<Record<string, boolean>>({})
+
+  const selectedSetting = useMemo(
+    () => settings.find((setting) => setting.key === selectedSettingKey) ?? null,
+    [selectedSettingKey, settings],
+  )
+  const selectedDraft = selectedSetting
+    ? (drafts[selectedSetting.key] ?? formatSettingValue(selectedSetting.effectiveValue))
+    : ''
+  const selectedOverwriteEnabled = selectedSetting
+    ? (overwriteEnabled[selectedSetting.key] ?? selectedSetting.overrideValue !== null)
+    : false
+  const selectedBusy = selectedSetting
+    ? isSettingBusy(activeOperation, selectedSetting.key)
+    : false
+
+  useEffect(() => {
+    setOverwriteEnabled(
+      Object.fromEntries(
+        settings.map((setting) => [setting.key, setting.overrideValue !== null]),
+      ),
+    )
+
+    if (selectedSettingKey && !settings.some((setting) => setting.key === selectedSettingKey)) {
+      setSelectedSettingKey(null)
+    }
+  }, [selectedSettingKey, settings])
+
   return (
     <section className="card border border-base-300/60 bg-base-200/60 shadow-panel backdrop-blur">
-      <div className="card-body p-6 sm:p-8">
+      <div className="card-body p-5 sm:p-8">
         <h2 className="card-title text-2xl font-semibold capitalize text-base-content">settings</h2>
         <p className="max-w-3xl text-sm text-base-content/75">
           Runtime overrides are stored in SQLite and applied on top of YAML/default values.
         </p>
-        <p className="text-xs text-base-content/60">
-          Last refresh: {generatedAt ?? '-'}
-        </p>
+        <p className="text-xs text-base-content/60">Last refresh: {generatedAt ?? '-'}</p>
 
         {isLoading ? (
           <p className="text-sm text-base-content/70">Loading settings…</p>
         ) : settings.length === 0 ? (
           <p className="text-sm text-base-content/70">No curated settings available.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="table table-zebra table-sm">
-              <thead>
-                <tr>
-                  <th>Key</th>
-                  <th>Base</th>
-                  <th>Override</th>
-                  <th>Effective</th>
-                  <th>Value</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {settings.map((setting) => {
-                  const draft = drafts[setting.key] ?? formatSettingValue(setting.effectiveValue)
-                  const rowBusy = activeOperation === `setting:set:${setting.key}` || activeOperation === `setting:clear:${setting.key}`
+          <ul className="mt-2 grid gap-3">
+            {settings.map((setting) => (
+              <li key={setting.key}>
+                <button
+                  type="button"
+                  className="group w-full rounded-box border border-base-300/80 bg-base-100/60 p-4 text-left transition hover:border-info/40 hover:bg-base-100/85 focus:outline-none focus-visible:ring-2 focus-visible:ring-info/70"
+                  onClick={() => {
+                    setSelectedSettingKey(setting.key)
+                  }}
+                >
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold text-base-content">{setting.label}</span>
+                        <span
+                          className={`badge badge-xs ${setting.source === 'override' ? 'badge-info' : 'badge-ghost'}`}
+                        >
+                          {setting.source === 'override' ? 'overwritten' : 'default/yaml'}
+                        </span>
+                      </div>
+                      <p className="mt-1 break-all font-mono text-[11px] text-base-content/55">{setting.key}</p>
+                      <p className="mt-2 text-sm text-base-content/75">{setting.description}</p>
+                    </div>
 
-                  return (
-                    <tr key={setting.key}>
-                      <td>
-                        <div className="flex flex-col">
-                          <span className="font-mono text-xs">{setting.key}</span>
-                          <span className="text-xs text-base-content/60">{setting.label}</span>
-                        </div>
-                      </td>
-                      <td className="font-mono text-xs">{formatSettingValue(setting.baseValue)}</td>
-                      <td className="font-mono text-xs">
-                        {setting.overrideValue === null ? '-' : formatSettingValue(setting.overrideValue)}
-                      </td>
-                      <td className="font-mono text-xs">
+                    <div className="shrink-0 rounded-lg border border-base-300/80 bg-base-100/60 px-3 py-2 sm:min-w-[150px] sm:text-right">
+                      <p className="text-[11px] uppercase tracking-wide text-base-content/55">Applied</p>
+                      <p className="mt-1 font-mono text-sm font-semibold text-base-content">
                         {formatSettingValue(setting.effectiveValue)}
-                        <span className="ml-2 badge badge-ghost badge-xs">{setting.source}</span>
-                      </td>
-                      <td>
-                        {setting.type === 'boolean' ? (
-                          <select
-                            className="select select-bordered select-xs w-28"
-                            value={normalizeBooleanDraft(draft)}
-                            onChange={(event) => onDraftChange(setting.key, event.target.value)}
-                            disabled={rowBusy}
-                          >
-                            <option value="true">true</option>
-                            <option value="false">false</option>
-                          </select>
-                        ) : (
-                          <input
-                            className="input input-bordered input-xs w-32 font-mono"
-                            type="number"
-                            value={draft}
-                            min={setting.min}
-                            max={setting.max}
-                            step={setting.step}
-                            onChange={(event) => onDraftChange(setting.key, event.target.value)}
-                            disabled={rowBusy}
-                          />
-                        )}
-                      </td>
-                      <td>
-                        <div className="flex gap-2">
-                          <ButtonWeb
-                            type="button"
-                            tone="info"
-                            size="xs"
-                            onClick={() => onApply(setting.key)}
-                            disabled={rowBusy}
-                          >
-                            apply
-                          </ButtonWeb>
-                          <ButtonWeb
-                            type="button"
-                            tone="ghost"
-                            size="xs"
-                            onClick={() => onClear(setting.key)}
-                            disabled={rowBusy}
-                          >
-                            clear
-                          </ButtonWeb>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+                      </p>
+                    </div>
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ul>
         )}
       </div>
+
+      <ModalWeb
+        open={selectedSetting !== null}
+        title={selectedSetting?.label}
+        description={selectedSetting?.details}
+        widthClassName="max-w-2xl"
+        onClose={() => {
+          setSelectedSettingKey(null)
+        }}
+        actions={selectedSetting ? (
+          <>
+            <ButtonWeb
+              type="button"
+              tone="ghost"
+              onClick={() => {
+                setSelectedSettingKey(null)
+              }}
+            >
+              close
+            </ButtonWeb>
+            <ButtonWeb
+              type="button"
+              tone={selectedOverwriteEnabled ? 'info' : 'neutral'}
+              onClick={() => {
+                if (!selectedSetting) {
+                  return
+                }
+                if (selectedOverwriteEnabled) {
+                  onApply(selectedSetting.key)
+                  return
+                }
+                onClear(selectedSetting.key)
+              }}
+              disabled={selectedBusy}
+            >
+              {selectedBusy
+                ? 'saving...'
+                : selectedOverwriteEnabled
+                  ? 'apply override'
+                  : 'clear override'}
+            </ButtonWeb>
+          </>
+        ) : null}
+      >
+        {selectedSetting ? (
+          <div className="mt-4 space-y-4">
+            <dl className="grid gap-2 rounded-box border border-base-300/70 bg-base-200/50 p-3 text-sm sm:grid-cols-2">
+              <SettingFact label="Night-orch default" value={formatSettingValue(selectedSetting.defaultValue)} />
+              <SettingFact
+                label="YAML value"
+                value={
+                  selectedSetting.hasYamlValue && selectedSetting.yamlValue !== null
+                    ? formatSettingValue(selectedSetting.yamlValue)
+                    : 'Not set'
+                }
+              />
+              <SettingFact label="Effective value" value={formatSettingValue(selectedSetting.effectiveValue)} />
+              <SettingFact
+                label="Current override"
+                value={
+                  selectedSetting.overrideValue === null
+                    ? 'None'
+                    : formatSettingValue(selectedSetting.overrideValue)
+                }
+              />
+            </dl>
+
+            <label className="flex items-center gap-3 rounded-box border border-base-300/70 bg-base-200/45 p-3">
+              <input
+                type="checkbox"
+                className="checkbox checkbox-sm checkbox-info"
+                checked={selectedOverwriteEnabled}
+                disabled={selectedBusy}
+                onChange={(event) => {
+                  setOverwriteEnabled((current) => ({
+                    ...current,
+                    [selectedSetting.key]: event.target.checked,
+                  }))
+                }}
+              />
+              <div>
+                <p className="text-sm font-medium text-base-content">Overwrite this value</p>
+                <p className="text-xs text-base-content/65">
+                  Disable to use YAML/default value. Enable to set a DB runtime override.
+                </p>
+              </div>
+            </label>
+
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-base-content/60">
+                Override value
+              </p>
+              {selectedSetting.type === 'boolean' ? (
+                <select
+                  className="select select-bordered w-full max-w-xs font-mono"
+                  value={normalizeBooleanDraft(selectedDraft)}
+                  onChange={(event) => {
+                    onDraftChange(selectedSetting.key, event.target.value)
+                  }}
+                  disabled={!selectedOverwriteEnabled || selectedBusy}
+                >
+                  <option value="true">true</option>
+                  <option value="false">false</option>
+                </select>
+              ) : (
+                <input
+                  className="input input-bordered w-full max-w-xs font-mono"
+                  type="number"
+                  value={selectedDraft}
+                  min={selectedSetting.min}
+                  max={selectedSetting.max}
+                  step={selectedSetting.step}
+                  onChange={(event) => {
+                    onDraftChange(selectedSetting.key, event.target.value)
+                  }}
+                  disabled={!selectedOverwriteEnabled || selectedBusy}
+                />
+              )}
+            </div>
+          </div>
+        ) : null}
+      </ModalWeb>
     </section>
   )
 }
 
+function SettingFact({ label, value }: { label: string; value: string }): ReactElement {
+  return (
+    <div>
+      <dt className="text-[11px] uppercase tracking-wide text-base-content/55">{label}</dt>
+      <dd className="mt-1 font-mono text-sm text-base-content">{value}</dd>
+    </div>
+  )
+}
+
+function isSettingBusy(activeOperation: string | null, key: string): boolean {
+  return activeOperation === `setting:set:${key}` || activeOperation === `setting:clear:${key}`
+}
+
 function formatSettingValue(value: string | number | boolean): string {
-  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  if (typeof value === 'boolean') {
+    return value ? 'true' : 'false'
+  }
   return String(value)
 }
 

@@ -15,10 +15,12 @@ export interface RuntimeSettingSnapshot {
   key: SettingKey
   label: string
   description: string
+  details: string
   type: SettingType
   min?: number
   max?: number
   step?: number
+  defaultValue: SettingValue
   baseValue: SettingValue
   overrideValue: SettingValue | null
   effectiveValue: SettingValue
@@ -62,6 +64,7 @@ export function listRuntimeSettings(
       key: definition.key,
       label: definition.label,
       description: definition.description,
+      details: definition.details,
       type: definition.type,
       ...(definition.type === 'number'
         ? {
@@ -70,6 +73,7 @@ export function listRuntimeSettings(
             ...(definition.step !== undefined ? { step: definition.step } : {}),
           }
         : {}),
+      defaultValue: definition.defaultValue,
       baseValue,
       overrideValue,
       effectiveValue,

@@ -212,10 +212,14 @@ export interface RuntimeSettingSnapshot {
   key: string
   label: string
   description: string
+  details: string
   type: RuntimeSettingType
   min?: number
   max?: number
   step?: number
+  defaultValue: number | boolean
+  hasYamlValue: boolean
+  yamlValue: number | boolean | null
   baseValue: number | boolean
   overrideValue: number | boolean | null
   effectiveValue: number | boolean

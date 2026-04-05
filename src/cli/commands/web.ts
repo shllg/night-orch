@@ -1,5 +1,5 @@
 import type { Server } from 'node:http'
-import { loadConfig, resolveConfigPath, ConfigError } from '../../config/loader.js'
+import { loadConfigWithRaw, resolveConfigPath, ConfigError } from '../../config/loader.js'
 import { initDatabase } from '../../state/db.js'
 import { pollOnce } from '../../runner/poller.js'
 import { SyncEngine } from '../../ops/sync.js'
@@ -35,11 +35,14 @@ export async function webCommand(
   const dryRun = globalOpts?.dryRun ?? false
 
   let baseConfig
+  let rawConfig: unknown
   try {
     const configPath = resolveConfigPath(globalOpts?.config, {
       trustWorkspace: globalOpts?.trustWorkspace ?? false,
     })
-    baseConfig = loadConfig(configPath)
+    const loadedConfig = loadConfigWithRaw(configPath)
+    baseConfig = loadedConfig.config
+    rawConfig = loadedConfig.raw
   } catch (err) {
     if (err instanceof ConfigError) {
       process.stderr.write(`Config error: ${err.message}\n`)
@@ -124,7 +127,14 @@ export async function webCommand(
   try {
     webServer = await startWebServer(
       { db, config: baseConfig, forgeAdapters, poller: pollerControl, metrics: metrics ?? null },
-      { host, allowedHosts, port, snapshotIntervalMs, operationsEnabled: true },
+      {
+        host,
+        allowedHosts,
+        port,
+        snapshotIntervalMs,
+        operationsEnabled: true,
+        rawConfig,
+      },
     )
   } catch (err) {
     logger.error({ err, host, allowedHosts, port }, 'Failed to start web server')
