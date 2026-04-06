@@ -123,6 +123,7 @@ describe('tui action key dispatch', () => {
   const baseArgs = {
     activeTab: 'runs' as const,
     runsViewMode: 'list' as const,
+    projectsViewMode: 'list' as const,
     controlsEnabled: true,
     actionBusy: false,
     cleanupConfirmPending: false,
@@ -229,6 +230,32 @@ describe('tui action key dispatch', () => {
     expect(resolveActionCommand({
       ...nonRunsFocusedArgs,
       input: 't',
+    })).toBe('none')
+  })
+
+  it('blocks p/s/D/L actions while focused project detail is open', () => {
+    const focusedProjectArgs = {
+      ...baseArgs,
+      activeTab: 'projects' as const,
+      projectsViewMode: 'focus' as const,
+    }
+
+    expect(resolveActionCommand({
+      ...focusedProjectArgs,
+      input: 'p',
+    })).toBe('none')
+    expect(resolveActionCommand({
+      ...focusedProjectArgs,
+      input: 's',
+    })).toBe('none')
+    expect(resolveActionCommand({
+      ...focusedProjectArgs,
+      input: 'D',
+      cleanupConfirmPending: true,
+    })).toBe('none')
+    expect(resolveActionCommand({
+      ...focusedProjectArgs,
+      input: 'L',
     })).toBe('none')
   })
 

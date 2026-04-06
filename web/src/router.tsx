@@ -7,13 +7,30 @@ import {
   createRoute,
   createRouter,
   redirect,
+  useParams,
 } from '@tanstack/react-router'
 
 import { App } from './App.js'
-import { isDashboardPage } from './types/dashboard.js'
+import { type DashboardPage, isDashboardPage } from './types/dashboard.js'
 
 function RootLayout(): ReactElement {
   return <Outlet />
+}
+
+function DashboardPageRoute(): ReactElement {
+  const { page } = useParams({ from: '/$page' })
+  return <App activePage={page as DashboardPage} />
+}
+
+function DashboardDetailRoute(): ReactElement {
+  const { page, detailId } = useParams({ from: '/$page/$detailId' })
+  if (page === 'issues') {
+    return <App activePage="issues" issueDetailRunId={detailId} />
+  }
+  if (page === 'projects') {
+    return <App activePage="projects" projectDetailRepo={detailId} />
+  }
+  return <App activePage={page as DashboardPage} />
 }
 
 const rootRoute = createRootRoute({
@@ -38,10 +55,25 @@ const dashboardPageRoute = createRoute({
     }
     return undefined
   },
-  component: App,
+  component: DashboardPageRoute,
 })
 
-const routeTree = rootRoute.addChildren([indexRoute, dashboardPageRoute])
+const dashboardDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '$page/$detailId',
+  loader: ({ params }) => {
+    if (!isDashboardPage(params.page)) {
+      return redirect({ to: '/$page', params: { page: 'issues' }, replace: true, throw: true })
+    }
+    if (params.page !== 'issues' && params.page !== 'projects') {
+      return redirect({ to: '/$page', params: { page: params.page }, replace: true, throw: true })
+    }
+    return undefined
+  },
+  component: DashboardDetailRoute,
+})
+
+const routeTree = rootRoute.addChildren([indexRoute, dashboardPageRoute, dashboardDetailRoute])
 
 type DashboardHistory = ReturnType<typeof createBrowserHistory>
 

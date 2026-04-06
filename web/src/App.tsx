@@ -1,13 +1,14 @@
 import { type FormEvent, type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from '@tanstack/react-router'
+import { useNavigate } from '@tanstack/react-router'
 
 import { BudgetOverridesPanel } from './components/BudgetOverridesPanel.js'
 import { DashboardHeader } from './components/DashboardHeader.js'
 import { DashboardMetrics } from './components/DashboardMetrics.js'
 import { DashboardNavigation } from './components/DashboardNavigation.js'
+import { IssueDetailPage } from './components/IssueDetailPage.js'
 import { OperationsPanel } from './components/OperationsPanel.js'
+import { ProjectDetailPage } from './components/ProjectDetailPage.js'
 import { ProjectsPage } from './components/ProjectsPage.js'
-import { RunEventStream } from './components/RunEventStream.js'
 import { RunsPanel } from './components/RunsPanel.js'
 import { SettingsPage } from './components/SettingsPage.js'
 import { StatsPage } from './components/StatsPage.js'
@@ -45,10 +46,27 @@ interface RunOperationOptions {
   refreshAfterSuccess?: boolean
 }
 
-export function App(): ReactElement {
+interface AppProps {
+  activePage: DashboardPage
+  issueDetailRunId?: string | null
+  projectDetailRepo?: string | null
+}
+
+function decodeDetailId(value: string | null | undefined): string | null {
+  if (!value) return null
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+export function App({
+  activePage,
+  issueDetailRunId = null,
+  projectDetailRepo = null,
+}: AppProps): ReactElement {
   const navigate = useNavigate()
-  const { page } = useParams({ from: '/$page' })
-  const activePage = page as DashboardPage
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null)
   const [projectsSnapshot, setProjectsSnapshot] = useState<ProjectsSnapshot | null>(null)
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsSnapshot | null>(null)
@@ -57,7 +75,6 @@ export function App(): ReactElement {
   const [isSettingsLoading, setIsSettingsLoading] = useState(true)
   const [socketConnected, setSocketConnected] = useState(false)
   const [selectedRepo, setSelectedRepo] = useState('all')
-  const [selectedProjectRepo, setSelectedProjectRepo] = useState('')
   const [selectedRunId, setSelectedRunId] = useState('')
   const [runEvents, setRunEvents] = useState<RunEvent[]>([])
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -108,11 +125,21 @@ export function App(): ReactElement {
     return allRuns.filter((run) => run.repo === selectedRepo)
   }, [allRuns, selectedRepo])
 
-  const selectedRun = useMemo(
-    () => allRuns.find((run) => run.runId === selectedRunId) ?? null,
-    [allRuns, selectedRunId],
+  const decodedIssueDetailRunId = useMemo(
+    () => decodeDetailId(issueDetailRunId),
+    [issueDetailRunId],
   )
-  const selectedStreamRunId = selectedRun?.hasRun ? selectedRun.runId : ''
+  const decodedProjectDetailRepo = useMemo(
+    () => decodeDetailId(projectDetailRepo),
+    [projectDetailRepo],
+  )
+  const selectedIssueDetailRun = useMemo(
+    () => decodedIssueDetailRunId
+      ? allRuns.find((run) => run.runId === decodedIssueDetailRunId) ?? null
+      : null,
+    [allRuns, decodedIssueDetailRunId],
+  )
+  const selectedStreamRunId = selectedIssueDetailRun?.hasRun ? selectedIssueDetailRun.runId : ''
 
   const currentState = useMemo(() => {
     if (updateInProgress) {
@@ -262,13 +289,9 @@ export function App(): ReactElement {
   }, [repos])
 
   useEffect(() => {
-    const projectRepos = projectsSnapshot?.repos.map((repo) => repo.repo) ?? []
-    if (projectRepos.length === 0) {
-      setSelectedProjectRepo('')
-      return
-    }
-    setSelectedProjectRepo((prev) => (prev && projectRepos.includes(prev) ? prev : projectRepos[0] ?? ''))
-  }, [projectsSnapshot])
+    if (!decodedIssueDetailRunId) return
+    setSelectedRunId(decodedIssueDetailRunId)
+  }, [decodedIssueDetailRunId])
 
   useEffect(() => {
     let cancelled = false
@@ -510,6 +533,29 @@ export function App(): ReactElement {
     void navigate({ to: '/$page', params: { page } })
   }, [navigate])
 
+  const openIssueDetail = useCallback((runId: string) => {
+    setSelectedRunId(runId)
+    void navigate({
+      to: '/$page/$detailId',
+      params: { page: 'issues', detailId: runId },
+    })
+  }, [navigate])
+
+  const closeIssueDetail = useCallback(() => {
+    void navigate({ to: '/$page', params: { page: 'issues' } })
+  }, [navigate])
+
+  const openProjectDetail = useCallback((repo: string) => {
+    void navigate({
+      to: '/$page/$detailId',
+      params: { page: 'projects', detailId: repo },
+    })
+  }, [navigate])
+
+  const closeProjectDetail = useCallback(() => {
+    void navigate({ to: '/$page', params: { page: 'projects' } })
+  }, [navigate])
+
   const submitUpdate = useCallback(async () => {
     if (!confirmSelfUpdate((message) => window.confirm(message))) {
       return
@@ -728,6 +774,9 @@ export function App(): ReactElement {
     )
   }, [costOverrideDraft, runOperation])
 
+  const isIssueDetailScreen = activePage === 'issues' && decodedIssueDetailRunId !== null
+  const isProjectDetailScreen = activePage === 'projects' && decodedProjectDetailRepo !== null
+
   return (
     <main data-theme="black" className="min-h-screen bg-orch-admin">
       <DashboardHeader
@@ -775,107 +824,122 @@ export function App(): ReactElement {
 
           <div className="flex min-w-0 flex-col gap-5 md:pl-6">
             {activePage === 'issues' && (
-              <div className="flex flex-col gap-5">
-                <DashboardMetrics snapshot={snapshot} />
+              isIssueDetailScreen ? (
+                <IssueDetailPage
+                  run={selectedIssueDetailRun}
+                  runId={decodedIssueDetailRunId ?? ''}
+                  runEvents={runEvents}
+                  onBack={closeIssueDetail}
+                />
+              ) : (
+                <div className="flex flex-col gap-5">
+                  <DashboardMetrics snapshot={snapshot} />
 
-                <section className="grid gap-5 xl:grid-cols-[1.65fr_1fr]">
-                  <RunsPanel
-                    isLoading={isLoading}
-                    repos={repos}
-                    selectedRepo={selectedRepo}
-                    onSelectedRepoChange={setSelectedRepo}
-                    filteredRuns={filteredRuns}
-                    selectedRunId={selectedRunId}
-                    onSelectedRunChange={setSelectedRunId}
-                    statusTone={STATUS_BADGE_TONE}
-                  />
+                  <section className="grid gap-5 xl:grid-cols-[1.65fr_1fr]">
+                    <RunsPanel
+                      isLoading={isLoading}
+                      repos={repos}
+                      selectedRepo={selectedRepo}
+                      onSelectedRepoChange={setSelectedRepo}
+                      filteredRuns={filteredRuns}
+                      selectedRunId={selectedRunId}
+                      onOpenRun={openIssueDetail}
+                      statusTone={STATUS_BADGE_TONE}
+                    />
 
-                  <OperationsPanel
-                    operationsEnabled={operationsEnabled}
-                    activeOperation={activeOperation}
-                    updateStatus={updateStatus}
-                    repos={repos}
-                    retryForm={{
-                      repo: retryRepo,
-                      issueNumber: retryIssueNumber,
-                      resetPlan: retryResetPlan,
-                      fresh: retryFresh,
-                    }}
-                    rebaseForm={{
-                      repo: rebaseRepo,
-                      issueNumber: rebaseIssueNumber,
-                    }}
-                    continueForm={{
-                      repo: continueRepo,
-                      issueNumber: continueIssueNumber,
-                    }}
-                    deleteEntryForm={{
-                      repo: deleteRepo,
-                      issueNumber: deleteIssueNumber,
-                      force: deleteForce,
-                    }}
-                    labelsInitForm={{
-                      repo: labelsInitRepo,
-                    }}
-                    onRetryFormChange={(patch) => {
-                      if (patch.repo !== undefined) setRetryRepo(patch.repo)
-                      if (patch.issueNumber !== undefined) setRetryIssueNumber(patch.issueNumber)
-                      if (patch.resetPlan !== undefined) setRetryResetPlan(patch.resetPlan)
-                      if (patch.fresh !== undefined) setRetryFresh(patch.fresh)
-                    }}
-                    onRebaseFormChange={(patch) => {
-                      if (patch.repo !== undefined) setRebaseRepo(patch.repo)
-                      if (patch.issueNumber !== undefined) setRebaseIssueNumber(patch.issueNumber)
-                    }}
-                    onContinueFormChange={(patch) => {
-                      if (patch.repo !== undefined) setContinueRepo(patch.repo)
-                      if (patch.issueNumber !== undefined) setContinueIssueNumber(patch.issueNumber)
-                    }}
-                    onDeleteEntryFormChange={(patch) => {
-                      if (patch.repo !== undefined) setDeleteRepo(patch.repo)
-                      if (patch.issueNumber !== undefined) setDeleteIssueNumber(patch.issueNumber)
-                      if (patch.force !== undefined) setDeleteForce(patch.force)
-                    }}
-                    onLabelsInitFormChange={(patch) => {
-                      if (patch.repo !== undefined) setLabelsInitRepo(patch.repo)
-                    }}
-                    onPoll={triggerPoll}
-                    onSync={triggerSync}
-                    onCleanup={triggerCleanup}
-                    onLabelsInitSubmit={(event) => {
-                      void submitLabelsInit(event)
-                    }}
-                    onRetrySubmit={(event) => {
-                      void submitRetry(event)
-                    }}
-                    onRebaseSubmit={(event) => {
-                      void submitRebase(event)
-                    }}
-                    onContinueSubmit={(event) => {
-                      void submitContinue(event)
-                    }}
-                    onDeleteEntrySubmit={(event) => {
-                      void submitDeleteEntry(event)
-                    }}
-                    onUpdate={() => {
-                      void submitUpdate()
-                    }}
-                  />
-                </section>
-
-                <RunEventStream selectedRunId={selectedRunId} selectedRun={selectedRun} runEvents={runEvents} />
-              </div>
+                    <OperationsPanel
+                      operationsEnabled={operationsEnabled}
+                      activeOperation={activeOperation}
+                      updateStatus={updateStatus}
+                      repos={repos}
+                      retryForm={{
+                        repo: retryRepo,
+                        issueNumber: retryIssueNumber,
+                        resetPlan: retryResetPlan,
+                        fresh: retryFresh,
+                      }}
+                      rebaseForm={{
+                        repo: rebaseRepo,
+                        issueNumber: rebaseIssueNumber,
+                      }}
+                      continueForm={{
+                        repo: continueRepo,
+                        issueNumber: continueIssueNumber,
+                      }}
+                      deleteEntryForm={{
+                        repo: deleteRepo,
+                        issueNumber: deleteIssueNumber,
+                        force: deleteForce,
+                      }}
+                      labelsInitForm={{
+                        repo: labelsInitRepo,
+                      }}
+                      onRetryFormChange={(patch) => {
+                        if (patch.repo !== undefined) setRetryRepo(patch.repo)
+                        if (patch.issueNumber !== undefined) setRetryIssueNumber(patch.issueNumber)
+                        if (patch.resetPlan !== undefined) setRetryResetPlan(patch.resetPlan)
+                        if (patch.fresh !== undefined) setRetryFresh(patch.fresh)
+                      }}
+                      onRebaseFormChange={(patch) => {
+                        if (patch.repo !== undefined) setRebaseRepo(patch.repo)
+                        if (patch.issueNumber !== undefined) setRebaseIssueNumber(patch.issueNumber)
+                      }}
+                      onContinueFormChange={(patch) => {
+                        if (patch.repo !== undefined) setContinueRepo(patch.repo)
+                        if (patch.issueNumber !== undefined) setContinueIssueNumber(patch.issueNumber)
+                      }}
+                      onDeleteEntryFormChange={(patch) => {
+                        if (patch.repo !== undefined) setDeleteRepo(patch.repo)
+                        if (patch.issueNumber !== undefined) setDeleteIssueNumber(patch.issueNumber)
+                        if (patch.force !== undefined) setDeleteForce(patch.force)
+                      }}
+                      onLabelsInitFormChange={(patch) => {
+                        if (patch.repo !== undefined) setLabelsInitRepo(patch.repo)
+                      }}
+                      onPoll={triggerPoll}
+                      onSync={triggerSync}
+                      onCleanup={triggerCleanup}
+                      onLabelsInitSubmit={(event) => {
+                        void submitLabelsInit(event)
+                      }}
+                      onRetrySubmit={(event) => {
+                        void submitRetry(event)
+                      }}
+                      onRebaseSubmit={(event) => {
+                        void submitRebase(event)
+                      }}
+                      onContinueSubmit={(event) => {
+                        void submitContinue(event)
+                      }}
+                      onDeleteEntrySubmit={(event) => {
+                        void submitDeleteEntry(event)
+                      }}
+                      onUpdate={() => {
+                        void submitUpdate()
+                      }}
+                    />
+                  </section>
+                </div>
+              )
             )}
 
             {activePage === 'stats' && <StatsPage snapshot={snapshot} socketConnected={socketConnected} />}
 
             {activePage === 'projects' && (
-              <ProjectsPage
-                snapshot={projectsSnapshot}
-                isLoading={isProjectsLoading}
-                selectedRepo={selectedProjectRepo}
-                onSelectedRepoChange={setSelectedProjectRepo}
-              />
+              isProjectDetailScreen ? (
+                <ProjectDetailPage
+                  snapshot={projectsSnapshot}
+                  repo={decodedProjectDetailRepo ?? ''}
+                  isLoading={isProjectsLoading}
+                  onBack={closeProjectDetail}
+                />
+              ) : (
+                <ProjectsPage
+                  snapshot={projectsSnapshot}
+                  isLoading={isProjectsLoading}
+                  onOpenRepo={openProjectDetail}
+                />
+              )
             )}
 
             {activePage === 'settings' && (

@@ -94,6 +94,7 @@ describe('projects view helpers', () => {
       workerProfiles: {},
       globalGithubTokenEnv: 'GH_TOKEN',
       globalGithubApiBaseUrl: 'https://api.github.example',
+      mode: 'list',
     }))
 
     expect(output).toContain('Projects (0)')
@@ -108,11 +109,13 @@ describe('projects view helpers', () => {
       workerProfiles: {},
       globalGithubTokenEnv: 'GH_TOKEN',
       globalGithubApiBaseUrl: 'https://api.github.example',
+      mode: 'focus',
     }))
 
     expect(output).toContain('org/forgejo-repo')
     expect(output).toContain('token FORGEJO_TOKEN (default)')
-    expect(output).toContain('api (missing: required for forgejo)')
+    expect(output).toContain('api (missing: required for')
+    expect(output).toContain('forgejo)')
     expect(output).toContain('apiBaseUrl is required for Forgejo')
   })
 
@@ -123,6 +126,7 @@ describe('projects view helpers', () => {
       workerProfiles: {},
       globalGithubTokenEnv: 'GH_TOKEN',
       globalGithubApiBaseUrl: 'https://api.github.example',
+      mode: 'focus',
     }))
 
     expect(output).toContain('org/github-repo')

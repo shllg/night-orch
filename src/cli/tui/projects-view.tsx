@@ -2,6 +2,7 @@ import React from 'react'
 import { Box, Text } from 'ink'
 import type { RepoConfig, WorkerProfile } from '../../config/schema.js'
 import { truncate } from './format.js'
+import type { ProjectsViewMode } from './types.js'
 
 interface ProjectsViewProps {
   repos: RepoConfig[]
@@ -9,6 +10,7 @@ interface ProjectsViewProps {
   workerProfiles: Record<string, WorkerProfile>
   globalGithubTokenEnv: string
   globalGithubApiBaseUrl: string
+  mode: ProjectsViewMode
 }
 
 type CommandSpec = string | string[]
@@ -30,6 +32,7 @@ export function ProjectsView({
   workerProfiles,
   globalGithubTokenEnv,
   globalGithubApiBaseUrl,
+  mode,
 }: ProjectsViewProps): React.ReactElement {
   const safeIndex = resolveProjectSelectionIndex(selectedIndex, repos.length)
   const selectedRepo = safeIndex >= 0 ? (repos[safeIndex] ?? null) : null
@@ -38,6 +41,16 @@ export function ProjectsView({
     githubApiBaseUrl: globalGithubApiBaseUrl,
   }
   const authDisplay = selectedRepo ? resolveRepoAuthDisplay(selectedRepo, authDefaults) : null
+
+  if (mode === 'focus') {
+    return (
+      <FocusedProjectView
+        selectedRepo={selectedRepo}
+        workerProfiles={workerProfiles}
+        authDisplay={authDisplay}
+      />
+    )
+  }
 
   return (
     <Box flexDirection="column" marginBottom={1}>
@@ -72,79 +85,122 @@ export function ProjectsView({
         </Box>
 
         <Box width="62%" flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
-          <Text bold color="cyan">Project Configuration</Text>
+          <Text bold color="cyan">Project Preview</Text>
           {!selectedRepo && <Text color="gray">Select a repository to inspect</Text>}
-          {selectedRepo && authDisplay && (
+          {selectedRepo && (
             <>
               <Text>{selectedRepo.repo}</Text>
               <Text dimColor>path {truncate(selectedRepo.localPath, 92)}</Text>
               <Text>
                 forge {selectedRepo.forge}
                 {'  '}
-                branch {selectedRepo.baseBranch}
-                {'  '}
-                prefix {selectedRepo.branchPrefix}
+                base {selectedRepo.baseBranch}
                 {'  '}
                 workflow {selectedRepo.workflow ?? 'default'}
               </Text>
               <Text>
                 concurrency {selectedRepo.maxConcurrentRuns}
                 {'  '}
-                token {authDisplay.tokenEnv}
-                {'  '}
-                api {authDisplay.apiBaseUrl}
+                coder {selectedRepo.defaults.coder}
               </Text>
-              {authDisplay.apiMissing && (
-                <Text color="yellow">apiBaseUrl is required for Forgejo repositories</Text>
-              )}
-
-              <Text bold>Tools</Text>
-              <Text>planner {describeRoleSelection(selectedRepo, 'planner', workerProfiles)}</Text>
-              <Text>coder   {describeRoleSelection(selectedRepo, 'coder', workerProfiles)}</Text>
-              <Text>reviewer {describeRoleSelection(selectedRepo, 'reviewer', workerProfiles)}</Text>
-              <Text>mentions {formatList(selectedRepo.defaults.prMentions)}</Text>
-
-              <Text bold>Tags & Lanes</Text>
-              <Text>all tags {formatList(collectTags(selectedRepo))}</Text>
-              <Text>include {formatList(selectedRepo.selectors.includeLabelsAny)}</Text>
-              <Text>exclude {formatList(selectedRepo.selectors.excludeLabelsAny)}</Text>
-              <Text>
-                lanes ready:{formatList(selectedRepo.labels.ready)} running:{selectedRepo.labels.running} review:{selectedRepo.labels.reviewReady} blocked:{selectedRepo.labels.blocked}
+              <Text dimColor>
+                labels {selectedRepo.labels.ready.join(', ')}
+                {'  '}
+                {'->'} {selectedRepo.labels.reviewReady}
               </Text>
-
-              <Text bold>Execution</Text>
-              <Text>verify {formatCommands(selectedRepo.verify)}</Text>
-              <Text>planning PRD dir {selectedRepo.planning.prdDirectory}</Text>
-              <Text>
-                prompts planner:{flag(selectedRepo.prompts?.plannerSystem)} coder:{flag(selectedRepo.prompts?.coderSystem)} reviewer:{flag(selectedRepo.prompts?.reviewerSystem)}
-              </Text>
-
-              <Text bold>Environment</Text>
-              <Text>mode {selectedRepo.environment?.defaultMode ?? 'shared (implicit default)'}</Text>
-              <Text>bootstrap {formatBootstrap(selectedRepo)}</Text>
-              <Text>cleanup {formatCleanup(selectedRepo)}</Text>
-              <Text>shared {formatSharedEnv(selectedRepo)}</Text>
-              <Text>dedicated {formatDedicatedEnv(selectedRepo)}</Text>
-
-              <Text bold>Merge Queue & Labels</Text>
-              <Text>
-                merge queue {selectedRepo.mergeQueue.enabled ? 'enabled' : 'disabled'}
-                {'  '}
-                batch {selectedRepo.mergeQueue.batchSize}
-                {'  '}
-                method {selectedRepo.mergeQueue.mergeMethod}
-                {'  '}
-                approval {selectedRepo.mergeQueue.requireApproval ? 'required' : 'optional'}
-                {'  '}
-                retryFlakyOnce {selectedRepo.mergeQueue.retryFlakyOnce ? 'yes' : 'no'}
-              </Text>
-              <Text>staging branch {selectedRepo.mergeQueue.stagingBranchPrefix}</Text>
-              <Text>label presentation {formatLabelPresentation(selectedRepo)}</Text>
             </>
           )}
         </Box>
       </Box>
-      <Text color="gray">Press j/k to select a project</Text>
+      <Text color="gray">Press j/k to select a project, then o or Enter for full details</Text>
+    </Box>
+  )
+}
+
+interface FocusedProjectViewProps {
+  selectedRepo: RepoConfig | null
+  workerProfiles: Record<string, WorkerProfile>
+  authDisplay: RepoAuthDisplay | null
+}
+
+function FocusedProjectView({
+  selectedRepo,
+  workerProfiles,
+  authDisplay,
+}: FocusedProjectViewProps): React.ReactElement {
+  return (
+    <Box flexDirection="column" marginBottom={1}>
+      <Text bold>Project Detail</Text>
+      {!selectedRepo && <Text color="gray">No project selected</Text>}
+      {selectedRepo && authDisplay && (
+        <Box marginTop={1} flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
+          <Text bold color="cyan">{selectedRepo.repo}</Text>
+          <Text dimColor>path {truncate(selectedRepo.localPath, 120)}</Text>
+          <Text>
+            forge {selectedRepo.forge}
+            {'  '}
+            branch {selectedRepo.baseBranch}
+            {'  '}
+            prefix {selectedRepo.branchPrefix}
+            {'  '}
+            workflow {selectedRepo.workflow ?? 'default'}
+          </Text>
+          <Text>
+            concurrency {selectedRepo.maxConcurrentRuns}
+            {'  '}
+            token {authDisplay.tokenEnv}
+            {'  '}
+            api {authDisplay.apiBaseUrl}
+          </Text>
+          {authDisplay.apiMissing && (
+            <Text color="yellow">apiBaseUrl is required for Forgejo repositories</Text>
+          )}
+
+          <Text bold>Tools</Text>
+          <Text>planner {describeRoleSelection(selectedRepo, 'planner', workerProfiles)}</Text>
+          <Text>coder   {describeRoleSelection(selectedRepo, 'coder', workerProfiles)}</Text>
+          <Text>reviewer {describeRoleSelection(selectedRepo, 'reviewer', workerProfiles)}</Text>
+          <Text>mentions {formatList(selectedRepo.defaults.prMentions)}</Text>
+
+          <Text bold>Tags & Lanes</Text>
+          <Text>all tags {formatList(collectTags(selectedRepo))}</Text>
+          <Text>include {formatList(selectedRepo.selectors.includeLabelsAny)}</Text>
+          <Text>exclude {formatList(selectedRepo.selectors.excludeLabelsAny)}</Text>
+          <Text>
+            lanes ready:{formatList(selectedRepo.labels.ready)} running:{selectedRepo.labels.running} review:{selectedRepo.labels.reviewReady} blocked:{selectedRepo.labels.blocked}
+          </Text>
+
+          <Text bold>Execution</Text>
+          <Text>verify {formatCommands(selectedRepo.verify)}</Text>
+          <Text>planning PRD dir {selectedRepo.planning.prdDirectory}</Text>
+          <Text>
+            prompts planner:{flag(selectedRepo.prompts?.plannerSystem)} coder:{flag(selectedRepo.prompts?.coderSystem)} reviewer:{flag(selectedRepo.prompts?.reviewerSystem)}
+          </Text>
+
+          <Text bold>Environment</Text>
+          <Text>mode {selectedRepo.environment?.defaultMode ?? 'shared (implicit default)'}</Text>
+          <Text>bootstrap {formatBootstrap(selectedRepo)}</Text>
+          <Text>cleanup {formatCleanup(selectedRepo)}</Text>
+          <Text>shared {formatSharedEnv(selectedRepo)}</Text>
+          <Text>dedicated {formatDedicatedEnv(selectedRepo)}</Text>
+
+          <Text bold>Merge Queue & Labels</Text>
+          <Text>
+            merge queue {selectedRepo.mergeQueue.enabled ? 'enabled' : 'disabled'}
+            {'  '}
+            batch {selectedRepo.mergeQueue.batchSize}
+            {'  '}
+            method {selectedRepo.mergeQueue.mergeMethod}
+            {'  '}
+            approval {selectedRepo.mergeQueue.requireApproval ? 'required' : 'optional'}
+            {'  '}
+            retryFlakyOnce {selectedRepo.mergeQueue.retryFlakyOnce ? 'yes' : 'no'}
+          </Text>
+          <Text>staging branch {selectedRepo.mergeQueue.stagingBranchPrefix}</Text>
+          <Text>label presentation {formatLabelPresentation(selectedRepo)}</Text>
+        </Box>
+      )}
+      <Text color="gray">Press q or esc to close project detail</Text>
     </Box>
   )
 }

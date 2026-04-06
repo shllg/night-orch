@@ -16,7 +16,7 @@ interface RunsPanelProps {
   onSelectedRepoChange: (repo: string) => void
   filteredRuns: RunSummary[]
   selectedRunId: string
-  onSelectedRunChange: (runId: string) => void
+  onOpenRun: (runId: string) => void
   statusTone: Record<RunStatus, string>
 }
 
@@ -27,7 +27,7 @@ export function RunsPanel({
   onSelectedRepoChange,
   filteredRuns,
   selectedRunId,
-  onSelectedRunChange,
+  onOpenRun,
   statusTone,
 }: RunsPanelProps): ReactElement {
   return (
@@ -74,7 +74,7 @@ export function RunsPanel({
                 <button
                   key={run.runId}
                   type="button"
-                  onClick={() => onSelectedRunChange(run.runId)}
+                  onClick={() => onOpenRun(run.runId)}
                   className={`card w-full border text-left transition-all ${
                     selectedRunId === run.runId
                       ? 'border-primary/65 bg-primary/10 shadow-md'

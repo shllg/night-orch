@@ -1,6 +1,7 @@
 export type TabId = 'runs' | 'projects' | 'stats' | 'logs' | 'settings'
 
 export type RunsViewMode = 'list' | 'focus'
+export type ProjectsViewMode = 'list' | 'focus'
 
 export interface TuiLogLine {
   id: number

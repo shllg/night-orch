@@ -10,7 +10,8 @@ describe('buildActionHints', () => {
     const sections = sectionMap(buildActionHints({
       activeTab: 'runs',
       busy: false,
-      runFocused: false,
+      runsFocused: false,
+      projectsFocused: false,
       autoRefresh: true,
     }))
 
@@ -23,7 +24,8 @@ describe('buildActionHints', () => {
     const sections = sectionMap(buildActionHints({
       activeTab: 'runs',
       busy: false,
-      runFocused: false,
+      runsFocused: false,
+      projectsFocused: false,
       autoRefresh: true,
       controlsEnabled: false,
     }))
@@ -36,7 +38,8 @@ describe('buildActionHints', () => {
     const sections = sectionMap(buildActionHints({
       activeTab: 'runs',
       busy: false,
-      runFocused: true,
+      runsFocused: true,
+      projectsFocused: false,
       autoRefresh: true,
     }))
 
@@ -49,7 +52,8 @@ describe('buildActionHints', () => {
     const sections = sectionMap(buildActionHints({
       activeTab: 'stats',
       busy: false,
-      runFocused: false,
+      runsFocused: false,
+      projectsFocused: false,
       autoRefresh: false,
     }))
 
@@ -63,7 +67,8 @@ describe('buildActionHints', () => {
     const sections = sectionMap(buildActionHints({
       activeTab: 'stats',
       busy: false,
-      runFocused: true,
+      runsFocused: true,
+      projectsFocused: false,
       autoRefresh: true,
     }))
 
@@ -75,20 +80,36 @@ describe('buildActionHints', () => {
     const sections = sectionMap(buildActionHints({
       activeTab: 'projects',
       busy: false,
-      runFocused: false,
+      runsFocused: false,
+      projectsFocused: false,
       autoRefresh: true,
     }))
 
-    expect(sections.navigation).toContain('[j/k]select project')
+    expect(sections.navigation).toContain('[j/k]select project [o/enter]open')
     expect(sections.global).toContain('[q]quit [r]refresh')
     expect(sections.issue).toContain('runs tab')
+  })
+
+  it('shows close-focused hints on project detail mode', () => {
+    const sections = sectionMap(buildActionHints({
+      activeTab: 'projects',
+      busy: false,
+      runsFocused: false,
+      projectsFocused: true,
+      autoRefresh: true,
+    }))
+
+    expect(sections.navigation).toBe('[1-5]tabs [h/l]tabs')
+    expect(sections.global).toContain('[q/esc]close [r]refresh')
+    expect(sections.issue).toContain('focused project detail')
   })
 
   it('shows log navigation controls on logs tab', () => {
     const sections = sectionMap(buildActionHints({
       activeTab: 'logs',
       busy: false,
-      runFocused: false,
+      runsFocused: false,
+      projectsFocused: false,
       autoRefresh: false,
     }))
 
@@ -101,7 +122,8 @@ describe('buildActionHints', () => {
     const sections = sectionMap(buildActionHints({
       activeTab: 'settings',
       busy: false,
-      runFocused: false,
+      runsFocused: false,
+      projectsFocused: false,
       autoRefresh: true,
     }))
 
