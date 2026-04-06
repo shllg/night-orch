@@ -183,7 +183,7 @@ export async function pollOnce(
           try { metrics?.setEligibleIssues(repoConfig.repo, discovered.length) } catch { /* best-effort */ }
 
           if (discovered.length === 0) {
-            logger.info({ repo: repoConfig.repo }, 'No eligible issues')
+            logger.debug({ repo: repoConfig.repo }, 'No eligible issues')
             return {
               processed: repoProcessed,
               errors: repoErrors,
@@ -227,7 +227,12 @@ export async function pollOnce(
                   continue
                 }
 
-                if (!leaseManager.acquire(issueRepo, discoveredIssue.issue.number, 'poller', 7200)) {
+                // Lease duration is deliberately short (30 min) so a
+                // crashed poller's leases expire promptly. The engine
+                // bumps the deadline on every phase checkpoint via
+                // leaseHeartbeat below, so a long run is not at risk of
+                // expiring mid-work.
+                if (!leaseManager.acquire(issueRepo, discoveredIssue.issue.number, 'poller', 1800)) {
                   continue
                 }
 
@@ -615,6 +620,13 @@ export async function pollOnce(
                   onPlanReady: async (ctx) => {
                     await postPlanSummaryComment(forge, ctx.issueRepo ?? ctx.repo, ctx.issueNumber, ctx.plan, botUser)
                   },
+                  leaseHeartbeat: () =>
+                    leaseManager.heartbeat(
+                      issueRepo,
+                      discoveredIssue.issue.number,
+                      'poller',
+                      1800,
+                    ),
                 })
 
                 const runDurationSec = (Date.now() - loopStart) / 1000
@@ -638,14 +650,25 @@ export async function pollOnce(
 
                 if (outcome === 'processed') repoProcessed++
                 else repoErrors++
+
+                // Release per-run observability resources (session log
+                // streams + event bus history) once the run has reached
+                // a terminal state — without this both Maps grow for the
+                // daemon's entire lifetime.
+                try {
+                  await observability.closeRun(run.id)
+                } catch (closeErr) {
+                  logger.debug({ runId: run.id, err: closeErr }, 'closeRun failed (best-effort)')
+                }
                 } catch (err) {
                   logger.error({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err }, 'Failed to process issue')
                   if (runId) {
                     const errorMessage = toErrorMessage(err)
-                    const recentErrors = runManager.countRecentErrors(repoConfig.repo, discoveredIssue.issue.number)
+                    const existing = runManager.getById(runId)
+                    const currentRetries = existing?.retryCount ?? 0
                     const maxRetries = config.loop.maxAutoRetries
-                    const canAutoRetry = recentErrors < maxRetries
-                    const attemptCount = recentErrors + 1
+                    const canAutoRetry = currentRetries < maxRetries
+                    const attemptCount = currentRetries + 1
 
                     runManager.update(runId, {
                       status: 'error',
@@ -654,9 +677,14 @@ export async function pollOnce(
                     })
 
                     if (canAutoRetry) {
+                      // Bump retry_count on the same row so repeated replay
+                      // retries converge on maxRetries. Without this the
+                      // same run row cycles error → queued → error forever.
+                      runManager.incrementRetryCount(runId)
+
                       // Auto-retry: transition back to queued so the next poll picks it up
                       logger.info(
-                        { repo: repoConfig.repo, issue: discoveredIssue.issue.number, recentErrors, maxRetries },
+                        { repo: repoConfig.repo, issue: discoveredIssue.issue.number, attempt: attemptCount, maxRetries },
                         'Infra error — auto-retrying (transitioning back to ready)',
                       )
                       try {
@@ -687,7 +715,7 @@ export async function pollOnce(
                     } else {
                       // Retries exhausted: mark as error, require human
                       logger.warn(
-                        { repo: repoConfig.repo, issue: discoveredIssue.issue.number, recentErrors, maxRetries },
+                        { repo: repoConfig.repo, issue: discoveredIssue.issue.number, currentRetries, maxRetries },
                         'Auto-retry limit reached — marking as error',
                       )
                       try {
@@ -900,10 +928,12 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
         return 'error'
       }
 
+      const currentRun = runManager.getById(runId)
+      const currentRetries = currentRun?.retryCount ?? 0
       runManager.update(runId, { status: 'error', iterationCount: finalCtx.iteration, lastError: errorMessage, endedAt: nowUtcIso() })
-      const recentErrors = new RunManager(db).countRecentErrors(repo, issueNumber)
       const latestIssue = await forge.getIssue(issueRepo, issueNumber)
-      if (recentErrors < maxAutoRetries) {
+      if (currentRetries < maxAutoRetries) {
+        runManager.incrementRetryCount(runId)
         await transitionLabels(
           forge,
           issueRepo,
@@ -913,14 +943,14 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
           'queued',
           buildLabelConfig(repoConfig, latestIssue.labels),
         )
-        logger.info({ repo, issueNumber, recentErrors }, 'Publish failed — auto-retrying')
+        logger.info({ repo, issueNumber, attempt: currentRetries + 1, maxAutoRetries }, 'Publish failed — auto-retrying')
         await postErrorStatusComment({
           forge,
           issueRepo,
           issueNumber,
           botUser,
           error: `Publish failed. Last error: ${errorMessage}`,
-          retryCount: recentErrors,
+          retryCount: currentRetries + 1,
           maxRetries: maxAutoRetries,
           nextStep: 'Automatic retry queued. night-orch will retry this issue on the next poll cycle.',
           warnMessage: 'Failed to post publish auto-retry status comment',
@@ -935,13 +965,14 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
           'error',
           buildLabelConfig(repoConfig, latestIssue.labels),
         )
+        const attemptCount = currentRetries + 1
         await postErrorStatusComment({
           forge,
           issueRepo,
           issueNumber,
           botUser,
-          error: `Failed after ${recentErrors} attempts. Last error: ${errorMessage}`,
-          retryCount: recentErrors,
+          error: `Failed after ${attemptCount} attempts. Last error: ${errorMessage}`,
+          retryCount: attemptCount,
           maxRetries: maxAutoRetries,
           nextStep: 'Manual action required: inspect the failure, then run /orch retry or /orch continue.',
           warnMessage: 'Failed to post publish retry-exhausted status comment',
@@ -949,7 +980,7 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
         const sanitizedErrorForSummary = sanitizeErrorForComment(errorMessage)
         try {
           await notifier.dispatch(makePayload('retry_exhausted', repo, issue, {
-            summary: `Publish failed after ${recentErrors} attempts: ${sanitizedErrorForSummary}`,
+            summary: `Publish failed after ${attemptCount} attempts: ${sanitizedErrorForSummary}`,
           }))
         } catch (notifyErr) {
           logger.warn({ repo, issueNumber, err: notifyErr }, 'Failed to send publish retry exhaustion notification')
@@ -1017,10 +1048,12 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
   }
 
   const unexpectedError = `Loop ended in unexpected state: ${finalCtx.terminalStatus}/${finalCtx.currentPhase}`
+  const currentRunForUnexpected = runManager.getById(runId)
+  const currentRetriesUnexpected = currentRunForUnexpected?.retryCount ?? 0
   runManager.update(runId, { status: 'error', iterationCount: finalCtx.iteration, lastError: unexpectedError, endedAt: nowUtcIso() })
-  const recentErrors = new RunManager(db).countRecentErrors(repo, issueNumber)
   const latestIssue = await forge.getIssue(issueRepo, issueNumber)
-  if (recentErrors < maxAutoRetries) {
+  if (currentRetriesUnexpected < maxAutoRetries) {
+    runManager.incrementRetryCount(runId)
     await transitionLabels(
       forge,
       issueRepo,
@@ -1030,14 +1063,14 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
       'queued',
       buildLabelConfig(repoConfig, latestIssue.labels),
     )
-    logger.info({ repo, issueNumber, recentErrors }, 'Unexpected state — auto-retrying')
+    logger.info({ repo, issueNumber, attempt: currentRetriesUnexpected + 1, maxAutoRetries }, 'Unexpected state — auto-retrying')
     await postErrorStatusComment({
       forge,
       issueRepo,
       issueNumber,
       botUser,
       error: `Loop entered unexpected state: ${finalCtx.terminalStatus}/${finalCtx.currentPhase}`,
-      retryCount: recentErrors,
+      retryCount: currentRetriesUnexpected + 1,
       maxRetries: maxAutoRetries,
       nextStep: 'Automatic retry queued. night-orch will retry this issue on the next poll cycle.',
       warnMessage: 'Failed to post unexpected-state auto-retry status comment',
@@ -1052,13 +1085,14 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
       'error',
       buildLabelConfig(repoConfig, latestIssue.labels),
     )
+    const attemptCount = currentRetriesUnexpected + 1
     await postErrorStatusComment({
       forge,
       issueRepo,
       issueNumber,
       botUser,
-      error: `Failed after ${recentErrors} attempts. Last error: ${unexpectedError}`,
-      retryCount: recentErrors,
+      error: `Failed after ${attemptCount} attempts. Last error: ${unexpectedError}`,
+      retryCount: attemptCount,
       maxRetries: maxAutoRetries,
       nextStep: 'Manual action required: inspect the failure, then run /orch retry or /orch continue.',
       warnMessage: 'Failed to post unexpected-state retry-exhausted status comment',
@@ -1404,6 +1438,15 @@ async function processCommentCommands(params: ProcessCommentCommandsParams): Pro
 
   const commandSettings = config.commentCommands ?? { enabled: true, requireCollaborator: false }
   if (!commandSettings.enabled) return
+  // Warn once per poll when comment commands accept non-collaborators —
+  // for public repos this means any GitHub user can trigger retry/rebase/
+  // continue/delete operations.
+  if (!commandSettings.requireCollaborator) {
+    logger.warn(
+      { repo: repoConfig.repo },
+      'commentCommands.requireCollaborator=false — /orch commands accept any commenter. Enable on public repos.',
+    )
+  }
 
   const activeRuns = runManager
     .getActive()
@@ -1446,7 +1489,11 @@ async function processCommentCommands(params: ProcessCommentCommandsParams): Pro
     for (const item of parsed) {
       if (isCommandProcessed(db, row.issue_repo, row.issue_number, item.commentId)) continue
 
-      let commandStatus = 'applied'
+      // Track whether the command reached a terminal outcome — applied,
+      // denied (policy decision), or rejected (validated failure). Only
+      // terminal outcomes mark the command as processed; transient
+      // failures must remain retriable on the next poll cycle.
+      let commandStatus: string | null = null
       try {
         const allowed = await canExecuteCommentCommand({
           forge,
@@ -1485,25 +1532,29 @@ async function processCommentCommands(params: ProcessCommentCommandsParams): Pro
             'Comment command rejected',
           )
         } else {
+          commandStatus = 'applied'
           logger.info(
             { repo: repoConfig.repo, issueNumber: row.issue_number, command: item.command.type, user: item.user },
             'Comment command applied',
           )
         }
       } catch (err) {
-        commandStatus = 'failed'
+        // Transient failure: leave commandStatus=null so the command
+        // remains unprocessed and will be retried on the next poll.
         logger.warn(
           { repo: repoConfig.repo, issueNumber: row.issue_number, commentId: item.commentId, command: item.command.type, err },
-          'Comment command failed',
+          'Comment command failed (transient — will retry)',
         )
       } finally {
-        markCommandProcessed(
-          db,
-          row.issue_repo,
-          row.issue_number,
-          item.commentId,
-          `${item.command.type}:${commandStatus}`,
-        )
+        if (commandStatus !== null) {
+          markCommandProcessed(
+            db,
+            row.issue_repo,
+            row.issue_number,
+            item.commentId,
+            `${item.command.type}:${commandStatus}`,
+          )
+        }
       }
     }
   }
@@ -1522,22 +1573,26 @@ async function canExecuteCommentCommand(params: CanExecuteCommentCommandParams):
   if (!requireCollaborator) return true
   if (!user) return false
 
-  const cached = cache.get(user)
+  // Cache key must include the repo — a user might be a collaborator on
+  // one linked project but not another, and reusing a single-user cache
+  // across repos in the same scan would erroneously grant or deny access.
+  const cacheKey = `${repo}\n${user}`
+  const cached = cache.get(cacheKey)
   if (cached !== undefined) return cached
 
   if (!forge.isCollaborator) {
     logger.warn({ repo, user }, 'requireCollaborator=true but forge adapter has no isCollaborator() implementation')
-    cache.set(user, false)
+    cache.set(cacheKey, false)
     return false
   }
 
   try {
     const allowed = await forge.isCollaborator(repo, user)
-    cache.set(user, allowed)
+    cache.set(cacheKey, allowed)
     return allowed
   } catch (err) {
     logger.warn({ repo, user, err }, 'Failed collaborator check for comment command user')
-    cache.set(user, false)
+    cache.set(cacheKey, false)
     return false
   }
 }

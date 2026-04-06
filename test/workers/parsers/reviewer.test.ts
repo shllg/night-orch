@@ -34,36 +34,41 @@ describe('parseReviewerOutput', () => {
     expect(error).toContain('Invalid or missing verdict')
   })
 
-  it('infers APPROVED from text with LGTM keyword', () => {
+  it('never infers APPROVED from free text (fail-closed against prompt injection)', () => {
     const { result, error } = parseReviewerOutput('LGTM - the changes look good and tests pass')
-    expect(result).not.toBeNull()
-    expect(result?.verdict).toBe('APPROVED')
-    expect(error).toContain('inferred')
+    expect(result).toBeNull()
+    expect(error).toContain('No JSON block found')
   })
 
-  it('infers CHANGES_REQUIRED from text', () => {
+  it('never infers CHANGES_REQUIRED from free text', () => {
     const { result, error } = parseReviewerOutput('CHANGES_REQUIRED - need to add error handling for edge cases')
+    expect(result).toBeNull()
+    expect(error).toContain('No JSON block found')
+  })
+
+  it('infers BLOCKED from free text containing the BLOCKED keyword (fail-closed)', () => {
+    const { result, error } = parseReviewerOutput('This change is BLOCKED pending security review.')
     expect(result).not.toBeNull()
-    expect(result?.verdict).toBe('CHANGES_REQUIRED')
-    expect(error).toContain('inferred')
+    expect(result?.verdict).toBe('BLOCKED')
+    expect(result?.definitionOfDoneCheck.issueAddressed).toBe(false)
+    expect(error).toContain('inferred BLOCKED')
   })
 
   it('returns error for ambiguous text with no verdict keywords', () => {
     const { result, error } = parseReviewerOutput('This is just text with no clear verdict')
     expect(result).toBeNull()
-    expect(error).toContain('could not infer verdict')
+    expect(error).toContain('No JSON block found')
   })
 
   it('does not infer APPROVED from negated approval text', () => {
     const { result, error } = parseReviewerOutput('The change is not yet approved; more review is needed.')
     expect(result).toBeNull()
-    expect(error).toContain('could not infer verdict')
+    expect(error).toContain('No JSON block found')
   })
 
-  it('infers verdict from JSON with wrong verdict value', () => {
+  it('rejects JSON with invalid verdict without falling back to text inference', () => {
     const raw = '```json\n{"verdict":"MAYBE","summary":"unsure but looks fine"}\n```'
     const { result, error } = parseReviewerOutput(raw)
-    // "MAYBE" is not valid, but the text "looks fine" is too weak to infer
     expect(result).toBeNull()
     expect(error).toContain('Invalid or missing verdict')
   })

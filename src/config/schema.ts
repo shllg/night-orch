@@ -246,6 +246,19 @@ const RepoConfigSchema = z.object({
   workflow: z.string().optional(),
   workflowByTriage: WorkflowByTriageSchema.optional(),
   mergeQueue: MergeQueueSchema.default({}),
+}).superRefine((repo, ctx) => {
+  // The merge queue relies on `getPRCheckStatus`, `getRefCheckStatus`, and
+  // `updateRef` which are only implemented in the GitHub adapter. Enabling
+  // mergeQueue for a Forgejo repo would silently skip CI verification and
+  // direct-ref fast-forward pushes. Reject at config-load time with a
+  // clear message until the Forgejo adapter implements the missing methods.
+  if (repo.forge === 'forgejo' && repo.mergeQueue.enabled) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['mergeQueue', 'enabled'],
+      message: 'mergeQueue.enabled is not supported on Forgejo repos (forge adapter lacks check-status/ref-update methods).',
+    })
+  }
 })
 
 // --- Security schema ---

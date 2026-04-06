@@ -18,6 +18,9 @@ import { up as migration013 } from './migrations/013-token-usage.js'
 import { up as migration014 } from './migrations/014-daily-run-usage.js'
 import { up as migration015 } from './migrations/015-run-cost-override.js'
 import { up as migration016 } from './migrations/016-daily-cost-cap-override.js'
+import { up as migration017 } from './migrations/017-merge-batch-merged-prs.js'
+import { up as migration018 } from './migrations/018-run-retry-count.js'
+import { up as migration019 } from './migrations/019-runs-active-index-top-level.js'
 
 const MIGRATIONS = [
   { version: 1, name: '001-initial', up: migration001 },
@@ -36,6 +39,9 @@ const MIGRATIONS = [
   { version: 14, name: '014-daily-run-usage', up: migration014 },
   { version: 15, name: '015-run-cost-override', up: migration015 },
   { version: 16, name: '016-daily-cost-cap-override', up: migration016 },
+  { version: 17, name: '017-merge-batch-merged-prs', up: migration017 },
+  { version: 18, name: '018-run-retry-count', up: migration018 },
+  { version: 19, name: '019-runs-active-index-top-level', up: migration019 },
 ]
 
 export function initDatabase(dbPath: string): Database.Database {

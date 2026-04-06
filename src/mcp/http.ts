@@ -18,6 +18,17 @@ export function startMCPHttpServer(
     return Promise.reject(new Error(`MCP HTTP/SSE server must bind to a loopback host, got: ${host}`))
   }
 
+  // HTTP/SSE is loopback-only but any local process on the same box
+  // (including runaway bootstrap scripts in worktrees) can connect. When
+  // authTokenEnv is unset, every mutating tool is reachable unauthenticated
+  // — log a loud warning so operators notice.
+  if (!deps.config.mcp.authTokenEnv) {
+    logger.warn(
+      { transport: 'http-sse' },
+      'MCP HTTP/SSE server enabled without mcp.authTokenEnv — mutation tools are unauthenticated',
+    )
+  }
+
   const transports = new Map<string, SSEServerTransport>()
 
   const httpServer = createServer(async (req, res) => {

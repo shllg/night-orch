@@ -210,5 +210,98 @@ describe('Checkpoint', () => {
       expect(resumed!.issueNumber).toBe(1)
       expect(resumed!.worktreePath).toBe('/tmp/wt')
     })
+
+    it('rehydrates persisted sessionIds so worker --continue chains survive crashes', () => {
+      checkpoint.phaseCompleted('run-test-1', 'plan', { plan: { objective: 'Fix' } })
+      checkpoint.persistRunState(
+        'run-test-1',
+        { planner: 'sess-abc', 'coder::claude': 'sess-def' },
+        {},
+      )
+
+      const baseCtx = makeBaseCtx()
+      const resumed = checkpoint.resumeFromCheckpoint('run-test-1', baseCtx)
+      expect(resumed!.sessionIds).toEqual({ planner: 'sess-abc', 'coder::claude': 'sess-def' })
+    })
+
+    it('rehydrates persisted stepOutputs so custom-role workflow steps survive crashes', () => {
+      checkpoint.phaseCompleted('run-test-1', 'plan', { plan: { objective: 'Fix' } })
+      checkpoint.persistRunState('run-test-1', {}, { 'custom-analysis': { score: 0.87 } })
+
+      const baseCtx = makeBaseCtx()
+      const resumed = checkpoint.resumeFromCheckpoint('run-test-1', baseCtx)
+      expect(resumed!.stepOutputs).toEqual({ 'custom-analysis': { score: 0.87 } })
+    })
+
+    it('returns empty defaults when phase_data JSON is corrupt (does not throw)', () => {
+      db.prepare('UPDATE runs SET current_phase = ?, phase_data = ? WHERE id = ?').run(
+        'plan',
+        '{not valid json',
+        'run-test-1',
+      )
+
+      const baseCtx = makeBaseCtx()
+      // Must not throw — corrupt phase_data should degrade gracefully
+      expect(() => checkpoint.resumeFromCheckpoint('run-test-1', baseCtx)).not.toThrow()
+      const resumed = checkpoint.resumeFromCheckpoint('run-test-1', baseCtx)
+      expect(resumed).not.toBeNull()
+      expect(resumed!.plan).toBeNull()
+    })
+  })
+
+  describe('phaseSkipped and phaseBlocked', () => {
+    it('phaseSkipped emits paired phase_started + phase_completed events', () => {
+      checkpoint.phaseSkipped('run-test-1', 'plan', 1)
+
+      const events = db
+        .prepare('SELECT event_type, phase FROM events WHERE run_id = ? ORDER BY id ASC')
+        .all('run-test-1') as Array<{ event_type: string; phase: string }>
+
+      expect(events).toHaveLength(2)
+      expect(events[0]).toEqual({ event_type: 'phase_started', phase: 'plan' })
+      expect(events[1]).toEqual({ event_type: 'phase_completed', phase: 'plan' })
+    })
+
+    it('phaseBlocked records blocked=true in phase_data', () => {
+      checkpoint.phaseBlocked('run-test-1', 'plan', 'cost limit exceeded', 1)
+
+      const row = db
+        .prepare('SELECT phase_data FROM runs WHERE id = ?')
+        .get('run-test-1') as { phase_data: string }
+      const data = JSON.parse(row.phase_data)
+      expect(data.plan.blocked).toBe(true)
+      expect(data.plan.reason).toBe('cost limit exceeded')
+    })
+  })
+
+  describe('decision outcome persistence', () => {
+    it('recordDecisionOutcome + getDecisionOutcomes round-trips', () => {
+      checkpoint.recordDecisionOutcome('run-test-1', 'decide', {
+        action: 'publish',
+        reason: 'ship it',
+      })
+      const outcomes = checkpoint.getDecisionOutcomes('run-test-1')
+      expect(outcomes['decide']).toEqual({ action: 'publish', reason: 'ship it' })
+    })
+
+    it('preserves other phase_data alongside decision outcomes', () => {
+      checkpoint.phaseCompleted('run-test-1', 'plan', { plan: { objective: 'Fix' } })
+      checkpoint.recordDecisionOutcome('run-test-1', 'decide', { action: 'block', reason: 'budget' })
+
+      const outcomes = checkpoint.getDecisionOutcomes('run-test-1')
+      expect(outcomes['decide']?.action).toBe('block')
+      // plan data should still be there
+      const row = db.prepare('SELECT phase_data FROM runs WHERE id = ?').get('run-test-1') as { phase_data: string }
+      const data = JSON.parse(row.phase_data)
+      expect(data.plan?.plan?.objective).toBe('Fix')
+    })
+  })
+
+  describe('getCompletedPhases', () => {
+    it('lists phase IDs that have completion checkpoints', () => {
+      checkpoint.phaseCompleted('run-test-1', 'plan', { plan: { objective: 'a' } })
+      checkpoint.phaseCompleted('run-test-1', 'code', { codeResult: { summary: 'b' } })
+      expect(checkpoint.getCompletedPhases('run-test-1')).toEqual(['plan', 'code'])
+    })
   })
 })

@@ -280,4 +280,87 @@ describe('RunManager', () => {
     const active = runManager.getActive()
     expect(active.some((row) => row.id === newRun.id)).toBe(true)
   })
+
+  describe('sub-run uniqueness', () => {
+    it('allows multiple sub-runs to coexist with a parent on the same repo/issue', () => {
+      const parent = runManager.create({
+        repo: 'org/repo', issueNumber: 400, issueNodeId: 'n400',
+        planner: 'claude', coder: 'claude', reviewer: 'claude',
+      })
+      expect(parent.parentRunId).toBeNull()
+
+      // Both sub-runs share the parent's repo/issue but carry parent_run_id.
+      // The pre-fix uniqueness query would reject these.
+      const sub1 = runManager.create({
+        repo: 'org/repo', issueNumber: 400, issueNodeId: 'n400',
+        planner: 'claude', coder: 'claude', reviewer: 'claude',
+        parentRunId: parent.id,
+      })
+      const sub2 = runManager.create({
+        repo: 'org/repo', issueNumber: 400, issueNodeId: 'n400',
+        planner: 'claude', coder: 'claude', reviewer: 'claude',
+        parentRunId: parent.id,
+      })
+
+      expect(sub1.parentRunId).toBe(parent.id)
+      expect(sub2.parentRunId).toBe(parent.id)
+      expect(sub1.id).not.toBe(sub2.id)
+      expect(runManager.getSubRuns(parent.id).map((r) => r.id).sort()).toEqual(
+        [sub1.id, sub2.id].sort(),
+      )
+    })
+
+    it('still rejects a second top-level run for the same repo/issue while one is active', () => {
+      runManager.create({
+        repo: 'org/repo', issueNumber: 401, issueNodeId: 'n401',
+        planner: 'claude', coder: 'claude', reviewer: 'claude',
+      })
+      expect(() =>
+        runManager.create({
+          repo: 'org/repo', issueNumber: 401, issueNodeId: 'n401',
+          planner: 'claude', coder: 'claude', reviewer: 'claude',
+        }),
+      ).toThrow(/active run/)
+    })
+  })
+
+  describe('retry count tracking', () => {
+    it('exposes retryCount on new runs as 0', () => {
+      const run = runManager.create({
+        repo: 'org/repo', issueNumber: 300, issueNodeId: 'n300',
+        planner: 'claude', coder: 'claude', reviewer: 'claude',
+      })
+      expect(run.retryCount).toBe(0)
+    })
+
+    it('incrementRetryCount returns new value and persists it across reads', () => {
+      const run = runManager.create({
+        repo: 'org/repo', issueNumber: 301, issueNodeId: 'n301',
+        planner: 'claude', coder: 'claude', reviewer: 'claude',
+      })
+      expect(runManager.incrementRetryCount(run.id)).toBe(1)
+      expect(runManager.incrementRetryCount(run.id)).toBe(2)
+      expect(runManager.getById(run.id)?.retryCount).toBe(2)
+    })
+
+    it('countRecentErrors uses the active run retry_count even when the single row is reused across replay retries', () => {
+      // Simulate the auto-retry flow on a single reused run row:
+      // the row cycles queued → running → error → queued without a new row.
+      const run = runManager.create({
+        repo: 'org/repo', issueNumber: 302, issueNodeId: 'n302',
+        planner: 'claude', coder: 'claude', reviewer: 'claude',
+      })
+      runManager.update(run.id, { status: 'error', endedAt: new Date().toISOString() })
+      expect(runManager.countRecentErrors('org/repo', 302)).toBe(0)
+
+      runManager.incrementRetryCount(run.id)
+      expect(runManager.countRecentErrors('org/repo', 302)).toBe(1)
+
+      runManager.incrementRetryCount(run.id)
+      expect(runManager.countRecentErrors('org/repo', 302)).toBe(2)
+
+      runManager.incrementRetryCount(run.id)
+      expect(runManager.countRecentErrors('org/repo', 302)).toBe(3)
+    })
+  })
 })

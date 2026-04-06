@@ -82,6 +82,29 @@ export class AgentObservability {
     await this.closeStreams()
   }
 
+  /**
+   * Release per-run resources: close any session log streams for the
+   * run and clear its entry from the in-memory event history. Called
+   * from the poller when a run reaches a terminal state so that the
+   * daemon does not accumulate map entries and open file descriptors
+   * for every run it has ever processed.
+   */
+  async closeRun(runId: string): Promise<void> {
+    const toClose: Array<[string, WriteStream]> = []
+    for (const [key, stream] of this.streams.entries()) {
+      if (key.startsWith(`${runId}:`)) {
+        toClose.push([key, stream])
+      }
+    }
+    for (const [key] of toClose) {
+      this.streams.delete(key)
+    }
+    await Promise.all(
+      toClose.map(([, stream]) => new Promise<void>((resolve) => stream.end(() => resolve()))),
+    )
+    agentEventBus.clear(runId)
+  }
+
   private ensureFlushTimer(): void {
     if (this.flushTimer) return
     this.flushTimer = setTimeout(() => {

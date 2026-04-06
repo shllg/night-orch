@@ -82,13 +82,17 @@ export class RetryEngine {
       resetFields.blockReason = 'merge_conflict'
     }
 
-    runManager.update(run.id, resetFields)
-
-    // Release any lease
-    this.leaseManager.release(repo, issueNumber)
-    if (issueRepo !== repo) {
-      this.leaseManager.release(issueRepo, issueNumber)
-    }
+    // Atomic state transition: release leases AND reset the run in a
+    // single DB transaction. Without this, a crash between the two steps
+    // leaves the issue queued-but-leased until stale cleanup runs.
+    const transition = this.db.transaction(() => {
+      runManager.update(run.id, resetFields)
+      this.leaseManager.release(repo, issueNumber)
+      if (issueRepo !== repo) {
+        this.leaseManager.release(issueRepo, issueNumber)
+      }
+    })
+    transition()
 
     // Apply label mutations
     await this.updateLabels(repo, issueRepo, issueNumber, run.status)

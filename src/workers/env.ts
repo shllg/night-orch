@@ -17,13 +17,18 @@ export const ENV_BLACKLIST_EXACT = new Set([
   'NIGHT_ORCH_WEBHOOK_URL',
 ])
 
+// Use word-boundary matches so legitimate vars with these substrings
+// (e.g. USER_KEYBOARD_LAYOUT, NODE_ENV) are not false-flagged. The
+// boundary is either string start/end or an underscore.
 export const ENV_BLACKLIST_PATTERNS = [
-  /TOKEN/i,
-  /SECRET/i,
-  /PASSWORD/i,
-  /AUTH/i,
-  /CREDENTIAL/i,
-  /KEY/i,
+  /(?:^|_)TOKEN(?:$|_)/i,
+  /(?:^|_)SECRET(?:$|_)/i,
+  /(?:^|_)PASSWORD(?:$|_)/i,
+  /(?:^|_)AUTH(?:$|_)/i,
+  /(?:^|_)CREDENTIAL(?:$|_)/i,
+  /(?:^|_)KEY(?:$|_)/i,
+  /(?:^|_)API[_]?KEY(?:$|_)/i,
+  /(?:^|_)ACCESS[_]?TOKEN(?:$|_)/i,
   /^GITHUB_/i,
   /^FORGEJO_/i,
   /^GH_/i,
@@ -137,6 +142,50 @@ export function buildVerifierEnv(overrides: Record<string, string> = {}): Record
   for (const [key, val] of Object.entries(overrides)) {
     if (isBlacklisted(key)) {
       logger.warn({ key }, 'Verifier runtime env override contains blacklisted variable — skipped')
+      continue
+    }
+    result[key] = val
+  }
+  result['PATH'] = normalizePathForSubprocess(result['PATH'], result['HOME'] ?? process.env['HOME'])
+  return result
+}
+
+/**
+ * Build env vars for subprocesses that run inside a worktree but are not
+ * workers — bootstrap scripts, healthchecks, docker compose up/down.
+ *
+ * These commands are user-authored AND they execute inside an attacker-
+ * authored worktree (the coder worker may have written the Makefile, the
+ * devcontainer config, package postinstall scripts, etc). They must NOT
+ * inherit `process.env` because that would expose forge tokens, SMTP
+ * creds, webhook URLs, and every other secret loaded at startup.
+ *
+ * The whitelist is identical to `buildVerifierEnv`'s in spirit but adds
+ * `DOCKER_*` variables so compose can reach the engine configured by the
+ * operator. Anything else must come through `overrides`.
+ */
+const BOOTSTRAP_ENV_WHITELIST = [
+  ...VERIFIER_ENV_WHITELIST,
+  'DOCKER_HOST',
+  'DOCKER_CONFIG',
+  'DOCKER_CONTEXT',
+  'DOCKER_CERT_PATH',
+  'DOCKER_TLS_VERIFY',
+  'COMPOSE_PROJECT_NAME',
+  'COMPOSE_FILE',
+] as const
+
+export function buildBootstrapEnv(overrides: Record<string, string> = {}): Record<string, string> {
+  const result: Record<string, string> = {}
+  for (const key of BOOTSTRAP_ENV_WHITELIST) {
+    const val = process.env[key]
+    if (val !== undefined && !isBlacklisted(key)) {
+      result[key] = val
+    }
+  }
+  for (const [key, val] of Object.entries(overrides)) {
+    if (isBlacklisted(key)) {
+      logger.warn({ key }, 'Bootstrap runtime env override contains blacklisted variable — skipped')
       continue
     }
     result[key] = val

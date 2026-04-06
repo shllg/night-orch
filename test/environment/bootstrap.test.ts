@@ -57,8 +57,34 @@ describe('runBootstrapCommands', () => {
     expect(mockExeca).toHaveBeenCalledWith(
       'pnpm',
       ['install', '--frozen-lockfile'],
-      { cwd: '/tmp/wt', timeout: 300_000, reject: false },
+      expect.objectContaining({
+        cwd: '/tmp/wt',
+        timeout: 300_000,
+        reject: false,
+        extendEnv: false,
+        env: expect.any(Object),
+      }),
     )
+  })
+
+  it('does not leak forge tokens into bootstrap subprocess env', async () => {
+    mockExeca.mockResolvedValue({ exitCode: 0 } as never)
+    const originalToken = process.env['GITHUB_TOKEN']
+    process.env['GITHUB_TOKEN'] = 'ghp_should_not_leak'
+    try {
+      const commands: BootstrapCommand[] = [{ command: 'echo hi', when: 'always' }]
+      await runBootstrapCommands('/tmp/wt', commands, 'shared')
+      const call = mockExeca.mock.calls[0]
+      expect(call).toBeDefined()
+      const opts = call?.[2] as { extendEnv?: boolean; env?: Record<string, string> }
+      expect(opts.extendEnv).toBe(false)
+      expect(opts.env).toBeDefined()
+      expect(opts.env?.['GITHUB_TOKEN']).toBeUndefined()
+      expect(Object.values(opts.env ?? {})).not.toContain('ghp_should_not_leak')
+    } finally {
+      if (originalToken === undefined) delete process.env['GITHUB_TOKEN']
+      else process.env['GITHUB_TOKEN'] = originalToken
+    }
   })
 
   it('filters commands by mode — runs "always" and matching mode', async () => {

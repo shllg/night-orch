@@ -56,14 +56,30 @@ export class RetentionEngine {
     }
 
     const runPrune = this.db.transaction(() => {
-      // Step 1: Compact — summarize phase_data for old completed/error runs
+      // Step 1: Compact — summarize phase_data for old completed/error runs.
+      // We must preserve routing metadata (`issueRepo`) so post-compaction
+      // continue/retry/rebase/delete flows on linked projects still reach
+      // the correct upstream repo via `resolveIssueRepo(phaseData, ...)`.
       const compactRows = this.db
-        .prepare("SELECT id, estimated_cost_usd, status FROM runs WHERE ended_at < ? AND ended_at >= ? AND phase_data IS NOT NULL AND status IN ('completed', 'error')")
-        .all(detailCutoff, archiveCutoff) as Array<{ id: string; estimated_cost_usd: number; status: string }>
+        .prepare("SELECT id, estimated_cost_usd, status, phase_data FROM runs WHERE ended_at < ? AND ended_at >= ? AND phase_data IS NOT NULL AND status IN ('completed', 'error')")
+        .all(detailCutoff, archiveCutoff) as Array<{
+          id: string
+          estimated_cost_usd: number
+          status: string
+          phase_data: string | null
+        }>
 
       for (const row of compactRows) {
-        const summaryData = JSON.stringify({ compacted: true, costUsd: row.estimated_cost_usd, status: row.status })
-        this.db.prepare('UPDATE runs SET phase_data = ? WHERE id = ?').run(summaryData, row.id)
+        const preservedIssueRepo = extractIssueRepo(row.phase_data)
+        const summary: Record<string, unknown> = {
+          compacted: true,
+          costUsd: row.estimated_cost_usd,
+          status: row.status,
+        }
+        if (preservedIssueRepo) {
+          summary['issueRepo'] = preservedIssueRepo
+        }
+        this.db.prepare('UPDATE runs SET phase_data = ? WHERE id = ?').run(JSON.stringify(summary), row.id)
       }
       result.compactedRuns = compactRows.length
 
@@ -115,5 +131,23 @@ export class RetentionEngine {
     }
 
     return result
+  }
+}
+
+/**
+ * Pull the `issueRepo` routing key out of a phase_data JSON blob, if
+ * present. Used by retention compaction to preserve cross-repo routing
+ * when a run's detailed phase_data is summarized. Degrades to null on
+ * any parse error or missing field.
+ */
+function extractIssueRepo(phaseDataJson: string | null): string | null {
+  if (!phaseDataJson) return null
+  try {
+    const parsed = JSON.parse(phaseDataJson) as unknown
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
+    const value = (parsed as Record<string, unknown>)['issueRepo']
+    return typeof value === 'string' && value.length > 0 ? value : null
+  } catch {
+    return null
   }
 }

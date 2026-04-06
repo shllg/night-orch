@@ -1,6 +1,30 @@
 #!/usr/bin/env node
 import { Command } from 'commander'
+import { logger } from '../utils/logger.js'
+import { sanitizeError } from '../utils/sanitize-error.js'
 import { doctorCommand } from './commands/doctor.js'
+
+// Install process-level error handlers before any top-level async work
+// starts. Night-orch is a long-lived daemon with many floating promises
+// (TUI keybindings, poll-loop fan-outs, web request handlers); without
+// these, a single unhandled rejection would terminate the daemon with
+// no diagnostic beyond Node's default message. We log via pino (which
+// redacts credentials) and exit with a non-zero code so the system
+// supervisor (systemd, launchd, pm2) can restart us cleanly.
+//
+// Exit-on-crash intentionally matches the supervisor pattern used for
+// sub-processes in src/supervisor/index.ts — any transient fault is
+// better handled by a full daemon restart than by swallowing the
+// rejection and continuing in an unknown state.
+process.on('unhandledRejection', (reason) => {
+  logger.error({ err: sanitizeError(reason) }, 'Unhandled promise rejection — exiting')
+  // Give pino a tick to flush before exit.
+  setTimeout(() => process.exit(1), 50).unref()
+})
+process.on('uncaughtException', (err) => {
+  logger.error({ err: sanitizeError(err) }, 'Uncaught exception — exiting')
+  setTimeout(() => process.exit(1), 50).unref()
+})
 import { runCommand } from './commands/run.js'
 import { runOnceCommand } from './commands/run-once.js'
 import { syncCommand } from './commands/sync.js'

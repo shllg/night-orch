@@ -6,6 +6,7 @@ import { transitionLabels } from '../labels/manager.js'
 import { pushBranch } from './push.js'
 import { compilePRTitle, compilePRBody } from './pr-body.js'
 import { logger } from '../utils/logger.js'
+import { sanitizeError } from '../utils/sanitize-error.js'
 
 export interface PublishResult {
   prNumber: number
@@ -55,9 +56,12 @@ export async function publishPR(
   try {
     await pushBranch(ctx.worktreePath, ctx.branchName)
   } catch (pushErr) {
-    const message = pushErr instanceof Error ? pushErr.message : String(pushErr)
-    logger.error({ repo: ctx.repo, branch: ctx.branchName, err: pushErr }, 'Push failed')
-    await transitionToError(forge, ctx, `Push failed: ${message}`)
+    const sanitized = sanitizeError(pushErr)
+    logger.error(
+      { repo: ctx.repo, branch: ctx.branchName, err: sanitized },
+      'Push failed',
+    )
+    await transitionToError(forge, ctx, `Push failed: ${sanitized.message}`)
     throw pushErr
   }
 
@@ -129,9 +133,12 @@ export async function publishPR(
     logger.info({ prNumber: pr.number, prUrl: pr.url }, 'Created new PR')
     return { prNumber: pr.number, prUrl: pr.url, prTitle: pr.title, created: true }
   } catch (prErr) {
-    const message = prErr instanceof Error ? prErr.message : String(prErr)
-    logger.error({ repo: ctx.repo, branch: ctx.branchName, err: prErr }, 'PR creation/update failed')
-    await transitionToError(forge, ctx, `PR operation failed: ${message}`)
+    const sanitized = sanitizeError(prErr)
+    logger.error(
+      { repo: ctx.repo, branch: ctx.branchName, err: sanitized },
+      'PR creation/update failed',
+    )
+    await transitionToError(forge, ctx, `PR operation failed: ${sanitized.message}`)
     throw prErr
   }
 }

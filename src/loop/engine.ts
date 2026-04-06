@@ -3,6 +3,7 @@ import type { Config } from '../config/schema.js'
 import type { WorkerAdapter } from '../workers/types.js'
 import type { MetricsService } from '../metrics/service.js'
 import type { ResolvedWorkflow } from './workflow.js'
+import type { PersistedDecisionOutcome } from './checkpoint.js'
 import { updateContext, recordPhase } from './context.js'
 import { commitChanges } from './commit.js'
 import { executeStep, type StepDependencies } from './step-executor.js'
@@ -24,6 +25,14 @@ export interface LoopDependencies {
   metrics?: MetricsService
   onAgentEvent?: (event: AgentEvent) => void
   onPlanReady?: (ctx: RunContext) => Promise<void>
+  /**
+   * Called on every phase checkpoint to extend the lease on the issue this
+   * run is processing. Optional — tests and sub-loops pass no lease
+   * manager. Returning false signals the lease has expired and a concurrent
+   * engine may have picked the issue up; the engine logs a warning but
+   * does not abort (bailing mid-run has its own race risks).
+   */
+  leaseHeartbeat?: () => boolean
 }
 
 /**
@@ -52,14 +61,31 @@ export async function executeLoop(
 
   const steps = deps.workflow.steps
   const checkpointPhaseData = getCheckpointPhaseData(db, initialCtx.runId)
-  let stepIndex = resolveStartingStepIndex(steps, resumedCtx, checkpointPhaseData)
+  const persistedDecisions = checkpoint.getDecisionOutcomes(initialCtx.runId)
+
+  // If a decide step terminated the previous attempt mid-action, replay
+  // that terminal outcome instead of re-entering the loop. Without this,
+  // a crash between decide-checkpoint and action would silently re-route
+  // to iterate and discard the intended terminal state.
+  const terminalOutcome = findTerminalDecisionOutcome(persistedDecisions)
+  if (terminalOutcome) {
+    logger.info(
+      { runId: ctx.runId, phase: terminalOutcome.phase, action: terminalOutcome.outcome.action },
+      'Resume: replaying persisted terminal decision outcome',
+    )
+    return applyPersistedDecisionOutcome(ctx, terminalOutcome)
+  }
+
+  let stepIndex = resolveStartingStepIndex(steps, resumedCtx, checkpointPhaseData, checkpoint.getCompletedPhases(initialCtx.runId))
 
   while (stepIndex < steps.length) {
     const step = steps[stepIndex]!
 
-    // Skip step if skipWhen matches triage level
+    // Skip step if skipWhen matches triage level. Emit paired
+    // phase_started/phase_completed events so the event stream stays
+    // well-formed and observability consumers see the skip.
     if ('skipWhen' in step && step.skipWhen === ctx.triageResult.level) {
-      checkpoint.phaseCompleted(ctx.runId, step.id, {}, ctx.iteration)
+      checkpoint.phaseSkipped(ctx.runId, step.id, ctx.iteration)
       ctx = recordPhase(ctx, step.id, 'skipped')
       stepIndex++
       continue
@@ -79,6 +105,9 @@ export async function executeLoop(
           },
           'Cost limit exceeded',
         )
+        // Emit paired phase_started/phase_completed with a blocked payload
+        // so the event stream remains consistent across block early-returns.
+        checkpoint.phaseBlocked(ctx.runId, step.id, blockMessage, ctx.iteration)
         return recordPhase(
           updateContext(ctx, {
             currentPhase: 'blocked',
@@ -147,6 +176,21 @@ export async function executeLoop(
     // Checkpoint and record
     const artifacts = buildStepArtifacts(step, ctx)
     checkpoint.phaseCompleted(ctx.runId, step.id, artifacts, ctx.iteration)
+    // Persist sessionIds + stepOutputs so crash recovery can rehydrate
+    // multi-step workflow continuity (worker --continue chains and custom
+    // step outputs not captured by the builtin artifact map).
+    checkpoint.persistRunState(ctx.runId, ctx.sessionIds, ctx.stepOutputs)
+    // Extend the lease — a long workflow may run longer than the lease
+    // duration and would otherwise fall to cleanExpired mid-run.
+    if (deps.leaseHeartbeat) {
+      const held = deps.leaseHeartbeat()
+      if (!held) {
+        logger.warn(
+          { runId: ctx.runId, phase: step.id },
+          'Lease heartbeat failed — lease was released or taken over. Continuing cautiously.',
+        )
+      }
+    }
     ctx = recordPhase(ctx, step.id, stepSuccess ? 'success' : 'failure', {}, stepStartedAt)
 
     // Fire onPlanReady after plan step completes with a plan
@@ -160,6 +204,15 @@ export async function executeLoop(
     if (step.type === 'decide' && result.decision) {
       const decision = result.decision
       logger.info({ runId: ctx.runId, decision: decision.action, reason: decision.reason }, 'Loop decision')
+
+      // Persist decision outcome BEFORE taking action. If a crash happens
+      // between the decision and the terminal state write, resume will
+      // replay the outcome rather than re-routing to iterate.
+      checkpoint.recordDecisionOutcome(ctx.runId, step.id, {
+        action: decision.action,
+        reason: decision.reason,
+        blockReason: decision.action === 'block' ? decision.blockReason : null,
+      })
 
       switch (decision.action) {
         case 'publish': {
@@ -272,6 +325,7 @@ function resolveStartingStepIndex(
   steps: WorkflowStep[],
   resumedCtx: RunContext | null,
   checkpointPhaseData: Readonly<Record<string, unknown>>,
+  completedPhases: readonly string[],
 ): number {
   if (!resumedCtx) return 0
 
@@ -279,18 +333,80 @@ function resolveStartingStepIndex(
   if (resumedPhaseIndex === -1) return 0
 
   const resumedStep = steps[resumedPhaseIndex]!
-  const isCompletedCheckpoint = isStepCheckpointComplete(resumedStep, checkpointPhaseData[resumedStep.id])
+  // Completed-phases sentinel is authoritative when present. Pre-migration
+  // data (no sentinel) falls back to the artifact-shape check.
+  const hasCompletedSentinel = completedPhases.length > 0
+  const artifactComplete = isStepCheckpointComplete(resumedStep, checkpointPhaseData[resumedStep.id])
+  const isCompletedCheckpoint = hasCompletedSentinel
+    ? completedPhases.includes(resumedStep.id) && artifactComplete
+    : artifactComplete
   if (!isCompletedCheckpoint) {
     return resumedPhaseIndex
   }
 
   if (resumedStep.type === 'decide') {
+    // Decide steps without a persisted terminal outcome (checked earlier)
+    // fall through to the iterate target on resume — the crashed attempt
+    // chose iterate.
     const iterateTargetIndex = steps.findIndex((step) => step.id === resumedStep.onIterate)
     return iterateTargetIndex >= 0 ? iterateTargetIndex : 0
   }
 
   const nextStepIndex = resumedPhaseIndex + 1
   return nextStepIndex < steps.length ? nextStepIndex : resumedPhaseIndex
+}
+
+/**
+ * If a persisted decision outcome is terminal (publish/block/error),
+ * return it so the engine can replay the outcome on resume. iterate is
+ * not terminal — the crashed attempt went on to re-run earlier steps.
+ */
+function findTerminalDecisionOutcome(
+  outcomes: Record<string, PersistedDecisionOutcome>,
+): { phase: string; outcome: PersistedDecisionOutcome } | null {
+  for (const [phase, outcome] of Object.entries(outcomes)) {
+    if (outcome.action === 'publish' || outcome.action === 'block' || outcome.action === 'error') {
+      return { phase, outcome }
+    }
+  }
+  return null
+}
+
+function applyPersistedDecisionOutcome(
+  ctx: RunContext,
+  terminal: { phase: string; outcome: PersistedDecisionOutcome },
+): RunContext {
+  const { phase, outcome } = terminal
+  switch (outcome.action) {
+    case 'publish':
+      return recordPhase(
+        updateContext(ctx, { currentPhase: 'completed', terminalStatus: 'publish' }),
+        phase,
+        'success',
+      )
+    case 'block':
+      return recordPhase(
+        updateContext(ctx, {
+          currentPhase: 'blocked',
+          terminalStatus: 'blocked',
+          blockReason: (outcome.blockReason ?? null) as RunContext['blockReason'],
+          stepOutputs: {
+            ...ctx.stepOutputs,
+            blockMessage: outcome.reason ?? 'Blocked by prior decide outcome',
+          },
+        }),
+        phase,
+        'failure',
+      )
+    case 'error':
+      return recordPhase(
+        updateContext(ctx, { currentPhase: 'error', terminalStatus: 'error' }),
+        phase,
+        'failure',
+      )
+    default:
+      return ctx
+  }
 }
 
 function getCheckpointPhaseData(
@@ -324,7 +440,11 @@ function isStepCheckpointComplete(step: WorkflowStep, rawArtifacts: unknown): bo
       if (step.role === 'planner') return artifacts['plan'] !== null && artifacts['plan'] !== undefined
       if (step.role === 'coder') return artifacts['codeResult'] !== null && artifacts['codeResult'] !== undefined
       if (step.role === 'reviewer') return artifacts['reviewResult'] !== null && artifacts['reviewResult'] !== undefined
-      return true
+      // Custom-role workers: checkpoint is complete only if stepOutput was
+      // persisted (meaning the step ran to completion and its output was
+      // written back). Without this the resume path could skip a crashed
+      // custom step thinking it was done.
+      return 'stepOutput' in artifacts
     case 'verify':
       return Array.isArray(artifacts['verifyResults'])
     case 'decide':
@@ -352,7 +472,12 @@ function buildStepArtifacts(step: WorkflowStep, ctx: RunContext): Record<string,
       if (step.role === 'planner') return { plan: ctx.plan }
       if (step.role === 'coder') return { codeResult: ctx.codeResult }
       if (step.role === 'reviewer') return { reviewResult: ctx.reviewResult }
-      return {}
+      // Custom-role workers: persist the step's own output so resume can
+      // tell that work was completed. Without this, isStepCheckpointComplete
+      // fell through to `return true` for custom roles but phase_data
+      // recorded `{}`, so on resume the step was skipped AND its output
+      // was lost.
+      return { stepOutput: ctx.stepOutputs[step.id] ?? null }
     case 'verify':
       return { verifyResults: ctx.verifyResults }
     case 'decide':

@@ -14,6 +14,13 @@ interface ManagedChild {
   status: 'running' | 'draining' | 'stopped'
   restartCount: number
   lastStartedAt: number
+  /**
+   * Pending delayed-respawn timer for this child. Tracked so that
+   * `respawnAll()` and `shutdown()` can cancel any in-flight respawn
+   * before spawning a fresh process — otherwise the stale timer fires
+   * after the new spawn and produces a duplicate child.
+   */
+  pendingRespawn: NodeJS.Timeout | null
 }
 
 export interface SupervisorOptions {
@@ -53,6 +60,7 @@ export class Supervisor {
         status: 'stopped',
         restartCount: 0,
         lastStartedAt: 0,
+        pendingRespawn: null,
       },
       {
         name: 'web',
@@ -61,6 +69,7 @@ export class Supervisor {
         status: 'stopped',
         restartCount: 0,
         lastStartedAt: 0,
+        pendingRespawn: null,
       },
     ]
 
@@ -90,6 +99,14 @@ export class Supervisor {
 
   private spawn(child: ManagedChild): void {
     if (this.shuttingDown) return
+
+    // Clear any lingering delayed-respawn timer for this child — without
+    // this a stale timer queued during a crash loop would fire after the
+    // fresh spawn below and create a duplicate child process.
+    if (child.pendingRespawn) {
+      clearTimeout(child.pendingRespawn)
+      child.pendingRespawn = null
+    }
 
     const proc = fork(this.cliEntry, child.args, {
       stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
@@ -134,7 +151,8 @@ export class Supervisor {
         'Child exited unexpectedly — respawning',
       )
 
-      setTimeout(() => {
+      child.pendingRespawn = setTimeout(() => {
+        child.pendingRespawn = null
         if (!this.shuttingDown && !this.updating) {
           this.spawn(child)
         }
@@ -378,6 +396,13 @@ export class Supervisor {
 
   private respawnAll(): void {
     for (const child of this.children) {
+      // Cancel any in-flight delayed-respawn before reset; spawn() will also
+      // clear this defensively, but clearing here prevents a race window
+      // where a stale timer fires between the restartCount reset and spawn.
+      if (child.pendingRespawn) {
+        clearTimeout(child.pendingRespawn)
+        child.pendingRespawn = null
+      }
       child.restartCount = 0
       this.spawn(child)
     }
@@ -413,6 +438,14 @@ export class Supervisor {
   private shutdown(): void {
     this.shuttingDown = true
     logger.info('Supervisor shutting down...')
+    // Cancel any pending delayed respawns so they don't fire during drain
+    // and spawn a new child while we are trying to stop the existing ones.
+    for (const child of this.children) {
+      if (child.pendingRespawn) {
+        clearTimeout(child.pendingRespawn)
+        child.pendingRespawn = null
+      }
+    }
     unwatchFile(this.triggerFilePath)
     void this.drainAll().then(() => {
       logger.info('All children stopped')

@@ -205,7 +205,7 @@ describe('decide', () => {
     }
   })
 
-  it('subscription mode skips cost-over-budget block', () => {
+  it('subscription mode skips cost-over-budget block (reaches publish)', () => {
     const ctx = makeCtx({
       estimatedCostUsd: 500,
       reviewResult: {
@@ -217,7 +217,7 @@ describe('decide', () => {
       verifyResults: [{ command: 'test', exitCode: 0, stdout: '', stderr: '', durationMs: 100, passed: true }],
     })
     const d = decide(ctx, loopConfig, securityConfig, { costModel: 'subscription' })
-    expect(d.action).not.toBe('block')
+    expect(d.action).toBe('publish')
   })
 
   it('max total passes → block', () => {
@@ -264,5 +264,147 @@ describe('decide', () => {
     })
     const d = decide(ctx, { ...loopConfig, requireVerificationPass: false }, securityConfig)
     expect(d.action).toBe('publish')
+  })
+
+  describe('block reason discriminators', () => {
+    it('cost limit block carries blockReason=cost_limit', () => {
+      const ctx = makeCtx({
+        estimatedCostUsd: 999,
+        reviewResult: {
+          verdict: 'APPROVED',
+          summary: 'ok',
+          findings: [],
+          definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+        },
+      })
+      const d = decide(ctx, loopConfig, securityConfig)
+      expect(d.action).toBe('block')
+      if (d.action === 'block') expect(d.blockReason).toBe('cost_limit')
+    })
+
+    it('agent pass limit block carries blockReason=agent_pass_limit', () => {
+      const ctx = makeCtx({ totalAgentPasses: 10 })
+      const d = decide(ctx, loopConfig, securityConfig)
+      expect(d.action).toBe('block')
+      if (d.action === 'block') expect(d.blockReason).toBe('agent_pass_limit')
+    })
+
+    it('CHANGES_REQUIRED at max iterations carries blockReason=iteration_limit', () => {
+      const ctx = makeCtx({
+        iteration: 4,
+        reviewResult: {
+          verdict: 'CHANGES_REQUIRED',
+          summary: 'more work',
+          findings: [],
+          definitionOfDoneCheck: { issueAddressed: false, testsPassing: false, noBlockingFindings: false },
+        },
+      })
+      const d = decide(ctx, loopConfig, securityConfig)
+      expect(d.action).toBe('block')
+      if (d.action === 'block') expect(d.blockReason).toBe('iteration_limit')
+    })
+
+    it('BLOCKED verdict carries blockReason=reviewer_blocked', () => {
+      const ctx = makeCtx({
+        reviewResult: {
+          verdict: 'BLOCKED',
+          summary: 'Security concern',
+          findings: [],
+          definitionOfDoneCheck: { issueAddressed: false, testsPassing: false, noBlockingFindings: false },
+        },
+      })
+      const d = decide(ctx, loopConfig, securityConfig)
+      expect(d.action).toBe('block')
+      if (d.action === 'block') expect(d.blockReason).toBe('reviewer_blocked')
+    })
+
+    it('ambiguous review with blockOnAmbiguousReview carries blockReason=ambiguous_review', () => {
+      const ctx = makeCtx({ reviewResult: null })
+      const d = decide(ctx, loopConfig, securityConfig)
+      expect(d.action).toBe('block')
+      if (d.action === 'block') expect(d.blockReason).toBe('ambiguous_review')
+    })
+
+    it('APPROVED + requireVerificationPass but no verify commands → blockReason=verify_config', () => {
+      const ctx = makeCtx({
+        repoConfig: { ...makeCtx().repoConfig, verify: [] },
+        verifyResults: [],
+        reviewResult: {
+          verdict: 'APPROVED',
+          summary: 'ok',
+          findings: [],
+          definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+        },
+      })
+      const d = decide(ctx, loopConfig, securityConfig)
+      expect(d.action).toBe('block')
+      if (d.action === 'block') expect(d.blockReason).toBe('verify_config')
+    })
+  })
+
+  describe('no-review workflow (options.requireReview=false)', () => {
+    const noReviewCtx = (overrides: Partial<RunContext> = {}): RunContext =>
+      makeCtx({ reviewResult: null, ...overrides })
+
+    it('blocks with verify_config when verify required but no commands configured', () => {
+      const ctx = noReviewCtx({
+        repoConfig: { ...makeCtx().repoConfig, verify: [] },
+        verifyResults: [],
+      })
+      const d = decide(ctx, loopConfig, securityConfig, { requireReview: false })
+      expect(d.action).toBe('block')
+      if (d.action === 'block') expect(d.blockReason).toBe('verify_config')
+    })
+
+    it('blocks with verify_config when verify commands configured but no results yet', () => {
+      const ctx = noReviewCtx({ verifyResults: [] })
+      const d = decide(ctx, loopConfig, securityConfig, { requireReview: false })
+      expect(d.action).toBe('block')
+      if (d.action === 'block') expect(d.blockReason).toBe('verify_config')
+    })
+
+    it('iterates when verify failed but iteration is under the limit', () => {
+      const ctx = noReviewCtx({
+        iteration: 1,
+        verifyResults: [{ command: 'pnpm test', exitCode: 1, stdout: '', stderr: 'fail', durationMs: 10, passed: false }],
+      })
+      const d = decide(ctx, loopConfig, securityConfig, { requireReview: false })
+      expect(d.action).toBe('iterate')
+    })
+
+    it('blocks with iteration_limit when verify keeps failing past max iterations', () => {
+      const ctx = noReviewCtx({
+        iteration: 4,
+        verifyResults: [{ command: 'pnpm test', exitCode: 1, stdout: '', stderr: 'fail', durationMs: 10, passed: false }],
+      })
+      const d = decide(ctx, loopConfig, securityConfig, { requireReview: false })
+      expect(d.action).toBe('block')
+      if (d.action === 'block') expect(d.blockReason).toBe('iteration_limit')
+    })
+
+    it('publishes when verify passes', () => {
+      const ctx = noReviewCtx({
+        verifyResults: [{ command: 'pnpm test', exitCode: 0, stdout: '', stderr: '', durationMs: 10, passed: true }],
+      })
+      const d = decide(ctx, loopConfig, securityConfig, { requireReview: false })
+      expect(d.action).toBe('publish')
+    })
+  })
+
+  describe('unknown verdict (type-safety escape)', () => {
+    it('returns action=error with a descriptive reason', () => {
+      const ctx = makeCtx({
+        // Cast through unknown to exercise the default branch.
+        reviewResult: {
+          verdict: 'MAYBE' as unknown as 'APPROVED',
+          summary: 'unsure',
+          findings: [],
+          definitionOfDoneCheck: { issueAddressed: false, testsPassing: false, noBlockingFindings: false },
+        },
+      })
+      const d = decide(ctx, loopConfig, securityConfig)
+      expect(d.action).toBe('error')
+      if (d.action === 'error') expect(d.reason).toContain('Unknown review verdict')
+    })
   })
 })

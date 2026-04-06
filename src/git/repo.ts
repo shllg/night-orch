@@ -1,5 +1,6 @@
 import { logger } from '../utils/logger.js'
 import { runGit } from './process.js'
+import { sanitizeError } from '../utils/sanitize-error.js'
 
 /**
  * Fetch all refs from origin.
@@ -127,7 +128,7 @@ export async function mergeNoFF(
     await runGit(['merge', '--no-ff', branch, '-m', `Merge ${branch}`], { cwd: worktreePath })
     return { success: true }
   } catch (err) {
-    return { success: false, error: String(err) }
+    return { success: false, error: sanitizeError(err).message }
   }
 }
 
@@ -144,7 +145,7 @@ export async function cherryPick(
     return { success: true }
   } catch (err) {
     try { await runGit(['cherry-pick', '--abort'], { cwd: worktreePath }) } catch { /* ignore */ }
-    return { success: false, error: String(err) }
+    return { success: false, error: sanitizeError(err).message }
   }
 }
 

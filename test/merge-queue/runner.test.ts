@@ -96,6 +96,100 @@ describe('processMergeQueue', () => {
     expect(batch).toBeUndefined()
   })
 
+  it('does not mark batch passed when finalizeMerge throws', async () => {
+    const { finalizeMerge } = await import('../../src/merge-queue/finalize.js')
+    vi.mocked(finalizeMerge).mockRejectedValueOnce(new Error('push rejected'))
+
+    db.prepare(
+      "INSERT INTO runs (id, repo, issue_number, status, pr_number) VALUES ('r1', 'org/repo', 1, 'review_ready', 100)",
+    ).run()
+    db.prepare(
+      `INSERT INTO merge_batches (id, repo, base_branch, base_sha, status, staging_branch, staging_sha, pr_numbers, approved_shas, merged_pr_numbers, retry_count)
+       VALUES ('b-finalize-fail', 'org/repo', 'main', 'abc', 'testing', 'orch/staging/x', 'ssha', '[100]', '["sha-100"]', '[100]', 0)`,
+    ).run()
+
+    await processMergeQueue(db, makeForge(), makeRepoConfig())
+
+    // Batch should be failed (not passed); run should NOT be marked completed
+    const row = db.prepare("SELECT status FROM merge_batches WHERE id = 'b-finalize-fail'").get() as { status: string }
+    expect(row.status).toBe('failed')
+    const runRow = db.prepare("SELECT status FROM runs WHERE id = 'r1'").get() as { status: string }
+    expect(runRow.status).toBe('review_ready')
+  })
+
+  it('closes only merged PRs on finalize, not ejected ones', async () => {
+    const { finalizeMerge } = await import('../../src/merge-queue/finalize.js')
+    const finalizeSpy = vi.mocked(finalizeMerge).mockResolvedValue(undefined)
+
+    db.prepare(
+      "INSERT INTO runs (id, repo, issue_number, status, pr_number) VALUES ('r1', 'org/repo', 1, 'review_ready', 100)",
+    ).run()
+    db.prepare(
+      "INSERT INTO runs (id, repo, issue_number, status, pr_number) VALUES ('r2', 'org/repo', 2, 'review_ready', 101)",
+    ).run()
+    // batch has prNumbers=[100,101] but merged_pr_numbers=[100] (101 ejected)
+    db.prepare(
+      `INSERT INTO merge_batches (id, repo, base_branch, base_sha, status, staging_branch, staging_sha, pr_numbers, approved_shas, merged_pr_numbers, retry_count)
+       VALUES ('b-eject', 'org/repo', 'main', 'abc', 'testing', 'orch/staging/x', 'ssha', '[100,101]', '["sha-100","sha-101"]', '[100]', 0)`,
+    ).run()
+
+    await processMergeQueue(db, makeForge(), makeRepoConfig())
+
+    expect(finalizeSpy).toHaveBeenCalledTimes(1)
+    // Finalize must be called with merged subset, not full prNumbers
+    expect(finalizeSpy.mock.calls[0]![4]).toEqual([100])
+
+    // Only the merged run should transition to completed; the ejected one stays review_ready
+    const r1 = db.prepare("SELECT status FROM runs WHERE id = 'r1'").get() as { status: string }
+    expect(r1.status).toBe('completed')
+    const r2 = db.prepare("SELECT status FROM runs WHERE id = 'r2'").get() as { status: string }
+    expect(r2.status).toBe('review_ready')
+  })
+
+  it('transitions merged runs out of review_ready on success', async () => {
+    db.prepare(
+      "INSERT INTO runs (id, repo, issue_number, status, pr_number) VALUES ('r1', 'org/repo', 1, 'review_ready', 100)",
+    ).run()
+    db.prepare(
+      `INSERT INTO merge_batches (id, repo, base_branch, base_sha, status, staging_branch, staging_sha, pr_numbers, approved_shas, merged_pr_numbers, retry_count)
+       VALUES ('b-ok', 'org/repo', 'main', 'abc', 'testing', 'orch/staging/x', 'ssha', '[100]', '["sha-100"]', '[100]', 0)`,
+    ).run()
+
+    await processMergeQueue(db, makeForge(), makeRepoConfig())
+
+    const r1 = db.prepare("SELECT status FROM runs WHERE id = 'r1'").get() as { status: string }
+    expect(r1.status).toBe('completed')
+    const batchRow = db.prepare("SELECT status FROM merge_batches WHERE id = 'b-ok'").get() as { status: string }
+    expect(batchRow.status).toBe('passed')
+  })
+
+  it('recovers stuck-building batch by marking failed', async () => {
+    const staleIso = new Date(Date.now() - 31 * 60 * 1000).toISOString()
+    db.prepare(
+      `INSERT INTO merge_batches (id, repo, base_branch, base_sha, status, pr_numbers, approved_shas, retry_count, updated_at)
+       VALUES ('b-stuck', 'org/repo', 'main', 'abc', 'building', '[100]', '["sha-100"]', 0, ?)`,
+    ).run(staleIso)
+
+    await processMergeQueue(db, makeForge(), makeRepoConfig())
+
+    const row = db.prepare("SELECT status FROM merge_batches WHERE id = 'b-stuck'").get() as { status: string }
+    expect(row.status).toBe('failed')
+  })
+
+  it('marks batch failed when formNewBatch staging throws', async () => {
+    const { buildStagingBranch } = await import('../../src/merge-queue/staging.js')
+    vi.mocked(buildStagingBranch).mockRejectedValueOnce(new Error('git fetch failed'))
+
+    db.prepare(
+      "INSERT INTO runs (id, repo, issue_number, status, pr_number) VALUES ('r1', 'org/repo', 1, 'review_ready', 100)",
+    ).run()
+
+    await processMergeQueue(db, makeForge(), makeRepoConfig())
+
+    const batch = db.prepare("SELECT status FROM merge_batches WHERE repo = 'org/repo'").get() as { status: string } | undefined
+    expect(batch?.status).toBe('failed')
+  })
+
   it('quarantines culprit PR when single-item batch fails CI', async () => {
     db.prepare(
       "INSERT INTO runs (id, repo, issue_number, status, pr_number) VALUES ('r1', 'org/repo', 1, 'review_ready', 100)",

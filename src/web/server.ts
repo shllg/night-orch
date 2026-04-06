@@ -3,7 +3,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { readFile, stat } from 'node:fs/promises'
-import { extname, resolve, dirname } from 'node:path'
+import { extname, resolve, dirname, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocket, WebSocketServer } from 'ws'
 import type { MCPDependencies } from '../mcp/server.js'
@@ -13,6 +13,7 @@ import { handleResourceRead } from '../mcp/resources/index.js'
 import { loadTuiStats } from '../state/stats.js'
 import { getBuildInfo } from '../utils/build-info.js'
 import { logger } from '../utils/logger.js'
+import { sanitizeError } from '../utils/sanitize-error.js'
 import { nowUtcIso } from '../utils/time.js'
 import {
   listRuntimeSettings,
@@ -236,6 +237,25 @@ export async function startWebServer(
   deps: MCPDependencies,
   options: WebServerOptions,
 ): Promise<Server> {
+  // Hard gate on non-loopback binds: the web server hands out a mutation
+  // token via `/api/session` to any same-origin caller and offers
+  // destructive endpoints (retry/cleanup/sync/etc) under that token. When
+  // bound to a non-loopback address, require an operator-supplied auth
+  // token env (`NIGHT_ORCH_WEB_AUTH_TOKEN`) so any single-origin XSS or
+  // local process cannot trivially escalate to full write access.
+  const bindHostName = normalizeHostname(options.host) ?? options.host
+  const isLoopbackBind =
+    bindHostName === '127.0.0.1'
+    || bindHostName === '::1'
+    || bindHostName === 'localhost'
+    || bindHostName === ''
+  if (!isLoopbackBind && !process.env['NIGHT_ORCH_WEB_AUTH_TOKEN']) {
+    throw new Error(
+      `night-orch web refuses to bind to non-loopback host "${options.host}" without NIGHT_ORCH_WEB_AUTH_TOKEN set. `
+      + 'Either bind to 127.0.0.1 / ::1 or provide an out-of-band auth token via that env var.',
+    )
+  }
+
   const security = createWebSecurityContext(deps, options)
   const operationsEnabled = options.operationsEnabled ?? true
   const frontendDistPath = resolveWebFrontendDistPath(options.frontendDistPath)
@@ -275,16 +295,16 @@ export async function startWebServer(
         return
       }
 
-      const message = (err as Error).message
-      const status = isClientRequestError(message)
+      const sanitized = sanitizeError(err)
+      const status = isClientRequestError(sanitized.message)
         ? 400
-        : isAuthorizationError(message)
+        : isAuthorizationError(sanitized.message)
           ? 403
           : 500
       if (status >= 500) {
-        logger.warn({ err }, 'Web request failed')
+        logger.warn({ err: sanitized }, 'Web request failed')
       }
-      writeJson(res, status, { error: message })
+      writeJson(res, status, { error: sanitized.message })
     }
   })
 
@@ -878,7 +898,10 @@ async function serveFrontend(
   const relativePath = pathname === '/' ? '/index.html' : pathname
   const targetPath = resolve(frontendDistPath, `.${relativePath}`)
 
-  if (!targetPath.startsWith(frontendDistPath)) {
+  // Path-traversal guard: `targetPath.startsWith(frontendDistPath)` alone
+  // is insufficient — a sibling directory such as `frontendDistPath` +
+  // "-stash" would pass. Require exact match or a true subdirectory path.
+  if (targetPath !== frontendDistPath && !targetPath.startsWith(frontendDistPath + sep)) {
     writeJson(res, 403, { error: 'Forbidden path' })
     return
   }

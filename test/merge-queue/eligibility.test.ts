@@ -204,6 +204,65 @@ describe('findMergeEligiblePRs', () => {
     expect(candidates).toHaveLength(0)
   })
 
+  it('skips PR when latest review from a reviewer is changes_requested after an earlier approved', async () => {
+    db.prepare(
+      "INSERT INTO runs (id, repo, issue_number, status, pr_number) VALUES ('r1', 'org/repo', 1, 'review_ready', 100)",
+    ).run()
+
+    const forge = makeForge({
+      listPRReviews: vi.fn<() => Promise<ForgePRReview[]>>().mockResolvedValue([
+        { id: 1, user: 'alice', state: 'approved', body: '', submittedAt: '2026-01-01T00:00:00Z' },
+        { id: 2, user: 'alice', state: 'changes_requested', body: 'second look', submittedAt: '2026-01-02T00:00:00Z' },
+      ]),
+      getPR: vi.fn().mockResolvedValue({
+        number: 100, title: 'PR 100', body: '', state: 'open', headBranch: 'orch/100-fix',
+        headSha: 'sha-100', baseBranch: 'main', url: 'https://example.test/pr/100',
+      }),
+    })
+
+    const candidates = await findMergeEligiblePRs(db, forge, makeRepoConfig())
+    expect(candidates).toHaveLength(0)
+  })
+
+  it('includes PR when latest review is approved after an earlier changes_requested', async () => {
+    db.prepare(
+      "INSERT INTO runs (id, repo, issue_number, status, pr_number) VALUES ('r1', 'org/repo', 1, 'review_ready', 100)",
+    ).run()
+
+    const forge = makeForge({
+      listPRReviews: vi.fn<() => Promise<ForgePRReview[]>>().mockResolvedValue([
+        { id: 1, user: 'alice', state: 'changes_requested', body: '', submittedAt: '2026-01-01T00:00:00Z' },
+        { id: 2, user: 'alice', state: 'approved', body: 'fixed', submittedAt: '2026-01-02T00:00:00Z' },
+      ]),
+      getPR: vi.fn().mockResolvedValue({
+        number: 100, title: 'PR 100', body: '', state: 'open', headBranch: 'orch/100-fix',
+        headSha: 'sha-100', baseBranch: 'main', url: 'https://example.test/pr/100',
+      }),
+    })
+
+    const candidates = await findMergeEligiblePRs(db, forge, makeRepoConfig())
+    expect(candidates).toHaveLength(1)
+  })
+
+  it('skips PR when state is not open', async () => {
+    db.prepare(
+      "INSERT INTO runs (id, repo, issue_number, status, pr_number) VALUES ('r1', 'org/repo', 1, 'review_ready', 100)",
+    ).run()
+
+    const forge = makeForge({
+      listPRReviews: vi.fn<() => Promise<ForgePRReview[]>>().mockResolvedValue([
+        { id: 1, user: 'human', state: 'approved', body: '', submittedAt: '' },
+      ]),
+      getPR: vi.fn().mockResolvedValue({
+        number: 100, title: 'PR 100', body: '', state: 'closed', headBranch: 'orch/100-fix',
+        headSha: 'sha-100', baseBranch: 'main', url: 'https://example.test/pr/100',
+      }),
+    })
+
+    const candidates = await findMergeEligiblePRs(db, forge, makeRepoConfig())
+    expect(candidates).toHaveLength(0)
+  })
+
   it('includes PR when approval is not required', async () => {
     db.prepare(
       "INSERT INTO runs (id, repo, issue_number, status, pr_number) VALUES ('r1', 'org/repo', 1, 'review_ready', 100)",

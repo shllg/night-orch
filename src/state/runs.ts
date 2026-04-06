@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3'
 import { generateRunId } from '../utils/ids.js'
 import { nowUtcIso } from '../utils/time.js'
 import { IssueManager } from './issues.js'
+import { logger } from '../utils/logger.js'
 
 export type RunStatus = 'queued' | 'running' | 'blocked' | 'review_ready' | 'error' | 'completed'
 
@@ -31,6 +32,12 @@ export interface RunRecord {
   completionTokens: number
   blockReason: string | null
   parentRunId: string | null
+  /**
+   * Number of auto-retries performed against this run row. Increments when
+   * the poller transitions the row back to `queued` after an error so that
+   * `maxAutoRetries` is enforced across replay attempts on the same row.
+   */
+  retryCount: number
 }
 
 export interface CreateRunParams {
@@ -56,16 +63,24 @@ export class RunManager {
     const now = nowUtcIso()
 
     const createTx = this.db.transaction(() => {
-      const activeExisting = this.db
-        .prepare(
-          `SELECT id, status
-           FROM runs
-           WHERE repo = ?
-             AND issue_number = ?
-             AND status IN ('queued', 'running', 'blocked', 'review_ready', 'error')
-           LIMIT 1`,
-        )
-        .get(params.repo, params.issueNumber) as { id: string; status: string } | undefined
+      // Uniqueness only applies to top-level runs. Sub-runs (identified by
+      // a non-null `parent_run_id`) share the same repo+issue as their
+      // parent by design — decomposition and parallel subtasks both spawn
+      // multiple sub-runs on a single parent issue — and must not collide
+      // with the parent or with each other.
+      const activeExisting = params.parentRunId
+        ? undefined
+        : (this.db
+            .prepare(
+              `SELECT id, status
+               FROM runs
+               WHERE repo = ?
+                 AND issue_number = ?
+                 AND parent_run_id IS NULL
+                 AND status IN ('queued', 'running', 'blocked', 'review_ready', 'error')
+               LIMIT 1`,
+            )
+            .get(params.repo, params.issueNumber) as { id: string; status: string } | undefined)
 
       if (activeExisting) {
         throw new Error(
@@ -206,10 +221,25 @@ export class RunManager {
   }
 
   /**
-   * Count consecutive recent errors for an issue (within the last hour).
-   * Used to decide whether to auto-retry or give up.
+   * Count auto-retries performed for an issue. Prefers the active run's
+   * `retry_count` column (accurate across replay retries on the same row),
+   * and falls back to counting historical `error` rows in a time window
+   * for issues without an active run. Used to decide whether to auto-retry
+   * or give up.
    */
   countRecentErrors(repo: string, issueNumber: number, windowMinutes = 60): number {
+    const activeRow = this.db
+      .prepare(
+        `SELECT retry_count
+         FROM runs
+         WHERE repo = ? AND issue_number = ?
+         ORDER BY COALESCE(julianday(created_at), 0) DESC, rowid DESC
+         LIMIT 1`,
+      )
+      .get(repo, issueNumber) as { retry_count: number | null } | undefined
+    if (activeRow) {
+      return activeRow.retry_count ?? 0
+    }
     const row = this.db
       .prepare(
         `SELECT COUNT(*) as cnt FROM runs
@@ -218,6 +248,25 @@ export class RunManager {
       )
       .get(repo, issueNumber, windowMinutes) as { cnt: number } | undefined
     return row?.cnt ?? 0
+  }
+
+  /**
+   * Increment the retry counter on a run row. Called by the poller when
+   * transitioning an errored run back to `queued` for an auto-retry. Returns
+   * the new value so callers can enforce `maxAutoRetries` without a second
+   * read.
+   */
+  incrementRetryCount(id: string): number {
+    const tx = this.db.transaction(() => {
+      this.db
+        .prepare('UPDATE runs SET retry_count = retry_count + 1, updated_at = ? WHERE id = ?')
+        .run(nowUtcIso(), id)
+      const row = this.db
+        .prepare('SELECT retry_count FROM runs WHERE id = ?')
+        .get(id) as { retry_count: number | null } | undefined
+      return row?.retry_count ?? 0
+    })
+    return tx()
   }
 
   /**
@@ -282,7 +331,7 @@ export class RunManager {
       reviewer: row.reviewer ?? '',
       iterationCount: row.iteration_count ?? 0,
       currentPhase: row.current_phase,
-      phaseData: row.phase_data ? JSON.parse(row.phase_data) as Record<string, unknown> : null,
+      phaseData: safeParsePhaseData(row.phase_data, row.id),
       startedAt: row.started_at,
       endedAt: row.ended_at,
       lastError: row.last_error,
@@ -296,7 +345,26 @@ export class RunManager {
       completionTokens: row.completion_tokens ?? 0,
       blockReason: row.block_reason ?? null,
       parentRunId: row.parent_run_id ?? null,
+      retryCount: row.retry_count ?? 0,
     }
+  }
+}
+
+/**
+ * Defensively parse the `phase_data` JSON blob on a run row. A single
+ * corrupt row must not take down status, run-detail, list-runs, or TUI
+ * reads — we degrade to null + warn so callers see the row in its
+ * "no checkpoint data" shape.
+ */
+function safeParsePhaseData(raw: string | null, runId: string): Record<string, unknown> | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
+    return parsed as Record<string, unknown>
+  } catch (err) {
+    logger.warn({ runId, err }, 'Failed to parse run.phase_data JSON — returning null')
+    return null
   }
 }
 
@@ -326,4 +394,5 @@ interface RawRunRow {
   completion_tokens: number | null
   block_reason: string | null
   parent_run_id: string | null
+  retry_count: number | null
 }

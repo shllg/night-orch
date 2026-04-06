@@ -63,7 +63,10 @@ export class MergeBatchManager {
   update(
     id: string,
     fields: Partial<
-      Pick<MergeBatchRecord, 'status' | 'stagingBranch' | 'stagingSha' | 'retryCount' | 'parentBatchId'>
+      Pick<
+        MergeBatchRecord,
+        'status' | 'stagingBranch' | 'stagingSha' | 'retryCount' | 'parentBatchId' | 'mergedPrNumbers'
+      >
     >,
   ): void {
     const columnMap: Record<string, string> = {
@@ -72,6 +75,7 @@ export class MergeBatchManager {
       stagingSha: 'staging_sha',
       retryCount: 'retry_count',
       parentBatchId: 'parent_batch_id',
+      mergedPrNumbers: 'merged_pr_numbers',
     }
 
     const setClauses: string[] = []
@@ -83,7 +87,12 @@ export class MergeBatchManager {
         throw new Error(`Unknown merge batch field: ${key}`)
       }
       setClauses.push(`${col} = ?`)
-      values.push(val)
+      // JSON-encode array fields on write
+      if (key === 'mergedPrNumbers') {
+        values.push(val == null ? null : JSON.stringify(val))
+      } else {
+        values.push(val)
+      }
     }
 
     if (setClauses.length === 0) return
@@ -108,6 +117,7 @@ function mapRow(row: RawBatchRow): MergeBatchRecord {
     stagingBranch: row.staging_branch ?? null,
     stagingSha: row.staging_sha ?? null,
     prNumbers: parseJsonArray<number>(row.pr_numbers),
+    mergedPrNumbers: row.merged_pr_numbers ? parseJsonArray<number>(row.merged_pr_numbers) : null,
     approvedShas: parseJsonArray<string>(row.approved_shas),
     retryCount: row.retry_count ?? 0,
     parentBatchId: row.parent_batch_id ?? null,
@@ -134,6 +144,7 @@ interface RawBatchRow {
   staging_branch: string | null
   staging_sha: string | null
   pr_numbers: string
+  merged_pr_numbers: string | null
   approved_shas: string
   retry_count: number | null
   parent_batch_id: string | null

@@ -21,13 +21,7 @@ export function parseReviewerOutput(raw: string): { result: ReviewerOutput | nul
   const verdict = obj['verdict'] as string
 
   if (!verdict || !VALID_VERDICTS.has(verdict as ReviewVerdict)) {
-    // Try to infer verdict from text before failing
-    const inferredVerdict = inferVerdictFromText(raw)
-    if (inferredVerdict) {
-      obj['verdict'] = inferredVerdict
-    } else {
-      return { result: null, error: `Invalid or missing verdict: "${verdict}". Expected: ${[...VALID_VERDICTS].join(', ')}` }
-    }
+    return { result: null, error: `Invalid or missing verdict: "${verdict}". Expected: ${[...VALID_VERDICTS].join(', ')}` }
   }
 
   const validation = ReviewerOutputSchema.safeParse(obj)
@@ -44,8 +38,14 @@ export function parseReviewerOutput(raw: string): { result: ReviewerOutput | nul
 }
 
 /**
- * When the reviewer produces text with no parseable JSON, try to infer
- * a verdict from keywords in the text and construct a synthetic output.
+ * When the reviewer produces text with no parseable JSON, fail closed.
+ *
+ * Previously this path inferred a verdict from free text (e.g. "LGTM",
+ * "APPROVED"), which is a prompt-injection vector: a malicious diff or
+ * issue body can coerce the reviewer into emitting those tokens and bypass
+ * the gate. We now only ever return BLOCKED on the fallback path (for
+ * explicit block signals) or null (for everything else, which callers
+ * treat as a reviewer failure and retry/escalate).
  */
 function buildTextFallback(raw: string): { result: ReviewerOutput | null; error: string | null } {
   const trimmed = raw.trim()
@@ -53,9 +53,9 @@ function buildTextFallback(raw: string): { result: ReviewerOutput | null; error:
     return { result: null, error: 'No JSON block found in reviewer output' }
   }
 
-  const verdict = inferVerdictFromText(trimmed)
+  const verdict = inferBlockVerdictFromText(trimmed)
   if (!verdict) {
-    return { result: null, error: 'No JSON block found and could not infer verdict from reviewer text' }
+    return { result: null, error: 'No JSON block found in reviewer output' }
   }
 
   const firstLine = trimmed.split('\n').find((l) => l.trim().length > 0) ?? trimmed
@@ -67,36 +67,23 @@ function buildTextFallback(raw: string): { result: ReviewerOutput | null; error:
       summary,
       findings: [],
       definitionOfDoneCheck: {
-        issueAddressed: verdict === 'APPROVED',
-        testsPassing: verdict === 'APPROVED',
-        noBlockingFindings: verdict === 'APPROVED',
+        issueAddressed: false,
+        testsPassing: false,
+        noBlockingFindings: false,
       },
     },
-    error: `No JSON block found — inferred verdict "${verdict}" from reviewer text`,
+    error: `No JSON block found — inferred BLOCKED verdict from reviewer text`,
   }
 }
 
 /**
- * Scan reviewer text for verdict keywords. Case-insensitive matching
- * with word boundaries to avoid false positives.
+ * Fail-closed text inference: only recognize explicit BLOCKED signals.
+ * APPROVED/CHANGES_REQUIRED are intentionally NOT inferred — callers must
+ * receive a structured JSON verdict to approve or gate on changes.
  */
-function inferVerdictFromText(text: string): ReviewVerdict | null {
+function inferBlockVerdictFromText(text: string): ReviewVerdict | null {
   const upper = text.toUpperCase()
-  const hasApprovedWord = /\bAPPROVED\b/.test(upper)
-  const hasNegatedApproved = /\bNOT\s+APPROVED\b/.test(upper)
-    || /\bNOT\s+YET\s+APPROVED\b/.test(upper)
-    || /\bNO[T]?\s+APPROVAL\b/.test(upper)
-    || /\bUNAPPROVED\b/.test(upper)
-
-  // Exact keyword match (strongest signal)
-  if (hasApprovedWord && !hasNegatedApproved) return 'APPROVED'
-  if (upper.includes('CHANGES_REQUIRED') || upper.includes('CHANGES REQUIRED')) return 'CHANGES_REQUIRED'
   if (upper.includes('BLOCKED')) return 'BLOCKED'
-
-  // Weaker signals — only use if no ambiguity
-  if (/\bLGTM\b/.test(upper) || /\bLOOKS GOOD\b/.test(upper)) return 'APPROVED'
-  if (/\bNEEDS? (?:CHANGES?|FIX(?:ES)?|WORK)\b/.test(upper)) return 'CHANGES_REQUIRED'
-
   return null
 }
 

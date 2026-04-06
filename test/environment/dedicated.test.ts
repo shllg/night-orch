@@ -38,7 +38,7 @@ describe('startDedicatedStack', () => {
     expect(mockExeca).toHaveBeenCalledWith(
       'docker',
       ['compose', '-p', 'orch-42', '-f', 'docker-compose.yml', 'up', '-d', 'db', 'redis'],
-      { cwd: '/tmp/wt', timeout: 120_000 },
+      expect.objectContaining({ cwd: '/tmp/wt', timeout: 120_000, extendEnv: false }),
     )
   })
 
@@ -55,7 +55,7 @@ describe('startDedicatedStack', () => {
     expect(mockExeca).toHaveBeenCalledWith(
       'docker',
       ['compose', '-p', 'orch-1', '-f', 'compose.yaml', 'up', '-d'],
-      { cwd: '/tmp/wt', timeout: 120_000 },
+      expect.objectContaining({ cwd: '/tmp/wt', timeout: 120_000, extendEnv: false }),
     )
   })
 
@@ -76,7 +76,7 @@ describe('startDedicatedStack', () => {
     expect(mockExeca).toHaveBeenLastCalledWith(
       'curl',
       ['http://localhost:5103/health'],
-      { timeout: 5_000 },
+      expect.objectContaining({ timeout: 5_000, extendEnv: false }),
     )
   })
 
@@ -159,7 +159,7 @@ describe('startDedicatedStack', () => {
     expect(mockExeca).toHaveBeenLastCalledWith(
       'curl',
       ['http://localhost:5103/health'],
-      { timeout: 5_000 },
+      expect.objectContaining({ timeout: 5_000, extendEnv: false }),
     )
   })
 })
@@ -177,7 +177,7 @@ describe('stopDedicatedStack', () => {
     expect(mockExeca).toHaveBeenCalledWith(
       'docker',
       ['compose', '-p', 'orch-42', '-f', 'compose.yaml', 'down', '-v'],
-      { cwd: '/tmp/wt', timeout: 60_000 },
+      expect.objectContaining({ cwd: '/tmp/wt', timeout: 60_000, extendEnv: false }),
     )
   })
 

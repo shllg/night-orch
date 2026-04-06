@@ -313,8 +313,8 @@ export class GitHubForgeAdapter implements ForgeAdapter {
       ref: sha,
     })
 
-    // Get check runs (checks API)
-    const { data: checkRuns } = await this.octokit.rest.checks.listForRef({
+    // Get check runs (checks API) — paginate to cover repos with >100 checks.
+    const allCheckRuns = await this.octokit.paginate(this.octokit.rest.checks.listForRef, {
       owner,
       repo: repoName,
       ref: sha,
@@ -333,7 +333,7 @@ export class GitHubForgeAdapter implements ForgeAdapter {
     }
 
     // Map check runs
-    for (const run of checkRuns.check_runs) {
+    for (const run of allCheckRuns) {
       checks.push({
         name: run.name,
         conclusion: mapCheckConclusion(run.status, run.conclusion),
@@ -361,7 +361,8 @@ export class GitHubForgeAdapter implements ForgeAdapter {
       owner, repo: repoName, ref,
     })
 
-    const { data: checkRuns } = await this.octokit.rest.checks.listForRef({
+    // Paginate check runs so we don't silently drop checks past the 100th.
+    const allCheckRuns = await this.octokit.paginate(this.octokit.rest.checks.listForRef, {
       owner, repo: repoName, ref, per_page: 100,
     })
 
@@ -373,7 +374,7 @@ export class GitHubForgeAdapter implements ForgeAdapter {
         detailsUrl: status.target_url ?? null,
       })
     }
-    for (const run of checkRuns.check_runs) {
+    for (const run of allCheckRuns) {
       checks.push({
         name: run.name,
         conclusion: mapCheckConclusion(run.status, run.conclusion),

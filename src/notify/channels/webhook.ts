@@ -134,20 +134,56 @@ function isPrivateAddress(host: string): boolean {
   const ipVersion = isIP(host)
   if (ipVersion === 0) return false
   if (ipVersion === 6) {
-    const normalized = host.toLowerCase()
-    return normalized === '::1' || normalized.startsWith('fc') || normalized.startsWith('fd') || normalized.startsWith('fe80:')
+    return isPrivateIpv6(host)
   }
 
+  return isPrivateIpv4(host)
+}
+
+function isPrivateIpv4(host: string): boolean {
   const parts = host.split('.').map((n) => Number(n))
   if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return true
   const a = parts[0]!
   const b = parts[1]!
-  if (a === 10) return true
-  if (a === 127) return true
-  if (a === 0) return true
-  if (a === 169 && b === 254) return true
-  if (a === 172 && b >= 16 && b <= 31) return true
-  if (a === 192 && b === 168) return true
+  if (a === 10) return true // 10.0.0.0/8
+  if (a === 127) return true // loopback
+  if (a === 0) return true // "this" network
+  if (a === 169 && b === 254) return true // link-local
+  if (a === 172 && b >= 16 && b <= 31) return true // 172.16.0.0/12
+  if (a === 192 && b === 168) return true // 192.168.0.0/16
+  if (a === 100 && b >= 64 && b <= 127) return true // 100.64.0.0/10 CGNAT
+  if (a >= 224) return true // multicast + reserved
+  return false
+}
+
+function isPrivateIpv6(host: string): boolean {
+  const normalized = host.toLowerCase().replace(/^\[/, '').replace(/\]$/, '')
+
+  // Loopback and unspecified
+  if (normalized === '::1' || normalized === '::') return true
+
+  // Unique local addresses (fc00::/7) — either fc or fd prefix.
+  if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true
+
+  // Link-local (fe80::/10)
+  if (normalized.startsWith('fe8') || normalized.startsWith('fe9')
+    || normalized.startsWith('fea') || normalized.startsWith('feb')) return true
+
+  // IPv4-mapped IPv6: ::ffff:a.b.c.d — if the mapped v4 is private, reject.
+  const mapped = normalized.match(/^::ffff:([0-9.]+)$/)
+  if (mapped && mapped[1]) {
+    return isPrivateIpv4(mapped[1])
+  }
+
+  // IPv4-compatible IPv6 (deprecated, reject conservatively).
+  const compat = normalized.match(/^::([0-9.]+)$/)
+  if (compat && compat[1]) {
+    return isPrivateIpv4(compat[1])
+  }
+
+  // Multicast (ff00::/8)
+  if (normalized.startsWith('ff')) return true
+
   return false
 }
 

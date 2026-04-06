@@ -104,4 +104,32 @@ describe('LeaseManager', () => {
     expect(leaseManager.isLeased('org/repo-a', 1)).toBe(false)
     expect(leaseManager.isLeased('org/repo-b', 2)).toBe(true)
   })
+
+  describe('heartbeat', () => {
+    it('returns true for a live owner-held lease and extends the deadline', () => {
+      // Acquire with a short 2-second window then heartbeat to 3600.
+      leaseManager.acquire('org/repo', 1, 'runner-1', 2)
+      const held = leaseManager.heartbeat('org/repo', 1, 'runner-1', 3600)
+      expect(held).toBe(true)
+      // Confirm the lease survives well past the original 2-second window.
+      const row = db
+        .prepare("SELECT leased_until FROM leases WHERE repo = 'org/repo' AND issue_number = 1")
+        .get() as { leased_until: string } | undefined
+      expect(row).toBeDefined()
+      // The deadline should be more than 30 minutes from now (we asked for 3600s).
+      const deadline = new Date(row!.leased_until.replace(' ', 'T') + 'Z').getTime()
+      expect(deadline - Date.now()).toBeGreaterThan(30 * 60 * 1000)
+    })
+
+    it('returns false for a lease owned by someone else', () => {
+      leaseManager.acquire('org/repo', 1, 'runner-1', 3600)
+      const held = leaseManager.heartbeat('org/repo', 1, 'runner-2', 3600)
+      expect(held).toBe(false)
+    })
+
+    it('returns false when no lease exists', () => {
+      const held = leaseManager.heartbeat('org/repo', 999, 'runner-1', 3600)
+      expect(held).toBe(false)
+    })
+  })
 })

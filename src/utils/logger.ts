@@ -1,5 +1,43 @@
 import pino from 'pino'
 
+/**
+ * Paths scrubbed from every log object. Extend this list with case-sensitive
+ * header names and known credential field names. `**.foo` matches `foo` at
+ * any depth, but pino's path matcher is case-sensitive — so `Authorization`
+ * and `authorization` must be listed separately.
+ */
+const REDACT_PATHS = [
+  // Generic credential fields
+  '**.token',
+  '**.Token',
+  '**.apiKey',
+  '**.apikey',
+  '**.ApiKey',
+  '**.API_KEY',
+  '**.secret',
+  '**.Secret',
+  '**.password',
+  '**.Password',
+  '**.credential',
+  '**.credentials',
+  '**.auth',
+  '**.access_token',
+  '**.accessToken',
+  '**.refresh_token',
+  '**.refreshToken',
+  '**.privateKey',
+  '**.private_key',
+  // HTTP header variants — Octokit/Forgejo surface these in error objects.
+  '**.authorization',
+  '**.Authorization',
+  '**.headers.authorization',
+  '**.headers.Authorization',
+  // Environment blobs: if a caller logs a full env snapshot, scrub it.
+  'env',
+  '*.env',
+  '**.env',
+]
+
 export function createLogger(
   level = 'info',
   options: { destination?: 'stdout' | 'stderr'; pretty?: boolean } = {},
@@ -13,7 +51,7 @@ export function createLogger(
     return pino({
       level,
       redact: {
-        paths: ['**.token', '**.apiKey', '**.secret', '**.password', 'headers.authorization'],
+        paths: REDACT_PATHS,
         censor: '[REDACTED]',
       },
       transport: { target: 'pino-pretty', options: { colorize: true, destination: fd } },
@@ -24,7 +62,7 @@ export function createLogger(
     {
       level,
       redact: {
-        paths: ['**.token', '**.apiKey', '**.secret', '**.password', 'headers.authorization'],
+        paths: REDACT_PATHS,
         censor: '[REDACTED]',
       },
     },

@@ -226,12 +226,22 @@ export class ForgejoForgeAdapter implements ForgeAdapter {
 
   async findPRByBranch(repo: string, branch: string): Promise<ForgePR | null> {
     const { owner, repo: repoName } = splitRepo(repo)
-    const pulls = await this.client.get<ForgejoPRData[]>(
-      `/repos/${owner}/${repoName}/pulls`,
-      { state: 'open', limit: '50' },
-    )
-    const match = pulls.find((p) => p.head.ref === branch)
-    return match ? this.mapPR(match) : null
+    // Paginate open PRs until we either find the branch or exhaust the
+    // list. The previous 50-item cap silently returned null for any PR
+    // past the first page, which at scale caused open PRs to be treated
+    // as missing and trigger duplicate PR creation.
+    const MAX_PAGES = 20
+    const PAGE_LIMIT = 50
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const pulls = await this.client.get<ForgejoPRData[]>(
+        `/repos/${owner}/${repoName}/pulls`,
+        { state: 'open', limit: String(PAGE_LIMIT), page: String(page) },
+      )
+      const match = pulls.find((p) => p.head.ref === branch)
+      if (match) return this.mapPR(match)
+      if (pulls.length < PAGE_LIMIT) return null
+    }
+    return null
   }
 
   async getPR(repo: string, prNumber: number): Promise<ForgePR> {

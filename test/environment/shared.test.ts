@@ -38,7 +38,7 @@ describe('validateSharedEnvironment', () => {
     expect(mockExeca).toHaveBeenCalledWith(
       'curl',
       ['http://localhost:3000/health'],
-      { timeout: 10_000 },
+      expect.objectContaining({ timeout: 10_000, extendEnv: false }),
     )
   })
 
@@ -66,7 +66,7 @@ describe('validateSharedEnvironment', () => {
     expect(mockExeca).toHaveBeenCalledWith(
       'docker',
       ['compose', 'ps', '--services'],
-      { timeout: 10_000 },
+      expect.objectContaining({ timeout: 10_000, extendEnv: false }),
     )
   })
 
@@ -84,7 +84,7 @@ describe('validateSharedEnvironment', () => {
     expect(mockExeca).toHaveBeenCalledWith(
       'docker',
       ['compose', 'ps', '--services'],
-      { timeout: 10_000 },
+      expect.objectContaining({ timeout: 10_000, extendEnv: false }),
     )
   })
 })

@@ -1,6 +1,7 @@
 import { execa } from 'execa'
 import { logger } from '../utils/logger.js'
 import { parseCommandSpec, type CommandSpec } from '../utils/command.js'
+import { buildBootstrapEnv } from '../workers/env.js'
 
 /**
  * Validate that the shared dev environment is running by executing a healthcheck command.
@@ -15,7 +16,11 @@ export async function validateSharedEnvironment(healthcheck?: CommandSpec, requi
   const { binary, args } = parseCommandSpec(healthcheck)
 
   try {
-    await execa(binary, args, { timeout: 10_000 })
+    await execa(binary, args, {
+      timeout: 10_000,
+      extendEnv: false,
+      env: buildBootstrapEnv(),
+    })
     logger.info({ healthcheck: commandLabel }, 'Shared environment healthcheck passed')
   } catch {
     if (requireRunning) {

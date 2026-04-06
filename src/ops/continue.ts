@@ -69,26 +69,32 @@ export async function queueContinue(
 
   const existingPhaseData = run.phaseData ?? {}
   const resumePhase = resolveResumePhase(run.currentPhase, existingPhaseData)
-  runManager.update(run.id, {
-    status: 'queued',
-    currentPhase: resumePhase,
-    endedAt: null,
-    lastError: null,
-    blockReason: null,
-    phaseData: {
-      ...existingPhaseData,
-      issueRepo,
-      reactionType: followup.primaryType,
-      reactionSummary: followup.summary,
-      reactionContext: followup.context,
-      continueRequestedAt: nowUtcIso(),
-    },
-  })
 
-  leaseManager.release(issueRepo, issueNumber)
-  if (issueRepo !== repoConfig.repo) {
-    leaseManager.release(repoConfig.repo, issueNumber)
-  }
+  // Atomic state transition: update run + release leases in a single
+  // DB transaction so a crash in between cannot leave the issue
+  // queued-but-leased.
+  const transition = db.transaction(() => {
+    runManager.update(run.id, {
+      status: 'queued',
+      currentPhase: resumePhase,
+      endedAt: null,
+      lastError: null,
+      blockReason: null,
+      phaseData: {
+        ...existingPhaseData,
+        issueRepo,
+        reactionType: followup.primaryType,
+        reactionSummary: followup.summary,
+        reactionContext: followup.context,
+        continueRequestedAt: nowUtcIso(),
+      },
+    })
+    leaseManager.release(issueRepo, issueNumber)
+    if (issueRepo !== repoConfig.repo) {
+      leaseManager.release(repoConfig.repo, issueNumber)
+    }
+  })
+  transition()
 
   try {
     const issue = await forge.getIssue(issueRepo, issueNumber)

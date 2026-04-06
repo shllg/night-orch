@@ -36,6 +36,30 @@ export class LeaseManager {
       .run(repo, issueNumber)
   }
 
+  /**
+   * Extend the lease expiry for a held lease. Used by the loop engine to
+   * bump the deadline on every phase checkpoint so a long-running issue
+   * does not fall off under the stale-lease cleanup. Returns true if the
+   * lease existed and belonged to the owner (and was updated), false
+   * otherwise — the caller can decide whether to re-acquire or bail.
+   */
+  heartbeat(
+    repo: string,
+    issueNumber: number,
+    owner: string,
+    durationSeconds: number,
+  ): boolean {
+    const now = nowUtcIso()
+    const result = this.db
+      .prepare(
+        `UPDATE leases
+         SET leased_until = datetime(?, '+' || ? || ' seconds')
+         WHERE repo = ? AND issue_number = ? AND lease_owner = ?`,
+      )
+      .run(now, durationSeconds, repo, issueNumber, owner)
+    return result.changes > 0
+  }
+
   /** Check if a lease is active (not expired). */
   isLeased(repo: string, issueNumber: number): boolean {
     const row = this.db

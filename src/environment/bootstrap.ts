@@ -1,6 +1,8 @@
 import { execa } from 'execa'
 import { logger } from '../utils/logger.js'
 import { parseCommandSpec, type CommandSpec } from '../utils/command.js'
+import { buildBootstrapEnv } from '../workers/env.js'
+import { sanitizeErrorMessage } from '../utils/sanitize-error.js'
 
 export type BootstrapWhen = 'always' | 'dedicated' | 'shared'
 
@@ -35,10 +37,16 @@ export async function runBootstrapCommands(
     logger.info({ command: commandLabel, worktreePath }, 'Running bootstrap command')
     const { binary, args } = parseCommandSpec(cmd.command)
 
+    // Bootstrap commands run inside an attacker-influenced worktree and
+    // MUST NOT inherit the daemon's env (forge tokens, SMTP creds, etc).
+    // Scrub stdout/stderr of any token shapes before we log them at error
+    // level so an echoed secret doesn't bypass the redaction layer.
     const result = await execa(binary, args, {
       cwd: worktreePath,
       timeout: 300_000, // 5 min timeout for bootstrap commands
       reject: false,
+      extendEnv: false,
+      env: buildBootstrapEnv(),
     })
 
     if (result.exitCode !== 0) {
@@ -46,8 +54,8 @@ export async function runBootstrapCommands(
         {
           command: commandLabel,
           exitCode: result.exitCode,
-          stdout: result.stdout,
-          stderr: result.stderr,
+          stdout: sanitizeErrorMessage(result.stdout ?? ''),
+          stderr: sanitizeErrorMessage(result.stderr ?? ''),
         },
         'Bootstrap command failed',
       )
@@ -73,11 +81,11 @@ function formatBootstrapFailure(
     `Bootstrap command failed: ${commandLabel}`,
     `Exit code: ${result.exitCode}`,
   ]
-  const stdoutTail = tail(result.stdout)
+  const stdoutTail = tail(sanitizeErrorMessage(result.stdout ?? ''))
   if (stdoutTail) {
     lines.push('stdout:', stdoutTail)
   }
-  const stderrTail = tail(result.stderr)
+  const stderrTail = tail(sanitizeErrorMessage(result.stderr ?? ''))
   if (stderrTail) {
     lines.push('stderr:', stderrTail)
   }
