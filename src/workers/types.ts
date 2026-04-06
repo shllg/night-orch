@@ -43,6 +43,8 @@ export interface WorkerTaskResult {
     promptTokens: number
     completionTokens: number
   }
+  /** Set by worker adapters when a non-zero exit is classified as an auth failure. */
+  authFailure?: boolean
 }
 
 export interface PlannerOutput {

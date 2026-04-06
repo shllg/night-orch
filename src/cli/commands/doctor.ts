@@ -93,15 +93,29 @@ export async function doctorCommand(globalOpts?: GlobalOpts): Promise<void> {
     }
   }
 
-  // 4. CLI binaries
+  // 4. CLI binaries + auth status
+  const { checkWorkerAuth } = await import('../../workers/auth-check.js')
   const checkedBinaries = new Set<string>()
-  for (const profile of Object.values(config.workerProfiles)) {
+  for (const [profileName, profile] of Object.entries(config.workerProfiles)) {
     if (checkedBinaries.has(profile.command)) continue
     checkedBinaries.add(profile.command)
 
     const version = await checkBinary(profile.command)
     if (version) {
       results.push({ name: `CLI: ${profile.command}`, passed: true, message: version })
+
+      // Auth check — only meaningful if the binary exists
+      const adapterType = profile.type === 'codex' ? 'codex' : 'claude'
+      const authResult = await checkWorkerAuth(profile.command, adapterType)
+      if (authResult.authenticated) {
+        results.push({ name: `Auth: ${profileName} (${profile.command})`, passed: true, message: 'Authenticated' })
+      } else {
+        results.push({
+          name: `Auth: ${profileName} (${profile.command})`,
+          passed: false,
+          message: `Not authenticated. ${authResult.remediation ?? ''}`.trim(),
+        })
+      }
     } else {
       results.push({ name: `CLI: ${profile.command}`, passed: false, message: 'Not found on PATH' })
     }

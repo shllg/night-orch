@@ -10,6 +10,7 @@ import { executeStep, type StepDependencies } from './step-executor.js'
 import { Checkpoint } from './checkpoint.js'
 import { CostTracker, describeBudgetBlock, costLimitRecoveryHint } from './cost.js'
 import { estimateWorkerCostUsd } from './pricing.js'
+import { WorkerAuthError } from '../workers/errors.js'
 import { logger } from '../utils/logger.js'
 import { utcIsoFromMs } from '../utils/time.js'
 import type Database from 'better-sqlite3'
@@ -130,7 +131,35 @@ export async function executeLoop(
     ctx = updateContext(ctx, { currentPhase: step.id })
     checkpoint.phaseStarted(ctx.runId, step.id, ctx.iteration)
 
-    const result = await executeStep(ctx, step, stepDeps)
+    let result: Awaited<ReturnType<typeof executeStep>>
+    try {
+      result = await executeStep(ctx, step, stepDeps)
+    } catch (err) {
+      if (err instanceof WorkerAuthError) {
+        const blockMessage = `Worker authentication failure (${err.adapterType}). ${err.remediation}`
+        logger.error(
+          { runId: ctx.runId, phase: step.id, adapterType: err.adapterType },
+          blockMessage,
+        )
+        checkpoint.phaseBlocked(ctx.runId, step.id, blockMessage, ctx.iteration)
+        return recordPhase(
+          updateContext(ctx, {
+            currentPhase: 'blocked',
+            terminalStatus: 'blocked',
+            blockReason: 'auth_failure',
+            stepOutputs: {
+              ...ctx.stepOutputs,
+              blockMessage,
+            },
+          }),
+          step.id,
+          'failure',
+          {},
+          stepStartedAt,
+        )
+      }
+      throw err
+    }
     ctx = result.ctx
     const stepDurationMs = Date.now() - stepStart
 

@@ -12,6 +12,7 @@ export type BlockReason =
   | 'ambiguous_review'
   | 'verify_config'
   | 'merge_conflict'
+  | 'auth_failure'
 
 export type RunMode = 'fresh' | 'followup' | 'rebase'
 

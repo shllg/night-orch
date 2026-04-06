@@ -12,6 +12,8 @@ import { getDefaultTemplate, buildPlanningOnlyCoderTemplate } from '../workers/p
 import { buildWorkerEnv, buildVerifierEnv } from '../workers/env.js'
 import { getDiffAgainstBranch, getChangedFilesAgainstBranch } from '../git/repo.js'
 import { superviseWorker } from './supervisor.js'
+import { WorkerAuthError } from '../workers/errors.js'
+import { getRemediation } from '../workers/auth-check.js'
 import { logger } from '../utils/logger.js'
 import { buildPlanningPrdPath, isPlanningIssue } from '../planning/mode.js'
 
@@ -115,6 +117,18 @@ export async function executeWorkerStep(
     throw new Error(`${step.role} worker timed out after ${ctx.adjustedLimits.workerTimeoutSeconds}s`)
   }
   if (result.exitCode !== 0) {
+    const adapterType = profile.type === 'codex' ? 'codex' : 'claude'
+    if (result.authFailure) {
+      logger.error(
+        { role: step.role, exitCode: result.exitCode, adapterType },
+        `${step.role} worker authentication failure — CLI is signed out`,
+      )
+      throw new WorkerAuthError(
+        adapterType,
+        getRemediation(adapterType),
+        `${step.role} worker exited with code ${result.exitCode} (authentication failure)`,
+      )
+    }
     logger.error(
       { role: step.role, exitCode: result.exitCode, rawLength: result.rawOutput.length, rawTail: result.rawOutput.slice(-500) },
       `${step.role} worker exited with non-zero code`,

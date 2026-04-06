@@ -5,6 +5,7 @@ import { parsePlannerOutput } from './parsers/planner.js'
 import { parseCoderOutput } from './parsers/coder.js'
 import { parseReviewerOutput } from './parsers/reviewer.js'
 import { buildWorkerCommand } from './command.js'
+import { classifyAuthFailure } from './auth-check.js'
 import { logger } from '../utils/logger.js'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
@@ -95,6 +96,12 @@ export class CodexWorkerAdapter implements WorkerAdapter {
       emitWorkerEvent(input, 'error', { error: summarizeValue(result.stderr, 400) })
     }
 
+    // Classify auth failures on non-zero exit so the loop engine can block
+    // immediately instead of retrying futilely.
+    const authFailure = result.exitCode !== 0
+      ? classifyAuthFailure(result.stderr, result.exitCode, 'codex', result.stdout).isAuthFailure
+      : false
+
     emitWorkerEvent(input, 'session_end', {
       exitCode: result.exitCode,
       timedOut: result.timedOut,
@@ -112,6 +119,7 @@ export class CodexWorkerAdapter implements WorkerAdapter {
       parseError,
       sessionId,
       tokenUsage,
+      authFailure,
     }
   }
 

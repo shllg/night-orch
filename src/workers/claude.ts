@@ -6,6 +6,7 @@ import { parseCoderOutput } from './parsers/coder.js'
 import { parseReviewerOutput } from './parsers/reviewer.js'
 import { buildWorkerCommand } from './command.js'
 import { normalizePathForSubprocess } from './env.js'
+import { classifyAuthFailure } from './auth-check.js'
 import { logger } from '../utils/logger.js'
 import { emitWorkerEvent, isRecord, summarizeValue } from './events.js'
 
@@ -77,6 +78,12 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
     // Parse output based on role
     const { parsed, parseError } = parseOutput(input.role, assistantText)
 
+    // Classify auth failures on non-zero exit so the loop engine can block
+    // immediately instead of retrying futilely.
+    const authFailure = result.exitCode !== 0
+      ? classifyAuthFailure(result.stderr, result.exitCode, 'claude', result.stdout).isAuthFailure
+      : false
+
     emitWorkerEvent(input, 'session_end', {
       exitCode: result.exitCode,
       timedOut: result.timedOut,
@@ -94,6 +101,7 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
       parseError,
       sessionId,
       tokenUsage,
+      authFailure,
     }
   }
 

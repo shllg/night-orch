@@ -1234,6 +1234,8 @@ function blockReasonSummary(reason: BlockReason, ctx: RunContext): string {
       return 'Verification is required but verify commands or results are unavailable'
     case 'merge_conflict':
       return 'Merge conflict encountered while applying updates'
+    case 'auth_failure':
+      return 'Worker CLI authentication expired — re-authenticate and retry'
     default:
       return `Blocked in phase ${ctx.currentPhase}`
   }
@@ -1766,7 +1768,7 @@ async function cancelRunFromComment(params: CancelRunFromCommentParams): Promise
  * (reviewer_blocked, iteration_limit, ambiguous_review, verify_config)
  * preserve the branch so existing work can be continued.
  */
-const TAINTED_BLOCK_REASONS = new Set(['agent_pass_limit', 'cost_limit', 'merge_conflict'])
+const TAINTED_BLOCK_REASONS = new Set(['agent_pass_limit', 'cost_limit', 'merge_conflict', 'auth_failure'])
 
 // --- Reaction scanning ---
 
