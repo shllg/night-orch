@@ -11,6 +11,11 @@ const WebhookChannelSchema = z.object({
   urlEnv: z.string(),
 })
 
+const DiscordChannelSchema = z.object({
+  type: z.literal('discord'),
+  urlEnv: z.string(),
+})
+
 const SmtpChannelSchema = z.object({
   type: z.literal('smtp'),
   host: z.string(),
@@ -24,6 +29,7 @@ const SmtpChannelSchema = z.object({
 const NotificationChannelSchema = z.discriminatedUnion('type', [
   ConsoleChannelSchema,
   WebhookChannelSchema,
+  DiscordChannelSchema,
   SmtpChannelSchema,
 ])
 
@@ -31,6 +37,7 @@ const NotificationEventsSchema = z.object({
   onRunStarted: z.boolean().default(false),
   onBlocked: z.boolean().default(true),
   onPrReady: z.boolean().default(true),
+  onPrUpdated: z.boolean().default(true),
   onError: z.boolean().default(true),
   onRetryExhausted: z.boolean().default(true),
 })

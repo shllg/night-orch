@@ -438,7 +438,7 @@ Create or update orchestration labels on GitHub/Forgejo. Run this after initial 
 
 ### `night-orch notify-test`
 
-Send a test notification through all configured channels. Verifies webhook URLs, SMTP credentials, etc.
+Send a test notification through all configured channels. Verifies webhook/Discord URLs, SMTP credentials, etc.
 
 ### `night-orch mcp`
 

@@ -3,6 +3,7 @@ import type { ForgeAdapter } from '../forge/types.js'
 import type { NotificationChannel } from './types.js'
 import { ConsoleChannel } from './channels/console.js'
 import { WebhookChannel } from './channels/webhook.js'
+import { DiscordChannel } from './channels/discord.js'
 import { SmtpChannel } from './channels/smtp.js'
 import { GitHubCommentChannel } from './channels/github-comment.js'
 import { logger } from '../utils/logger.js'
@@ -25,6 +26,15 @@ export function createChannels(
           break
         }
         channels.push(new WebhookChannel(url))
+        break
+      }
+      case 'discord': {
+        const url = process.env[ch.urlEnv]
+        if (!url) {
+          logger.warn({ urlEnv: ch.urlEnv }, 'Discord webhook URL env var not set — skipping channel')
+          break
+        }
+        channels.push(new DiscordChannel(url))
         break
       }
       case 'smtp':

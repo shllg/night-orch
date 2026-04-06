@@ -57,7 +57,7 @@ export async function doctorCommand(globalOpts?: GlobalOpts): Promise<void> {
   }
 
   for (const channel of config.notifications.channels) {
-    if (channel.type === 'webhook' && 'urlEnv' in channel) {
+    if ((channel.type === 'webhook' || channel.type === 'discord') && 'urlEnv' in channel) {
       const envName = channel.urlEnv
       if (process.env[envName]) {
         results.push({ name: `Env: ${envName}`, passed: true, message: 'Set' })

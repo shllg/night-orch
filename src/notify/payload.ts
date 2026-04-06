@@ -16,6 +16,7 @@ export function buildPayload(
     repo: ctx.repo,
     issueNumber: ctx.issueNumber,
     issueTitle: ctx.issue.title,
+    issueUrl: ctx.issue.url,
     state: ctx.currentPhase,
     prUrl: extra.prUrl ?? null,
     prNumber: extra.prNumber ?? null,

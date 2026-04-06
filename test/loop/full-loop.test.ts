@@ -35,7 +35,7 @@ function makeConfig(): Config {
     version: 1,
     github: { tokenEnv: 'GITHUB_TOKEN', apiBaseUrl: 'https://api.github.com', pollIntervalSeconds: 300, appMentions: {} },
     storage: { dbPath: '', worktreeRoot: '', logsRoot: '' },
-    notifications: { channels: [{ type: 'console' }], events: { onRunStarted: false, onBlocked: true, onPrReady: true, onError: true, onRetryExhausted: true } },
+    notifications: { channels: [{ type: 'console' }], events: { onRunStarted: false, onBlocked: true, onPrReady: true, onPrUpdated: true, onError: true, onRetryExhausted: true } },
     loop: {
       maxReviewIterations: 4,
       maxTotalAgentPasses: 10,

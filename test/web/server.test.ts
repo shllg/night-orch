@@ -31,6 +31,7 @@ function makeMinimalConfig() {
         onRunStarted: false,
         onBlocked: true,
         onPrReady: true,
+        onPrUpdated: true,
         onError: true,
         onRetryExhausted: true,
       },

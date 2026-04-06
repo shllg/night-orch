@@ -32,6 +32,7 @@ export async function notifyTestCommand(globalOpts?: GlobalOpts): Promise<void> 
     onRunStarted: true,
     onBlocked: true,
     onPrReady: true,
+    onPrUpdated: true,
     onError: true,
     onRetryExhausted: true,
   }

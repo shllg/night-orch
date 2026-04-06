@@ -30,7 +30,7 @@ This walkthrough follows a single issue from discovery to PR. Read this first to
 
 8. **Publish** — On `publish` decision, the branch is pushed and a PR is created/updated via the forge adapter (`src/publishing/`). Labels transition to `review_ready`.
 
-9. **Notify** — Configured channels (console, webhook, SMTP, GitHub comment) receive event notifications (`src/notify/`).
+9. **Notify** — Configured channels (console, webhook, Discord, SMTP, GitHub comment) receive event notifications (`src/notify/`).
 
 10. **Cleanup** — The lease is released in a `finally` block. On error or block, labels are updated and a comment is posted.
 
@@ -131,7 +131,7 @@ Pushes branches and creates/updates PRs via the forge adapter. Compiles PR title
 `computeLabelMutation()` is a pure function that computes which labels to add/remove for a given status transition. `transitionLabels()` applies mutations via the forge, with best-effort error handling (logs warnings, doesn't throw).
 
 ### Notifications (`src/notify/`)
-Multi-channel dispatcher. Channels (console, webhook, SMTP, GitHub comment) run in parallel via `Promise.allSettled()`. Event config controls which events trigger notifications. Missing env vars silently skip channels.
+Multi-channel dispatcher. Channels (console, webhook, Discord, SMTP, GitHub comment) run in parallel via `Promise.allSettled()`. Event config controls which events trigger notifications. Missing env vars silently skip channels.
 
 ### Mentions (`src/mentions/`)
 Posts configured mentions to PRs. Deduplication is commit-specific (tracked in SQLite). Labels like `pr-mention:slack` configure per-issue mentions.

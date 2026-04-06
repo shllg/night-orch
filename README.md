@@ -79,7 +79,7 @@ mise run labels-init
 4. **Plan** → **Code** → **Verify** → **Review** loop (the "Ralph loop")
 5. Reviewer can bounce back to coder (up to configured max iterations)
 6. Push branch, create/update PR, label `orch:review-ready`
-7. Notify via console, webhook, GitHub comment, or email
+7. Notify via console, webhook, Discord, GitHub comment, or email
 
 Special case: issues labeled `orch:planning` (configurable) run in planning-only mode and generate only one PRD markdown file in the configured PRD directory.
 

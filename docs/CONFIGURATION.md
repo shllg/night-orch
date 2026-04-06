@@ -149,6 +149,9 @@ Discriminated by `type`:
 - `webhook`
   - `type: "webhook"`
   - `urlEnv: string` (env var name containing webhook URL)
+- `discord`
+  - `type: "discord"`
+  - `urlEnv: string` (env var name containing Discord webhook URL)
 - `smtp`
   - `type: "smtp"`
   - `host: string`
@@ -165,6 +168,7 @@ Discriminated by `type`:
 | `onRunStarted` | boolean | `false` |
 | `onBlocked` | boolean | `true` |
 | `onPrReady` | boolean | `true` |
+| `onPrUpdated` | boolean | `true` |
 | `onError` | boolean | `true` |
 | `onRetryExhausted` | boolean | `true` |
 

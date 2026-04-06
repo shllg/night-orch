@@ -101,6 +101,23 @@ describe('ConfigSchema', () => {
       expect(result.data.repos[0]?.maxConcurrentRuns).toBe(1)
       expect(result.data.repos[0]?.baseBranch).toBe('main')
       expect(result.data.repos[0]?.branchPrefix).toBe('orch')
+      expect(result.data.notifications.events.onPrUpdated).toBe(true)
+    }
+  })
+
+  it('accepts discord notification channel config', () => {
+    const raw = loadExampleConfig()
+    raw.notifications.channels = [
+      { type: 'discord', urlEnv: 'NIGHT_ORCH_DISCORD_WEBHOOK_URL' },
+    ]
+
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.notifications.channels[0]).toEqual({
+        type: 'discord',
+        urlEnv: 'NIGHT_ORCH_DISCORD_WEBHOOK_URL',
+      })
     }
   })
 
