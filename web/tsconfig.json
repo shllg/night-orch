@@ -7,6 +7,7 @@
     "jsx": "react-jsx",
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "skipLibCheck": true,
     "types": ["vite/client", "react", "react-dom"]
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"]

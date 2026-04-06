@@ -1,4 +1,5 @@
 import { type FormEvent, type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate, useParams } from '@tanstack/react-router'
 
 import { BudgetOverridesPanel } from './components/BudgetOverridesPanel.js'
 import { DashboardHeader } from './components/DashboardHeader.js'
@@ -45,6 +46,9 @@ interface RunOperationOptions {
 }
 
 export function App(): ReactElement {
+  const navigate = useNavigate()
+  const { page } = useParams({ from: '/$page' })
+  const activePage = page as DashboardPage
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null)
   const [projectsSnapshot, setProjectsSnapshot] = useState<ProjectsSnapshot | null>(null)
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsSnapshot | null>(null)
@@ -52,7 +56,6 @@ export function App(): ReactElement {
   const [isProjectsLoading, setIsProjectsLoading] = useState(true)
   const [isSettingsLoading, setIsSettingsLoading] = useState(true)
   const [socketConnected, setSocketConnected] = useState(false)
-  const [activePage, setActivePage] = useState<DashboardPage>('issues')
   const [selectedRepo, setSelectedRepo] = useState('all')
   const [selectedProjectRepo, setSelectedProjectRepo] = useState('')
   const [selectedRunId, setSelectedRunId] = useState('')
@@ -503,6 +506,10 @@ export function App(): ReactElement {
     void runOperation('cleanup', '/api/operations/cleanup', {}, 'Cleanup completed')
   }, [runOperation])
 
+  const navigateToPage = useCallback((page: DashboardPage) => {
+    void navigate({ to: '/$page', params: { page } })
+  }, [navigate])
+
   const submitUpdate = useCallback(async () => {
     if (!confirmSelfUpdate((message) => window.confirm(message))) {
       return
@@ -747,7 +754,7 @@ export function App(): ReactElement {
         onPoll={triggerPoll}
         onSync={triggerSync}
         onGoToSettings={() => {
-          setActivePage('settings')
+          navigateToPage('settings')
         }}
       />
 
@@ -764,7 +771,7 @@ export function App(): ReactElement {
         )}
 
         <div className="grid gap-5 md:grid-cols-[auto_minmax(0,1fr)] md:items-stretch md:gap-0">
-          <DashboardNavigation activePage={activePage} onPageChange={setActivePage} />
+          <DashboardNavigation activePage={activePage} onPageChange={navigateToPage} />
 
           <div className="flex min-w-0 flex-col gap-5 md:pl-6">
             {activePage === 'issues' && (

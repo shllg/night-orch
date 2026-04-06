@@ -1,5 +1,11 @@
 export type RunStatus = 'queued' | 'running' | 'blocked' | 'review_ready' | 'error' | 'completed'
-export type DashboardPage = 'issues' | 'stats' | 'projects' | 'settings'
+
+export const DASHBOARD_PAGES = ['issues', 'stats', 'projects', 'settings'] as const
+export type DashboardPage = (typeof DASHBOARD_PAGES)[number]
+
+export function isDashboardPage(page: string): page is DashboardPage {
+  return DASHBOARD_PAGES.some((knownPage) => knownPage === page)
+}
 
 export interface RunListResult {
   count: number

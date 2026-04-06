@@ -1,6 +1,7 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
-import { App } from './App.js'
+import { RouterProvider } from '@tanstack/react-router'
+import { router } from './router.js'
 import './index.css'
 
 const rootElement = document.getElementById('root')
@@ -10,7 +11,7 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <React.StrictMode>
-    <App />
+    <RouterProvider router={router} />
   </React.StrictMode>,
 )
 
