@@ -64,10 +64,16 @@ Detailed implementation specs in `docs/specs-active/`. Consult the relevant phas
 
 - Follow `.claude/rules/08-react-tui.md` and `.codex/rules/08-react-tui.md` for React TUI structure, keybinding scoping, and state management.
 
-## Config Documentation
+## Documentation Site
 
-Configuration authoring reference lives in `docs/CONFIGURATION.md`.
-When changing config schema, config loading behavior, or config-dependent runtime behavior, update `docs/CONFIGURATION.md` in the same change.
+Public docs are built with VitePress and deployed to GitHub Pages on each release. Source lives in `docs/`:
+
+- `docs/CONFIGURATION.md` — config authoring reference
+- `docs/OVERVIEW.md` — architecture and concepts
+- `docs/USAGE.md` — features and command reference
+- `docs/deployment.md` — deployment guide
+
+Any change to user-visible behavior must update the corresponding docs page in the same change. See `.codex/rules/07-config-doc-sync.md` for the full rule.
 
 ## Commit Messages
 

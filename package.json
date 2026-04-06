@@ -24,6 +24,9 @@
     "storybook": "storybook dev -p 6006",
     "storybook:build": "storybook build",
     "storybook:typecheck": "tsc -p .storybook/tsconfig.json --noEmit",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs",
     "web:dev": "vite --config web/vite.config.ts",
     "web:build": "vite build --config web/vite.config.ts",
     "web:typecheck": "tsc -p web/tsconfig.json --noEmit",
@@ -81,6 +84,7 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.57.1",
     "vite": "^7.3.2",
+    "vitepress": "^1.6.4",
     "vitest": "^4.1.0"
   },
   "overrides": {

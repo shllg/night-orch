@@ -82,10 +82,17 @@ src/utils/           — Logger, IDs, time helpers
 
 Implementation specs in `docs/specs-active/`. Consult the relevant phase spec before implementing.
 
-## Config Documentation
+## Documentation Site
 
-Configuration authoring reference lives in `docs/CONFIGURATION.md`.
-When changing config schema, config loading behavior, or config-dependent runtime behavior, update `docs/CONFIGURATION.md` in the same change.
+Public docs are built with VitePress and deployed to GitHub Pages on each release. Source lives in `docs/`:
+
+- `docs/CONFIGURATION.md` — config authoring reference
+- `docs/OVERVIEW.md` — architecture and concepts
+- `docs/USAGE.md` — features and command reference
+- `docs/deployment.md` — deployment guide
+- `docs/.vitepress/config.ts` — VitePress nav/sidebar config
+
+**Any change to user-visible behavior must update the corresponding docs page in the same change.** See `.claude/rules/07-config-doc-sync.md` for the full rule. Build locally with `pnpm docs:build`.
 
 ## Extended Rules
 
