@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 import type { LoopPhase, RunContext, PlannerOutput, CoderOutput, ReviewerOutput, VerifyResult } from './types.js'
-import { IssueManager } from '../state/issues.js'
+import { RunManager } from '../state/runs.js'
 import { nowUtcIso } from '../utils/time.js'
 import { logger } from '../utils/logger.js'
 
@@ -39,18 +39,14 @@ export interface PersistedDecisionOutcome {
 }
 
 export class Checkpoint {
-  private issueManager: IssueManager
+  private runManager: RunManager
 
   constructor(private db: Database.Database) {
-    this.issueManager = new IssueManager(db)
+    this.runManager = new RunManager(db)
   }
 
   phaseStarted(runId: string, phase: LoopPhase, iteration?: number): void {
-    const now = nowUtcIso()
-    this.db
-      .prepare('UPDATE runs SET current_phase = ?, iteration_count = COALESCE(?, iteration_count), updated_at = ? WHERE id = ?')
-      .run(phase, iteration ?? null, now, runId)
-    this.issueManager.syncFromRunId(runId)
+    this.runManager.updatePhaseCheckpoint(runId, phase, null, iteration)
     this.recordEvent(runId, 'phase_started', phase, null)
   }
 
@@ -59,7 +55,6 @@ export class Checkpoint {
     // so concurrent writers (e.g. parallel sub-tasks on the same run)
     // cannot lose updates. Also track the set of completed phases in
     // the same blob so resume can distinguish "entered" from "completed".
-    const now = nowUtcIso()
     const tx = this.db.transaction(() => {
       const existing = this.getPhaseData(runId)
       const prevCompleted = Array.isArray(existing[COMPLETED_PHASES_KEY])
@@ -68,12 +63,7 @@ export class Checkpoint {
       const completed = prevCompleted.includes(phase) ? prevCompleted : [...prevCompleted, phase]
       const merged = { ...existing, [phase]: artifacts, [COMPLETED_PHASES_KEY]: completed }
 
-      this.db
-        .prepare(
-          'UPDATE runs SET current_phase = ?, phase_data = ?, iteration_count = COALESCE(?, iteration_count), updated_at = ? WHERE id = ?',
-        )
-        .run(phase, JSON.stringify(merged), iteration ?? null, now, runId)
-      this.issueManager.syncFromRunId(runId)
+      this.runManager.updatePhaseCheckpoint(runId, phase, JSON.stringify(merged), iteration)
     })
     tx()
     this.recordEvent(runId, 'phase_completed', phase, artifacts)
@@ -117,9 +107,7 @@ export class Checkpoint {
       ...existing,
       [DECISION_OUTCOMES_KEY]: { ...prev, [phase]: outcome },
     }
-    this.db
-      .prepare('UPDATE runs SET phase_data = ?, updated_at = ? WHERE id = ?')
-      .run(JSON.stringify(merged), nowUtcIso(), runId)
+    this.runManager.updatePhaseData(runId, JSON.stringify(merged))
   }
 
   /**
@@ -138,9 +126,7 @@ export class Checkpoint {
       [SESSION_IDS_KEY]: { ...sessionIds },
       [STEP_OUTPUTS_KEY]: { ...stepOutputs },
     }
-    this.db
-      .prepare('UPDATE runs SET phase_data = ?, updated_at = ? WHERE id = ?')
-      .run(JSON.stringify(merged), nowUtcIso(), runId)
+    this.runManager.updatePhaseData(runId, JSON.stringify(merged))
   }
 
   getLastCompleted(runId: string): { phase: LoopPhase; artifacts: Record<string, unknown> } | null {

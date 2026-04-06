@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3'
 import type { Config } from '../config/schema.js'
 import { IssueManager } from '../state/issues.js'
+import { RunManager } from '../state/runs.js'
 import { utcDayKey } from '../utils/time.js'
 
 interface TokenUsageInput {
@@ -196,9 +197,7 @@ export class CostTracker {
         throw new Error(`cost budget override must be a positive finite number, got ${overrideUsd}`)
       }
     }
-    this.db
-      .prepare('UPDATE runs SET cost_budget_override_usd = ? WHERE id = ?')
-      .run(overrideUsd, runId)
+    new RunManager(this.db).setCostBudgetOverride(runId, overrideUsd)
   }
 
   /**

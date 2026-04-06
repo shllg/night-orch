@@ -50,6 +50,7 @@ const WorkerProfileSchema = z.object({
   command: z.string(),
   args: z.array(z.string()).default([]),
   workerTimeoutSeconds: z.number().positive().default(1800),
+  /** @deprecated Ignored at runtime — always uses whitelist-only env mode. */
   minimalEnv: z.boolean().default(true),
   runtimeWrapper: z.string().nullable().default(null),
   env: z.record(z.string()).default({}),
@@ -143,7 +144,9 @@ const DefaultsSchema = z.object({
   planner: z.enum(['claude', 'codex']).default('claude'),
   coder: z.enum(['claude', 'codex']).default('claude'),
   reviewer: z.enum(['claude', 'codex']).default('claude'),
+  /** @deprecated Reserved — not read by the loop engine or notification dispatch. */
   doneMode: z.enum(['pr-ready', 'manual-only']).default('pr-ready'),
+  /** @deprecated Reserved — not read by the notification dispatch. */
   notifyPriority: z.enum(['normal', 'high']).default('normal'),
   prMentions: z.array(z.string()).default([]),
 })

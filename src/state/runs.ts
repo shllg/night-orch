@@ -270,6 +270,67 @@ export class RunManager {
   }
 
   /**
+   * Directly update the current_phase + optionally phase_data columns for
+   * checkpoint writes. When `phaseData` is null the existing phase_data is
+   * preserved (used by `phaseStarted` which only sets `current_phase`).
+   * Triggers issue-sync side effects like the general `update()` method.
+   */
+  updatePhaseCheckpoint(
+    id: string,
+    currentPhase: string,
+    phaseData: string | null,
+    iteration?: number | null,
+  ): void {
+    const now = nowUtcIso()
+    const tx = this.db.transaction(() => {
+      if (phaseData !== null) {
+        this.db
+          .prepare(
+            'UPDATE runs SET current_phase = ?, phase_data = ?, iteration_count = COALESCE(?, iteration_count), updated_at = ? WHERE id = ?',
+          )
+          .run(currentPhase, phaseData, iteration ?? null, now, id)
+      } else {
+        this.db
+          .prepare(
+            'UPDATE runs SET current_phase = ?, iteration_count = COALESCE(?, iteration_count), updated_at = ? WHERE id = ?',
+          )
+          .run(currentPhase, iteration ?? null, now, id)
+      }
+      this.issueManager.syncFromRunId(id)
+    })
+    tx()
+  }
+
+  /**
+   * Update only the phase_data JSON blob (for persistRunState, decision
+   * outcomes, etc).
+   */
+  updatePhaseData(id: string, phaseData: string): void {
+    this.db
+      .prepare('UPDATE runs SET phase_data = ?, updated_at = ? WHERE id = ?')
+      .run(phaseData, nowUtcIso(), id)
+  }
+
+  /**
+   * Set the per-run cost budget override.
+   */
+  setCostBudgetOverride(id: string, overrideUsd: number | null): void {
+    this.db
+      .prepare('UPDATE runs SET cost_budget_override_usd = ? WHERE id = ?')
+      .run(overrideUsd, id)
+  }
+
+  /**
+   * Compact the phase_data to a summary blob for retention. Does NOT
+   * trigger issue-sync because the run is already in a terminal state.
+   */
+  compactPhaseData(id: string, summaryJson: string): void {
+    this.db
+      .prepare('UPDATE runs SET phase_data = ? WHERE id = ?')
+      .run(summaryJson, id)
+  }
+
+  /**
    * Get the most recent non-queued, non-running run for an issue,
    * excluding the current run. Used to check if prior work is tainted.
    */

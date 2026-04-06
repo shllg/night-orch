@@ -57,8 +57,20 @@ describe('parseOrchCommands', () => {
     expect(result).toHaveLength(0)
   })
 
-  it('ignores commands inside code blocks', () => {
+  it('ignores commands inside fenced code blocks', () => {
     const comments = [makeComment(1, '```\n/orch retry\n```')]
+    const result = parseOrchCommands(comments, since)
+    expect(result).toHaveLength(0)
+  })
+
+  it('ignores commands inside 4-space indented code blocks', () => {
+    const comments = [makeComment(1, 'Run this:\n    /orch retry\nDone')]
+    const result = parseOrchCommands(comments, since)
+    expect(result).toHaveLength(0)
+  })
+
+  it('ignores commands inside tab-indented code blocks', () => {
+    const comments = [makeComment(1, 'Example:\n\t/orch rebase\n')]
     const result = parseOrchCommands(comments, since)
     expect(result).toHaveLength(0)
   })

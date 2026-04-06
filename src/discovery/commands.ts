@@ -17,11 +17,17 @@ export interface ParsedCommand {
 const COMMAND_PATTERN = /^\s*\/(?:orch|night-orch)\s+(\S+)(?:\s+(.*))?$/im
 
 /**
- * Strip code fences from text so commands inside them are ignored.
- * Replaces the content of ```...``` blocks with empty strings.
+ * Strip code blocks from text so commands inside them are ignored.
+ * Handles both fenced (```...```) and indented (4-space / 1-tab at line
+ * start, per CommonMark) code blocks to prevent stray /orch commands in
+ * pasted terminal output or code samples from being executed.
  */
 function stripCodeBlocks(text: string): string {
-  return text.replace(/```[\s\S]*?```/g, '')
+  // Fenced blocks first (greedy within delimiters).
+  let result = text.replace(/```[\s\S]*?```/g, '')
+  // Indented code blocks: lines starting with ≥4 spaces or a tab.
+  result = result.replace(/^(?:[ ]{4}|\t).*$/gm, '')
+  return result
 }
 
 /**

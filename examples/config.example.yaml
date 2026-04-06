@@ -80,7 +80,6 @@ workerProfiles:
     args:
       - -p
     workerTimeoutSeconds: 1800
-    minimalEnv: true
     env: {}
   codex-default:
     type: codex
@@ -90,7 +89,6 @@ workerProfiles:
       - exec
       - --json
     workerTimeoutSeconds: 1800
-    minimalEnv: true
     env: {}
   # gemini-acp:
   #   type: acp

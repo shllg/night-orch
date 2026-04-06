@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
-import { mkdirSync, createWriteStream, type WriteStream } from 'node:fs'
+import { createWriteStream, type WriteStream } from 'node:fs'
+import { mkdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { Config } from '../config/schema.js'
 import { logger } from '../utils/logger.js'
@@ -115,31 +116,38 @@ export class AgentObservability {
   }
 
   private writeSessionLog(event: AgentEvent): void {
-    try {
-      const stream = this.getStream(event.runId, event.phase)
-      stream.write(`${JSON.stringify(event)}\n`)
-    } catch (err) {
-      logger.warn({ err, runId: event.runId, phase: event.phase }, 'Failed to write session log event')
+    const key = `${event.runId}:${event.phase}`
+    const existing = this.streams.get(key)
+    if (existing) {
+      existing.write(`${JSON.stringify(event)}\n`)
+      return
     }
+    // Lazy-open the stream asynchronously so mkdirSync does not block the
+    // event loop on every new run×phase combination.
+    void this.openStreamAndWrite(event, key)
   }
 
-  private getStream(runId: string, phase: string): WriteStream {
-    const key = `${runId}:${phase}`
-    const existing = this.streams.get(key)
-    if (existing) return existing
+  private async openStreamAndWrite(event: AgentEvent, key: string): Promise<void> {
+    // Re-check after await to avoid double-open races
+    if (this.streams.has(key)) {
+      this.streams.get(key)!.write(`${JSON.stringify(event)}\n`)
+      return
+    }
+    try {
+      const safePhase = sanitizeSegment(event.phase)
+      const dir = join(this.config.storage.logsRoot, event.runId)
+      const path = join(dir, `${safePhase}.jsonl`)
+      await mkdir(dirname(path), { recursive: true })
 
-    const safePhase = sanitizeSegment(phase)
-    const dir = join(this.config.storage.logsRoot, runId)
-    mkdirSync(dir, { recursive: true })
-    const path = join(dir, `${safePhase}.jsonl`)
-    mkdirSync(dirname(path), { recursive: true })
-
-    const stream = createWriteStream(path, { flags: 'a' })
-    stream.on('error', (err) => {
-      logger.warn({ err, runId, phase, path }, 'Session log stream error')
-    })
-    this.streams.set(key, stream)
-    return stream
+      const stream = createWriteStream(path, { flags: 'a' })
+      stream.on('error', (err) => {
+        logger.warn({ err, runId: event.runId, phase: event.phase, path }, 'Session log stream error')
+      })
+      this.streams.set(key, stream)
+      stream.write(`${JSON.stringify(event)}\n`)
+    } catch (err) {
+      logger.warn({ err, runId: event.runId, phase: event.phase }, 'Failed to open session log stream')
+    }
   }
 
   private async closeStreams(): Promise<void> {

@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import { RunManager } from '../state/runs.js'
 import { logger } from '../utils/logger.js'
 import { utcIsoFromMs } from '../utils/time.js'
 
@@ -79,7 +80,7 @@ export class RetentionEngine {
         if (preservedIssueRepo) {
           summary['issueRepo'] = preservedIssueRepo
         }
-        this.db.prepare('UPDATE runs SET phase_data = ? WHERE id = ?').run(JSON.stringify(summary), row.id)
+        new RunManager(this.db).compactPhaseData(row.id, JSON.stringify(summary))
       }
       result.compactedRuns = compactRows.length
 
