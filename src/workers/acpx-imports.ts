@@ -8,6 +8,7 @@
 
 import { readdir } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 
 interface AcpxSessionRuntime {
@@ -35,7 +36,9 @@ export async function loadAcpxRuntime(): Promise<AcpxSessionRuntime> {
     throw new Error('Could not find acpx session-runtime module in dist/')
   }
 
-  const mod = await import(join(distDir, sessionFile)) as Record<string, unknown>
+  // Use pathToFileURL for Windows compatibility — path.join produces backslash
+  // paths which ESM import() rejects as ERR_UNSUPPORTED_ESM_URL_SCHEME.
+  const mod = await import(pathToFileURL(join(distDir, sessionFile)).href) as Record<string, unknown>
 
   // The exports are minified — find runOnce and sendSessionDirect by scanning
   // exported functions. They have distinctive parameter patterns we can identify

@@ -1,0 +1,103 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump override (leave empty for auto-detect from commits)"
+        required: false
+        type: choice
+        options:
+          - ""
+          - patch
+          - minor
+          - major
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: [ci]
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      BUMP_OVERRIDE: ${{ inputs.bump }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Determine version bump
+        id: bump
+        run: |
+          if [ -n "$BUMP_OVERRIDE" ]; then
+            echo "type=$BUMP_OVERRIDE" >> "$GITHUB_OUTPUT"
+          else
+            BUMP=$(node scripts/detect-version-bump.js)
+            echo "type=$BUMP" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump version
+        if: steps.bump.outputs.type != 'none'
+        id: version
+        run: |
+          npm version "${{ steps.bump.outputs.type }}" --no-git-tag-version
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        if: steps.bump.outputs.type != 'none'
+        run: pnpm build
+
+      - name: Pack
+        if: steps.bump.outputs.type != 'none'
+        run: npm pack
+
+      - name: Commit version bump
+        if: steps.bump.outputs.type != 'none'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json pnpm-lock.yaml
+          git commit -m "[INTERNAL] Release v${VERSION}"
+          git tag "v${VERSION}"
+          git push origin master --tags
+
+      - name: Create GitHub Release
+        if: steps.bump.outputs.type != 'none'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          NOTES=$(node scripts/release-notes.js)
+          gh release create "v${VERSION}" \
+            --title "v${VERSION}" \
+            --notes "$NOTES" \
+            night-orch-*.tgz
+
+      - name: Publish to npm
+        if: steps.bump.outputs.type != 'none'
+        run: npm publish --provenance
+
+      - name: Skip — no releasable changes
+        if: steps.bump.outputs.type == 'none'
+        run: echo "No releasable commits since last tag. Skipping release."
