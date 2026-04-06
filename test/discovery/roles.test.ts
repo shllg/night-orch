@@ -41,4 +41,15 @@ describe('resolveRoles', () => {
     expect(result.coder).toBe('codex')
     expect(result.planner).toBe('claude')
   })
+
+  it('accepts opencode as a valid agent name', () => {
+    const result = resolveRoles(['code:opencode', 'review:opencode'], defaults)
+    expect(result).toEqual({ planner: 'claude', coder: 'opencode', reviewer: 'opencode' })
+  })
+
+  it('accepts opencode in defaults', () => {
+    const opencodeDefaults = { ...defaults, coder: 'opencode' as const }
+    const result = resolveRoles([], opencodeDefaults)
+    expect(result.coder).toBe('opencode')
+  })
 })

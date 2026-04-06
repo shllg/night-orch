@@ -148,9 +148,9 @@ const LabelPresentationSchema = z.object({
 })
 
 const DefaultsSchema = z.object({
-  planner: z.enum(['claude', 'codex']).default('claude'),
-  coder: z.enum(['claude', 'codex']).default('claude'),
-  reviewer: z.enum(['claude', 'codex']).default('claude'),
+  planner: z.enum(['claude', 'codex', 'opencode']).default('claude'),
+  coder: z.enum(['claude', 'codex', 'opencode']).default('claude'),
+  reviewer: z.enum(['claude', 'codex', 'opencode']).default('claude'),
   /** @deprecated Reserved — not read by the loop engine or notification dispatch. */
   doneMode: z.enum(['pr-ready', 'manual-only']).default('pr-ready'),
   /** @deprecated Reserved — not read by the notification dispatch. */
@@ -204,9 +204,9 @@ const WorkflowStepSchema = z.discriminatedUnion('type', [
 ])
 
 const WorkflowRoleOverridesSchema = z.object({
-  planner: z.enum(['claude', 'codex']).optional(),
-  coder: z.enum(['claude', 'codex']).optional(),
-  reviewer: z.enum(['claude', 'codex']).optional(),
+  planner: z.enum(['claude', 'codex', 'opencode']).optional(),
+  coder: z.enum(['claude', 'codex', 'opencode']).optional(),
+  reviewer: z.enum(['claude', 'codex', 'opencode']).optional(),
 })
 
 const WorkflowSchema = z.object({

@@ -1115,7 +1115,7 @@ function coerceAgentName(
   value: string,
   fallback: ResolvedRoles['planner'],
 ): ResolvedRoles['planner'] {
-  if (value === 'claude' || value === 'codex') {
+  if (value === 'claude' || value === 'codex' || value === 'opencode') {
     return value
   }
   return fallback

@@ -3,7 +3,7 @@ import type { TriageLevel } from '../discovery/triage.js'
 import { isPlanningIssue } from '../planning/mode.js'
 
 export type WorkflowRoleName = 'planner' | 'coder' | 'reviewer'
-export type WorkflowAgentName = 'claude' | 'codex'
+export type WorkflowAgentName = 'claude' | 'codex' | 'opencode'
 
 export type WorkerStep = {
   type: 'worker'

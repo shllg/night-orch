@@ -269,7 +269,7 @@ workerProfiles:
 
 | Key | Type | Required | Default | Notes |
 | --- | --- | --- | --- | --- |
-| `type` | string | yes | none | Adapter type. Built-in: `claude`, `codex`, `acp`. |
+| `type` | string | yes | none | Adapter type. Built-in: `claude`, `codex`, `acp`. OpenCode uses `acp` with `command: opencode`. |
 | `pricingModel` | string | no | none | Optional model key used by `cost.pricing.models` for cost estimation. Falls back to `type` when omitted. |
 | `command` | string | yes | none | Binary to execute. |
 | `args` | string[] | no | `[]` | Base CLI args for every task invocation. |
@@ -531,18 +531,18 @@ Constraint: each entry must include at least one of `color` or `description`.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `planner` | `claude` or `codex` | `claude` | Default planner role assignment. |
-| `coder` | `claude` or `codex` | `claude` | Default coder role assignment. |
-| `reviewer` | `claude` or `codex` | `claude` | Default reviewer role assignment. |
+| `planner` | `claude`, `codex`, or `opencode` | `claude` | Default planner role assignment. |
+| `coder` | `claude`, `codex`, or `opencode` | `claude` | Default coder role assignment. |
+| `reviewer` | `claude`, `codex`, or `opencode` | `claude` | Default reviewer role assignment. |
 | `doneMode` | `pr-ready` or `manual-only` | `pr-ready` | Reserved for workflow policy; currently not consumed in runtime logic. |
 | `notifyPriority` | `normal` or `high` | `normal` | Reserved for notification priority; currently not consumed in notifier routing. |
 | `prMentions` | string[] | `[]` | Mention aliases posted on PRs by default. |
 
 Role labels can override these defaults per issue:
 
-- `plan:claude` / `plan:codex`
-- `code:claude` / `code:codex`
-- `review:claude` / `review:codex`
+- `plan:claude` / `plan:codex` / `plan:opencode`
+- `code:claude` / `code:codex` / `code:opencode`
+- `review:claude` / `review:codex` / `review:opencode`
 
 Planning-only mode label:
 
@@ -638,13 +638,32 @@ Typical shape:
 agents:
   claude: claude-default
   codex: codex-default
+  opencode: opencode-qwen
 ```
 
 Resolution behavior:
 
 1. If mapping exists and profile exists, that profile is used.
-2. Otherwise, night-orch falls back to first profile whose `type` matches the role agent (`claude`/`codex`).
+2. Otherwise, night-orch falls back to first profile whose `type` matches the role agent (`claude`/`codex`/`opencode`).
 3. If no matching profile exists, the run fails.
+
+OpenCode runs through the `acp` adapter with `command: opencode`. The target repo must have an `opencode.json` defining available models and provider config. To select different models per role, use `OPENCODE_CONFIG_CONTENT` in the worker profile's `env` to override the default model:
+
+```yaml
+workerProfiles:
+  opencode-qwen:
+    type: acp
+    command: opencode
+    env:
+      OPENCODE_CONFIG_CONTENT: '{"model":"openrouter/qwen/qwen3-coder"}'
+  opencode-kimi:
+    type: acp
+    command: opencode
+    env:
+      OPENCODE_CONFIG_CONTENT: '{"model":"openrouter/moonshotai/kimi-k2.5"}'
+```
+
+OpenCode reads API credentials from its own auth store (`~/.local/share/opencode/auth.json`, configured via `opencode /connect`). Since `HOME` is on the worker env whitelist, no additional env changes are needed.
 
 ### `repos[].mergeQueue`
 

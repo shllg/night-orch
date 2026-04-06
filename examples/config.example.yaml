@@ -98,6 +98,18 @@ workerProfiles:
   #   command: gemini            # acpx agent name
   #   args: []
   #   workerTimeoutSeconds: 1800
+  # opencode-qwen:
+  #   type: acp
+  #   command: opencode
+  #   workerTimeoutSeconds: 1800
+  #   env:
+  #     OPENCODE_CONFIG_CONTENT: '{"model":"openrouter/qwen/qwen3-coder"}'
+  # opencode-kimi:
+  #   type: acp
+  #   command: opencode
+  #   workerTimeoutSeconds: 1800
+  #   env:
+  #     OPENCODE_CONFIG_CONTENT: '{"model":"openrouter/moonshotai/kimi-k2.5"}'
 
 metrics:
   enabled: true
@@ -243,6 +255,7 @@ repos:
     agents:
       claude: claude-default
       codex: codex-default
+      # opencode: opencode-qwen
     # workflow: minimal           # Reference a named workflow
     # workflowByTriage:
     #   trivial: fast-trivial

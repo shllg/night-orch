@@ -1,7 +1,7 @@
 import type { RepoConfig } from '../config/schema.js'
 
 export type AgentRole = 'planner' | 'coder' | 'reviewer'
-export type AgentName = 'claude' | 'codex'
+export type AgentName = 'claude' | 'codex' | 'opencode'
 
 export interface ResolvedRoles {
   planner: AgentName
@@ -9,7 +9,7 @@ export interface ResolvedRoles {
   reviewer: AgentName
 }
 
-const VALID_AGENTS: Set<string> = new Set(['claude', 'codex'])
+const VALID_AGENTS: Set<string> = new Set(['claude', 'codex', 'opencode'])
 const ROLE_LABEL_PREFIXES: Record<AgentRole, string> = {
   planner: 'plan:',
   coder: 'code:',

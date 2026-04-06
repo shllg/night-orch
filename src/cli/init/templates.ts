@@ -6,7 +6,7 @@ export interface InitConfig {
   localPath: string
   baseBranch: string
   verifyCommands: string[]
-  workerType: 'claude' | 'codex' | 'acp'
+  workerType: 'claude' | 'codex' | 'opencode' | 'acp'
 }
 
 export function generateConfigYaml(params: InitConfig): string {
@@ -17,7 +17,7 @@ export function generateConfigYaml(params: InitConfig): string {
     },
     workerProfiles: {
       default: {
-        type: params.workerType,
+        type: params.workerType === 'opencode' ? 'acp' : params.workerType,
         command: params.workerType === 'acp' ? 'claude' : params.workerType,
         args: params.workerType === 'claude' ? ['-p'] : [],
       },
@@ -31,6 +31,7 @@ export function generateConfigYaml(params: InitConfig): string {
         agents: {
           claude: 'default',
           codex: 'default',
+          opencode: 'default',
         },
       },
     ],

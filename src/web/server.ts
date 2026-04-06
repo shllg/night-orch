@@ -117,9 +117,9 @@ interface ProjectRepoSummary {
   }
   labelConfig: Record<string, { color?: string; description?: string }>
   defaults: {
-    planner: 'claude' | 'codex'
-    coder: 'claude' | 'codex'
-    reviewer: 'claude' | 'codex'
+    planner: 'claude' | 'codex' | 'opencode'
+    coder: 'claude' | 'codex' | 'opencode'
+    reviewer: 'claude' | 'codex' | 'opencode'
     doneMode: 'pr-ready' | 'manual-only'
     notifyPriority: 'normal' | 'high'
     prMentions: string[]

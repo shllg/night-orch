@@ -50,8 +50,8 @@ export async function runInit(): Promise<void> {
         : detection.verifyCommands
 
     // Step 5: Worker type
-    const workerChoice = (await rl.question('  Worker type (claude/codex/acp) [claude]: ')) || 'claude'
-    const workerType = (['claude', 'codex', 'acp'].includes(workerChoice) ? workerChoice : 'claude') as InitConfig['workerType']
+    const workerChoice = (await rl.question('  Worker type (claude/codex/opencode/acp) [claude]: ')) || 'claude'
+    const workerType = (['claude', 'codex', 'opencode', 'acp'].includes(workerChoice) ? workerChoice : 'claude') as InitConfig['workerType']
 
     // Step 6: Generate and write config
     const config = generateConfigYaml({
