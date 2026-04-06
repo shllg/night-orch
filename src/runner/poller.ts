@@ -820,6 +820,7 @@ interface FinalizeRunOutcomeParams {
   issue: {
     number: number
     title: string
+    url?: string
   }
   runDurationSec: number
   repo: string
@@ -874,10 +875,13 @@ async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'pr
         'review_ready',
         buildLabelConfig(repoConfig, latestIssue.labels),
       )
-      const notifyResult = await notifier.dispatch(makePayload('pr_ready', repo, issue, {
+      const notificationEvent = publishResult.created ? 'pr_ready' : 'pr_updated'
+      const notifyResult = await notifier.dispatch(makePayload(notificationEvent, repo, issue, {
         prUrl: publishResult.prUrl,
         prNumber: publishResult.prNumber,
-        summary: `PR ready: ${publishResult.prUrl}`,
+        summary: publishResult.created
+          ? `PR ready: ${publishResult.prUrl}`
+          : `PR updated: ${publishResult.prUrl}`,
       }))
       try {
         metrics?.incRunsTotal('completed')
@@ -1251,7 +1255,7 @@ function formatBlockComment(reason: string, ctx: RunContext): string {
 function makePayload(
   event: NotificationPayload['event'],
   repo: string,
-  issue: { number: number; title: string },
+  issue: { number: number; title: string; url?: string },
   extra: Partial<NotificationPayload> = {},
 ): NotificationPayload {
   return {
@@ -1259,6 +1263,7 @@ function makePayload(
     repo,
     issueNumber: issue.number,
     issueTitle: issue.title,
+    issueUrl: issue.url ?? null,
     state: event,
     prUrl: null,
     prNumber: null,

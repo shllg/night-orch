@@ -11,6 +11,7 @@ export interface NotificationPayload {
   repo: string
   issueNumber: number
   issueTitle: string
+  issueUrl?: string | null
   state: string
   prUrl: string | null
   prNumber: number | null

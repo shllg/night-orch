@@ -135,7 +135,7 @@ function makeConfig(dbPath: string): Config {
     version: 1,
     github: { tokenEnv: 'GITHUB_TOKEN', apiBaseUrl: 'https://api.github.com', pollIntervalSeconds: 300, appMentions: {} },
     storage: { dbPath, worktreeRoot: '/tmp/wt', logsRoot: '/tmp/logs' },
-    notifications: { channels: [], events: { onRunStarted: false, onBlocked: true, onPrReady: true, onError: true, onRetryExhausted: true } },
+    notifications: { channels: [], events: { onRunStarted: false, onBlocked: true, onPrReady: true, onPrUpdated: true, onError: true, onRetryExhausted: true } },
     loop: { maxReviewIterations: 4, maxTotalAgentPasses: 10, stopOnPlannerFailure: true, requireVerificationPass: true, reviewApprovalKeyword: 'APPROVED', reviewNeedsChangesKeyword: 'CHANGES_REQUIRED', blockOnAmbiguousReview: true, maxAutoRetries: 3 },
     security: { maxChangedFiles: 50, maxChangedLines: 5000, maxDailyCostUsd: 50, maxCostPerRunUsd: 10 },
     metrics: { enabled: false, port: 9090, host: '127.0.0.1' },
@@ -702,6 +702,32 @@ describe('pollOnce', () => {
     expect(result.immediateFollowupRepos).toEqual(['org/repo'])
     const row = db.prepare('SELECT status FROM runs ORDER BY created_at DESC LIMIT 1').get() as { status: string }
     expect(row.status).toBe('review_ready')
+  })
+
+  it('emits pr_updated notification when publish updates an existing PR', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([{
+      issue: { number: 2, nodeId: '', title: 'Existing PR update', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: 'https://example.com/issues/2' },
+      triage: { level: 'standard', reason: '' },
+    }])
+    mockExecuteLoop.mockResolvedValue({
+      currentPhase: 'completed',
+      terminalStatus: 'publish',
+    })
+    mockPublishPR.mockResolvedValueOnce({
+      prNumber: 202,
+      prTitle: 'Existing PR',
+      prUrl: 'https://example.com/pr/202',
+      created: false,
+    })
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    await pollOnce(config, db, false)
+
+    const payloads = mockNotificationDispatch.mock.calls
+      .map((call) => call[0] as { event?: string; prUrl?: string | null })
+    const updatedPayload = payloads.find((payload) => payload.event === 'pr_updated')
+    expect(updatedPayload).toBeDefined()
+    expect(updatedPayload?.prUrl).toBe('https://example.com/pr/202')
   })
 
   it('posts a structured auto-retry status comment when publish fails and retries remain', async () => {

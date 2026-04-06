@@ -7,7 +7,7 @@ const EVENT_CONFIG_MAP: Record<NotificationEvent, keyof Config['notifications'][
   run_started: 'onRunStarted',
   blocked: 'onBlocked',
   pr_ready: 'onPrReady',
-  pr_updated: 'onPrReady',
+  pr_updated: 'onPrUpdated',
   error: 'onError',
   retry_exhausted: 'onRetryExhausted',
 }

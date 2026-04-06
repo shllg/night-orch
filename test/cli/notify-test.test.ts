@@ -28,6 +28,7 @@ describe('notify-test command (dispatcher integration)', () => {
       onRunStarted: true,
       onBlocked: true,
       onPrReady: true,
+      onPrUpdated: true,
       onError: true,
       onRetryExhausted: true,
     }
@@ -58,6 +59,7 @@ describe('notify-test command (dispatcher integration)', () => {
       onRunStarted: true,
       onBlocked: true,
       onPrReady: true,
+      onPrUpdated: true,
       onError: true,
       onRetryExhausted: true,
     }

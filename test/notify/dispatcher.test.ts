@@ -36,6 +36,7 @@ const allEnabled = {
   onRunStarted: true,
   onBlocked: true,
   onPrReady: true,
+  onPrUpdated: true,
   onError: true,
   onRetryExhausted: true,
 }
@@ -64,6 +65,19 @@ describe('NotificationDispatcher', () => {
     })
 
     const report = await dispatcher.dispatch(makePayload({ event: 'run_started' }))
+
+    expect(ch.send).not.toHaveBeenCalled()
+    expect(report.sent).toHaveLength(0)
+  })
+
+  it('uses onPrUpdated toggle for pr_updated events', async () => {
+    const ch = makeChannel('console')
+    const dispatcher = new NotificationDispatcher([ch], {
+      ...allEnabled,
+      onPrUpdated: false,
+    })
+
+    const report = await dispatcher.dispatch(makePayload({ event: 'pr_updated' }))
 
     expect(ch.send).not.toHaveBeenCalled()
     expect(report.sent).toHaveLength(0)
