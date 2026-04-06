@@ -283,6 +283,16 @@ Worker `PATH` is normalized at runtime: if missing, `~/.local/bin`, `~/.local/sh
 
 `repos[].agents` references these profile names. Unknown profile references fail config load.
 
+### Authentication Considerations
+
+Night-orch invokes the `claude` CLI as a subprocess — it does not handle authentication itself. The installed `claude` binary uses whatever auth is configured on the host (OAuth subscription login or API key).
+
+**For production / high-volume deployments**, configure the `claude` CLI with an **API key** (`ANTHROPIC_API_KEY`) rather than a subscription OAuth login. As of April 2026, Anthropic restricts subscription OAuth to "ordinary, individual usage" of Claude Code and reserves the right to enforce this without notice. API key auth uses metered billing and is unaffected by these restrictions.
+
+**For personal dev-server usage**, subscription OAuth login works fine and is fully supported — night-orch invokes the real `claude` CLI binary, not the API directly.
+
+See [Anthropic's legal and compliance docs](https://code.claude.com/docs/en/legal-and-compliance) for current policy on authentication methods.
+
 ### ACP Adapter
 
 The `acp` adapter type uses the [Agent Client Protocol](https://github.com/openclaw/acpx) for agent-agnostic communication:
