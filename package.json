@@ -30,6 +30,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@octokit/rest": "^22.0.1",
+    "@tanstack/react-router": "^1.168.10",
     "acpx": "^0.4.0",
     "better-sqlite3": "^12.8.0",
     "commander": "^14.0.3",
@@ -52,6 +53,7 @@
     "@storybook/addon-a11y": "^10.3.4",
     "@storybook/react-vite": "^10.3.4",
     "@tailwindcss/vite": "^4.2.2",
+    "@testing-library/react": "^16.3.2",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.13.0",
     "@types/react": "^19.2.14",
@@ -61,6 +63,7 @@
     "@vitest/coverage-v8": "^4.1.0",
     "daisyui": "^5.5.19",
     "eslint": "^9.20.0",
+    "jsdom": "^29.0.1",
     "storybook": "^10.3.4",
     "tailwindcss": "^4.2.2",
     "tsx": "^4.19.0",
