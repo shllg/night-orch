@@ -24,7 +24,7 @@ import { SettingsView } from './settings-view.js'
 import { StatsView } from './stats-view.js'
 import { collectMissingTitleTargets, hasReadableTitle, type TitleLookup } from './titles.js'
 import { TABS } from './constants.js'
-import type { RunsViewMode, TabId, TuiLogLine } from './types.js'
+import type { ProjectsViewMode, RunsViewMode, TabId, TuiLogLine } from './types.js'
 import { formatUtcClock, nowUtcIso } from '../../utils/time.js'
 import { getBuildInfo } from '../../utils/build-info.js'
 import {
@@ -177,6 +177,7 @@ interface ResolveActionCommandInput {
   input: string
   activeTab: TabId
   runsViewMode: RunsViewMode
+  projectsViewMode: ProjectsViewMode
   controlsEnabled: boolean
   actionBusy: boolean
   cleanupConfirmPending: boolean
@@ -186,6 +187,8 @@ export function resolveActionCommand(args: ResolveActionCommandInput): TuiAction
   if (args.input === 'r') return 'refresh'
 
   const isFocusedRun = args.activeTab === 'runs' && args.runsViewMode === 'focus'
+  const isFocusedProject = args.activeTab === 'projects' && args.projectsViewMode === 'focus'
+  const isFocusedDetail = isFocusedRun || isFocusedProject
   const monitorOnlyActionKey = args.input === 'p'
     || args.input === 's'
     || args.input === 'D'
@@ -197,8 +200,8 @@ export function resolveActionCommand(args: ResolveActionCommandInput): TuiAction
     return 'standaloneMessage'
   }
 
-  // Keep focused run detail isolated to match its legend.
-  if (isFocusedRun && (args.input === 'p' || args.input === 's' || args.input === 'D' || args.input === 'L')) {
+  // Keep focused detail screens isolated to match their legend.
+  if (isFocusedDetail && (args.input === 'p' || args.input === 's' || args.input === 'D' || args.input === 'L')) {
     return 'none'
   }
 
@@ -241,6 +244,7 @@ export function App({
   const [actionState, setActionState] = useState<ActionState>({ busy: false, action: null })
   const [activeTab, setActiveTab] = useState<TabId>('runs')
   const [runsViewMode, setRunsViewMode] = useState<RunsViewMode>('list')
+  const [projectsViewMode, setProjectsViewMode] = useState<ProjectsViewMode>('list')
   const [selectedProjectIndex, setSelectedProjectIndex] = useState(0)
   const [selectedSettingIndex, setSelectedSettingIndex] = useState(0)
   const [autoRefresh, setAutoRefresh] = useState(true)
@@ -931,7 +935,8 @@ export function App({
     }
 
     const focusedRunDetail = activeTab === 'runs' && runsViewMode === 'focus'
-    if (cleanupConfirmPending && (input !== 'D' || focusedRunDetail)) {
+    const focusedProjectDetail = activeTab === 'projects' && projectsViewMode === 'focus'
+    if (cleanupConfirmPending && (input !== 'D' || focusedRunDetail || focusedProjectDetail)) {
       const transition = resolveCleanupConfirmationTransition(true, 'pressOther')
       if (transition === 'cancel') {
         clearCleanupConfirmation()
@@ -952,6 +957,12 @@ export function App({
         setRunEventScrollOffset((current) => Math.max(0, current - 1))
         return
       }
+    }
+
+    if (focusedProjectDetail && (key.escape || input === 'q')) {
+      setProjectsViewMode('list')
+      setStatusLine('Closed project detail')
+      return
     }
 
     if (input === 'q') {
@@ -991,13 +1002,19 @@ export function App({
       }
     }
 
-    if (activeTab === 'projects') {
+    if (activeTab === 'projects' && projectsViewMode === 'list') {
       if (key.downArrow || input === 'j') {
         setSelectedProjectIndex((current) => moveProjectSelection(current, 1, runtimeConfig.repos.length))
         return
       }
       if (key.upArrow || input === 'k') {
         setSelectedProjectIndex((current) => moveProjectSelection(current, -1, runtimeConfig.repos.length))
+        return
+      }
+      if (input === 'o' || key.return) {
+        if (runtimeConfig.repos.length > 0) {
+          setProjectsViewMode('focus')
+        }
         return
       }
     }
@@ -1066,6 +1083,7 @@ export function App({
       input,
       activeTab,
       runsViewMode,
+      projectsViewMode,
       controlsEnabled: enableBackgroundPoller,
       actionBusy: actionState.busy,
       cleanupConfirmPending,
@@ -1203,6 +1221,7 @@ export function App({
           workerProfiles={runtimeConfig.workerProfiles}
           globalGithubTokenEnv={runtimeConfig.github.tokenEnv}
           globalGithubApiBaseUrl={runtimeConfig.github.apiBaseUrl}
+          mode={projectsViewMode}
         />
       )}
       {activeTab === 'logs' && (
@@ -1225,7 +1244,8 @@ export function App({
       <ActionsBar
         activeTab={activeTab}
         busy={actionState.busy}
-        runFocused={activeTab === 'runs' && runsViewMode === 'focus'}
+        runsFocused={activeTab === 'runs' && runsViewMode === 'focus'}
+        projectsFocused={activeTab === 'projects' && projectsViewMode === 'focus'}
         autoRefresh={autoRefresh}
         controlsEnabled={enableBackgroundPoller}
       />

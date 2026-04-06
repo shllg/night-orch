@@ -286,4 +286,40 @@ describe('dashboard router integration (real App)', () => {
     expect(screen.getByText(/Stats snapshot is loading.|System Signals/i)).toBeDefined()
     expectPageActive('stats')
   })
+
+  it('renders issue detail route and navigates back to issues list', async () => {
+    const { router } = renderDashboard('/issues/issue%3Aorg%2Frepo%231')
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/issues/issue%3Aorg%2Frepo%231')
+    })
+
+    expectPageActive('issues')
+    expect(screen.getByText('Issue Detail')).toBeDefined()
+    expect(screen.getByText('Run "issue:org/repo#1" is not in the current dashboard snapshot.')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to issues' }))
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/issues')
+    })
+  })
+
+  it('renders project detail route and navigates back to projects list', async () => {
+    const { router } = renderDashboard('/projects/org%2Frepo')
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/projects/org%2Frepo')
+    })
+
+    expectPageActive('projects')
+    expect(screen.getByText('Project Details')).toBeDefined()
+    expect(screen.getByText('Repository "org/repo" is not configured.')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to projects' }))
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/projects')
+    })
+  })
 })
