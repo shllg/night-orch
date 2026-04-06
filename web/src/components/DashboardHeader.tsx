@@ -61,7 +61,7 @@ export function DashboardHeader({
   activeRuns,
   runningRuns,
   queuedRuns,
-  frontendVersion,
+  frontendVersion: _frontendVersion,
   frontendGitSha,
   backendVersion,
   backendGitSha,
@@ -90,7 +90,6 @@ export function DashboardHeader({
           <div className="min-w-0 flex-1 space-y-2">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <p className="text-lg font-semibold tracking-wide text-base-content sm:text-xl">night-orch</p>
-              <span className="text-[11px] font-mono text-base-content/65">web v{frontendVersion} · api v{backendVersion}</span>
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/75">
               <span className="text-[10px] uppercase tracking-[0.22em] text-base-content/65">State</span>

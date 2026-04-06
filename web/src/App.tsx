@@ -360,10 +360,14 @@ export function App(): ReactElement {
     subscribedRunRef.current = selectedStreamRunId
   }, [selectedStreamRunId, socketConnected])
 
+  const [serverUnreachable, setServerUnreachable] = useState(false)
+
   useEffect(() => {
     if (!updateInProgress) return
 
     let cancelled = false
+    let consecutiveFailures = 0
+
     const pollUpdateStatus = async (): Promise<void> => {
       try {
         const nextTransition = await pollAndApplyUpdateStatus({
@@ -371,10 +375,14 @@ export function App(): ReactElement {
           transition: updateTransitionRef.current,
           onStatus: (status) => {
             if (cancelled) return
+            consecutiveFailures = 0
+            setServerUnreachable(false)
             setUpdateStatus(status)
           },
           onError: (message) => {
             if (cancelled) return
+            consecutiveFailures = 0
+            setServerUnreachable(false)
             setErrorMessage(message)
           },
           onReload: () => {
@@ -386,7 +394,26 @@ export function App(): ReactElement {
           updateTransitionRef.current = nextTransition
         }
       } catch {
-        // Ignore fetch errors while services are restarting.
+        // Server is down during the update (expected: supervisor drains
+        // web server during pulling/building/restarting). After 2+
+        // consecutive failures, mark as unreachable so the modal can
+        // show a "server restarting" indicator and advance the displayed
+        // stage past "draining".
+        consecutiveFailures++
+        if (!cancelled && consecutiveFailures >= 2) {
+          setServerUnreachable(true)
+          // Advance the displayed state through the workflow stages so
+          // the user sees progress even while the server is down. We
+          // infer the stage from how long the server has been unreachable.
+          setUpdateStatus((prev) => {
+            if (!prev) return prev
+            const elapsed = consecutiveFailures * 2 // ~2s per poll
+            if (elapsed >= 12 && prev.state === 'draining') return { ...prev, state: 'restarting' }
+            if (elapsed >= 8 && prev.state === 'draining') return { ...prev, state: 'building' }
+            if (elapsed >= 4 && prev.state === 'draining') return { ...prev, state: 'pulling' }
+            return prev
+          })
+        }
       }
     }
 
@@ -901,7 +928,9 @@ export function App(): ReactElement {
         </div>
       </div>
 
-      {updateInProgress && updateStatus && <UpdateProgressModal status={updateStatus} />}
+      {updateInProgress && updateStatus && (
+        <UpdateProgressModal status={updateStatus} serverUnreachable={serverUnreachable} />
+      )}
     </main>
   )
 }
