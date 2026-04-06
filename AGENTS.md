@@ -1,4 +1,12 @@
-# Night-Orch — Codex / Agent Instructions
+# Night-Orch — Agent Instructions
+
+## AI Tools
+
+- **Claude Code**: `.claude/` — agents, commands, skills, hooks, settings
+- **Codex CLI**: `.codex/` — config, rules, prompts
+- **OpenCode**: `.opencode/` — agents, commands, config
+
+Canonical rules live in `.claude/rules/`. Canonical skills live in `.claude/skills/`. These apply regardless of which AI tool is in use.
 
 ## Project
 
@@ -62,7 +70,7 @@ Detailed implementation specs in `docs/specs-active/`. Consult the relevant phas
 
 ## React TUI Rules
 
-- Follow `.claude/rules/08-react-tui.md` and `.codex/rules/08-react-tui.md` for React TUI structure, keybinding scoping, and state management.
+- Follow `.claude/rules/08-react-tui.md` for React TUI structure, keybinding scoping, and state management.
 
 ## Documentation Site
 
@@ -73,7 +81,7 @@ Public docs are built with VitePress and deployed to GitHub Pages on each releas
 - `docs/USAGE.md` — features and command reference
 - `docs/deployment.md` — deployment guide
 
-Any change to user-visible behavior must update the corresponding docs page in the same change. See `.codex/rules/07-config-doc-sync.md` for the full rule.
+Any change to user-visible behavior must update the corresponding docs page in the same change. See `.claude/rules/07-config-doc-sync.md` for the full rule.
 
 ## Commit Messages
 
