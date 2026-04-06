@@ -28,9 +28,9 @@ const PAGES: PageDefinition[] = [
 export function DashboardNavigation({ activePage, onPageChange }: DashboardNavigationProps): ReactElement {
   return (
     <>
-      <aside className="hidden md:block">
+      <aside className="hidden md:block md:min-h-0">
         <nav
-          className="sticky top-28 flex w-16 flex-col gap-1 rounded-box border border-base-300/70 bg-base-200/65 p-1.5 shadow-panel backdrop-blur lg:w-52"
+          className="sticky top-[4.55rem] flex h-[calc(100dvh-4.9rem)] min-h-[560px] w-20 flex-col gap-1 border-r border-base-300/70 bg-base-200/45 px-2 py-4 lg:w-56 lg:px-3"
           aria-label="Dashboard pages"
         >
           {PAGES.map((page) => {
@@ -45,8 +45,8 @@ export function DashboardNavigation({ activePage, onPageChange }: DashboardNavig
                 title={page.label}
                 className={`btn btn-sm h-11 w-full rounded-lg border border-transparent px-2 ${
                   isActive
-                    ? 'btn-info text-info-content'
-                    : 'btn-ghost bg-base-100/30 text-base-content/75 hover:bg-base-100/50 hover:text-base-content'
+                    ? 'btn-primary text-primary-content'
+                    : 'btn-ghost bg-base-100/25 text-base-content/75 hover:bg-base-100/45 hover:text-base-content'
                 } justify-center lg:justify-start lg:gap-3 lg:px-3`}
               >
                 <page.Icon className="size-4 shrink-0" />
@@ -58,7 +58,7 @@ export function DashboardNavigation({ activePage, onPageChange }: DashboardNavig
       </aside>
 
       <nav
-        className="dock dock-sm z-40 border-t border-base-300/70 bg-base-200/95 backdrop-blur md:hidden"
+        className="dock dock-sm shadow-nav-dock z-40 border-t border-base-300/70 bg-base-200/95 backdrop-blur md:hidden"
         aria-label="Dashboard pages"
       >
         {PAGES.map((page) => {
@@ -70,7 +70,7 @@ export function DashboardNavigation({ activePage, onPageChange }: DashboardNavig
               onClick={() => onPageChange(page.id)}
               aria-label={page.label}
               title={page.label}
-              className={isActive ? 'dock-active text-info' : 'text-base-content/70'}
+              className={isActive ? 'dock-active text-primary' : 'text-base-content/70'}
               aria-current={isActive ? 'page' : undefined}
             >
               <page.Icon className="size-[1.1rem]" />
@@ -145,15 +145,8 @@ function SettingsIcon({ className }: IconProps): ReactElement {
     className,
     children: (
       <>
-        <circle cx="12" cy="12" r="2.75" />
-        <path d="M12 4.2v1.6" />
-        <path d="M12 18.2v1.6" />
-        <path d="m5.9 5.9 1.15 1.15" />
-        <path d="m16.95 16.95 1.15 1.15" />
-        <path d="M4.2 12h1.6" />
-        <path d="M18.2 12h1.6" />
-        <path d="m5.9 18.1 1.15-1.15" />
-        <path d="m16.95 7.05 1.15-1.15" />
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19 12a1.3 1.3 0 0 0 .9 1.25l.12.03a1.9 1.9 0 0 1 0 3.44l-.12.04A1.3 1.3 0 0 0 19 18a1.3 1.3 0 0 0-.23.75l.01.12a1.9 1.9 0 0 1-2.98 1.72l-.1-.07a1.3 1.3 0 0 0-1.5 0l-.1.07a1.9 1.9 0 0 1-2.98-1.72l.01-.12a1.3 1.3 0 0 0-.23-.75 1.3 1.3 0 0 0-.9-.56l-.12-.04a1.9 1.9 0 0 1 0-3.44l.12-.03A1.3 1.3 0 0 0 9 12a1.3 1.3 0 0 0-.23-.75l-.01-.12a1.9 1.9 0 0 1 2.98-1.72l.1.07a1.3 1.3 0 0 0 1.5 0l.1-.07a1.9 1.9 0 0 1 2.98 1.72l-.01.12c0 .27.08.53.23.75.2.28.51.48.86.56l.12.03A1.3 1.3 0 0 0 19 12Z" />
       </>
     ),
   })

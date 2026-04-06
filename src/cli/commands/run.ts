@@ -1,9 +1,8 @@
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
 import { loadConfig, resolveConfigPath, ConfigError } from '../../config/loader.js'
 import { initDatabase } from '../../state/db.js'
 import { pollOnce } from '../../runner/poller.js'
 import { SyncEngine } from '../../ops/sync.js'
+import { AutoCleanupScheduler } from '../../ops/auto-cleanup.js'
 import { ShutdownHandler } from '../../poller/shutdown.js'
 import { PollCycleController } from '../../poller/control.js'
 import { createMetricsService, type MetricsService } from '../../metrics/service.js'
@@ -23,17 +22,6 @@ interface GlobalOpts {
 
 export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
   const dryRun = globalOpts?.dryRun ?? false
-
-  // Require docker-compose.yaml for the monitoring stack
-  const composeFile = join(process.cwd(), 'docker-compose.yaml')
-  if (!existsSync(composeFile)) {
-    process.stderr.write(
-      'docker-compose.yaml not found.\n' +
-      'Copy docker-compose.example.yaml to docker-compose.yaml and adjust for your environment.\n',
-    )
-    process.exitCode = 1
-    return
-  }
 
   let baseConfig
   try {
@@ -112,6 +100,11 @@ export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
     }
   }
 
+  // Auto-cleanup scheduler: runs worktree + DB retention on a time-gated
+  // interval within the poll loop. Without this, the daemon accumulates
+  // stale worktrees and DB history until disk fills on long-running hosts.
+  const autoCleanup = new AutoCleanupScheduler(runtimeConfig, db)
+
   logger.info(
     {
       intervalMs: runtimeConfig.github.pollIntervalSeconds * 1000,
@@ -149,6 +142,15 @@ export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
       }
     } catch (err) {
       logger.error({ err }, 'Poll cycle failed')
+    }
+
+    // Run time-gated auto-cleanup (worktrees, DB retention). Runs inline
+    // after each poll cycle; the scheduler skips if the configured interval
+    // hasn't elapsed yet, so this is a cheap no-op on most cycles.
+    try {
+      await autoCleanup.maybeRun()
+    } catch (err) {
+      logger.warn({ err }, 'Auto-cleanup failed (non-fatal)')
     }
 
     if (shutdown.isShuttingDown) break

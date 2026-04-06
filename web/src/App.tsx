@@ -699,6 +699,7 @@ export function App(): ReactElement {
       <DashboardHeader
         currentStateLabel={currentState.label}
         currentStateToneClass={currentState.toneClass}
+        isWorking={runningRuns > 0 || activeOperation !== null || updateInProgress}
         socketConnected={socketConnected}
         lastRefreshAt={snapshot?.generatedAt ?? null}
         pollIntervalSeconds={snapshot?.config.pollIntervalSeconds ?? null}
@@ -723,7 +724,7 @@ export function App(): ReactElement {
         }}
       />
 
-      <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-5 px-4 pb-24 pt-5 sm:px-6 md:pb-6 lg:px-8">
+      <div className="mx-auto flex w-full max-w-[1550px] flex-col gap-5 px-4 pb-24 pt-5 sm:px-6 md:pb-6 lg:px-8">
         {errorMessage && (
           <div className="alert alert-error shadow-sm">
             <span>{errorMessage}</span>
@@ -735,10 +736,10 @@ export function App(): ReactElement {
           </div>
         )}
 
-        <div className="grid gap-5 md:grid-cols-[auto_minmax(0,1fr)] md:items-start">
+        <div className="grid gap-5 md:grid-cols-[auto_minmax(0,1fr)] md:items-stretch md:gap-0">
           <DashboardNavigation activePage={activePage} onPageChange={setActivePage} />
 
-          <div className="flex min-w-0 flex-col gap-5">
+          <div className="flex min-w-0 flex-col gap-5 md:pl-6">
             {activePage === 'issues' && (
               <div className="flex flex-col gap-5">
                 <DashboardMetrics snapshot={snapshot} />
@@ -885,6 +886,18 @@ export function App(): ReactElement {
               </div>
             )}
           </div>
+        </div>
+
+        <div className="flex justify-center pb-16 pt-1 md:pb-2">
+          <button
+            type="button"
+            className="btn btn-outline btn-sm border-primary/55 bg-base-200/45 text-primary hover:bg-primary/15"
+            onClick={() => {
+              window.location.reload()
+            }}
+          >
+            UI reload
+          </button>
         </div>
       </div>
 

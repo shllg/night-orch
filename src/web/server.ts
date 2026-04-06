@@ -196,6 +196,11 @@ interface WebSecurityContext {
   allowedHostnames: Set<string>
   webMutationToken: string
   mcpMutationAuthToken?: string
+  /** True when the web server is bound to a non-loopback address and the
+   *  mutation token is operator-supplied rather than random-per-process. In
+   *  this mode, GET /api/session must NOT disclose the token — the client
+   *  must provide it out-of-band. */
+  operatorAuthMode: boolean
 }
 
 type WebSocketCommand =
@@ -467,9 +472,13 @@ async function handleApiRequest(
   }
 
   if (method === 'GET' && pathname === '/api/session') {
+    // When the server is bound to a non-loopback address with an operator-
+    // supplied auth token, we must NOT hand it out via HTTP — the client
+    // must provide it out-of-band. For loopback, disclosure is low-risk.
     writeJson(res, 200, {
-      mutationToken: security.webMutationToken,
+      mutationToken: security.operatorAuthMode ? null : security.webMutationToken,
       operationsEnabled,
+      requiresExternalAuth: security.operatorAuthMode,
     })
     return
   }
@@ -1070,10 +1079,30 @@ function withMcpMutationAuth(
 }
 
 function createWebSecurityContext(deps: MCPDependencies, options: WebServerOptions): WebSecurityContext {
+  // When bound to a non-loopback address, the operator-supplied env var
+  // IS the mutation token. The startup guard in startWebServer() ensures
+  // the env var is set before we get here. Using it directly means the
+  // /api/session endpoint can refuse to disclose it — the operator gives
+  // the token to trusted clients out-of-band (browser extension, curl
+  // header, etc).
+  //
+  // For loopback binds, keep the random-per-process token and disclose it
+  // via /api/session as before — the risk is low when only local processes
+  // can reach the server.
+  const operatorToken = process.env['NIGHT_ORCH_WEB_AUTH_TOKEN']
+  const bindHostName = normalizeHostname(options.host) ?? options.host
+  const isLoopback =
+    bindHostName === '127.0.0.1'
+    || bindHostName === '::1'
+    || bindHostName === 'localhost'
+    || bindHostName === ''
+  const operatorAuthMode = !isLoopback && !!operatorToken
+
   return {
     allowedHostnames: resolveAllowedHostnames(options.host, options.allowedHosts ?? []),
-    webMutationToken: randomBytes(24).toString('base64url'),
+    webMutationToken: operatorAuthMode ? operatorToken : randomBytes(24).toString('base64url'),
     mcpMutationAuthToken: resolveMcpMutationAuthToken(deps),
+    operatorAuthMode,
   }
 }
 

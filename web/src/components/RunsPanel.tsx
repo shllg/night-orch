@@ -68,57 +68,60 @@ export function RunsPanel({
           </div>
         ) : (
           <div className="mt-4 grid max-h-[540px] gap-3 overflow-y-auto pr-1">
-            {filteredRuns.map((run) => (
-              <button
-                key={run.runId}
-                type="button"
-                onClick={() => onSelectedRunChange(run.runId)}
-                className={`card w-full border text-left transition-all ${
-                  selectedRunId === run.runId
-                    ? 'border-info/70 bg-info/10 shadow-md'
-                    : 'border-base-300/70 bg-base-100/50 hover:border-info/40 hover:bg-base-100/80'
-                }`}
-              >
-                <div className="card-body gap-2.5 p-3">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <p className="text-xs font-medium uppercase tracking-wide text-base-content/70">
-                        {run.repo} #{run.issue}
-                      </p>
-                      <p className="mt-0.5 text-sm font-semibold text-base-content">
-                        {truncate(resolveIssueTitle(run.issueTitle), 110)}
-                      </p>
-                      <p className="mt-0.5 text-xs text-base-content/55">
-                        {run.hasRun ? run.runId : 'Tracked issue (no run yet)'}
-                      </p>
+            {filteredRuns.map((run) => {
+              const isRunning = run.status === 'running'
+              return (
+                <button
+                  key={run.runId}
+                  type="button"
+                  onClick={() => onSelectedRunChange(run.runId)}
+                  className={`card w-full border text-left transition-all ${
+                    selectedRunId === run.runId
+                      ? 'border-primary/65 bg-primary/10 shadow-md'
+                      : 'border-base-300/70 bg-base-100/50 hover:border-primary/40 hover:bg-base-100/80'
+                  } ${isRunning ? 'orch-running-card' : ''}`}
+                >
+                  <div className="card-body gap-2.5 p-3">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-medium uppercase tracking-wide text-base-content/70">
+                          {run.repo} #{run.issue}
+                        </p>
+                        <p className="mt-0.5 text-sm font-semibold text-base-content">
+                          {truncate(resolveIssueTitle(run.issueTitle), 110)}
+                        </p>
+                        <p className="mt-0.5 text-xs text-base-content/55">
+                          {run.hasRun ? run.runId : 'Tracked issue (no run yet)'}
+                        </p>
+                      </div>
+                      <span className={`badge badge-sm capitalize ${statusTone[run.status]} ${isRunning ? 'orch-working-pulse' : ''}`}>
+                        {run.status.replaceAll('_', ' ')}
+                      </span>
                     </div>
-                    <span className={`badge badge-sm capitalize ${statusTone[run.status]}`}>
-                      {run.status.replaceAll('_', ' ')}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                      <span className={`badge badge-xs ${badgeToneForPhase(run.phase)}`}>
+                        phase {truncate(resolvePhaseLabel(run.phase), 18)}
+                      </span>
+                      <span className={`badge badge-xs ${badgeToneForIterationCount(run.iterations)}`}>
+                        iter {run.iterations}
+                      </span>
+                      <span className={`badge badge-xs ${badgeToneForCostUsd(run.costUsd)}`}>
+                        ${formatMoney(run.costUsd)}
+                      </span>
+                      <span className={`badge badge-xs ${badgeToneForPrNumber(run.prNumber)}`}>
+                        {run.prNumber !== null ? `PR #${run.prNumber}` : 'no PR'}
+                      </span>
+                      <span className="ml-auto text-[11px] text-base-content/65">{formatRunTime(run)}</span>
+                    </div>
+                    {run.lastError && (
+                      <p className="whitespace-pre-wrap rounded-md border border-error/30 bg-error/10 px-2 py-1 text-xs text-error">
+                        {truncate(run.lastError, 500)}
+                      </p>
+                    )}
                   </div>
-                  <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                    <span className={`badge badge-xs ${badgeToneForPhase(run.phase)}`}>
-                      phase {truncate(resolvePhaseLabel(run.phase), 18)}
-                    </span>
-                    <span className={`badge badge-xs ${badgeToneForIterationCount(run.iterations)}`}>
-                      iter {run.iterations}
-                    </span>
-                    <span className={`badge badge-xs ${badgeToneForCostUsd(run.costUsd)}`}>
-                      ${formatMoney(run.costUsd)}
-                    </span>
-                    <span className={`badge badge-xs ${badgeToneForPrNumber(run.prNumber)}`}>
-                      {run.prNumber !== null ? `PR #${run.prNumber}` : 'no PR'}
-                    </span>
-                    <span className="ml-auto text-[11px] text-base-content/65">{formatRunTime(run)}</span>
-                  </div>
-                  {run.lastError && (
-                    <p className="whitespace-pre-wrap rounded-md border border-error/30 bg-error/10 px-2 py-1 text-xs text-error">
-                      {truncate(run.lastError, 500)}
-                    </p>
-                  )}
-                </div>
-              </button>
-            ))}
+                </button>
+              )
+            })}
           </div>
         )}
       </div>

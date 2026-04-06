@@ -328,7 +328,7 @@ Requires `acpx` installed as a dependency (`pnpm add acpx`).
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `enabled` | boolean | `true` | Enable processing of `/orch` commands in issue comments. |
-| `requireCollaborator` | boolean | `false` | If true, only repo collaborators can use comment commands. |
+| `requireCollaborator` | boolean | `true` | Only repo collaborators can use comment commands. Set to `false` only for private repos where all commenters are trusted. |
 
 Supported commands (posted as issue comments):
 - `/orch retry` — re-queue a blocked/errored issue

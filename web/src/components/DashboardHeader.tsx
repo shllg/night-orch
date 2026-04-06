@@ -3,6 +3,7 @@ import { type ReactElement } from 'react'
 interface DashboardHeaderProps {
   currentStateLabel: string
   currentStateToneClass: string
+  isWorking: boolean
   socketConnected: boolean
   lastRefreshAt: string | null
   pollIntervalSeconds: number | null
@@ -52,6 +53,7 @@ function shortSha(sha: string | null): string {
 export function DashboardHeader({
   currentStateLabel,
   currentStateToneClass,
+  isWorking,
   socketConnected,
   lastRefreshAt,
   pollIntervalSeconds,
@@ -88,18 +90,20 @@ export function DashboardHeader({
           <div className="min-w-0 flex-1 space-y-2">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <p className="text-lg font-semibold tracking-wide text-base-content sm:text-xl">night-orch</p>
-              <span className="text-[11px] font-mono text-base-content/70">web v{frontendVersion} · api v{backendVersion}</span>
+              <span className="text-[11px] font-mono text-base-content/65">web v{frontendVersion} · api v{backendVersion}</span>
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/75">
               <span className="text-[10px] uppercase tracking-[0.22em] text-base-content/65">State</span>
-              <span className={`badge badge-sm capitalize ${currentStateToneClass}`}>{currentStateLabel}</span>
+              <span className={`badge badge-sm capitalize ${currentStateToneClass} ${isWorking ? 'orch-working-pulse' : ''}`}>
+                {currentStateLabel}
+              </span>
               <span className={socketConnected ? 'text-success' : 'text-warning'}>
                 {socketConnected ? 'stream online' : 'stream reconnecting'}
               </span>
               <span>Last refresh {lastRefreshLabel}</span>
               <span>Poll {pollIntervalSeconds ?? '--'}s</span>
             </div>
-            <div className="flex flex-wrap items-center gap-2 text-[11px]">
+            <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
               <StatPill label="active" value={activeRuns} />
               <StatPill label="running" value={runningRuns} />
               <StatPill label="queued" value={queuedRuns} />
@@ -123,7 +127,7 @@ export function DashboardHeader({
               disabled={!canRunMutations}
               busy={activeOperation === 'poll'}
             >
-              <BoltIcon />
+              <PollIcon />
             </ActionIconButton>
             <ActionIconButton
               label={activeOperation === 'sync' ? 'Syncing...' : 'Run sync'}
@@ -160,8 +164,8 @@ function StatPill({
   monospace?: boolean
 }): ReactElement {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-base-100/45 bg-base-100/35 px-2 py-1">
-      <span className="uppercase tracking-[0.18em] text-base-content/65">{label}</span>
+    <span className="inline-flex items-center gap-1 rounded-full border border-base-100/45 bg-base-100/35 px-1.5 py-0.5">
+      <span className="text-[9px] uppercase tracking-[0.16em] text-base-content/65">{label}</span>
       <span className={monospace ? 'font-mono text-base-content' : 'font-semibold text-base-content'}>
         {value}
       </span>
@@ -224,10 +228,13 @@ function RefreshIcon(): ReactElement {
   )
 }
 
-function BoltIcon(): ReactElement {
+function PollIcon(): ReactElement {
   return svgIcon(
     <>
-      <path d="m13 2-8 12h6l-1 8 8-12h-6z" />
+      <circle cx="12" cy="12" r="7.25" />
+      <circle cx="12" cy="12" r="2.25" />
+      <path d="m20 4-3.4 3.4" />
+      <path d="M20 7V4h-3" />
     </>,
   )
 }
@@ -235,10 +242,10 @@ function BoltIcon(): ReactElement {
 function SyncIcon(): ReactElement {
   return svgIcon(
     <>
-      <path d="M3.5 12a8.5 8.5 0 0 1 14.9-5.7" />
-      <path d="M18.5 6.2v4.3h-4.3" />
-      <path d="M20.5 12a8.5 8.5 0 0 1-14.9 5.7" />
-      <path d="M5.5 17.8v-4.3h4.3" />
+      <path d="M10.2 6.2a4.4 4.4 0 1 0-2.8 6.5" />
+      <path d="M10.4 8.8V5.7H7.3" />
+      <path d="M13.8 17.8a4.4 4.4 0 1 0 2.8-6.5" />
+      <path d="M13.6 15.2v3.1h3.1" />
     </>,
   )
 }
@@ -246,15 +253,8 @@ function SyncIcon(): ReactElement {
 function SettingsIcon(): ReactElement {
   return svgIcon(
     <>
-      <circle cx="12" cy="12" r="2.75" />
-      <path d="M12 4.2v1.6" />
-      <path d="M12 18.2v1.6" />
-      <path d="m5.9 5.9 1.15 1.15" />
-      <path d="m16.95 16.95 1.15 1.15" />
-      <path d="M4.2 12h1.6" />
-      <path d="M18.2 12h1.6" />
-      <path d="m5.9 18.1 1.15-1.15" />
-      <path d="m16.95 7.05 1.15-1.15" />
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19 12a1.3 1.3 0 0 0 .9 1.25l.12.03a1.9 1.9 0 0 1 0 3.44l-.12.04A1.3 1.3 0 0 0 19 18a1.3 1.3 0 0 0-.23.75l.01.12a1.9 1.9 0 0 1-2.98 1.72l-.1-.07a1.3 1.3 0 0 0-1.5 0l-.1.07a1.9 1.9 0 0 1-2.98-1.72l.01-.12a1.3 1.3 0 0 0-.23-.75 1.3 1.3 0 0 0-.9-.56l-.12-.04a1.9 1.9 0 0 1 0-3.44l.12-.03A1.3 1.3 0 0 0 9 12a1.3 1.3 0 0 0-.23-.75l-.01-.12a1.9 1.9 0 0 1 2.98-1.72l.1.07a1.3 1.3 0 0 0 1.5 0l.1-.07a1.9 1.9 0 0 1 2.98 1.72l-.01.12c0 .27.08.53.23.75.2.28.51.48.86.56l.12.03A1.3 1.3 0 0 0 19 12Z" />
     </>,
   )
 }

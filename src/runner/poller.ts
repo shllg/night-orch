@@ -660,6 +660,8 @@ export async function pollOnce(
                 } catch (closeErr) {
                   logger.debug({ runId: run.id, err: closeErr }, 'closeRun failed (best-effort)')
                 }
+                // Evict per-issue caches so they don't grow unbounded.
+                cleanupRunCaches(repoConfig.repo, discoveredIssue.issue.number)
                 } catch (err) {
                   logger.error({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err }, 'Failed to process issue')
                   if (runId) {
@@ -1414,7 +1416,9 @@ interface ProcessCommentCommandsParams {
   botUser: string
 }
 
-/** Issues that returned 404 during comment scan in this process lifecycle. */
+/** Issues that returned 404 during comment scan in this process lifecycle.
+ *  Bounded: entries are evicted when the key's run reaches a terminal state
+ *  via {@link cleanupRunCaches}. */
 const missingCommentCommandIssues = new Set<string>()
 
 function getHttpStatus(err: unknown): number | null {
@@ -1761,8 +1765,20 @@ const TAINTED_BLOCK_REASONS = new Set(['agent_pass_limit', 'cost_limit', 'merge_
 
 // --- Reaction scanning ---
 
-/** In-memory reaction cursors, keyed by "repo#issueNumber". */
+/** In-memory reaction cursors, keyed by "repo#issueNumber".
+ *  Bounded: entries are evicted via {@link cleanupRunCaches}. */
 const reactionCursors = new Map<string, ReactionCursor>()
+
+/**
+ * Evict entries from process-global caches that are keyed by repo+issue.
+ * Called when a run reaches a terminal state so the caches don't grow
+ * unbounded over the daemon's lifetime.
+ */
+function cleanupRunCaches(repo: string, issueNumber: number): void {
+  const key = `${repo}#${issueNumber}`
+  missingCommentCommandIssues.delete(key)
+  reactionCursors.delete(key)
+}
 
 interface ScanAndHandleReactionsParams {
   db: Database.Database

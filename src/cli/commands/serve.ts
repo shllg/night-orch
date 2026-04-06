@@ -1,6 +1,6 @@
 import { resolve } from 'node:path'
 import { homedir } from 'node:os'
-import { existsSync, mkdirSync } from 'node:fs'
+import { mkdirSync } from 'node:fs'
 import { Supervisor } from '../../supervisor/index.js'
 import { logger } from '../../utils/logger.js'
 
@@ -23,16 +23,10 @@ export async function serveCommand(
 ): Promise<void> {
   const projectRoot = process.cwd()
 
-  // Check for docker-compose.yaml (same check as run command)
-  const composeFile = resolve(projectRoot, 'docker-compose.yaml')
-  if (!existsSync(composeFile)) {
-    process.stderr.write(
-      'docker-compose.yaml not found.\n' +
-      'Copy docker-compose.example.yaml to docker-compose.yaml and adjust for your environment.\n',
-    )
-    process.exitCode = 1
-    return
-  }
+  // docker-compose.yaml is optional — only required when the monitoring
+  // stack (Prometheus + Grafana) is explicitly requested via mise run dev.
+  // The supervisor spawns run + web children which do not themselves
+  // require compose.
 
   // Build global args to pass to children
   const globalArgs: string[] = []

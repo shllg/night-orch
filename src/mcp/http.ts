@@ -32,39 +32,47 @@ export function startMCPHttpServer(
   const transports = new Map<string, SSEServerTransport>()
 
   const httpServer = createServer(async (req, res) => {
-    const url = new URL(req.url ?? '/', `http://${req.headers.host}`)
+    try {
+      const url = new URL(req.url ?? '/', `http://${req.headers.host}`)
 
-    if (url.pathname === '/sse' && req.method === 'GET') {
-      // SSE connection — create a new transport + MCP server per session
-      const transport = new SSEServerTransport(MCP_PATH, res)
-      const server = createMCPServer(deps)
+      if (url.pathname === '/sse' && req.method === 'GET') {
+        // SSE connection — create a new transport + MCP server per session
+        const transport = new SSEServerTransport(MCP_PATH, res)
+        const server = createMCPServer(deps)
 
-      transports.set(transport.sessionId, transport)
-      logger.info({ sessionId: transport.sessionId }, 'MCP SSE client connected')
+        transports.set(transport.sessionId, transport)
+        logger.info({ sessionId: transport.sessionId }, 'MCP SSE client connected')
 
-      res.on('close', () => {
-        transports.delete(transport.sessionId)
-        logger.info({ sessionId: transport.sessionId }, 'MCP SSE client disconnected')
-      })
+        res.on('close', () => {
+          transports.delete(transport.sessionId)
+          logger.info({ sessionId: transport.sessionId }, 'MCP SSE client disconnected')
+        })
 
-      await server.connect(transport)
-    } else if (url.pathname === MCP_PATH && req.method === 'POST') {
-      // JSON-RPC message from client
-      const sessionId = url.searchParams.get('sessionId')
-      if (!sessionId || !transports.has(sessionId)) {
-        res.writeHead(400, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: 'Invalid or missing sessionId' }))
-        return
+        await server.connect(transport)
+      } else if (url.pathname === MCP_PATH && req.method === 'POST') {
+        // JSON-RPC message from client
+        const sessionId = url.searchParams.get('sessionId')
+        if (!sessionId || !transports.has(sessionId)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Invalid or missing sessionId' }))
+          return
+        }
+
+        const transport = transports.get(sessionId)!
+        await transport.handlePostMessage(req, res)
+      } else if (url.pathname === '/health') {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ status: 'ok', sessions: transports.size }))
+      } else {
+        res.writeHead(404)
+        res.end('Not found')
       }
-
-      const transport = transports.get(sessionId)!
-      await transport.handlePostMessage(req, res)
-    } else if (url.pathname === '/health') {
-      res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ status: 'ok', sessions: transports.size }))
-    } else {
-      res.writeHead(404)
-      res.end('Not found')
+    } catch (err) {
+      logger.warn({ err }, 'MCP HTTP request handler error')
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Internal server error' }))
+      }
     }
   })
 
