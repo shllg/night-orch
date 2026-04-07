@@ -1,138 +1,73 @@
 # night-orch
 
-A self-hosted Node.js/TypeScript CLI that autonomously processes GitHub/Forgejo issues using AI agents (Claude Code, Codex CLI). Runs overnight or unattended — discovers issues, plans, codes, reviews, and opens PRs.
+[![CI](https://github.com/shllg/night-orch/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/shllg/night-orch/actions/workflows/ci.yml)
+[![Docs](https://github.com/shllg/night-orch/actions/workflows/docs.yml/badge.svg?branch=master)](https://github.com/shllg/night-orch/actions/workflows/docs.yml)
 
-## Features
+Night-orch is a self-hosted orchestrator that watches GitHub/Forgejo issues, runs AI agents to implement changes, verifies the result, and opens pull requests.
 
-- **Configurable workflows** — YAML-defined pipelines (Plan→Code→Verify→Review or custom)
-- **Planning-only mode** — label an issue to produce a single PRD markdown artifact (no code changes)
-- **Multi-agent support** — Claude, Codex, Gemini, and 17+ agents via ACP protocol
-- **Issue decomposition** — automatically splits complex issues into parallel sub-tasks
-- **Merge queue** — Bors-style batch-and-bisect for automated PR merging
-- **Session persistence** — agents retain context across pipeline phases
-- **Reaction engine** — auto-responds to CI failures and human review comments
-- **Live monitoring** — terminal dashboard with active runs, costs, merge queue status
-- **Mobile web interface** — REST + WebSocket control surface with React/Tailwind frontend
-- **Prometheus metrics** — full observability with 13+ metrics
-- **MCP integration** — 9 tools for Claude Code integration
-- **GitHub + Forgejo** — dual forge support
+It is designed for unattended operation: label an issue, let the orchestrator execute your workflow, and review the resulting PR.
 
 ## Quick Start
 
-1. Install: `pnpm install`
-2. Setup: `night-orch init` (guided wizard)
-3. Verify: `night-orch doctor`
-4. Labels: `night-orch labels-init`
-5. Run: `night-orch run`
-6. Monitor: `night-orch tui` (in another terminal)
+### 1. Prerequisites
 
-## Setup
+- Node.js 24+
+- GitHub or Forgejo repositories with local git clones
+- One or more worker CLIs (for example `codex` and/or `claude`)
 
-```bash
-pnpm install
-cp examples/config.example.yaml ~/.config/night-orch/config.yaml
-# Edit config with your repos, tokens, and agent preferences
-night-orch doctor    # validate setup
-```
-
-Requires Node.js 24+ and at least one agent CLI (`claude` or `codex`).
-
-Run night-orch as a dedicated non-root user (for example `orch`), not as `root`.
-Use user-home paths for code and state (for example `/home/orch/apps/night-orch` and
-`/home/orch/.night-orch`).
-
-## Commands
-
-```
-night-orch run              # long-running poller daemon
-night-orch web              # poller + embedded REST/WebSocket web UI server
-night-orch run-once         # single poll cycle (for testing/CI)
-night-orch init             # interactive setup wizard
-night-orch doctor           # validate config, auth, CLIs, repos, DB
-night-orch status           # show active runs, costs, recent history
-night-orch tui              # live monitoring TUI dashboard
-night-orch sync             # reconcile DB state with GitHub
-night-orch retry <repo> <#> # re-run a blocked/errored issue
-night-orch continue <repo> <#> # queue a context-aware second pass
-night-orch rebase <repo> <#> # rebase PR branch + verify, requeue if broken
-night-orch cleanup          # remove stale worktrees, branches, logs
-night-orch labels-init      # create/update GitHub labels from config
-night-orch notify-test      # send test notification to all channels
-night-orch mcp              # start MCP stdio server
-```
-
-All mutating commands support `--dry-run`.
-
-To initialize labels from config defaults/overrides:
+### 2. Install
 
 ```bash
-mise run labels-init -- myorg/myrepo
-# or all configured repos
-mise run labels-init
+npm install -g night-orch
 ```
 
-## How It Works
-
-1. Poll configured repos for issues with `orch:ready` label
-2. Claim issue (lease in SQLite, add `orch:running` label)
-3. Create/reuse git worktree with deterministic branch name
-4. **Plan** → **Code** → **Verify** → **Review** loop (the "Ralph loop")
-5. Reviewer can bounce back to coder (up to configured max iterations)
-6. Push branch, create/update PR, label `orch:review-ready`
-7. Notify via console, webhook, Discord, GitHub comment, or email
-
-Special case: issues labeled `orch:planning` (configurable) run in planning-only mode and generate only one PRD markdown file in the configured PRD directory.
-
-The orchestrator's job ends when the PR is ready. A human merges.
-
-## Development
+### 3. Initialize and validate
 
 ```bash
-pnpm dev doctor             # run via tsx
-pnpm storybook             # component workbench (dev only)
-pnpm storybook:build       # static Storybook build
-pnpm web:dev               # run frontend in Vite dev mode
-pnpm web:build             # build frontend assets for `night-orch web`
-pnpm test                   # vitest
-pnpm lint                   # eslint
-pnpm typecheck              # tsc --noEmit
-pnpm build                  # compile to dist/
+night-orch init
+night-orch doctor
+night-orch labels-init
 ```
 
-## Component Structure
+### 4. Start orchestration
 
-Reusable UI components live in `src/components/`.
+```bash
+night-orch run
+```
 
-- Use one folder per component (`src/components/<component-name>/`).
-- Keep shared prop contracts in `types.ts` and shared formatting/view-model logic in local helpers.
-- Put platform renderers in `*.web.tsx` and `*.tui.tsx`.
-- Export the component surface from a local `index.ts`.
+In another terminal, monitor progress:
 
-## Commit Messages
+```bash
+night-orch tui
+# or
+night-orch web
+```
 
-Format: `[CATEGORY] Short imperative summary` (≤ 50 chars, no trailing punctuation)
+### 5. Queue work
 
-| Category | Use for |
-|------------|------------------------------------------|
-| `[FIX]` | Bug fixes |
-| `[FEATURE]` | New functionality |
-| `[REFACTOR]` | Code restructuring without behavior change |
-| `[INTERNAL]` | Tooling, config, dev-only changes |
-| `[TEST]` | Test-only changes |
-| `[DOCS]` | Documentation |
+Add the ready label (default: `orch:ready`) to an issue in a configured repository. Night-orch will pick it up on the next poll cycle and run the Plan -> Code -> Verify -> Review loop.
 
-Body (optional): bullet points, imperative mood. Do not wrap lines.
+## Core Commands
 
-## Architecture
+```bash
+night-orch run                      # long-running poller daemon
+night-orch run-once                 # execute one poll cycle
+night-orch status                   # current runs and recent activity
+night-orch tui                      # terminal dashboard
+night-orch web                      # browser UI + API
+night-orch retry <repo> <issue>     # requeue blocked or errored issue
+night-orch continue <repo> <issue>  # queue context-aware second pass
+night-orch labels-init              # create/update required labels
+```
 
-See `docs/specs-active/index.md` for the full implementation spec with dependency graph and cross-cutting concerns.
+## Documentation
 
-## Key Design Decisions
+- Overview: https://shllg.github.io/night-orch/OVERVIEW
+- Usage guide: https://shllg.github.io/night-orch/USAGE
+- Configuration reference: https://shllg.github.io/night-orch/CONFIGURATION
+- Deployment guide: https://shllg.github.io/night-orch/deployment
+- Docs home: https://shllg.github.io/night-orch/
 
-- **GitHub issues are the queue** — no separate UI
-- **Always PR** — never push directly to base branch
-- **Per-repo concurrency** — repos run in parallel; each repo defaults to one active run
-- **Orchestrator owns verification** — never trust agent claims that tests pass
-- **Forge abstraction** — GitHub first, Forgejo second via `ForgeAdapter` interface
-- **Review gates readiness** — PR only marked ready when reviewer approves AND verify passes
-- **UTC timestamps everywhere** — persisted and displayed times are normalized to UTC
+## Contributing
+
+Development setup, architecture guardrails, and contribution workflow live in [`CONTRIBUTING.md`](CONTRIBUTING.md).
