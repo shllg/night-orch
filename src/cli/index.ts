@@ -2,6 +2,7 @@
 import { Command } from 'commander'
 import { logger } from '../utils/logger.js'
 import { sanitizeError } from '../utils/sanitize-error.js'
+import { getBuildInfo } from '../utils/build-info.js'
 import { doctorCommand } from './commands/doctor.js'
 
 // Install process-level error handlers before any top-level async work
@@ -75,7 +76,7 @@ function resolveRootGlobalOpts(cmd: Command): GlobalCliOpts | undefined {
 program
   .name('night-orch')
   .description('Nightly GitHub/Forgejo issue orchestrator — autonomous AI agent coding tool')
-  .version('0.1.0')
+  .version(getBuildInfo().version)
   .option('-c, --config <path>', 'Path to config YAML file')
   .option('--trust-workspace', 'Allow loading .night-orch.yaml/.yml from the current directory')
   .option('--dry-run', 'Show what would happen without making changes')

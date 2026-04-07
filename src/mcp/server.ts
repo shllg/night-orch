@@ -14,6 +14,7 @@ import type { PollerControl } from '../poller/control.js'
 import { registerTools, handleToolCall } from './tools/index.js'
 import { registerResources, handleResourceRead } from './resources/index.js'
 import { createLogger } from '../utils/logger.js'
+import { getBuildInfo } from '../utils/build-info.js'
 
 export interface MCPDependencies {
   db: Database.Database
@@ -30,7 +31,7 @@ const mcpLogger = createLogger(process.env['LOG_LEVEL'] ?? 'info', {
 
 export function createMCPServer(deps: MCPDependencies): Server {
   const server = new Server(
-    { name: 'night-orch', version: '0.1.0' },
+    { name: 'night-orch', version: getBuildInfo().version },
     { capabilities: { tools: {}, resources: {} } },
   )
 
