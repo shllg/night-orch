@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createDashboardRouter } from '../../web/src/router.js'
 import {
   type DashboardSnapshot,
+  type InteractiveAgentSessionsSnapshot,
   type ProjectsSnapshot,
   type SettingsSnapshot,
   type SessionResponse,
@@ -146,6 +147,13 @@ const SETTINGS_SNAPSHOT: SettingsSnapshot = {
   settings: [],
 }
 
+const AGENT_SESSIONS_SNAPSHOT: InteractiveAgentSessionsSnapshot = {
+  generatedAt: '2026-04-06T10:00:00.000Z',
+  workspacePath: '/tmp/night-orch',
+  profiles: [],
+  sessions: [],
+}
+
 class MockWebSocket {
   static readonly OPEN = 1
   static readonly CLOSED = 3
@@ -190,6 +198,7 @@ function buildFetchMock() {
     if (pathname === '/api/session') return createJsonResponse(SESSION_RESPONSE)
     if (pathname === '/api/projects') return createJsonResponse(PROJECTS_SNAPSHOT)
     if (pathname === '/api/settings') return createJsonResponse(SETTINGS_SNAPSHOT)
+    if (pathname === '/api/agent/sessions') return createJsonResponse(AGENT_SESSIONS_SNAPSHOT)
     if (pathname === '/api/update-status') return createJsonResponse({}, 404)
 
     return createJsonResponse({ error: `Unhandled endpoint: ${pathname}` }, 404)
@@ -203,7 +212,7 @@ function renderDashboard(pathname: string) {
   return { ...rendered, router }
 }
 
-function expectPageActive(label: 'issues' | 'stats' | 'projects' | 'settings'): void {
+function expectPageActive(label: 'issues' | 'stats' | 'projects' | 'agent' | 'settings'): void {
   const pageButtons = screen
     .getAllByRole('button', { name: new RegExp(`^${label}$`, 'i') })
     .filter((button) => button.getAttribute('aria-label') === label)
@@ -245,6 +254,17 @@ describe('dashboard router integration (real App)', () => {
 
     expect(screen.getByText(/Runtime overrides are stored in SQLite/i)).toBeDefined()
     expectPageActive('settings')
+  })
+
+  it('renders /agent with interactive session workspace controls', async () => {
+    const { router } = renderDashboard('/agent')
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/agent')
+    })
+
+    expect(screen.getByText('Interactive Agent')).toBeDefined()
+    expectPageActive('agent')
   })
 
   it('redirects invalid routes to /issues', async () => {

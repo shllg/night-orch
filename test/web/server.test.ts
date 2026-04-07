@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { request as httpRequest, type OutgoingHttpHeaders, type Server } from 'node:http'
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { once } from 'node:events'
 import { WebSocket } from 'ws'
@@ -150,6 +150,7 @@ describe('startWebServer', () => {
       poller: null,
       metrics: null,
     }
+    deps.config.storage.worktreeRoot = tmpDir
   })
 
   afterEach(async () => {
@@ -766,6 +767,30 @@ describe('startWebServer', () => {
     expect(Array.isArray(payload.stats.topRepos30d)).toBe(true)
   })
 
+  it('reports interactive agent workspace path from configured storage root', async () => {
+    deps.config.storage.worktreeRoot = './tmp/worktrees-relative'
+
+    server = await startWebServer(
+      deps,
+      {
+        host: '127.0.0.1',
+        port: 0,
+        frontendDistPath: frontendDir,
+      },
+    )
+
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Unexpected address type')
+    }
+    baseUrl = `http://127.0.0.1:${address.port}`
+
+    const response = await fetch(`${baseUrl}/api/agent/sessions`)
+    expect(response.status).toBe(200)
+    const payload = await response.json() as { workspacePath: string }
+    expect(payload.workspacePath).toBe(resolve('./tmp/worktrees-relative'))
+  })
+
   it('returns projects config snapshot for the web projects page', async () => {
     deps.config.workerProfiles = {
       codexCli: {
@@ -955,6 +980,16 @@ describe('startWebServer', () => {
     await expect(poll.json()).resolves.toMatchObject({
       error: 'Web operations are disabled by server policy.',
     })
+
+    const agentCreate = await fetch(`${baseUrl}/api/agent/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent: 'claude' }),
+    })
+    expect(agentCreate.status).toBe(409)
+    await expect(agentCreate.json()).resolves.toMatchObject({
+      error: 'Web operations are disabled by server policy.',
+    })
   })
 
   it('requires application/json for mutating API requests', async () => {
@@ -1142,6 +1177,158 @@ describe('startWebServer', () => {
     await expect(clientRoute.text()).resolves.toContain('<!doctype html>')
   })
 
+  it('creates interactive agent sessions and streams prompt output over websocket', async () => {
+    deps.config.workerProfiles = {
+      interactiveClaude: {
+        type: 'claude',
+        command: 'sh',
+        args: [
+          '-c',
+          'cat >/dev/null; printf \'{"type":"assistant","message":{"content":[{"type":"text","text":"hello from interactive test"}]}}\\n\'',
+        ],
+        workerTimeoutSeconds: 5,
+        minimalEnv: true,
+        runtimeWrapper: null,
+        env: {},
+      },
+    }
+
+    server = await startWebServer(
+      deps,
+      {
+        host: '127.0.0.1',
+        port: 0,
+        frontendDistPath: frontendDir,
+        snapshotIntervalMs: 50,
+      },
+    )
+
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Unexpected address type')
+    }
+    baseUrl = `http://127.0.0.1:${address.port}`
+    const mutationToken = await getMutationToken(baseUrl)
+
+    const create = await fetch(`${baseUrl}/api/agent/sessions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+        [WEB_AUTH_TOKEN_HEADER]: mutationToken,
+      },
+      body: JSON.stringify({
+        agent: 'claude',
+        profileName: 'interactiveClaude',
+      }),
+    })
+    expect(create.status).toBe(200)
+    const createPayload = await create.json() as {
+      session: { id: string; status: string; agent: string }
+    }
+    const sessionId = createPayload.session.id
+    expect(createPayload.session.status).toBe('idle')
+    expect(createPayload.session.agent).toBe('claude')
+
+    const wsOrigin = `http://127.0.0.1:${address.port}`
+    const ws = new WebSocket(`ws://127.0.0.1:${address.port}/ws`, { origin: wsOrigin })
+    await once(ws, 'open')
+    ws.send(JSON.stringify({ type: 'subscribe-agent-session-events', sessionId, since: 0 }))
+
+    try {
+      const liveEventsPromise = waitForWsMessage<{
+        type: string
+        payload: {
+          sessionId: string
+          events: Array<{
+            type: string
+            data: { text?: string; message?: string }
+          }>
+        }
+      }>(ws, (payload) => {
+        if (!payload || typeof payload !== 'object') return null
+        const message = payload as { type?: unknown; payload?: unknown }
+        if (message.type !== 'agent-session-events' || !message.payload || typeof message.payload !== 'object') return null
+        const body = message.payload as {
+          sessionId?: unknown
+          events?: unknown
+        }
+        if (body.sessionId !== sessionId || !Array.isArray(body.events)) return null
+        const hasTurnStarted = body.events.some((event) => (
+          event
+          && typeof event === 'object'
+          && (event as { type?: unknown }).type === 'status'
+          && ((event as { data?: unknown }).data as { message?: unknown } | undefined)?.message === 'Turn started'
+        ))
+        if (!hasTurnStarted) return null
+        return message as {
+          type: string
+          payload: {
+            sessionId: string
+            events: Array<{
+              type: string
+              data: { text?: string; message?: string }
+            }>
+          }
+        }
+      }, 5000)
+
+      const sendPrompt = await fetch(`${baseUrl}/api/agent/sessions/${encodeURIComponent(sessionId)}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          [MUTATION_INTENT_HEADER]: 'mutate',
+          [WEB_AUTH_TOKEN_HEADER]: mutationToken,
+        },
+        body: JSON.stringify({
+          prompt: 'say hello',
+        }),
+      })
+      expect(sendPrompt.status).toBe(200)
+      await expect(sendPrompt.json()).resolves.toMatchObject({
+        accepted: true,
+        sessionId,
+      })
+
+      const liveEvents = await liveEventsPromise
+
+      expect(liveEvents.payload.events.some((event) =>
+        event.type === 'status'
+        && event.data.message === 'Turn started')).toBe(true)
+    } finally {
+      ws.close()
+    }
+
+    const eventsPayload = await waitForAgentSessionEvents(
+      baseUrl,
+      sessionId,
+      (payload) => payload.events.some((event) => event.type === 'text'),
+      5_000,
+    )
+    expect(eventsPayload).toMatchObject({
+      sessionId,
+      events: expect.arrayContaining([
+        expect.objectContaining({ type: 'text' }),
+      ]),
+    })
+
+    const close = await fetch(`${baseUrl}/api/agent/sessions/${encodeURIComponent(sessionId)}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+        [WEB_AUTH_TOKEN_HEADER]: mutationToken,
+      },
+    })
+    expect(close.status).toBe(200)
+    await expect(close.json()).resolves.toMatchObject({
+      session: {
+        id: sessionId,
+        status: 'closed',
+      },
+    })
+  })
+
   it('streams run events over websocket subscriptions', async () => {
     const runManager = new RunManager(db)
     const run = runManager.create({
@@ -1278,6 +1465,44 @@ async function waitForWsMessage<T>(
   })
 
   return Promise.race([timeout, stream])
+}
+
+async function waitForAgentSessionEvents(
+  baseUrl: string,
+  sessionId: string,
+  matcher: (payload: {
+    sessionId: string
+    status: string
+    events: Array<{ type: string }>
+    lastEventId: number
+  }) => boolean,
+  timeoutMs: number,
+): Promise<{
+  sessionId: string
+  status: string
+  events: Array<{ type: string }>
+  lastEventId: number
+}> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const response = await fetch(`${baseUrl}/api/agent/sessions/${encodeURIComponent(sessionId)}/events?since=0&limit=400`)
+    if (response.status !== 200) {
+      throw new Error(`Failed to read session events (${response.status})`)
+    }
+    const payload = await response.json() as {
+      sessionId: string
+      status: string
+      events: Array<{ type: string }>
+      lastEventId: number
+    }
+    if (matcher(payload)) {
+      return payload
+    }
+    if (Date.now() >= deadline) {
+      throw new Error('Timed out waiting for agent session events')
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 50))
+  }
 }
 
 function decodeWsRaw(raw: unknown): string | null {
