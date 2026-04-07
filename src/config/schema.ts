@@ -26,7 +26,7 @@ const SmtpChannelSchema = z.object({
   passEnv: z.string(),
 })
 
-const NotificationChannelSchema = z.discriminatedUnion('type', [
+export const NotificationChannelSchema = z.discriminatedUnion('type', [
   ConsoleChannelSchema,
   WebhookChannelSchema,
   DiscordChannelSchema,
@@ -44,14 +44,14 @@ const NotificationEventsSchema = z.object({
 
 // --- App mention schemas ---
 
-const AppMentionSchema = z.object({
+export const AppMentionSchema = z.object({
   enabled: z.boolean().default(false),
   commentTemplate: z.string(),
 })
 
 // --- Worker profile schema ---
 
-const WorkerProfileSchema = z.object({
+export const WorkerProfileSchema = z.object({
   type: z.string().min(1, 'Worker type must not be empty'),
   pricingModel: z.string().min(1).optional(),
   command: z.string(),
@@ -209,7 +209,7 @@ const WorkflowRoleOverridesSchema = z.object({
   reviewer: z.enum(['claude', 'codex', 'opencode']).optional(),
 })
 
-const WorkflowSchema = z.object({
+export const WorkflowSchema = z.object({
   steps: z.array(WorkflowStepSchema).min(1),
   roles: WorkflowRoleOverridesSchema.optional(),
   agents: z.record(z.string()).optional(),
@@ -284,7 +284,7 @@ const SecuritySchema = z.object({
 
 const CostModelSchema = z.enum(['pay-per-use', 'subscription'])
 
-const CostPricingModelSchema = z.object({
+export const CostPricingModelSchema = z.object({
   inputUsdPerMillionTokens: z.number().nonnegative().default(3),
   outputUsdPerMillionTokens: z.number().nonnegative().default(15),
   minuteUsd: z.number().nonnegative().default(0.008),

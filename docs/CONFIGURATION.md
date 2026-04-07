@@ -25,7 +25,7 @@ Recommended deployment uses a dedicated non-root user (for example `orch`) with:
 
 ## Runtime Settings Overrides (DB-backed)
 
-Night-orch supports a curated set of runtime overrides stored in SQLite (`settings_overrides` table).  
+Night-orch supports DB-backed runtime overrides stored in SQLite (`settings_overrides` table).  
 Effective config precedence is:
 
 1. YAML value (or schema default when omitted)
@@ -33,16 +33,28 @@ Effective config precedence is:
 
 Overrides are persisted in DB and survive process restarts. They are not written back to YAML.
 
-Curated runtime keys:
+Runtime settings registry scope:
 
-| Key | Type | Accepted Range |
-| --- | --- | --- |
-| `github.pollIntervalSeconds` | integer | `5..3600` |
-| `security.maxDailyCostUsd` | number | `1..10000` |
-| `security.maxCostPerRunUsd` | number | `0.1..1000` |
-| `loop.maxReviewIterations` | integer | `1..20` |
-| `loop.maxTotalAgentPasses` | integer | `1..50` |
-| `observability.agentStreaming` | boolean | `true`/`false` |
+- Includes all non-project-specific config keys used at runtime.
+- Excludes project-scoped `repos[*]` settings and schema marker `version`.
+- `storage.dbPath` is listed for visibility but is read-only at runtime (DB bootstraps before overrides load).
+- Sensitive fields are redacted in settings read surfaces (for example `workerProfiles.*.env` values).
+- JSON setting overrides are schema-validated per key before persistence.
+
+Registered keys are visible via `night-orch settings list` (or Web/TUI Settings/MCP `night-orch-list-settings`). Current key groups:
+
+- `github`: `tokenEnv`, `apiBaseUrl`, `pollIntervalSeconds`, `appMentions`
+- `storage`: `dbPath` (read-only), `worktreeRoot`, `logsRoot`, `autoCleanup.enabled`, `autoCleanup.intervalMinutes`, `retention.worktreeAgeDays`, `retention.detailDays`, `retention.archiveDays`
+- `notifications`: `channels`, `events.onRunStarted`, `events.onBlocked`, `events.onPrReady`, `events.onPrUpdated`, `events.onError`, `events.onRetryExhausted`
+- `loop`: `maxReviewIterations`, `maxTotalAgentPasses`, `stopOnPlannerFailure`, `requireVerificationPass`, `reviewApprovalKeyword`, `reviewNeedsChangesKeyword`, `blockOnAmbiguousReview`, `maxAutoRetries`, `decompose`, `maxSubtasks`, `maxConcurrentSubtasks`
+- `security`: `maxChangedFiles`, `maxChangedLines`, `maxDailyCostUsd`, `maxCostPerRunUsd`
+- `cost`: `model`, `pricing.defaultModel`, `pricing.models`
+- `workerProfiles`
+- `metrics`: `enabled`, `port`, `host`
+- `observability`: `agentStreaming`, `eventRetention`, `sessionLogs`, `sessionLogRetention`
+- `mcp`: `enabled`, `transport`, `authTokenEnv`, `httpPort`, `httpHost`
+- `commentCommands`: `enabled`, `requireCollaborator`
+- `workflows`
 
 Update surfaces:
 

@@ -4,6 +4,7 @@ import { logger } from '../utils/logger.js'
 import {
   getSettingDefinition,
   listSettingDefinitions,
+  sanitizeSettingValueForDisplay,
   type SettingDefinition,
   type SettingKey,
   type SettingType,
@@ -17,10 +18,14 @@ export interface RuntimeSettingSnapshot {
   description: string
   details: string
   type: SettingType
+  mutable: boolean
+  sensitive: boolean
   min?: number
   max?: number
   step?: number
-  defaultValue: SettingValue
+  options?: string[]
+  allowNull?: boolean
+  defaultValue: SettingValue | null
   baseValue: SettingValue
   overrideValue: SettingValue | null
   effectiveValue: SettingValue
@@ -57,8 +62,13 @@ export function listRuntimeSettings(
   return listSettingDefinitions().map((definition) => {
     const override = parsedOverrides.get(definition.key)
     const baseValue = definition.read(baseConfig)
-    const overrideValue = override?.value ?? null
-    const effectiveValue = overrideValue ?? baseValue
+    const hasOverride = override !== undefined
+    const overrideValue = hasOverride ? override.value : null
+    const effectiveValue = hasOverride ? override.value : baseValue
+    const displayDefaultValue = sanitizeSettingValueForDisplay(definition, definition.defaultValue)
+    const displayBaseValue = sanitizeSettingValueForDisplay(definition, baseValue)
+    const displayOverrideValue = sanitizeSettingValueForDisplay(definition, overrideValue)
+    const displayEffectiveValue = sanitizeSettingValueForDisplay(definition, effectiveValue)
 
     return {
       key: definition.key,
@@ -66,6 +76,8 @@ export function listRuntimeSettings(
       description: definition.description,
       details: definition.details,
       type: definition.type,
+      mutable: definition.mutable,
+      sensitive: definition.sensitive,
       ...(definition.type === 'number'
         ? {
             ...(definition.min !== undefined ? { min: definition.min } : {}),
@@ -73,11 +85,17 @@ export function listRuntimeSettings(
             ...(definition.step !== undefined ? { step: definition.step } : {}),
           }
         : {}),
-      defaultValue: definition.defaultValue,
-      baseValue,
-      overrideValue,
-      effectiveValue,
-      source: overrideValue === null ? 'base' : 'override',
+      ...(definition.type === 'string'
+        ? {
+            ...(definition.options ? { options: [...definition.options] } : {}),
+            ...(definition.allowNull ? { allowNull: true } : {}),
+          }
+        : {}),
+      defaultValue: displayDefaultValue,
+      baseValue: displayBaseValue,
+      overrideValue: displayOverrideValue,
+      effectiveValue: displayEffectiveValue,
+      source: hasOverride ? 'override' : 'base',
       updatedBy: override?.row.updatedBy ?? null,
       updatedAt: override?.row.updatedAt ?? null,
     }
@@ -99,7 +117,16 @@ export function resolveConfigWithRuntimeSettings(
       effectiveConfig = definition.apply(effectiveConfig, override.value)
       continue
     }
-    if (typeof override.value !== 'boolean') continue
+    if (definition.type === 'boolean') {
+      if (typeof override.value !== 'boolean') continue
+      effectiveConfig = definition.apply(effectiveConfig, override.value)
+      continue
+    }
+    if (definition.type === 'string') {
+      if (typeof override.value !== 'string' && override.value !== null) continue
+      effectiveConfig = definition.apply(effectiveConfig, override.value)
+      continue
+    }
     effectiveConfig = definition.apply(effectiveConfig, override.value)
   }
 
@@ -114,9 +141,18 @@ export function setRuntimeSettingOverride(
   updatedBy: string | null = null,
 ): RuntimeSettingMutationResult {
   const definition = requireSettingDefinition(key)
+  if (!definition.mutable) {
+    throw new RuntimeSettingInputError(`${definition.key} is read-only at runtime and cannot be overridden`)
+  }
   let serialized: string
   try {
     if (definition.type === 'number') {
+      const parsedValue = definition.parseInput(rawValue)
+      serialized = definition.serialize(parsedValue)
+    } else if (definition.type === 'boolean') {
+      const parsedValue = definition.parseInput(rawValue)
+      serialized = definition.serialize(parsedValue)
+    } else if (definition.type === 'string') {
       const parsedValue = definition.parseInput(rawValue)
       serialized = definition.serialize(parsedValue)
     } else {
@@ -152,6 +188,9 @@ export function clearRuntimeSettingOverride(
   key: string,
 ): RuntimeSettingMutationResult {
   const definition = requireSettingDefinition(key)
+  if (!definition.mutable) {
+    throw new RuntimeSettingInputError(`${definition.key} is read-only at runtime and cannot be overridden`)
+  }
   const store = new SettingOverrideStore(db)
   const changed = store.delete(definition.key)
 
