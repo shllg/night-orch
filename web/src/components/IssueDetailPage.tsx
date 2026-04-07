@@ -38,16 +38,16 @@ export function IssueDetailPage({
   }, [runId])
 
   return (
-    <section className="card border border-base-300/60 bg-base-200/60 shadow-panel backdrop-blur">
+    <section className="card min-w-0 overflow-hidden border border-base-300/60 bg-base-200/60 shadow-panel backdrop-blur">
       <div className="card-body p-4 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <h2 className="card-title text-lg">Issue Detail</h2>
-            <p className="text-xs text-base-content/70">
+            <p className="break-all text-xs text-base-content/70">
               {run ? `${run.repo} #${run.issue}` : `Run ${runId}`}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <button
               type="button"
               className={`btn btn-sm ${autoScroll ? 'btn-primary' : 'btn-ghost'}`}
@@ -67,13 +67,13 @@ export function IssueDetailPage({
           </div>
         ) : (
           <div className="mt-4 space-y-4">
-            <section className="rounded-box border border-base-300/70 bg-base-100/70 px-3 py-3">
-              <p className="text-sm font-semibold text-base-content">
+            <section className="min-w-0 rounded-box border border-base-300/70 bg-base-100/70 px-3 py-3">
+              <p className="break-words text-sm font-semibold text-base-content">
                 {truncate(resolveIssueTitle(run.issueTitle), 200)}
               </p>
               <div className="mt-2 flex flex-wrap gap-2 text-xs text-base-content/80">
                 <span className="badge badge-sm">{run.status.replaceAll('_', ' ')}</span>
-                <span className="badge badge-sm">phase {run.phase?.trim() || '-'}</span>
+                <span className="badge badge-sm">phase {truncate(run.phase?.trim() || '-', 28)}</span>
                 <span className="badge badge-sm">iter {run.iterations}</span>
                 <span className="badge badge-sm">${run.costUsd.toFixed(2)}</span>
                 <span className="badge badge-sm">
@@ -81,7 +81,7 @@ export function IssueDetailPage({
                 </span>
               </div>
               {run.lastError && (
-                <p className="mt-2 whitespace-pre-wrap rounded-md border border-error/30 bg-error/10 px-2 py-1 text-xs text-error">
+                <p className="mt-2 whitespace-pre-wrap break-words rounded-md border border-error/30 bg-error/10 px-2 py-1 text-xs text-error">
                   {truncate(run.lastError, 2000)}
                 </p>
               )}
@@ -101,7 +101,7 @@ export function IssueDetailPage({
                 <span>No events yet for this run.</span>
               </div>
             ) : (
-              <section className="rounded-box border border-base-300/70 bg-base-100/70 px-3 py-3">
+              <section className="min-w-0 rounded-box border border-base-300/70 bg-base-100/70 px-3 py-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-sm font-semibold text-base-content">Event Stream</h3>
                   <p className="text-xs text-base-content/65">
@@ -117,16 +117,18 @@ export function IssueDetailPage({
                     const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight
                     setAutoScroll(distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX)
                   }}
-                  className="mt-3 max-h-[70vh] space-y-2 overflow-y-auto pr-1"
+                  className="mt-3 max-h-[70vh] min-w-0 space-y-2 overflow-x-hidden overflow-y-auto pr-1"
                 >
                   {visibleEvents.map((event) => (
-                    <div key={event.id} className="rounded-box border border-base-300/70 bg-base-200/70 px-3 py-2">
+                    <div key={event.id} className="min-w-0 rounded-box border border-base-300/70 bg-base-200/70 px-3 py-2">
                       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-base-content/70">
                         <span>{formatTimestamp(event.timestamp)}</span>
-                        <span>{event.phase} / {event.role}</span>
+                        <span className="break-all">{event.phase} / {event.role}</span>
                       </div>
-                      <p className="mt-1 text-sm font-semibold text-info">{event.type}</p>
-                      <p className="mt-1 text-xs text-base-content/85">{describeEventData(event.data)}</p>
+                      <p className="mt-1 break-words text-sm font-semibold text-info">{event.type}</p>
+                      <p className="mt-1 whitespace-pre-wrap break-words text-xs text-base-content/85">
+                        {describeEventData(event.data)}
+                      </p>
                     </div>
                   ))}
                 </div>
