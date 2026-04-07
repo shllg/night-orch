@@ -71,3 +71,7 @@ night-orch labels-init              # create/update required labels
 ## Contributing
 
 Development setup, architecture guardrails, and contribution workflow live in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+## License
+
+This project is licensed under the MIT License. See [`LICENSE`](LICENSE).

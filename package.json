@@ -2,6 +2,7 @@
   "name": "night-orch",
   "version": "0.3.2",
   "description": "Nightly GitHub/Forgejo issue orchestrator — autonomous AI agent coding tool",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/shllg/night-orch"
