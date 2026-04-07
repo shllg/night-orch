@@ -1,6 +1,6 @@
 export type RunStatus = 'queued' | 'running' | 'blocked' | 'review_ready' | 'error' | 'completed'
 
-export const DASHBOARD_PAGES = ['issues', 'stats', 'projects', 'settings'] as const
+export const DASHBOARD_PAGES = ['issues', 'stats', 'projects', 'agent', 'settings'] as const
 export type DashboardPage = (typeof DASHBOARD_PAGES)[number]
 
 export function isDashboardPage(page: string): page is DashboardPage {
@@ -198,6 +198,56 @@ export interface RunEvent {
 export interface RunEventsPayload {
   runId: string
   events: RunEvent[]
+  lastEventId: number
+}
+
+export type InteractiveAgentType = 'claude' | 'codex'
+export type InteractiveAgentSessionStatus = 'idle' | 'running' | 'failed' | 'closed'
+export type InteractiveAgentSessionEventType = 'status' | 'stdout' | 'stderr' | 'text' | 'tool_call'
+
+export interface InteractiveAgentProfileSummary {
+  name: string
+  type: InteractiveAgentType
+  command: string
+  args: string[]
+}
+
+export interface InteractiveAgentSessionSummary {
+  id: string
+  agent: InteractiveAgentType
+  profileName: string | null
+  status: InteractiveAgentSessionStatus
+  cwd: string
+  createdAt: string
+  updatedAt: string
+  turnCount: number
+  lastError: string | null
+}
+
+export interface InteractiveAgentSessionDetail extends InteractiveAgentSessionSummary {
+  continueSessionId: string | null
+  runningTurnId: string | null
+}
+
+export interface InteractiveAgentSessionEvent {
+  id: number
+  sessionId: string
+  timestamp: string
+  type: InteractiveAgentSessionEventType
+  data: Record<string, unknown>
+}
+
+export interface InteractiveAgentSessionsSnapshot {
+  generatedAt: string
+  workspacePath: string
+  profiles: InteractiveAgentProfileSummary[]
+  sessions: InteractiveAgentSessionSummary[]
+}
+
+export interface InteractiveAgentSessionEventsPayload {
+  sessionId: string
+  status: InteractiveAgentSessionStatus
+  events: InteractiveAgentSessionEvent[]
   lastEventId: number
 }
 

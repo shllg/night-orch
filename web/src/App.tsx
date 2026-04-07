@@ -2,6 +2,7 @@ import { type FormEvent, type ReactElement, useCallback, useEffect, useMemo, use
 import { useNavigate } from '@tanstack/react-router'
 
 import { BudgetOverridesPanel } from './components/BudgetOverridesPanel.js'
+import { AgentSessionsPage } from './components/AgentSessionsPage.js'
 import { DashboardHeader } from './components/DashboardHeader.js'
 import { DashboardMetrics } from './components/DashboardMetrics.js'
 import { DashboardNavigation } from './components/DashboardNavigation.js'
@@ -16,6 +17,10 @@ import { UpdateProgressModal } from './components/UpdateProgressModal.js'
 import { extractMessage } from './lib/format.js'
 import { STATUS_BADGE_TONE } from './lib/run-tone.js'
 import { asRunEventsPayload, mergeRunEvents } from './lib/run-events.js'
+import {
+  asInteractiveAgentSessionEventsPayload,
+  mergeInteractiveAgentSessionEvents,
+} from './lib/agent-session-events.js'
 import { confirmSelfUpdate } from './lib/update-confirmation.js'
 import {
   clearUpdateTransitionState,
@@ -28,6 +33,10 @@ import {
 import {
   type DashboardPage,
   type DashboardSnapshot,
+  type InteractiveAgentSessionDetail,
+  type InteractiveAgentSessionEvent,
+  type InteractiveAgentSessionsSnapshot,
+  type InteractiveAgentType,
   type ProjectsSnapshot,
   type RunEvent,
   type SettingsSnapshot,
@@ -77,6 +86,19 @@ export function App({
   const [selectedRepo, setSelectedRepo] = useState('all')
   const [selectedRunId, setSelectedRunId] = useState('')
   const [runEvents, setRunEvents] = useState<RunEvent[]>([])
+  const [agentSessionsSnapshot, setAgentSessionsSnapshot] = useState<InteractiveAgentSessionsSnapshot | null>(null)
+  const [isAgentSessionsLoading, setIsAgentSessionsLoading] = useState(false)
+  const [selectedAgentSessionId, setSelectedAgentSessionId] = useState('')
+  const [selectedAgentSession, setSelectedAgentSession] = useState<InteractiveAgentSessionDetail | null>(null)
+  const [agentSessionEvents, setAgentSessionEvents] = useState<InteractiveAgentSessionEvent[]>([])
+  const [agentPromptDraft, setAgentPromptDraft] = useState('')
+  const [agentCreateDraft, setAgentCreateDraft] = useState<{
+    agent: InteractiveAgentType
+    profileName: string
+  }>({
+    agent: 'codex',
+    profileName: '',
+  })
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null)
   const [activeOperation, setActiveOperation] = useState<string | null>(null)
@@ -111,7 +133,9 @@ export function App({
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
   const selectedStreamRunIdRef = useRef('')
+  const selectedAgentSessionIdRef = useRef('')
   const subscribedRunRef = useRef('')
+  const subscribedAgentSessionRef = useRef('')
   const updateTransitionRef = useRef<UpdateTransitionState>(clearUpdateTransitionState())
 
   const repos = snapshot?.config.repos ?? []
@@ -229,6 +253,35 @@ export function App({
     )
   }, [])
 
+  const loadAgentSessions = useCallback(async () => {
+    const response = await fetch('/api/agent/sessions')
+    if (!response.ok) {
+      throw new Error(`Failed to load agent sessions (${response.status})`)
+    }
+    const payload = await response.json() as InteractiveAgentSessionsSnapshot
+    setAgentSessionsSnapshot(payload)
+  }, [])
+
+  const loadAgentSessionDetail = useCallback(async (sessionId: string) => {
+    if (!sessionId) {
+      setSelectedAgentSession(null)
+      return
+    }
+    const response = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}`)
+    if (response.status === 404) {
+      setSelectedAgentSession(null)
+      return
+    }
+    if (!response.ok) {
+      throw new Error(`Failed to load agent session (${response.status})`)
+    }
+    const payload = await response.json() as { session?: InteractiveAgentSessionDetail }
+    if (!payload.session) {
+      throw new Error('Malformed agent session response')
+    }
+    setSelectedAgentSession(payload.session)
+  }, [])
+
   useEffect(() => {
     void (async () => {
       try {
@@ -294,6 +347,58 @@ export function App({
   }, [decodedIssueDetailRunId])
 
   useEffect(() => {
+    if (activePage !== 'agent') return
+    let cancelled = false
+    setIsAgentSessionsLoading(true)
+    setErrorMessage(null)
+    void (async () => {
+      try {
+        await loadAgentSessions()
+      } catch (err) {
+        if (!cancelled) {
+          setErrorMessage((err as Error).message)
+        }
+      } finally {
+        if (!cancelled) {
+          setIsAgentSessionsLoading(false)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [activePage, loadAgentSessions])
+
+  useEffect(() => {
+    if (activePage !== 'agent') return
+    const sessions = agentSessionsSnapshot?.sessions ?? []
+    setSelectedAgentSessionId((previous) => {
+      if (previous && sessions.some((session) => session.id === previous)) {
+        return previous
+      }
+      return sessions[0]?.id ?? ''
+    })
+  }, [activePage, agentSessionsSnapshot])
+
+  useEffect(() => {
+    if (activePage !== 'agent') return
+    let cancelled = false
+    void (async () => {
+      try {
+        await loadAgentSessionDetail(selectedAgentSessionId)
+      } catch (err) {
+        if (!cancelled) {
+          setErrorMessage((err as Error).message)
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [activePage, loadAgentSessionDetail, selectedAgentSessionId])
+
+  useEffect(() => {
     let cancelled = false
 
     const connect = (): void => {
@@ -308,6 +413,10 @@ export function App({
         const activeRun = selectedStreamRunIdRef.current
         if (activeRun) {
           socket.send(JSON.stringify({ type: 'subscribe-run-events', runId: activeRun, since: 0 }))
+        }
+        const activeSession = selectedAgentSessionIdRef.current
+        if (activeSession) {
+          socket.send(JSON.stringify({ type: 'subscribe-agent-session-events', sessionId: activeSession, since: 0 }))
         }
       }
 
@@ -326,6 +435,39 @@ export function App({
             }
 
             setRunEvents((previous) => mergeRunEvents(previous, payload.events))
+            return
+          }
+
+          if (envelope.type === 'agent-session-events' && envelope.payload) {
+            const payload = asInteractiveAgentSessionEventsPayload(envelope.payload)
+            if (!payload) {
+              return
+            }
+
+            setAgentSessionsSnapshot((current) => {
+              if (!current) return current
+              return {
+                ...current,
+                sessions: current.sessions.map((session) => (
+                  session.id === payload.sessionId
+                    ? {
+                        ...session,
+                        status: payload.status,
+                  }
+                    : session
+                )),
+              }
+            })
+            if (payload.sessionId !== selectedAgentSessionIdRef.current) {
+              return
+            }
+
+            setAgentSessionEvents((previous) => mergeInteractiveAgentSessionEvents(previous, payload.events))
+            setSelectedAgentSession((current) => (
+              current && current.id === payload.sessionId
+                ? { ...current, status: payload.status }
+                : current
+            ))
             return
           }
 
@@ -385,6 +527,28 @@ export function App({
 
     subscribedRunRef.current = selectedStreamRunId
   }, [selectedStreamRunId, socketConnected])
+
+  useEffect(() => {
+    selectedAgentSessionIdRef.current = selectedAgentSessionId
+    setAgentSessionEvents([])
+
+    const socket = wsRef.current
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      subscribedAgentSessionRef.current = selectedAgentSessionId
+      return
+    }
+
+    const previousSession = subscribedAgentSessionRef.current
+    if (previousSession && previousSession !== selectedAgentSessionId) {
+      socket.send(JSON.stringify({ type: 'unsubscribe-agent-session-events', sessionId: previousSession }))
+    }
+
+    if (selectedAgentSessionId) {
+      socket.send(JSON.stringify({ type: 'subscribe-agent-session-events', sessionId: selectedAgentSessionId, since: 0 }))
+    }
+
+    subscribedAgentSessionRef.current = selectedAgentSessionId
+  }, [selectedAgentSessionId, socketConnected])
 
   const [serverUnreachable, setServerUnreachable] = useState(false)
 
@@ -502,11 +666,58 @@ export function App({
     }
   }, [loadDashboard, loadSettings, operationsEnabled, webMutationToken])
 
+  const runAgentMutation = useCallback(async (
+    operationName: string,
+    endpoint: string,
+    payload: Record<string, unknown>,
+    method: 'POST' | 'DELETE' = 'POST',
+  ): Promise<Record<string, unknown> | null> => {
+    try {
+      setActiveOperation(operationName)
+      setErrorMessage(null)
+
+      if (!webMutationToken) {
+        throw new Error('Web session is not initialized yet. Refresh the page and try again.')
+      }
+
+      const response = await fetch(endpoint, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          [MUTATION_INTENT_HEADER]: MUTATION_INTENT_VALUE,
+          [WEB_AUTH_TOKEN_HEADER]: webMutationToken,
+        },
+        body: method === 'DELETE' ? undefined : JSON.stringify(payload),
+      })
+
+      const body = await response.json() as Record<string, unknown>
+      if (!response.ok) {
+        const message = typeof body['error'] === 'string' ? body['error'] : `Operation failed (${response.status})`
+        throw new Error(message)
+      }
+
+      return body
+    } catch (err) {
+      setErrorMessage((err as Error).message)
+      return null
+    } finally {
+      setActiveOperation(null)
+    }
+  }, [webMutationToken])
+
   const refreshDashboardData = useCallback(async () => {
     try {
       setIsHeaderRefreshing(true)
       setErrorMessage(null)
-      await Promise.all([loadDashboard(), loadProjects(), loadSettings()])
+      const refreshTasks: Array<Promise<void>> = [
+        loadDashboard(),
+        loadProjects(),
+        loadSettings(),
+      ]
+      if (activePage === 'agent') {
+        refreshTasks.push(loadAgentSessions())
+      }
+      await Promise.all(refreshTasks)
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ type: 'refresh' }))
       }
@@ -515,7 +726,7 @@ export function App({
     } finally {
       setIsHeaderRefreshing(false)
     }
-  }, [loadDashboard, loadProjects, loadSettings])
+  }, [activePage, loadAgentSessions, loadDashboard, loadProjects, loadSettings])
 
   const triggerPoll = useCallback(() => {
     void runOperation('poll', '/api/operations/poll', {}, 'Manual poll requested')
@@ -774,6 +985,67 @@ export function App({
     )
   }, [costOverrideDraft, runOperation])
 
+  const submitCreateAgentSession = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const response = await runAgentMutation(
+      'agent:create-session',
+      '/api/agent/sessions',
+      {
+        agent: agentCreateDraft.agent,
+        profileName: agentCreateDraft.profileName || undefined,
+      },
+    )
+    if (!response) return
+
+    const session = response['session'] as InteractiveAgentSessionDetail | undefined
+    await loadAgentSessions()
+    if (session?.id) {
+      setSelectedAgentSessionId(session.id)
+      setSelectedAgentSession(session)
+      setAgentSessionEvents([])
+      setFeedbackMessage(`Created ${session.agent} session`)
+    }
+  }, [agentCreateDraft.agent, agentCreateDraft.profileName, loadAgentSessions, runAgentMutation])
+
+  const submitAgentPrompt = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!selectedAgentSessionId) {
+      setErrorMessage('Select a session before sending a prompt')
+      return
+    }
+    const prompt = agentPromptDraft.trim()
+    if (!prompt) {
+      setErrorMessage('Prompt cannot be empty')
+      return
+    }
+
+    const response = await runAgentMutation(
+      'agent:send-prompt',
+      `/api/agent/sessions/${encodeURIComponent(selectedAgentSessionId)}/messages`,
+      { prompt },
+    )
+    if (!response) return
+
+    setAgentPromptDraft('')
+    setFeedbackMessage('Prompt sent')
+    await loadAgentSessionDetail(selectedAgentSessionId)
+  }, [agentPromptDraft, loadAgentSessionDetail, runAgentMutation, selectedAgentSessionId])
+
+  const closeAgentSession = useCallback(async () => {
+    if (!selectedAgentSessionId) return
+    const response = await runAgentMutation(
+      'agent:close-session',
+      `/api/agent/sessions/${encodeURIComponent(selectedAgentSessionId)}`,
+      {},
+      'DELETE',
+    )
+    if (!response) return
+
+    await loadAgentSessions()
+    await loadAgentSessionDetail(selectedAgentSessionId)
+    setFeedbackMessage('Session closed')
+  }, [loadAgentSessionDetail, loadAgentSessions, runAgentMutation, selectedAgentSessionId])
+
   const isIssueDetailScreen = activePage === 'issues' && decodedIssueDetailRunId !== null
   const isProjectDetailScreen = activePage === 'projects' && decodedProjectDetailRepo !== null
 
@@ -940,6 +1212,35 @@ export function App({
                   onOpenRepo={openProjectDetail}
                 />
               )
+            )}
+
+            {activePage === 'agent' && (
+              <AgentSessionsPage
+                snapshot={agentSessionsSnapshot}
+                selectedSessionId={selectedAgentSessionId}
+                selectedSession={selectedAgentSession}
+                events={agentSessionEvents}
+                promptDraft={agentPromptDraft}
+                createDraft={agentCreateDraft}
+                isLoading={isAgentSessionsLoading}
+                isMutating={activeOperation !== null}
+                onSelectSession={(sessionId) => {
+                  setSelectedAgentSessionId(sessionId)
+                }}
+                onCreateDraftChange={(patch) => {
+                  setAgentCreateDraft((current) => ({ ...current, ...patch }))
+                }}
+                onPromptDraftChange={setAgentPromptDraft}
+                onCreateSession={(event) => {
+                  void submitCreateAgentSession(event)
+                }}
+                onSendPrompt={(event) => {
+                  void submitAgentPrompt(event)
+                }}
+                onCloseSession={() => {
+                  void closeAgentSession()
+                }}
+              />
             )}
 
             {activePage === 'settings' && (

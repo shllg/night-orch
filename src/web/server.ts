@@ -10,6 +10,11 @@ import type { MCPDependencies } from '../mcp/server.js'
 import type { RepoConfig, WorkerProfile } from '../config/schema.js'
 import { handleToolCall } from '../mcp/tools/index.js'
 import { handleResourceRead } from '../mcp/resources/index.js'
+import {
+  InteractiveAgentSessionManager,
+  type InteractiveAgentSessionEventList,
+  type InteractiveAgentType,
+} from './agent-session.js'
 import { loadTuiStats } from '../state/stats.js'
 import { getBuildInfo } from '../utils/build-info.js'
 import { logger } from '../utils/logger.js'
@@ -35,6 +40,7 @@ export interface WebServerOptions {
 
 interface WsClientState {
   runSubscriptions: Map<string, number>
+  agentSessionSubscriptions: Map<string, number>
 }
 
 interface DashboardSnapshot {
@@ -206,6 +212,8 @@ interface WebSecurityContext {
 type WebSocketCommand =
   | { type: 'subscribe-run-events'; runId: string; since?: number }
   | { type: 'unsubscribe-run-events'; runId: string }
+  | { type: 'subscribe-agent-session-events'; sessionId: string; since?: number }
+  | { type: 'unsubscribe-agent-session-events'; sessionId: string }
   | { type: 'refresh' }
 
 const ONE_MEGABYTE = 1024 * 1024
@@ -263,6 +271,9 @@ export async function startWebServer(
 
   const security = createWebSecurityContext(deps, options)
   const operationsEnabled = options.operationsEnabled ?? true
+  const agentSessionManager = new InteractiveAgentSessionManager(deps.config, {
+    workspacePath: resolveAgentSessionWorkspacePath(deps),
+  })
   const frontendDistPath = resolveWebFrontendDistPath(options.frontendDistPath)
   const hasFrontendAssets = existsSync(resolve(frontendDistPath, 'index.html'))
 
@@ -285,7 +296,16 @@ export async function startWebServer(
           writeJson(res, 403, { error: 'Forbidden host' })
           return
         }
-        await handleApiRequest(req, res, requestUrl, deps, security, operationsEnabled, options.rawConfig)
+        await handleApiRequest(
+          req,
+          res,
+          requestUrl,
+          deps,
+          security,
+          operationsEnabled,
+          options.rawConfig,
+          agentSessionManager,
+        )
         return
       }
 
@@ -343,7 +363,10 @@ export async function startWebServer(
   })
 
   wsServer.on('connection', (ws) => {
-    const state: WsClientState = { runSubscriptions: new Map() }
+    const state: WsClientState = {
+      runSubscriptions: new Map(),
+      agentSessionSubscriptions: new Map(),
+    }
     clients.set(ws, state)
 
     sendWebsocket(ws, {
@@ -357,7 +380,7 @@ export async function startWebServer(
         sendWebsocket(ws, { type: 'error', error: 'Unsupported websocket payload type' })
         return
       }
-      void handleWsMessage(ws, state, decoded, deps)
+      void handleWsMessage(ws, state, decoded, deps, agentSessionManager)
     })
 
     ws.on('close', () => {
@@ -383,6 +406,7 @@ export async function startWebServer(
       for (const [ws, state] of clients.entries()) {
         if (ws.readyState !== WebSocket.OPEN) continue
         await publishRunSubscriptions(ws, state, deps)
+        publishAgentSessionSubscriptions(ws, state, agentSessionManager)
       }
     } catch (err) {
       logger.warn({ err }, 'Failed to publish websocket snapshot tick')
@@ -396,7 +420,16 @@ export async function startWebServer(
   }, snapshotIntervalMs)
   interval.unref()
 
+  const stopAgentSessionStreaming = agentSessionManager.onSessionEvent((sessionId) => {
+    for (const [ws, state] of clients.entries()) {
+      if (ws.readyState !== WebSocket.OPEN) continue
+      if (!state.agentSessionSubscriptions.has(sessionId)) continue
+      publishAgentSessionSubscriptions(ws, state, agentSessionManager)
+    }
+  })
+
   httpServer.on('close', () => {
+    stopAgentSessionStreaming()
     clearInterval(interval)
     for (const ws of wsServer.clients) {
       ws.close()
@@ -426,6 +459,7 @@ async function handleApiRequest(
   security: WebSecurityContext,
   operationsEnabled: boolean,
   rawConfig: unknown,
+  agentSessionManager: InteractiveAgentSessionManager,
 ): Promise<void> {
   const method = req.method ?? 'GET'
   const { pathname, searchParams } = requestUrl
@@ -434,8 +468,9 @@ async function handleApiRequest(
     config: resolveConfigWithRuntimeSettings(deps.config, deps.db),
   }
 
-  if (method === 'POST' && pathname.startsWith('/api/operations/')) {
-    // Update is a supervisor operation — always allowed regardless of attach/standalone mode
+  if ((method === 'POST' || method === 'DELETE')
+    && (pathname.startsWith('/api/operations/') || pathname.startsWith('/api/agent/'))) {
+    // Update is a supervisor operation — always allowed regardless of attach/standalone mode.
     if (!operationsEnabled && pathname !== '/api/operations/update') {
       writeJson(res, 409, { error: 'Web operations are disabled by server policy.' })
       return
@@ -483,6 +518,11 @@ async function handleApiRequest(
     return
   }
 
+  if (method === 'GET' && pathname === '/api/agent/sessions') {
+    writeJson(res, 200, agentSessionManager.listSessions())
+    return
+  }
+
   if (method === 'GET' && pathname === '/api/status') {
     const repo = searchParams.get('repo') ?? undefined
     const result = await handleToolCall('night-orch-status', { repo }, runtimeDeps)
@@ -518,6 +558,33 @@ async function handleApiRequest(
   }
 
   if (method === 'GET') {
+    const agentSessionEventsMatch = pathname.match(/^\/api\/agent\/sessions\/([^/]+)\/events$/)
+    if (agentSessionEventsMatch) {
+      const sessionId = decodeURIComponent(agentSessionEventsMatch[1] ?? '')
+      const since = toBoundedInt(searchParams.get('since'), 0, 0, Number.MAX_SAFE_INTEGER)
+      const limit = toBoundedInt(searchParams.get('limit'), 100, 1, 400)
+      try {
+        writeJson(res, 200, agentSessionManager.getEvents(sessionId, since, limit))
+      } catch (err) {
+        const message = (err as Error).message
+        const statusCode = message.startsWith('Session not found:') ? 404 : 400
+        writeJson(res, statusCode, { error: message })
+      }
+      return
+    }
+
+    const agentSessionDetailMatch = pathname.match(/^\/api\/agent\/sessions\/([^/]+)$/)
+    if (agentSessionDetailMatch) {
+      const sessionId = decodeURIComponent(agentSessionDetailMatch[1] ?? '')
+      const session = agentSessionManager.getSession(sessionId)
+      if (!session) {
+        writeJson(res, 404, { error: `Session not found: ${sessionId}` })
+        return
+      }
+      writeJson(res, 200, { session })
+      return
+    }
+
     const runDetailMatch = pathname.match(/^\/api\/runs\/([^/]+)$/)
     if (runDetailMatch) {
       const runId = decodeURIComponent(runDetailMatch[1] ?? '')
@@ -879,6 +946,73 @@ async function handleApiRequest(
     return
   }
 
+  if (method === 'POST' && pathname === '/api/agent/sessions') {
+    const body = await readJsonBody(req)
+    const agentRaw = toNonEmptyString(body['agent'])
+    const profileName = toNonEmptyString(body['profileName'])
+    const cwd = toNonEmptyString(body['cwd'])
+
+    if (agentRaw !== 'claude' && agentRaw !== 'codex') {
+      writeJson(res, 400, { error: 'agent must be "claude" or "codex"' })
+      return
+    }
+
+    try {
+      const session = agentSessionManager.createSession({
+        agent: agentRaw as InteractiveAgentType,
+        profileName,
+        cwd,
+      })
+      writeJson(res, 200, { session })
+    } catch (err) {
+      writeJson(res, 400, { error: (err as Error).message })
+    }
+    return
+  }
+
+  const agentSessionMessageMatch = pathname.match(/^\/api\/agent\/sessions\/([^/]+)\/messages$/)
+  if (method === 'POST' && agentSessionMessageMatch) {
+    const sessionId = decodeURIComponent(agentSessionMessageMatch[1] ?? '')
+    const body = await readJsonBody(req)
+    const prompt = toNonEmptyString(body['prompt'])
+    if (!prompt) {
+      writeJson(res, 400, { error: 'prompt is required' })
+      return
+    }
+
+    try {
+      const result = agentSessionManager.sendPrompt(sessionId, prompt)
+      writeJson(res, 200, result)
+    } catch (err) {
+      const message = (err as Error).message
+      const statusCode = message.startsWith('Session not found:')
+        ? 404
+        : message.includes('running') || message.includes('closed')
+          ? 409
+          : 400
+      writeJson(res, statusCode, { error: message })
+    }
+    return
+  }
+
+  const agentSessionCloseMatch = pathname.match(/^\/api\/agent\/sessions\/([^/]+)$/)
+  if (method === 'DELETE' && agentSessionCloseMatch) {
+    const sessionId = decodeURIComponent(agentSessionCloseMatch[1] ?? '')
+    try {
+      const session = agentSessionManager.closeSession(sessionId)
+      writeJson(res, 200, { session })
+    } catch (err) {
+      const message = (err as Error).message
+      const statusCode = message.startsWith('Session not found:')
+        ? 404
+        : message.includes('running')
+          ? 409
+          : 400
+      writeJson(res, statusCode, { error: message })
+    }
+    return
+  }
+
   writeJson(res, 404, { error: `Unknown API route: ${method} ${pathname}` })
 }
 
@@ -1195,6 +1329,14 @@ function resolveMcpMutationAuthToken(deps: MCPDependencies): string | undefined 
   return token
 }
 
+function resolveAgentSessionWorkspacePath(deps: MCPDependencies): string {
+  const configuredRoot = deps.config.storage.worktreeRoot
+  if (configuredRoot.trim().length === 0) {
+    return process.cwd()
+  }
+  return resolve(configuredRoot)
+}
+
 function isMatchingToken(providedToken: string, expectedToken: string): boolean {
   const providedHash = createHash('sha256').update(providedToken).digest()
   const expectedHash = createHash('sha256').update(expectedToken).digest()
@@ -1502,6 +1644,7 @@ async function handleWsMessage(
   state: WsClientState,
   rawMessage: string,
   deps: MCPDependencies,
+  agentSessionManager: InteractiveAgentSessionManager,
 ): Promise<void> {
   let command: WebSocketCommand
   try {
@@ -1533,6 +1676,32 @@ async function handleWsMessage(
 
     state.runSubscriptions.delete(runId)
     sendWebsocket(ws, { type: 'unsubscribed', payload: { runId } })
+    return
+  }
+
+  if (command.type === 'subscribe-agent-session-events') {
+    const sessionId = typeof command.sessionId === 'string' ? command.sessionId : ''
+    if (!sessionId) {
+      sendWebsocket(ws, { type: 'error', error: 'sessionId is required for subscribe-agent-session-events' })
+      return
+    }
+
+    const cursor = Number.isFinite(command.since) ? Math.max(0, Math.floor(command.since ?? 0)) : 0
+    state.agentSessionSubscriptions.set(sessionId, cursor)
+    sendWebsocket(ws, { type: 'subscribed', payload: { sessionId, since: cursor } })
+    publishAgentSessionSubscriptions(ws, state, agentSessionManager)
+    return
+  }
+
+  if (command.type === 'unsubscribe-agent-session-events') {
+    const sessionId = typeof command.sessionId === 'string' ? command.sessionId : ''
+    if (!sessionId) {
+      sendWebsocket(ws, { type: 'error', error: 'sessionId is required for unsubscribe-agent-session-events' })
+      return
+    }
+
+    state.agentSessionSubscriptions.delete(sessionId)
+    sendWebsocket(ws, { type: 'unsubscribed', payload: { sessionId } })
     return
   }
 
@@ -1583,6 +1752,41 @@ async function publishRunSubscriptions(
         error: `Failed to stream events for ${runId}: ${(err as Error).message}`,
       })
     }
+  }
+}
+
+function publishAgentSessionSubscriptions(
+  ws: WebSocket,
+  state: WsClientState,
+  manager: InteractiveAgentSessionManager,
+): void {
+  for (const [sessionId, since] of state.agentSessionSubscriptions.entries()) {
+    let result: InteractiveAgentSessionEventList
+    try {
+      result = manager.getEvents(sessionId, since, 200)
+    } catch (err) {
+      sendWebsocket(ws, {
+        type: 'error',
+        error: `Failed to stream agent-session events for ${sessionId}: ${(err as Error).message}`,
+      })
+      continue
+    }
+
+    state.agentSessionSubscriptions.set(sessionId, result.lastEventId)
+
+    if (result.events.length === 0) {
+      continue
+    }
+
+    sendWebsocket(ws, {
+      type: 'agent-session-events',
+      payload: {
+        sessionId,
+        status: result.status,
+        events: result.events,
+        lastEventId: result.lastEventId,
+      },
+    })
   }
 }
 
