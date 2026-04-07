@@ -1,6 +1,6 @@
 {
   "name": "night-orch",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Nightly GitHub/Forgejo issue orchestrator — autonomous AI agent coding tool",
   "repository": {
     "type": "git",
