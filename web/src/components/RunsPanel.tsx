@@ -31,7 +31,7 @@ export function RunsPanel({
   statusTone,
 }: RunsPanelProps): ReactElement {
   return (
-    <div className="card border border-base-300/60 bg-base-200/60 shadow-panel backdrop-blur">
+    <div className="card min-w-0 overflow-hidden border border-base-300/60 bg-base-200/60 shadow-panel backdrop-blur">
       <div className="card-body p-4 sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -67,7 +67,7 @@ export function RunsPanel({
             <span>No runs for the current filter.</span>
           </div>
         ) : (
-          <div className="mt-4 grid max-h-[540px] gap-3 overflow-y-auto pr-1">
+          <div className="mt-4 grid max-h-[540px] min-w-0 gap-3 overflow-x-hidden overflow-y-auto pr-1">
             {filteredRuns.map((run) => {
               const isRunning = run.status === 'running'
               return (
@@ -75,22 +75,22 @@ export function RunsPanel({
                   key={run.runId}
                   type="button"
                   onClick={() => onOpenRun(run.runId)}
-                  className={`card w-full border text-left transition-all ${
+                  className={`card w-full min-w-0 overflow-hidden border text-left transition-all ${
                     selectedRunId === run.runId
                       ? 'border-primary/65 bg-primary/10 shadow-md'
                       : 'border-base-300/70 bg-base-100/50 hover:border-primary/40 hover:bg-base-100/80'
                   } ${isRunning ? 'orch-running-card' : ''}`}
                 >
-                  <div className="card-body gap-2.5 p-3">
+                  <div className="card-body min-w-0 gap-2.5 p-3">
                     <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div>
-                        <p className="text-xs font-medium uppercase tracking-wide text-base-content/70">
+                      <div className="min-w-0">
+                        <p className="break-all text-xs font-medium uppercase tracking-wide text-base-content/70">
                           {run.repo} #{run.issue}
                         </p>
-                        <p className="mt-0.5 text-sm font-semibold text-base-content">
+                        <p className="mt-0.5 break-words text-sm font-semibold text-base-content">
                           {truncate(resolveIssueTitle(run.issueTitle), 110)}
                         </p>
-                        <p className="mt-0.5 text-xs text-base-content/55">
+                        <p className="mt-0.5 break-all text-xs text-base-content/55">
                           {run.hasRun ? run.runId : 'Tracked issue (no run yet)'}
                         </p>
                       </div>
@@ -98,7 +98,7 @@ export function RunsPanel({
                         {run.status.replaceAll('_', ' ')}
                       </span>
                     </div>
-                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                    <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
                       <span className={`badge badge-xs ${badgeToneForPhase(run.phase)}`}>
                         phase {truncate(resolvePhaseLabel(run.phase), 18)}
                       </span>
@@ -111,10 +111,12 @@ export function RunsPanel({
                       <span className={`badge badge-xs ${badgeToneForPrNumber(run.prNumber)}`}>
                         {run.prNumber !== null ? `PR #${run.prNumber}` : 'no PR'}
                       </span>
-                      <span className="ml-auto text-[11px] text-base-content/65">{formatRunTime(run)}</span>
+                      <span className="max-w-full text-[11px] text-base-content/65 sm:ml-auto">
+                        {formatRunTime(run)}
+                      </span>
                     </div>
                     {run.lastError && (
-                      <p className="whitespace-pre-wrap rounded-md border border-error/30 bg-error/10 px-2 py-1 text-xs text-error">
+                      <p className="whitespace-pre-wrap break-words rounded-md border border-error/30 bg-error/10 px-2 py-1 text-xs text-error">
                         {truncate(run.lastError, 500)}
                       </p>
                     )}
