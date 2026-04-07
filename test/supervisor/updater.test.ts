@@ -8,6 +8,7 @@ vi.mock('execa', () => ({
 }))
 
 vi.mock('node:fs', async (importOriginal) => {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-imports
   const actual = await importOriginal<typeof import('node:fs')>()
   return {
     ...actual,
