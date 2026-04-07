@@ -399,15 +399,17 @@ Show current state: active runs, active leases, daily cost against budget, recen
 
 ### `night-orch tui`
 
-Live-updating terminal dashboard. Refreshes every 2 seconds. Shows active runs, merge queue, cost bar, recent history, issue actions (`poll`, `sync`, `cleanup`, `retry`, `retry fresh`, `continue`, `rebase`, `delete entry`), and a Settings tab (`5`) for curated runtime overrides. Press Ctrl+C to exit.
+Live-updating terminal dashboard. Refreshes every 2 seconds. Shows active runs, merge queue, cost bar, recent history, issue actions (`poll`, `sync`, `cleanup`, `retry`, `retry fresh`, `continue`, `rebase`, `delete entry`), and a Settings tab (`5`) for runtime overrides (read-only keys are listed but cannot be changed). Press Ctrl+C to exit.
 
 ### `night-orch settings`
 
-Manage DB-backed runtime overrides for curated config keys.
+Manage DB-backed runtime overrides for all non-project-specific config keys. Read-only keys (for example `storage.dbPath`) are listed but cannot be overridden at runtime. Sensitive values are redacted in list output.
 
 - `night-orch settings list [--json]`
 - `night-orch settings set <key> <value>`
 - `night-orch settings unset <key>`
+
+JSON runtime settings require schema-valid structure; syntactically valid but malformed payloads are rejected.
 
 ### `night-orch sync`
 
@@ -532,7 +534,7 @@ Night-orch exposes an MCP server for integration with Claude Code and other MCP 
 
 | Tool | Description |
 |------|-------------|
-| `night-orch-list-settings` | List curated runtime settings, overrides, and effective values |
+| `night-orch-list-settings` | List runtime settings, overrides, and effective values (sensitive fields redacted) |
 | `night-orch-set-setting` | Set one DB-backed runtime override |
 | `night-orch-clear-setting` | Clear one DB-backed runtime override |
 | `night-orch-status` | Operational snapshot |

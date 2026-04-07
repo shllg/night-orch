@@ -156,10 +156,12 @@ describe('runtime settings', () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  it('lists curated settings with base values by default', () => {
+  it('lists non-project runtime settings with base values by default', () => {
     const settings = listRuntimeSettings(baseConfig, db)
-    expect(settings).toHaveLength(6)
+    expect(settings).toHaveLength(53)
     expect(settings.map((s) => s.key)).toContain('security.maxCostPerRunUsd')
+    expect(settings.map((s) => s.key)).toContain('github.tokenEnv')
+    expect(settings.map((s) => s.key)).toContain('workerProfiles')
 
     const poll = settings.find((setting) => setting.key === 'github.pollIntervalSeconds')
     expect(poll).toMatchObject({
@@ -223,5 +225,108 @@ describe('runtime settings', () => {
         'test',
       )
     }).toThrow('security.maxDailyCostUsd must be a finite number')
+  })
+
+  it('supports nullable string overrides', () => {
+    const setResult = setRuntimeSettingOverride(
+      baseConfig,
+      db,
+      'mcp.authTokenEnv',
+      'MCP_TOKEN',
+      'test',
+    )
+    expect(setResult.changed).toBe(true)
+    expect(setResult.setting.effectiveValue).toBe('MCP_TOKEN')
+    expect(setResult.setting.source).toBe('override')
+
+    const nullResult = setRuntimeSettingOverride(
+      baseConfig,
+      db,
+      'mcp.authTokenEnv',
+      'null',
+      'test',
+    )
+    expect(nullResult.changed).toBe(true)
+    expect(nullResult.setting.effectiveValue).toBeNull()
+    expect(nullResult.setting.source).toBe('override')
+  })
+
+  it('redacts sensitive worker profile env values in runtime settings snapshots', () => {
+    baseConfig.workerProfiles = {
+      codexCli: {
+        type: 'codex',
+        command: 'codex',
+        args: ['exec'],
+        workerTimeoutSeconds: 900,
+        minimalEnv: true,
+        runtimeWrapper: null,
+        env: {
+          OPENAI_API_KEY: 'top-secret',
+          MODE: 'dev',
+        },
+      },
+    }
+
+    const settings = listRuntimeSettings(baseConfig, db)
+    const workerProfiles = settings.find((setting) => setting.key === 'workerProfiles')
+    expect(workerProfiles).toBeDefined()
+    expect(workerProfiles?.baseValue).toMatchObject({
+      codexCli: {
+        env: {
+          OPENAI_API_KEY: '[redacted]',
+          MODE: '[redacted]',
+        },
+      },
+    })
+    expect(workerProfiles?.effectiveValue).toMatchObject({
+      codexCli: {
+        env: {
+          OPENAI_API_KEY: '[redacted]',
+          MODE: '[redacted]',
+        },
+      },
+    })
+  })
+
+  it('rejects malformed JSON structure for json runtime settings', () => {
+    expect(() => {
+      setRuntimeSettingOverride(
+        baseConfig,
+        db,
+        'notifications.channels',
+        '{}',
+        'test',
+      )
+    }).toThrow('notifications.channels has invalid structure')
+
+    expect(() => {
+      setRuntimeSettingOverride(
+        baseConfig,
+        db,
+        'workerProfiles',
+        '{"codexCli":{"type":"codex"}}',
+        'test',
+      )
+    }).toThrow('workerProfiles has invalid structure')
+  })
+
+  it('marks storage.dbPath as read-only for runtime overrides', () => {
+    const settings = listRuntimeSettings(baseConfig, db)
+    const dbPath = settings.find((setting) => setting.key === 'storage.dbPath')
+    expect(dbPath?.mutable).toBe(false)
+
+    expect(() => {
+      setRuntimeSettingOverride(
+        baseConfig,
+        db,
+        'storage.dbPath',
+        '/tmp/alternate.db',
+        'test',
+      )
+    }).toThrow('storage.dbPath is read-only at runtime and cannot be overridden')
+
+    expect(() => {
+      clearRuntimeSettingOverride(baseConfig, db, 'storage.dbPath')
+    }).toThrow('storage.dbPath is read-only at runtime and cannot be overridden')
   })
 })

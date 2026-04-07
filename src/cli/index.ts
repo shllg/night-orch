@@ -254,7 +254,7 @@ const settingsCommand = program
 
 settingsCommand
   .command('list')
-  .description('List curated runtime settings and active overrides')
+  .description('List runtime settings and active overrides')
   .option('--json', 'Output JSON')
   .action((opts: { json?: boolean }, cmd) => {
     const globalOpts = resolveRootGlobalOpts(cmd)

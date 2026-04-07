@@ -262,7 +262,15 @@ export interface SessionResponse {
   operationsEnabled?: boolean
 }
 
-export type RuntimeSettingType = 'number' | 'boolean'
+export type RuntimeSettingType = 'number' | 'boolean' | 'string' | 'json'
+
+export type RuntimeSettingValue =
+  | string
+  | number
+  | boolean
+  | null
+  | RuntimeSettingValue[]
+  | { [key: string]: RuntimeSettingValue }
 
 export interface RuntimeSettingSnapshot {
   key: string
@@ -270,15 +278,19 @@ export interface RuntimeSettingSnapshot {
   description: string
   details: string
   type: RuntimeSettingType
+  mutable: boolean
+  sensitive: boolean
   min?: number
   max?: number
   step?: number
-  defaultValue: number | boolean
+  options?: string[]
+  allowNull?: boolean
+  defaultValue: RuntimeSettingValue
   hasYamlValue: boolean
-  yamlValue: number | boolean | null
-  baseValue: number | boolean
-  overrideValue: number | boolean | null
-  effectiveValue: number | boolean
+  yamlValue: RuntimeSettingValue | null
+  baseValue: RuntimeSettingValue
+  overrideValue: RuntimeSettingValue | null
+  effectiveValue: RuntimeSettingValue
   source: 'base' | 'override'
   updatedBy: string | null
   updatedAt: string | null

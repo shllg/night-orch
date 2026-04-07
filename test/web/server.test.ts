@@ -266,10 +266,10 @@ describe('startWebServer', () => {
       settings: Array<{
         key: string
         source: string
-        effectiveValue: number | boolean
-        defaultValue: number | boolean
+        effectiveValue: number | boolean | string | null
+        defaultValue: number | boolean | string | null
         hasYamlValue: boolean
-        yamlValue: number | boolean | null
+        yamlValue: number | boolean | string | null
       }>
     }
     const pollBefore = initialPayload.settings.find((setting) => setting.key === 'github.pollIntervalSeconds')
@@ -307,7 +307,7 @@ describe('startWebServer', () => {
 
     const afterSet = await fetch(`${baseUrl}/api/settings`)
     const afterSetPayload = await afterSet.json() as {
-      settings: Array<{ key: string; source: string; effectiveValue: number | boolean }>
+      settings: Array<{ key: string; source: string; effectiveValue: number | boolean | string | null }>
     }
     const pollAfterSet = afterSetPayload.settings.find((setting) => setting.key === 'github.pollIntervalSeconds')
     expect(pollAfterSet?.source).toBe('override')
@@ -331,6 +331,93 @@ describe('startWebServer', () => {
         key: 'github.pollIntervalSeconds',
         effectiveValue: 300,
         source: 'base',
+      },
+    })
+  })
+
+  it('redacts sensitive worker profile env values in /api/settings', async () => {
+    deps.config.workerProfiles = {
+      codexCli: {
+        type: 'codex',
+        command: 'codex',
+        args: ['exec'],
+        workerTimeoutSeconds: 900,
+        minimalEnv: true,
+        runtimeWrapper: null,
+        env: {
+          OPENAI_API_KEY: 'top-secret',
+          MODE: 'dev',
+        },
+      },
+    }
+
+    server = await startWebServer(
+      deps,
+      {
+        host: '127.0.0.1',
+        port: 0,
+        frontendDistPath: frontendDir,
+        rawConfig: {
+          workerProfiles: {
+            codexCli: {
+              type: 'codex',
+              command: 'codex',
+              args: ['exec'],
+              workerTimeoutSeconds: 900,
+              minimalEnv: true,
+              runtimeWrapper: null,
+              env: {
+                OPENAI_API_KEY: 'top-secret',
+                MODE: 'dev',
+              },
+            },
+          },
+        },
+      },
+    )
+
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Unexpected address type')
+    }
+    baseUrl = `http://127.0.0.1:${address.port}`
+
+    const response = await fetch(`${baseUrl}/api/settings`)
+    expect(response.status).toBe(200)
+    const payload = await response.json() as {
+      settings: Array<{
+        key: string
+        hasYamlValue: boolean
+        yamlValue: unknown
+        baseValue: unknown
+        effectiveValue: unknown
+      }>
+    }
+
+    const workerProfiles = payload.settings.find((setting) => setting.key === 'workerProfiles')
+    expect(workerProfiles?.hasYamlValue).toBe(true)
+    expect(workerProfiles?.baseValue).toMatchObject({
+      codexCli: {
+        env: {
+          OPENAI_API_KEY: '[redacted]',
+          MODE: '[redacted]',
+        },
+      },
+    })
+    expect(workerProfiles?.effectiveValue).toMatchObject({
+      codexCli: {
+        env: {
+          OPENAI_API_KEY: '[redacted]',
+          MODE: '[redacted]',
+        },
+      },
+    })
+    expect(workerProfiles?.yamlValue).toMatchObject({
+      codexCli: {
+        env: {
+          OPENAI_API_KEY: '[redacted]',
+          MODE: '[redacted]',
+        },
       },
     })
   })
@@ -365,11 +452,11 @@ describe('startWebServer', () => {
     const payload = await response.json() as {
       settings: Array<{
         key: string
-        baseValue: number | boolean
-        effectiveValue: number | boolean
-        defaultValue: number | boolean
+        baseValue: number | boolean | string | null
+        effectiveValue: number | boolean | string | null
+        defaultValue: number | boolean | string | null
         hasYamlValue: boolean
-        yamlValue: number | boolean | null
+        yamlValue: number | boolean | string | null
       }>
     }
 
@@ -432,6 +519,40 @@ describe('startWebServer', () => {
     expect(invalidValueSet.status).toBe(400)
     await expect(invalidValueSet.json()).resolves.toMatchObject({
       error: 'github.pollIntervalSeconds must be a finite number',
+    })
+
+    const invalidJsonStructure = await fetch(`${baseUrl}/api/operations/settings/set`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+        [WEB_AUTH_TOKEN_HEADER]: mutationToken,
+      },
+      body: JSON.stringify({
+        key: 'notifications.channels',
+        value: '{}',
+      }),
+    })
+    expect(invalidJsonStructure.status).toBe(400)
+    await expect(invalidJsonStructure.json()).resolves.toMatchObject({
+      error: expect.stringContaining('notifications.channels has invalid structure'),
+    })
+
+    const readOnlySet = await fetch(`${baseUrl}/api/operations/settings/set`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+        [WEB_AUTH_TOKEN_HEADER]: mutationToken,
+      },
+      body: JSON.stringify({
+        key: 'storage.dbPath',
+        value: '/tmp/other.db',
+      }),
+    })
+    expect(readOnlySet.status).toBe(400)
+    await expect(readOnlySet.json()).resolves.toMatchObject({
+      error: 'storage.dbPath is read-only at runtime and cannot be overridden',
     })
 
     const invalidKeyClear = await fetch(`${baseUrl}/api/operations/settings/clear`, {

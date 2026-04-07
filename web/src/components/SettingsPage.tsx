@@ -1,7 +1,7 @@
 import { type ReactElement, useEffect, useMemo, useState } from 'react'
 import { ButtonWeb } from '../../../src/components/button/button.web.js'
 import { ModalWeb } from '../../../src/components/modal/modal.web.js'
-import type { RuntimeSettingSnapshot } from '../types/dashboard.js'
+import type { RuntimeSettingSnapshot, RuntimeSettingValue } from '../types/dashboard.js'
 
 interface SettingsPageProps {
   settings: RuntimeSettingSnapshot[]
@@ -40,6 +40,7 @@ export function SettingsPage({
   const selectedBusy = selectedSetting
     ? isSettingBusy(activeOperation, selectedSetting.key)
     : false
+  const selectedReadOnly = selectedSetting ? !selectedSetting.mutable : false
 
   useEffect(() => {
     setOverwriteEnabled(
@@ -65,7 +66,7 @@ export function SettingsPage({
         {isLoading ? (
           <p className="text-sm text-base-content/70">Loading settings…</p>
         ) : settings.length === 0 ? (
-          <p className="text-sm text-base-content/70">No curated settings available.</p>
+          <p className="text-sm text-base-content/70">No runtime settings available.</p>
         ) : (
           <ul className="mt-2 grid gap-3">
             {settings.map((setting) => (
@@ -86,6 +87,7 @@ export function SettingsPage({
                         >
                           {setting.source === 'override' ? 'overwritten' : 'default/yaml'}
                         </span>
+                        {!setting.mutable ? <span className="badge badge-xs badge-warning">read-only</span> : null}
                       </div>
                       <p className="mt-1 break-all font-mono text-[11px] text-base-content/55">{setting.key}</p>
                       <p className="mt-2 text-sm text-base-content/75">{setting.description}</p>
@@ -131,15 +133,20 @@ export function SettingsPage({
                 if (!selectedSetting) {
                   return
                 }
+                if (!selectedSetting.mutable) {
+                  return
+                }
                 if (selectedOverwriteEnabled) {
                   onApply(selectedSetting.key)
                   return
                 }
                 onClear(selectedSetting.key)
               }}
-              disabled={selectedBusy}
+              disabled={selectedBusy || selectedReadOnly}
             >
-              {selectedBusy
+              {selectedReadOnly
+                ? 'read-only'
+                : selectedBusy
                 ? 'saving...'
                 : selectedOverwriteEnabled
                   ? 'apply override'
@@ -176,7 +183,7 @@ export function SettingsPage({
                 type="checkbox"
                 className="checkbox checkbox-sm checkbox-info"
                 checked={selectedOverwriteEnabled}
-                disabled={selectedBusy}
+                disabled={selectedBusy || selectedReadOnly}
                 onChange={(event) => {
                   setOverwriteEnabled((current) => ({
                     ...current,
@@ -187,7 +194,9 @@ export function SettingsPage({
               <div>
                 <p className="text-sm font-medium text-base-content">Overwrite this value</p>
                 <p className="text-xs text-base-content/65">
-                  Disable to use YAML/default value. Enable to set a DB runtime override.
+                  {selectedSetting.mutable
+                    ? 'Disable to use YAML/default value. Enable to set a DB runtime override.'
+                    : 'This key is read-only at runtime and cannot be overridden from settings.'}
                 </p>
               </div>
             </label>
@@ -203,12 +212,12 @@ export function SettingsPage({
                   onChange={(event) => {
                     onDraftChange(selectedSetting.key, event.target.value)
                   }}
-                  disabled={!selectedOverwriteEnabled || selectedBusy}
+                  disabled={!selectedOverwriteEnabled || selectedBusy || selectedReadOnly}
                 >
                   <option value="true">true</option>
                   <option value="false">false</option>
                 </select>
-              ) : (
+              ) : selectedSetting.type === 'number' ? (
                 <input
                   className="input input-bordered w-full max-w-xs font-mono"
                   type="number"
@@ -219,7 +228,42 @@ export function SettingsPage({
                   onChange={(event) => {
                     onDraftChange(selectedSetting.key, event.target.value)
                   }}
-                  disabled={!selectedOverwriteEnabled || selectedBusy}
+                  disabled={!selectedOverwriteEnabled || selectedBusy || selectedReadOnly}
+                />
+              ) : selectedSetting.options && selectedSetting.options.length > 0 ? (
+                <select
+                  className="select select-bordered w-full max-w-xs font-mono"
+                  value={selectedDraft}
+                  onChange={(event) => {
+                    onDraftChange(selectedSetting.key, event.target.value)
+                  }}
+                  disabled={!selectedOverwriteEnabled || selectedBusy || selectedReadOnly}
+                >
+                  {selectedSetting.options.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                  {selectedSetting.allowNull ? (
+                    <option value="null">null</option>
+                  ) : null}
+                </select>
+              ) : selectedSetting.type === 'json' ? (
+                <textarea
+                  className="textarea textarea-bordered min-h-[160px] w-full font-mono text-xs"
+                  value={selectedDraft}
+                  onChange={(event) => {
+                    onDraftChange(selectedSetting.key, event.target.value)
+                  }}
+                  disabled={!selectedOverwriteEnabled || selectedBusy || selectedReadOnly}
+                />
+              ) : (
+                <input
+                  className="input input-bordered w-full max-w-xs font-mono"
+                  type="text"
+                  value={selectedDraft}
+                  onChange={(event) => {
+                    onDraftChange(selectedSetting.key, event.target.value)
+                  }}
+                  disabled={!selectedOverwriteEnabled || selectedBusy || selectedReadOnly}
                 />
               )}
             </div>
@@ -243,7 +287,13 @@ function isSettingBusy(activeOperation: string | null, key: string): boolean {
   return activeOperation === `setting:set:${key}` || activeOperation === `setting:clear:${key}`
 }
 
-function formatSettingValue(value: string | number | boolean): string {
+function formatSettingValue(value: RuntimeSettingValue): string {
+  if (Array.isArray(value) || (typeof value === 'object' && value !== null)) {
+    return JSON.stringify(value)
+  }
+  if (value === null) {
+    return 'null'
+  }
   if (typeof value === 'boolean') {
     return value ? 'true' : 'false'
   }

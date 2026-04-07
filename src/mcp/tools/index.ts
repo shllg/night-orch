@@ -393,7 +393,7 @@ async function handleSetSetting(
     changed: result.changed,
     setting: result.setting,
     message: result.changed
-      ? `Updated ${result.setting.key} to ${String(result.setting.effectiveValue)}`
+      ? `Updated ${result.setting.key} to ${formatRuntimeSettingValue(result.setting.effectiveValue)}`
       : `${result.setting.key} unchanged`,
   }
 }
@@ -416,6 +416,21 @@ async function handleClearSetting(
       ? `Cleared override for ${result.setting.key}`
       : `No override found for ${result.setting.key}`,
   }
+}
+
+function formatRuntimeSettingValue(value: unknown): string {
+  if (value === null) return 'null'
+  if (Array.isArray(value) || (typeof value === 'object' && value !== null)) {
+    return JSON.stringify(value)
+  }
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  if (typeof value === 'string') return value
+  if (typeof value === 'number') return String(value)
+  if (typeof value === 'bigint') return `${value}n`
+  if (typeof value === 'undefined') return 'undefined'
+  if (typeof value === 'symbol') return value.toString()
+  if (typeof value === 'function') return '[function]'
+  return JSON.stringify(value)
 }
 
 async function handleStatus(args: { repo?: string }, deps: MCPDependencies): Promise<unknown> {

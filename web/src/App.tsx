@@ -38,6 +38,7 @@ import {
   type InteractiveAgentSessionsSnapshot,
   type InteractiveAgentType,
   type ProjectsSnapshot,
+  type RuntimeSettingValue,
   type RunEvent,
   type SettingsSnapshot,
   type SessionResponse,
@@ -68,6 +69,15 @@ function decodeDetailId(value: string | null | undefined): string | null {
   } catch {
     return value
   }
+}
+
+function formatRuntimeSettingDraft(value: RuntimeSettingValue): string {
+  if (value === null) return 'null'
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  if (Array.isArray(value) || (typeof value === 'object' && value !== null)) {
+    return JSON.stringify(value)
+  }
+  return String(value)
 }
 
 export function App({
@@ -248,7 +258,7 @@ export function App({
     setSettingsSnapshot(payload)
     setSettingsDrafts(
       Object.fromEntries(
-        payload.settings.map((setting) => [setting.key, String(setting.effectiveValue)]),
+        payload.settings.map((setting) => [setting.key, formatRuntimeSettingDraft(setting.effectiveValue)]),
       ),
     )
   }, [])

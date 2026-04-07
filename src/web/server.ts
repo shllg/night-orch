@@ -26,7 +26,12 @@ import {
   type RuntimeSettingSnapshot,
   RuntimeSettingInputError,
 } from '../settings/runtime.js'
-import { getSettingDefinition, resolveSettingYamlValue, type SettingValue } from '../settings/registry.js'
+import {
+  getSettingDefinition,
+  resolveSettingYamlValue,
+  sanitizeSettingValueForDisplay,
+  type SettingValue,
+} from '../settings/registry.js'
 
 export interface WebServerOptions {
   host: string
@@ -1463,7 +1468,7 @@ function buildSettingsSnapshot(deps: MCPDependencies, rawConfig: unknown): Setti
       return {
         ...setting,
         hasYamlValue,
-        yamlValue,
+        yamlValue: sanitizeSettingValueForDisplay(definition, yamlValue),
       }
     }),
   }

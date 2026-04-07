@@ -55,9 +55,19 @@ const EXIT_GRACE_TIMEOUT_MS = 15_000
 const CLEANUP_CONFIRM_TIMEOUT_MS = 5_000
 const BUILD_INFO = getBuildInfo()
 
-function formatSettingValue(value: string | number | boolean): string {
+function formatSettingValue(value: unknown): string {
+  if (value === null) return 'null'
+  if (Array.isArray(value) || (typeof value === 'object' && value !== null)) {
+    return JSON.stringify(value)
+  }
+  if (typeof value === 'string') return value
+  if (typeof value === 'number') return String(value)
+  if (typeof value === 'bigint') return `${value}n`
   if (typeof value === 'boolean') return value ? 'true' : 'false'
-  return String(value)
+  if (typeof value === 'undefined') return 'undefined'
+  if (typeof value === 'symbol') return value.toString()
+  if (typeof value === 'function') return '[function]'
+  return JSON.stringify(value)
 }
 
 export function resolveTabHotkey(input: string): TabId | null {
@@ -805,10 +815,14 @@ export function App({
     })
   }, [config, db, runAction])
 
-  const runSetSetting = useCallback(async (nextValue: string | number | boolean) => {
+  const runSetSetting = useCallback(async (nextValue: unknown) => {
     const target = runtimeSettings[selectedSettingIndex]
     if (!target) {
       setStatusLine('No setting selected')
+      return
+    }
+    if (!target.mutable) {
+      setStatusLine(`"${target.key}" is read-only at runtime`)
       return
     }
 
@@ -824,6 +838,10 @@ export function App({
       setStatusLine('No setting selected')
       return
     }
+    if (!target.mutable) {
+      setStatusLine(`"${target.key}" is read-only at runtime`)
+      return
+    }
 
     await runAction('setting-unset', async () => {
       const result = clearRuntimeSettingOverride(config, db, target.key)
@@ -837,8 +855,18 @@ export function App({
       setStatusLine('No setting selected')
       return
     }
+    if (!target.mutable) {
+      setStatusLine(`"${target.key}" is read-only at runtime`)
+      return
+    }
     if (target.type !== 'number') {
-      setStatusLine(`"${target.key}" is boolean. Use space to toggle.`)
+      if (target.type === 'boolean') {
+        setStatusLine(`"${target.key}" is boolean. Use space to toggle.`)
+      } else if (target.type === 'json') {
+        setStatusLine(`"${target.key}" is JSON. Use CLI/Web/MCP to set a value.`)
+      } else {
+        setStatusLine(`"${target.key}" is text. Use CLI/Web/MCP to set a value.`)
+      }
       return
     }
 
@@ -865,8 +893,18 @@ export function App({
       setStatusLine('No setting selected')
       return
     }
+    if (!target.mutable) {
+      setStatusLine(`"${target.key}" is read-only at runtime`)
+      return
+    }
     if (target.type !== 'boolean') {
-      setStatusLine(`"${target.key}" is numeric. Use +/- to adjust.`)
+      if (target.type === 'number') {
+        setStatusLine(`"${target.key}" is numeric. Use +/- to adjust.`)
+      } else if (target.type === 'json') {
+        setStatusLine(`"${target.key}" is JSON. Use CLI/Web/MCP to set a value.`)
+      } else {
+        setStatusLine(`"${target.key}" is text. Use CLI/Web/MCP to set a value.`)
+      }
       return
     }
 

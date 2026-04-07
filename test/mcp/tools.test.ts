@@ -68,7 +68,7 @@ describe('MCP Tools', () => {
 
   it('settings tools list/set/clear runtime overrides', async () => {
     const listedBefore = await handleToolCall('night-orch-list-settings', {}, deps) as {
-      settings: Array<{ key: string; source: string; effectiveValue: number | boolean }>
+      settings: Array<{ key: string; source: string; effectiveValue: number | boolean | string | null }>
     }
     const pollSettingBefore = listedBefore.settings.find((setting) => setting.key === 'github.pollIntervalSeconds')
     expect(pollSettingBefore).toBeDefined()
@@ -85,7 +85,7 @@ describe('MCP Tools', () => {
     expect(setResult.setting.source).toBe('override')
 
     const listedAfter = await handleToolCall('night-orch-list-settings', {}, deps) as {
-      settings: Array<{ key: string; source: string; effectiveValue: number | boolean }>
+      settings: Array<{ key: string; source: string; effectiveValue: number | boolean | string | null }>
     }
     const pollSettingAfter = listedAfter.settings.find((setting) => setting.key === 'github.pollIntervalSeconds')
     expect(pollSettingAfter?.effectiveValue).toBe(120)
@@ -100,6 +100,50 @@ describe('MCP Tools', () => {
     expect(clearResult.setting.key).toBe('github.pollIntervalSeconds')
     expect(clearResult.setting.effectiveValue).toBe(300)
     expect(clearResult.setting.source).toBe('base')
+  })
+
+  it('redacts sensitive worker profile env values in settings list output', async () => {
+    deps.config.workerProfiles = {
+      codexCli: {
+        type: 'codex',
+        command: 'codex',
+        args: ['exec'],
+        workerTimeoutSeconds: 900,
+        minimalEnv: true,
+        runtimeWrapper: null,
+        env: {
+          OPENAI_API_KEY: 'top-secret',
+          MODE: 'dev',
+        },
+      },
+    }
+
+    const listed = await handleToolCall('night-orch-list-settings', {}, deps) as {
+      settings: Array<{ key: string; effectiveValue: unknown }>
+    }
+    const workerProfiles = listed.settings.find((setting) => setting.key === 'workerProfiles')
+    expect(workerProfiles?.effectiveValue).toMatchObject({
+      codexCli: {
+        env: {
+          OPENAI_API_KEY: '[redacted]',
+          MODE: '[redacted]',
+        },
+      },
+    })
+  })
+
+  it('rejects malformed json structures and read-only runtime setting mutations', async () => {
+    await expect(handleToolCall(
+      'night-orch-set-setting',
+      { key: 'notifications.channels', value: '{}' },
+      deps,
+    )).rejects.toThrow('notifications.channels has invalid structure')
+
+    await expect(handleToolCall(
+      'night-orch-set-setting',
+      { key: 'storage.dbPath', value: '/tmp/other.db' },
+      deps,
+    )).rejects.toThrow('storage.dbPath is read-only at runtime and cannot be overridden')
   })
 
   it('status tool returns summary', async () => {

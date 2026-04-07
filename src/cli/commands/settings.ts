@@ -29,9 +29,13 @@ export async function settingsListCommand(
 
     console.log('\nRuntime Settings (base + DB override)\n')
     for (const setting of settings) {
-      const bounds = setting.type === 'number'
+      const accepted = setting.type === 'number'
         ? `${setting.min ?? '-'}..${setting.max ?? '-'} step=${setting.step ?? '-'}`
-        : 'true|false'
+        : setting.type === 'boolean'
+          ? 'true|false'
+          : setting.type === 'string'
+            ? resolveAcceptedString(setting.options, setting.allowNull ?? false)
+            : 'json'
       const overrideDisplay = setting.overrideValue === null ? '-' : formatSettingValue(setting.overrideValue)
       const updated = setting.updatedAt ?? '-'
 
@@ -40,7 +44,8 @@ export async function settingsListCommand(
       console.log(`  base:       ${formatSettingValue(setting.baseValue)}`)
       console.log(`  override:   ${overrideDisplay}`)
       console.log(`  effective:  ${formatSettingValue(setting.effectiveValue)} (${setting.source})`)
-      console.log(`  accepted:   ${bounds}`)
+      console.log(`  accepted:   ${accepted}`)
+      console.log(`  mode:       ${setting.mutable ? 'mutable' : 'read-only'}${setting.sensitive ? ' (sensitive values redacted)' : ''}`)
       console.log(`  updated:    ${updated}`)
     }
     console.log('')
@@ -116,9 +121,41 @@ function loadSettingsResources(
   }
 }
 
-function formatSettingValue(value: string | number | boolean): string {
+function formatSettingValue(value: unknown): string {
+  if (value === null) {
+    return 'null'
+  }
+  if (Array.isArray(value) || (typeof value === 'object' && value !== null)) {
+    return JSON.stringify(value)
+  }
+  if (typeof value === 'string') {
+    return value
+  }
+  if (typeof value === 'number') {
+    return String(value)
+  }
+  if (typeof value === 'bigint') {
+    return `${value}n`
+  }
   if (typeof value === 'boolean') {
     return value ? 'true' : 'false'
   }
-  return String(value)
+  if (typeof value === 'undefined') {
+    return 'undefined'
+  }
+  if (typeof value === 'symbol') {
+    return value.toString()
+  }
+  if (typeof value === 'function') {
+    return '[function]'
+  }
+  return JSON.stringify(value)
+}
+
+function resolveAcceptedString(options: string[] | undefined, allowNull: boolean): string {
+  if (options && options.length > 0) {
+    const values = allowNull ? [...options, 'null'] : options
+    return values.join('|')
+  }
+  return allowNull ? 'string|null' : 'string'
 }
