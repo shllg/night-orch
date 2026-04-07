@@ -19,11 +19,12 @@ export function DashboardMetrics({ snapshot }: DashboardMetricsProps): ReactElem
     : `Budget $${formatMoney(snapshot?.cost.dailyBudgetUsd ?? 0)}`
 
   return (
-    <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+    <section className="grid grid-cols-2 gap-1.5 sm:gap-2 xl:grid-cols-4">
       <MetricCard
         label={usageFirst ? 'Daily Usage' : 'Daily Cost'}
         value={usageFirst ? formatTokenCount(snapshot?.stats.usage.todayTotalTokens ?? 0) : `$${formatMoney(dailyCost)}`}
         accent="emerald"
+        compactOnMobile
         subValue={usageFirst
           ? `Est. $${formatMoney(dailyCost)} today`
           : budgetLabel}
@@ -32,18 +33,21 @@ export function DashboardMetrics({ snapshot }: DashboardMetricsProps): ReactElem
         label="Budget Headroom"
         value={formatSignedUsd(budgetHeadroom)}
         accent={budgetHeadroom >= 0 ? 'cyan' : 'amber'}
+        compactOnMobile
         subValue={`Daily cap $${formatMoney(effectiveBudget)}`}
       />
       <MetricCard
         label="24h Throughput"
         value={snapshot?.stats.throughput.runs24h ?? 0}
         accent="cyan"
+        compactOnMobile
         subValue={`${(snapshot?.stats.throughput.successRate7d ?? 0).toFixed(1)}% success (7d)`}
       />
       <MetricCard
         label="Review Ready"
         value={snapshot?.stats.overview.reviewReadyRuns ?? 0}
         accent="sky"
+        compactOnMobile
         subValue={`${snapshot?.stats.overview.completedRuns ?? 0} completed`}
       />
     </section>

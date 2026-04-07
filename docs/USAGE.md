@@ -373,6 +373,7 @@ By default, `web` runs in attach mode: no poll loop, no metrics server, and no e
 Use `--standalone` to run poller + metrics + embedded MCP in the same process as the web server.
 
 The web UI includes an **Agent** page for interactive Claude/Codex sessions that run in the configured worktree root (`storage.worktreeRoot`). Sessions stream output live over websocket and expose REST routes under `/api/agent/sessions` (create/list/detail/events/send-message/close).
+On narrow mobile viewports, the top-line dashboard metric cards render in a compact 2-column layout so the runs list stays the primary focus on the Issues page.
 
 Default bind is `127.0.0.1:3200`. Use `--host` / `--port` to change this (for example when reverse-proxying through Caddy or nginx). Use `--allowed-host` (repeatable) to permit additional Host/Origin values when proxying.
 
