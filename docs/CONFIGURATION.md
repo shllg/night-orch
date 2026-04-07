@@ -23,13 +23,31 @@ Recommended deployment uses a dedicated non-root user (for example `orch`) with:
 - code in `/home/orch/apps/night-orch`
 - target repos in `/home/orch/repos/*`
 
+## Per-Repo Project Config (`.night-orch.yml`)
+
+After the central config is loaded, night-orch checks each configured `repos[].localPath` for:
+
+1. `.night-orch.yml`
+2. `.night-orch.yaml`
+
+If both files exist in the same repo, config load fails (ambiguous source).
+
+Project config is deep-merged into central config with **project values winning**:
+
+- Repo-scoped keys merge into that repo entry only.
+- `workflows` and `workerProfiles` merge into top-level maps.
+- Objects merge recursively.
+- Arrays are replaced (not concatenated).
+
+Project files are intended for repo-scoped settings and project-owned workflow/profile definitions.
+
 ## Runtime Settings Overrides (DB-backed)
 
 Night-orch supports DB-backed runtime overrides stored in SQLite (`settings_overrides` table).  
 Effective config precedence is:
 
-1. YAML value (or schema default when omitted)
-2. DB override (if present)
+1. YAML value from central config, merged with per-repo project config (project wins where present)
+2. DB override (if present; applies only to runtime-overridable non-repo keys)
 
 Overrides are persisted in DB and survive process restarts. They are not written back to YAML.
 
@@ -77,6 +95,7 @@ Update surfaces:
   - string: `"pnpm test -- --run"`
   - array: `["pnpm", "test", "--", "--run"]`
 - `repos[].labels.ready` and `repos[].labels.blocked` accept either string or string array and are normalized to arrays.
+- Project config files (`repos[].localPath/.night-orch.yml` or `.yaml`) may define repo-scoped keys plus optional top-level `workflows` and `workerProfiles`.
 
 ## Timestamp & Timezone Semantics
 
@@ -449,6 +468,29 @@ Reference a workflow in `repos[].workflow` by name.
 Poll execution model:
 - Repos are polled in parallel.
 - Each repo runs up to `maxConcurrentRuns` issues at once (default `1`).
+
+### Project-local repo overrides
+
+You can move repo-specific settings into a file inside the repository checkout:
+
+```yaml
+# <repo>/.night-orch.yml
+workflow: project-fast
+defaults:
+  coder: codex
+environment:
+  bootstrap:
+    - command: pnpm install
+      when: always
+
+workflows:
+  project-fast:
+    steps:
+      - { type: worker, id: code, role: coder }
+      - { type: decide, id: decide, onIterate: code }
+```
+
+This file is merged with the matching `repos[]` entry from central config.
 
 ### `repos[].workflowByTriage`
 

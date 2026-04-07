@@ -133,6 +133,150 @@ workflows:
     expect(loaded.workflows['fast-trivial']?.agents?.['codex']).toBe('codex-fast')
   })
 
+  it('deep-merges per-repo .night-orch.yml with system config (project wins)', () => {
+    const repoDir = join(tmpDir, 'repo')
+    mkdirSync(repoDir, { recursive: true })
+
+    const configPath = join(tmpDir, 'config.yaml')
+    writeFileSync(configPath, `version: 1
+github:
+  tokenEnv: GITHUB_TOKEN
+workerProfiles:
+  claude-default:
+    type: claude
+    command: claude
+  codex-default:
+    type: codex
+    command: codex
+repos:
+  - repo: org/repo
+    localPath: ${repoDir}
+    defaults:
+      planner: codex
+      coder: claude
+      reviewer: claude
+    environment:
+      defaultMode: shared
+      bootstrap:
+        - command: pnpm typecheck
+          when: shared
+    workflow: standard
+workflows:
+  standard:
+    steps:
+      - type: worker
+        id: code
+        role: coder
+      - type: decide
+        id: decide
+        onIterate: code
+`)
+
+    writeFileSync(join(repoDir, '.night-orch.yml'), `workflows:
+  project-fast:
+    steps:
+      - type: worker
+        id: code
+        role: coder
+      - type: decide
+        id: decide
+        onIterate: code
+defaults:
+  coder: codex
+environment:
+  bootstrap:
+    - command: pnpm install
+      when: always
+workflow: project-fast
+`)
+
+    const loaded = loadConfig(configPath)
+    const repo = loaded.repos[0]
+
+    expect(repo?.defaults.planner).toBe('codex')
+    expect(repo?.defaults.coder).toBe('codex')
+    expect(repo?.defaults.reviewer).toBe('claude')
+    expect(repo?.workflow).toBe('project-fast')
+    expect(repo?.environment?.bootstrap).toHaveLength(1)
+    expect(repo?.environment?.bootstrap[0]?.command).toBe('pnpm install')
+    expect(loaded.workflows['project-fast']?.steps).toHaveLength(2)
+  })
+
+  it('loads .night-orch.yaml when .night-orch.yml is not present', () => {
+    const repoDir = join(tmpDir, 'repo')
+    mkdirSync(repoDir, { recursive: true })
+
+    const configPath = join(tmpDir, 'config.yaml')
+    writeFileSync(configPath, `version: 1
+github:
+  tokenEnv: GITHUB_TOKEN
+workerProfiles:
+  claude-default:
+    type: claude
+    command: claude
+repos:
+  - repo: org/repo
+    localPath: ${repoDir}
+    defaults:
+      reviewer: claude
+`)
+
+    writeFileSync(join(repoDir, '.night-orch.yaml'), `defaults:
+  reviewer: codex
+`)
+
+    const loaded = loadConfig(configPath)
+    expect(loaded.repos[0]?.defaults.reviewer).toBe('codex')
+  })
+
+  it('rejects ambiguous per-repo config when both .yml and .yaml exist', () => {
+    const repoDir = join(tmpDir, 'repo')
+    mkdirSync(repoDir, { recursive: true })
+
+    const configPath = join(tmpDir, 'config.yaml')
+    writeFileSync(configPath, `version: 1
+github:
+  tokenEnv: GITHUB_TOKEN
+workerProfiles:
+  claude-default:
+    type: claude
+    command: claude
+repos:
+  - repo: org/repo
+    localPath: ${repoDir}
+`)
+
+    writeFileSync(join(repoDir, '.night-orch.yml'), 'defaults:\n  coder: codex\n')
+    writeFileSync(join(repoDir, '.night-orch.yaml'), 'defaults:\n  coder: claude\n')
+
+    expect(() => loadConfig(configPath)).toThrow('Multiple project config files found')
+  })
+
+  it('validates per-repo project config top-level keys', () => {
+    const repoDir = join(tmpDir, 'repo')
+    mkdirSync(repoDir, { recursive: true })
+
+    const configPath = join(tmpDir, 'config.yaml')
+    writeFileSync(configPath, `version: 1
+github:
+  tokenEnv: GITHUB_TOKEN
+workerProfiles:
+  claude-default:
+    type: claude
+    command: claude
+repos:
+  - repo: org/repo
+    localPath: ${repoDir}
+`)
+
+    writeFileSync(join(repoDir, '.night-orch.yml'), `repo: org/other
+defaults:
+  coder: codex
+`)
+
+    expect(() => loadConfig(configPath)).toThrow('Project config validation failed')
+  })
+
   describe('MISE_TRUSTED_CONFIG_PATHS registration', () => {
     const originalTrusted = process.env['MISE_TRUSTED_CONFIG_PATHS']
 

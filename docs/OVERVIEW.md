@@ -96,7 +96,7 @@ Metrics (best-effort Prometheus) ◄──────────────�
 Core commands built with `commander`: `run` (long-running poller), `run-once` (single cycle), `doctor` (validate setup), `sync` (reconcile state with forge), `retry` (requeue an issue), `continue` (queue a context-aware second pass), `rebase` (rebase and re-evaluate), `cleanup` (remove stale artifacts), `notify-test` (test channels), and `mcp` (start MCP server). Global flags: `--config`, `--trust-workspace`, `--dry-run`, `--log-level`.
 
 ### Config (`src/config/`)
-YAML config validated by Zod schemas (`schema.ts`). The loader (`loader.ts`) reads the file, validates it, and expands paths (`~` → home dir, `{auto:3000-4000}` → allocated port). Key files: `schema.ts` (types + validation), `loader.ts` (load + expand).
+YAML config validated by Zod schemas (`schema.ts`). The loader (`loader.ts`) reads central config, merges optional per-repo `.night-orch.yml/.yaml` overrides from each `repos[].localPath` (project wins), validates the merged result, and expands paths (`~` → home dir, `{auto:3000-4000}` → allocated port). Key files: `schema.ts` (types + validation), `loader.ts` (load + merge + expand).
 
 > **Watch out:** Zod's `noUncheckedIndexedAccess` means every field accessed via bracket notation might be `undefined`. You'll see a lot of `if (!item) throw ...` guard patterns — these aren't paranoia, they're required by the compiler.
 
