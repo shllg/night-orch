@@ -243,6 +243,10 @@ const RepoConfigSchema = z.object({
   localPath: z.string(),
   baseBranch: z.string().default('main'),
   branchPrefix: z.string().default('orch'),
+  /** How to incorporate upstream base branch changes into work branches.
+   *  'merge' (default) creates merge commits — reliable for automated systems.
+   *  'rebase' replays commits for linear history — fragile with conflicts. */
+  updateStrategy: z.enum(['merge', 'rebase']).default('merge'),
   labels: LabelsSchema.default({ ready: ['orch:ready'] }),
   kanban: KanbanSchema.optional(),
   labelConfig: z.record(LabelPresentationSchema).default({}),
@@ -413,6 +417,7 @@ export const ProjectConfigSchema = z.object({
   maxConcurrentRuns: z.unknown().optional(),
   baseBranch: z.unknown().optional(),
   branchPrefix: z.unknown().optional(),
+  updateStrategy: z.unknown().optional(),
   labels: z.unknown().optional(),
   kanban: z.unknown().optional(),
   labelConfig: z.unknown().optional(),

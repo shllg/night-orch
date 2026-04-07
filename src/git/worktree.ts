@@ -8,6 +8,7 @@ import {
   branchExistsRemotely,
   createBranch,
   createTrackingBranch,
+  mergeFromBranch,
 } from './repo.js'
 import { runGit } from './process.js'
 
@@ -20,6 +21,8 @@ export interface WorktreeInfo {
   rebaseConflict: boolean
 }
 
+export type UpdateStrategy = 'merge' | 'rebase'
+
 export interface EnsureWorktreeParams {
   repoLocalPath: string
   baseBranch: string
@@ -27,6 +30,8 @@ export interface EnsureWorktreeParams {
   worktreePath: string
   /** Hard-reset the branch to baseBranch, discarding all prior commits. */
   resetToBase?: boolean
+  /** How to incorporate upstream base branch changes. Defaults to 'merge'. */
+  updateStrategy?: UpdateStrategy
 }
 
 export interface WorktreeManager {
@@ -38,7 +43,7 @@ export interface WorktreeManager {
 export function createWorktreeManager(): WorktreeManager {
   return {
     async ensure(params: EnsureWorktreeParams): Promise<WorktreeInfo> {
-      const { repoLocalPath, baseBranch, branchName, worktreePath, resetToBase } = params
+      const { repoLocalPath, baseBranch, branchName, worktreePath, resetToBase, updateStrategy = 'merge' } = params
 
       // 1. Fetch
       await fetchOrigin(repoLocalPath)
@@ -73,14 +78,13 @@ export function createWorktreeManager(): WorktreeManager {
             return { path: worktreePath, branchName, exists: true, isClean, rebaseConflict: false }
           }
 
-          logger.info({ worktreePath, branchName }, 'Reusing existing worktree')
-          // Attempt rebase onto latest base branch; on conflict, preserve branch as-is
-          const rebased = await rebaseOnto(worktreePath, baseBranch)
-          if (!rebased) {
-            logger.warn({ worktreePath, baseBranch }, 'Rebase conflict — preserving existing work, coder will handle divergence')
+          logger.info({ worktreePath, branchName, updateStrategy }, 'Reusing existing worktree')
+          const updateResult = await updateFromBase(worktreePath, baseBranch, updateStrategy)
+          if (!updateResult.success) {
+            logger.warn({ worktreePath, baseBranch, updateStrategy }, 'Update from base failed — preserving existing work, coder will handle divergence')
           }
           const isClean = await isWorktreeClean(worktreePath)
-          return { path: worktreePath, branchName, exists: true, isClean, rebaseConflict: !rebased }
+          return { path: worktreePath, branchName, exists: true, isClean, rebaseConflict: !updateResult.success }
         }
 
         // Corrupt — remove and recreate
@@ -88,7 +92,7 @@ export function createWorktreeManager(): WorktreeManager {
         await removeWorktree(repoLocalPath, worktreePath)
       }
 
-      return await createFreshWorktree(repoLocalPath, baseBranch, branchName, worktreePath)
+      return await createFreshWorktree(repoLocalPath, baseBranch, branchName, worktreePath, updateStrategy)
     },
 
     async remove(worktreePath: string, deleteBranch = false): Promise<void> {
@@ -148,6 +152,7 @@ async function createFreshWorktree(
   baseBranch: string,
   branchName: string,
   worktreePath: string,
+  updateStrategy: UpdateStrategy = 'merge',
 ): Promise<WorktreeInfo> {
   // Prune stale worktree registrations (directory deleted but still tracked by git)
   await runGit(['worktree', 'prune'], { cwd: repoLocalPath, reject: false })
@@ -159,15 +164,15 @@ async function createFreshWorktree(
     cwd: repoLocalPath,
   })
 
-  // Attempt rebase onto latest base; on conflict, preserve branch as-is.
+  // Attempt to incorporate latest base branch changes; on conflict, preserve branch as-is.
   // The AI coder will see the divergence and integrate base branch changes.
-  const rebased = await rebaseOnto(worktreePath, baseBranch)
-  if (!rebased) {
-    logger.warn({ worktreePath, baseBranch }, 'Rebase conflict — branch preserved as-is, coder will handle divergence')
+  const updateResult = await updateFromBase(worktreePath, baseBranch, updateStrategy)
+  if (!updateResult.success) {
+    logger.warn({ worktreePath, baseBranch, updateStrategy }, 'Update from base failed — branch preserved as-is, coder will handle divergence')
   }
 
   const isClean = await isWorktreeClean(worktreePath)
-  return { path: worktreePath, branchName, exists: true, isClean, rebaseConflict: !rebased }
+  return { path: worktreePath, branchName, exists: true, isClean, rebaseConflict: !updateResult.success }
 }
 
 async function validateWorktree(worktreePath: string, expectedBranch: string): Promise<boolean> {
@@ -221,14 +226,43 @@ async function hardResetToBase(worktreePath: string, baseBranch: string): Promis
 }
 
 /**
- * Rebase the current branch onto the latest base branch.
- * Returns true on success, false on conflict (after aborting the rebase).
+ * Incorporate upstream base branch changes into the worktree using the
+ * configured strategy. Merge is the default — it creates a merge commit
+ * but handles conflicts deterministically. Rebase replays commits for a
+ * linear history but is fragile in automated contexts.
+ *
+ * On conflict (either strategy), the operation is aborted and the worktree
+ * is left in its pre-update state.
  */
-async function rebaseOnto(worktreePath: string, baseBranch: string): Promise<boolean> {
+async function updateFromBase(
+  worktreePath: string,
+  baseBranch: string,
+  strategy: UpdateStrategy,
+): Promise<{ success: boolean; conflict: boolean }> {
+  const remoteRef = `origin/${baseBranch}`
+
+  // Check if base is already an ancestor of HEAD (no update needed)
   try {
-    await runGit(['rebase', `origin/${baseBranch}`], { cwd: worktreePath })
+    await runGit(['merge-base', '--is-ancestor', remoteRef, 'HEAD'], { cwd: worktreePath })
+    logger.debug({ worktreePath, baseBranch, strategy }, 'Base branch already up to date')
+    return { success: true, conflict: false }
+  } catch {
+    // Non-zero exit = base is NOT an ancestor → update needed
+  }
+
+  if (strategy === 'merge') {
+    const result = await mergeFromBranch(worktreePath, remoteRef)
+    if (result.success) {
+      logger.debug({ worktreePath, baseBranch }, 'Merged base branch into worktree')
+    }
+    return result
+  }
+
+  // Rebase strategy (legacy)
+  try {
+    await runGit(['rebase', remoteRef], { cwd: worktreePath })
     logger.debug({ worktreePath, baseBranch }, 'Rebased onto base branch')
-    return true
+    return { success: true, conflict: false }
   } catch {
     logger.warn({ worktreePath, baseBranch }, 'Rebase conflict with base branch')
     try {
@@ -236,7 +270,7 @@ async function rebaseOnto(worktreePath: string, baseBranch: string): Promise<boo
     } catch (abortErr) {
       logger.debug({ worktreePath, err: abortErr }, 'Failed to abort rebase')
     }
-    return false
+    return { success: false, conflict: true }
   }
 }
 

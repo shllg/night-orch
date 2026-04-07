@@ -4,6 +4,7 @@ import type { AgentEvent } from '../events/types.js'
 export type AgentRole = 'planner' | 'coder' | 'reviewer'
 export type ReviewVerdict = 'APPROVED' | 'CHANGES_REQUIRED' | 'BLOCKED'
 
+/** Input for a single worker invocation. The adapter spawns the configured CLI tool with this. */
 export interface WorkerTaskInput {
   runId?: string
   phase?: string
@@ -29,6 +30,7 @@ export interface WorkerProfileInput {
   env: Record<string, string>
 }
 
+/** Raw + parsed output from a worker invocation, including cost signals and session continuity. */
 export interface WorkerTaskResult {
   rawOutput: string
   exitCode: number
@@ -95,6 +97,7 @@ export interface VerifyResult {
   passed: boolean
 }
 
+/** Data passed to prompt templates. Assembled by the prompt compiler from RunContext. */
 export interface PromptContext {
   role: AgentRole
   issue: {
@@ -124,6 +127,10 @@ export interface PromptContext {
   } | null
 }
 
+/**
+ * Abstraction over AI CLI tools (Claude, Codex, etc.).
+ * Each adapter knows how to spawn its tool and parse availability info.
+ */
 export interface WorkerAdapter {
   runTask(input: WorkerTaskInput): Promise<WorkerTaskResult>
   checkAvailability(): Promise<{ available: boolean; version: string | null }>

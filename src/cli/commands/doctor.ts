@@ -16,6 +16,7 @@ interface GlobalOpts {
   trustWorkspace?: boolean
   dryRun?: boolean
   logLevel?: string
+  project?: string
 }
 
 interface CheckResult {
@@ -44,6 +45,26 @@ export async function doctorCommand(globalOpts?: GlobalOpts): Promise<void> {
   }
 
   if (!config) {
+    printResults(results)
+    return
+  }
+
+  // If --project specified, run project-specific validation for that repo
+  if (globalOpts?.project) {
+    const targetRepo = config.repos.find((r) => r.repo === globalOpts.project)
+    if (!targetRepo) {
+      results.push({ name: 'Project lookup', passed: false, message: `Repo '${globalOpts.project}' not found in config. Available: ${config.repos.map(r => r.repo).join(', ')}` })
+      printResults(results)
+      return
+    }
+
+    const { createForgeAdapter } = await import('../../forge/factory.js')
+    const { validateProjectSetup } = await import('../../ops/project-check.js')
+    const forge = createForgeAdapter(targetRepo, config)
+    const projectResults = await validateProjectSetup(targetRepo, config, forge)
+    for (const pr of projectResults) {
+      results.push(pr)
+    }
     printResults(results)
     return
   }

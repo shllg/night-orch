@@ -71,3 +71,26 @@ export function createLogger(
 }
 
 export const logger = createLogger(process.env['LOG_LEVEL'] ?? 'info')
+
+/**
+ * Create a child logger scoped to a specific run. Binds runId, repo, and
+ * issueNumber so every log entry from this run includes them automatically.
+ */
+export function createRunLogger(
+  runId: string,
+  repo: string,
+  issueNumber: number,
+): pino.Logger {
+  return logger.child({ runId, repo, issueNumber })
+}
+
+/**
+ * Create a child logger scoped to a specific loop phase within a run.
+ */
+export function createPhaseLogger(
+  parent: pino.Logger,
+  phase: string,
+  iteration: number,
+): pino.Logger {
+  return parent.child({ phase, iteration })
+}

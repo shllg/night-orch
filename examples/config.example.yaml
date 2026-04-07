@@ -161,6 +161,7 @@ repos:
     maxConcurrentRuns: 1
     baseBranch: main
     branchPrefix: orch
+    # updateStrategy: merge  # 'merge' (default, reliable) or 'rebase' (linear history)
     labels:
       ready:
         - orch:ready

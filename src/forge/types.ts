@@ -29,6 +29,7 @@ export interface ForgePRReviewComment {
 
 export type MergeMethod = 'merge' | 'squash' | 'rebase'
 
+/** Normalized issue representation shared across forge backends. */
 export interface ForgeIssue {
   number: number
   nodeId: string | null
@@ -44,6 +45,7 @@ export interface ForgeIssue {
   url: string
 }
 
+/** Normalized pull request representation shared across forge backends. */
 export interface ForgePR {
   number: number
   title: string
@@ -71,6 +73,11 @@ export interface ForgeAuthInfo {
   scopes: string[]
 }
 
+/**
+ * Platform-agnostic interface for issue trackers and code forges.
+ * Implemented by GitHub and Forgejo adapters. All forge access MUST go through
+ * this interface — never call Octokit or Forgejo APIs directly outside their adapter.
+ */
 export interface ForgeAdapter {
   /** List open issues matching label selectors for a repo. */
   listEligibleIssues(repo: RepoConfig): Promise<ForgeIssue[]>

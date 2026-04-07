@@ -167,6 +167,7 @@ function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
     prReviewFeedback: null,
     sessionIds: {},
     stepOutputs: {},
+    iterationSnapshots: [],
     ...overrides,
   }
 }

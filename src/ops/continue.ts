@@ -164,7 +164,7 @@ interface BuildFollowupContextParams {
 }
 
 interface FollowupContextPayload {
-  primaryType: 'continue'
+  primaryType: 'continue' | 'merge_conflict'
   summary: string
   context: string
 }
@@ -217,13 +217,19 @@ async function buildFollowupContext(params: BuildFollowupContextParams): Promise
     )
   }
 
+  // If merge conflicts were detected, signal the poller to auto-merge from
+  // base before entering the code loop. This unifies rebase/continue so
+  // users don't need to choose which command to run.
+  const hasMergeConflict = reactions.some((r) => r.type === 'merge_conflict')
+  const primaryType = hasMergeConflict ? 'merge_conflict' as const : 'continue' as const
+
   const dedupedSummaryParts = [...new Set(summaryParts)]
   const summary = dedupedSummaryParts.length > 0
     ? `Continue requested with ${dedupedSummaryParts.join(', ')}`
     : 'Continue requested — re-evaluate and complete the PR'
 
   return {
-    primaryType: 'continue',
+    primaryType,
     summary,
     context: sections.join('\n\n'),
   }

@@ -109,6 +109,7 @@ export async function executeParallelSubtasks(
             branchName: subBranch,
             worktreePath: subWorktreePath,
             resetToBase: true,
+            updateStrategy: parentCtx.repoConfig.updateStrategy,
           })
 
           const subCtx: RunContext = {
@@ -130,6 +131,7 @@ export async function executeParallelSubtasks(
             phaseHistory: [],
             sessionIds: {},
             stepOutputs: {},
+            iterationSnapshots: [],
             issue: {
               ...parentCtx.issue,
               title: subtask.title,

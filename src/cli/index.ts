@@ -98,7 +98,8 @@ program
 program
   .command('doctor')
   .description('Check configuration, auth, CLI binaries, repo paths, and DB')
-  .action((_opts, cmd) => doctorCommand(cmd.parent?.opts()))
+  .option('--project <repo>', 'Validate a specific target project (owner/name)')
+  .action((opts, cmd) => doctorCommand({ ...cmd.parent?.opts(), ...opts }))
 
 program
   .command('sync')

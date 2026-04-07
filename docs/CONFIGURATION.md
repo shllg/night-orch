@@ -451,6 +451,7 @@ Reference a workflow in `repos[].workflow` by name.
 | `localPath` | string path | yes | none | Local repo checkout path. |
 | `baseBranch` | string | no | `main` | PR target branch. |
 | `branchPrefix` | string | no | `orch` | Work branch prefix. |
+| `updateStrategy` | `merge` \| `rebase` | no | `merge` | How to incorporate upstream base branch changes. `merge` creates merge commits (reliable for automated systems). `rebase` replays commits for linear history (use only if your repo requires linear history). |
 | `labels` | object | no | object with defaults | Orchestration label names. |
 | `kanban` | object | no | none | Optional alternate state-label flow activated by a trigger label. |
 | `labelConfig` | record | no | `{}` | Label metadata overrides for `labels-init`. |

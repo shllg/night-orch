@@ -1,5 +1,7 @@
 import { runGit } from '../git/process.js'
+import { mergeFromBranch } from '../git/repo.js'
 import { logger } from '../utils/logger.js'
+import type { UpdateStrategy } from '../git/worktree.js'
 
 export interface RebaseTarget {
   repo: string
@@ -13,15 +15,18 @@ export interface RebaseTarget {
 export type RebaseResult = 'up_to_date' | 'rebased' | 'conflict' | 'error'
 
 /**
- * Check if a branch needs rebase and perform it automatically.
- * Uses --force-with-lease for push to protect against overwriting others' work.
+ * Update a branch to incorporate latest base branch changes and push.
+ * Supports both merge and rebase strategies. Uses --force-with-lease for
+ * push to protect against overwriting others' work.
  *
- * @returns 'up_to_date' if no rebase needed, 'rebased' on success,
- *          'conflict' if rebase had conflicts (aborted), 'error' on other failures.
+ * @param strategy - 'merge' creates a merge commit (reliable), 'rebase' replays commits (linear history)
+ * @returns 'up_to_date' if no update needed, 'rebased' on success,
+ *          'conflict' if update had conflicts (aborted), 'error' on other failures.
  */
 export async function autoRebase(
   target: RebaseTarget,
   repoLocalPath: string,
+  strategy: UpdateStrategy = 'merge',
 ): Promise<RebaseResult> {
   const { branchName, baseBranch, worktreePath } = target
   const log = logger.child({ repo: target.repo, issue: target.issueNumber, branch: branchName })
@@ -33,39 +38,49 @@ export async function autoRebase(
       timeout: 60_000,
     })
 
-    // Check if base branch is already an ancestor of HEAD (i.e., no rebase needed)
+    // Check if base branch is already an ancestor of HEAD (i.e., no update needed)
     try {
       await runGit(['merge-base', '--is-ancestor', `origin/${baseBranch}`, 'HEAD'], {
         cwd: worktreePath,
         timeout: 30_000,
       })
-      // Exit code 0 means base is ancestor → already up to date
       return 'up_to_date'
     } catch {
-      // Non-zero exit = base is NOT an ancestor → rebase needed
+      // Non-zero exit = base is NOT an ancestor → update needed
     }
 
-    log.info({ baseBranch }, 'Base branch has moved ahead — rebasing')
+    const remoteRef = `origin/${baseBranch}`
+    log.info({ baseBranch, strategy }, 'Base branch has moved ahead — updating')
 
-    // Attempt rebase
-    try {
-      await runGit(['rebase', `origin/${baseBranch}`], {
-        cwd: worktreePath,
-        timeout: 120_000,
-      })
-    } catch (rebaseErr) {
-      const stderr = (rebaseErr as { stderr?: string }).stderr ?? ''
-      if (stderr.includes('CONFLICT') || stderr.includes('could not apply')) {
-        log.warn({ baseBranch }, 'Rebase conflict — aborting')
-        try {
-          await runGit(['rebase', '--abort'], { cwd: worktreePath, timeout: 30_000 })
-        } catch {
-          // Abort itself failed — worktree may be in bad state
-          log.error('Failed to abort rebase')
+    if (strategy === 'merge') {
+      const result = await mergeFromBranch(worktreePath, remoteRef)
+      if (!result.success) {
+        if (result.conflict) {
+          log.warn({ baseBranch }, 'Merge conflict with base branch — aborting')
+          return 'conflict'
         }
-        return 'conflict'
+        return 'error'
       }
-      throw rebaseErr
+    } else {
+      // Rebase strategy
+      try {
+        await runGit(['rebase', remoteRef], {
+          cwd: worktreePath,
+          timeout: 120_000,
+        })
+      } catch (rebaseErr) {
+        const stderr = (rebaseErr as { stderr?: string }).stderr ?? ''
+        if (stderr.includes('CONFLICT') || stderr.includes('could not apply')) {
+          log.warn({ baseBranch }, 'Rebase conflict — aborting')
+          try {
+            await runGit(['rebase', '--abort'], { cwd: worktreePath, timeout: 30_000 })
+          } catch {
+            log.error('Failed to abort rebase')
+          }
+          return 'conflict'
+        }
+        throw rebaseErr
+      }
     }
 
     // Push with --force-with-lease
@@ -74,10 +89,10 @@ export async function autoRebase(
       timeout: 60_000,
     })
 
-    log.info({ baseBranch }, 'Rebased and pushed successfully')
+    log.info({ baseBranch, strategy }, 'Updated and pushed successfully')
     return 'rebased'
   } catch (err) {
-    log.error({ err }, 'Auto-rebase failed')
+    log.error({ err }, 'Auto-update failed')
     return 'error'
   }
 }

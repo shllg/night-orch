@@ -3,7 +3,9 @@ import type { RepoConfig } from '../config/schema.js'
 import type { ResolvedRoles } from '../discovery/roles.js'
 import type { TriageResult, TriageAdjustedLimits } from '../discovery/triage.js'
 import type { PlannerOutput, CoderOutput, ReviewerOutput, ReviewFinding, VerifyResult } from '../workers/types.js'
+import type { IterationSnapshot } from './progress.js'
 
+/** Why a run was blocked — used for reporting and retry eligibility. */
 export type BlockReason =
   | 'cost_limit'
   | 'iteration_limit'
@@ -14,6 +16,7 @@ export type BlockReason =
   | 'merge_conflict'
   | 'auth_failure'
 
+/** How this run was initiated: new work, PR feedback follow-up, or rebase after merge conflict. */
 export type RunMode = 'fresh' | 'followup' | 'rebase'
 
 export type LoopPhase = string
@@ -26,6 +29,13 @@ export interface PhaseRecord {
   artifacts: Record<string, unknown>
 }
 
+/**
+ * Immutable snapshot of everything the loop engine knows about a run.
+ *
+ * Never mutated in place — each phase returns a new context via `updateContext()`.
+ * Fields are grouped: identity/config, worker outputs, counters, phase state,
+ * and workflow metadata.
+ */
 export interface RunContext {
   readonly runId: string
   readonly repo: string
@@ -65,14 +75,22 @@ export interface RunContext {
 
   /** Generic step outputs keyed by step ID, for custom workflow steps. */
   readonly stepOutputs: Readonly<Record<string, unknown>>
+
+  /** Per-iteration verify output hashes for stuck-loop detection. */
+  readonly iterationSnapshots: readonly IterationSnapshot[]
 }
 
+/**
+ * Discriminated union returned by `decide()` to route the loop engine.
+ * `publish` and `block`/`error` are terminal; `iterate` jumps back to the coder step.
+ */
 export type LoopDecision =
   | { action: 'publish'; reason: string }
   | { action: 'iterate'; reason: string; findings: ReviewFinding[] }
   | { action: 'block'; reason: string; blockReason: BlockReason }
   | { action: 'error'; reason: string }
 
+/** Final disposition of a run. `running` is the initial value; the others are terminal. */
 export type TerminalStatus = 'running' | 'publish' | 'blocked' | 'error'
 
 export type { PlannerOutput, CoderOutput, ReviewerOutput, ReviewFinding, VerifyResult }

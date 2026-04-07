@@ -5,6 +5,7 @@ import type { MetricsService } from '../metrics/service.js'
 import type { ResolvedWorkflow } from './workflow.js'
 import type { PersistedDecisionOutcome } from './checkpoint.js'
 import { updateContext, recordPhase } from './context.js'
+import { hashVerifyResults, assessProgress } from './progress.js'
 import { commitChanges } from './commit.js'
 import { executeStep, type StepDependencies } from './step-executor.js'
 import { Checkpoint } from './checkpoint.js'
@@ -17,6 +18,7 @@ import type Database from 'better-sqlite3'
 import { buildPlanningPrdPath, isPlanningIssue } from '../planning/mode.js'
 import type { AgentEvent } from '../events/types.js'
 
+/** External services injected into the loop engine. Tests can substitute mocks for all of these. */
 export interface LoopDependencies {
   db: Database.Database
   config: Config
@@ -286,11 +288,37 @@ export async function executeLoop(
         }
 
         case 'iterate': {
+          // Snapshot verify results before clearing for stuck-loop detection
+          const verifyHash = hashVerifyResults(ctx.verifyResults)
+          const snapshot = { iteration: ctx.iteration, verifyHash }
+          const updatedSnapshots = [...ctx.iterationSnapshots, snapshot]
+
+          // Check if the loop is stuck (same verify output 2x in a row)
+          const progress = assessProgress(verifyHash, ctx.iterationSnapshots)
+          if (progress.status === 'stuck') {
+            logger.warn({ runId: ctx.runId, iteration: ctx.iteration, verifyHash }, progress.reason)
+            return recordPhase(
+              updateContext(ctx, {
+                currentPhase: 'blocked',
+                terminalStatus: 'blocked',
+                blockReason: 'iteration_limit',
+                iterationSnapshots: updatedSnapshots,
+                stepOutputs: {
+                  ...ctx.stepOutputs,
+                  blockMessage: `Loop stuck: ${progress.reason}`,
+                },
+              }),
+              'decision',
+              'failure',
+            )
+          }
+
           ctx = updateContext(ctx, {
             iteration: ctx.iteration + 1,
             reviewFindings: [...ctx.reviewFindings, ...decision.findings],
             reviewResult: null,
             verifyResults: [],
+            iterationSnapshots: updatedSnapshots,
           })
           try { metrics?.incLoopIterations(ctx.repo) } catch { /* best-effort */ }
           logger.info({ runId: ctx.runId, iteration: ctx.iteration }, 'Iterating loop')

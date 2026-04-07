@@ -395,6 +395,8 @@ Interactive setup wizard. Guides you through creating a config file.
 
 Run diagnostic checks: config validity, environment variables, forge authentication, CLI binaries, repo paths, base branches, worktree root, database, verify commands.
 
+Use `--project <owner/name>` to validate a specific target project's readiness: repo accessibility, base branch, forge auth, labels, worker profiles, and verify commands.
+
 ### `night-orch status`
 
 Show current state: active runs, active leases, daily cost against budget, recent run history.
@@ -432,6 +434,8 @@ Also available as a comment command: `/orch rebase` (with `--check` by default).
 ### `night-orch continue <repo> <issue>`
 
 Queue a context-aware second pass for blocked/review-ready/errored work. Night-orch collects the latest PR context (review comments, CI failures, mergeability state) and re-queues the run with that context.
+
+If the PR has merge conflicts, `/orch continue` automatically merges from the base branch (using the repo's `updateStrategy`) before entering the code loop. This means you don't need to choose between `/orch rebase` and `/orch continue` — continue handles both scenarios.
 
 Also available as a comment command: `/orch continue`.
 
@@ -479,6 +483,10 @@ security:
 When a budget is exceeded in `pay-per-use` mode, the run is blocked with
 reason `cost_limit`. In `subscription` mode, USD is advisory and cost-based
 blocking is skipped.
+
+### Stuck-loop detection
+
+Night-orch detects when the loop is stuck by comparing verify output hashes across iterations. If two consecutive iterations produce identical verify failures (same tests failing the same way, after stripping timestamps and non-deterministic output), the run is blocked with a specific "Loop stuck" message instead of consuming more iterations. This prevents the common case where the LLM keeps attempting the same fix without making progress.
 
 ### Cost model
 

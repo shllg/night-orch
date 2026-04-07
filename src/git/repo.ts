@@ -150,6 +150,25 @@ export async function cherryPick(
 }
 
 /**
+ * Merge a remote branch into the current HEAD using a regular merge commit.
+ * On conflict the merge is aborted and the worktree is left clean.
+ */
+export async function mergeFromBranch(
+  worktreePath: string,
+  branch: string,
+): Promise<{ success: boolean; conflict: boolean }> {
+  try {
+    await runGit(['merge', branch, '--no-edit'], { cwd: worktreePath })
+    return { success: true, conflict: false }
+  } catch (err) {
+    const stderr = (err as { stderr?: string }).stderr ?? ''
+    const isConflict = stderr.includes('CONFLICT') || stderr.includes('Automatic merge failed')
+    try { await runGit(['merge', '--abort'], { cwd: worktreePath }) } catch { /* best-effort */ }
+    return { success: false, conflict: isConflict }
+  }
+}
+
+/**
  * Abort an in-progress merge. No-op if there is nothing to abort.
  */
 export async function abortMerge(worktreePath: string): Promise<void> {

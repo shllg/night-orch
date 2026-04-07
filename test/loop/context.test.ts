@@ -32,6 +32,7 @@ function makeCtx(): RunContext {
     prReviewFeedback: null,
     sessionIds: {},
     stepOutputs: {},
+    iterationSnapshots: [],
   }
 }
 

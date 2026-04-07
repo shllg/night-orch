@@ -92,6 +92,7 @@ function makeCtx(labels: string[] = [], prMentions: string[] = []): RunContext {
     prReviewFeedback: null,
     sessionIds: {},
     stepOutputs: {},
+    iterationSnapshots: [],
   }
 }
 

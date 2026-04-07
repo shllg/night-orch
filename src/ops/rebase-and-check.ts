@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3'
 import type { ForgeAdapter } from '../forge/types.js'
 import type { RepoConfig } from '../config/schema.js'
 import { autoRebase, type RebaseTarget } from './rebase.js'
+import type { UpdateStrategy } from '../git/worktree.js'
 import { runVerifyCommands, allVerifyPassed } from '../loop/verifier.js'
 import { buildVerifierEnv } from '../workers/env.js'
 import { RunManager } from '../state/runs.js'
@@ -98,6 +99,7 @@ export async function executeRebase(
   repo: string,
   issueNumber: number,
   verifyCommands: Array<string | string[]>,
+  strategy: UpdateStrategy = 'merge',
 ): Promise<{ rebased: boolean; verifyPassed: boolean; conflict: boolean }> {
   const target: RebaseTarget = {
     repo,
@@ -108,7 +110,7 @@ export async function executeRebase(
     worktreePath,
   }
 
-  const rebaseResult = await autoRebase(target, repoLocalPath)
+  const rebaseResult = await autoRebase(target, repoLocalPath, strategy)
 
   if (rebaseResult === 'up_to_date') {
     return { rebased: false, verifyPassed: true, conflict: false }
