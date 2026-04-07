@@ -2,6 +2,10 @@
   "name": "night-orch",
   "version": "0.2.0",
   "description": "Nightly GitHub/Forgejo issue orchestrator — autonomous AI agent coding tool",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shllg/night-orch"
+  },
   "type": "module",
   "bin": {
     "night-orch": "./dist/cli/index.js"
