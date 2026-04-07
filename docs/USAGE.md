@@ -4,7 +4,7 @@ This guide covers how to use night-orch's features. For configuration reference,
 
 ## How Night-Orch Works
 
-Night-orch is a **central orchestrator** that runs as a single daemon on your machine. It manages one or more repositories from a single configuration file. You do **not** run it inside any project directory — it runs independently and reaches into your project clones via their local paths.
+Night-orch is a **central orchestrator** that runs as a single daemon on your machine. It manages one or more repositories from a central configuration file. You do **not** run it inside any project directory — it runs independently and reaches into your project clones via their local paths.
 
 ```
 ~/.config/night-orch/config.yaml   ← central config
@@ -16,6 +16,8 @@ Night-orch is a **central orchestrator** that runs as a single daemon on your ma
 ```
 
 Night-orch **never modifies your project clones directly**. It creates temporary git worktrees from them into its own storage area, does all AI work there, and pushes branches/PRs to the remote.
+
+Repo-local overrides are optional: if a repo contains `.night-orch.yml` (or `.night-orch.yaml`), those settings are deep-merged with the central config for that repo.
 
 ## Getting Started
 
@@ -357,7 +359,7 @@ commentCommands:
 
 ## CLI Reference
 
-All commands can be run from any directory — night-orch reads its config from `~/.config/night-orch/config.yaml` by default. Override with `--config <path>`.
+All commands can be run from any directory — night-orch reads its central config from `~/.config/night-orch/config.yaml` by default (or `--config <path>`), then applies optional per-repo `.night-orch.yml/.yaml` overrides from each `repos[].localPath`.
 
 ### `night-orch run`
 

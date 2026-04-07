@@ -396,8 +396,43 @@ export const ConfigSchema = z.object({
   workflows: z.record(WorkflowSchema).default({}),
 })
 
+/**
+ * Per-repo project config (`.night-orch.yml/.yaml`) loaded from inside a
+ * repository checkout. Keys mirror repo-scoped config blocks plus optional
+ * project-local workflow/profile definitions.
+ *
+ * Values are intentionally typed as `unknown` here so loader-level deep-merge
+ * can preserve partial overrides without schema defaults mutating omitted
+ * siblings. The merged result is then fully validated by `ConfigSchema`.
+ */
+export const ProjectConfigSchema = z.object({
+  forge: z.unknown().optional(),
+  linkedProjects: z.unknown().optional(),
+  apiBaseUrl: z.unknown().optional(),
+  tokenEnv: z.unknown().optional(),
+  maxConcurrentRuns: z.unknown().optional(),
+  baseBranch: z.unknown().optional(),
+  branchPrefix: z.unknown().optional(),
+  labels: z.unknown().optional(),
+  kanban: z.unknown().optional(),
+  labelConfig: z.unknown().optional(),
+  defaults: z.unknown().optional(),
+  environment: z.unknown().optional(),
+  verify: z.unknown().optional(),
+  prompts: z.unknown().optional(),
+  planning: z.unknown().optional(),
+  selectors: z.unknown().optional(),
+  agents: z.unknown().optional(),
+  workflow: z.unknown().optional(),
+  workflowByTriage: z.unknown().optional(),
+  mergeQueue: z.unknown().optional(),
+  workflows: z.unknown().optional(),
+  workerProfiles: z.unknown().optional(),
+}).strict()
+
 export type Config = z.infer<typeof ConfigSchema>
 export type RepoConfig = z.infer<typeof RepoConfigSchema>
 export type WorkerProfile = z.infer<typeof WorkerProfileSchema>
 export type EnvironmentConfig = z.infer<typeof EnvironmentConfigSchema>
 export type CostModel = z.infer<typeof CostModelSchema>
+export type ProjectConfig = z.infer<typeof ProjectConfigSchema>
