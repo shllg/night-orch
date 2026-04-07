@@ -143,6 +143,7 @@ export async function handleStatus(args: { repo?: string }, deps: MCPDependencie
     dailyCostUsd: costTracker.getDailyCost(),
     dailyPromptTokens: dailyTokens.promptTokens,
     dailyCompletionTokens: dailyTokens.completionTokens,
+    dailyCacheReadTokens: dailyTokens.cacheReadTokens,
     dailyTotalTokens: dailyTokens.totalTokens,
     configuredRepos: deps.config.repos.map((r) => r.repo),
   }
@@ -247,7 +248,8 @@ export async function handleCostReport(args: { days?: number }, deps: MCPDepende
          total_cost_usd,
          run_count,
          total_prompt_tokens,
-         total_completion_tokens
+         total_completion_tokens,
+         total_cache_read_tokens
        FROM daily_costs
        ORDER BY date DESC
        LIMIT ?`,
@@ -258,12 +260,14 @@ export async function handleCostReport(args: { days?: number }, deps: MCPDepende
       run_count: number
       total_prompt_tokens: number
       total_completion_tokens: number
+      total_cache_read_tokens: number
     }>
 
   const totalCost = rows.reduce((sum, r) => sum + r.total_cost_usd, 0)
   const totalRuns = rows.reduce((sum, r) => sum + r.run_count, 0)
   const totalPromptTokens = rows.reduce((sum, r) => sum + r.total_prompt_tokens, 0)
   const totalCompletionTokens = rows.reduce((sum, r) => sum + r.total_completion_tokens, 0)
+  const totalCacheReadTokens = rows.reduce((sum, r) => sum + r.total_cache_read_tokens, 0)
 
   return {
     model: costModel,
@@ -272,7 +276,8 @@ export async function handleCostReport(args: { days?: number }, deps: MCPDepende
     totalRuns,
     totalPromptTokens,
     totalCompletionTokens,
-    totalTokens: totalPromptTokens + totalCompletionTokens,
+    totalCacheReadTokens,
+    totalTokens: totalPromptTokens + totalCompletionTokens + totalCacheReadTokens,
     dailyBudgetUsd: deps.config.security.maxDailyCostUsd,
     dailyBudgetOverrideUsd,
     effectiveDailyBudgetUsd,
@@ -285,7 +290,8 @@ export async function handleCostReport(args: { days?: number }, deps: MCPDepende
       runCount: row.run_count,
       promptTokens: row.total_prompt_tokens,
       completionTokens: row.total_completion_tokens,
-      totalTokens: row.total_prompt_tokens + row.total_completion_tokens,
+      cacheReadTokens: row.total_cache_read_tokens,
+      totalTokens: row.total_prompt_tokens + row.total_completion_tokens + row.total_cache_read_tokens,
     })),
   }
 }

@@ -13,7 +13,7 @@ describe('estimateWorkerCostUsd', () => {
     expect(usd).toBe(0.0105)
   })
 
-  it('defaults to zero USD pricing in subscription mode', () => {
+  it('estimates advisory USD in subscription mode using configured/builtin rates', () => {
     const usd = estimateWorkerCostUsd({
       cost: { model: 'subscription' },
       identity: { role: 'coder', workerType: 'codex' },
@@ -21,7 +21,7 @@ describe('estimateWorkerCostUsd', () => {
       tokenUsage: { promptTokens: 25_000, completionTokens: 8_000 },
     })
 
-    expect(usd).toBe(0)
+    expect(usd).toBe(0.195)
   })
 
   it('uses configured model pricing when pricingModel is set on worker profile', () => {

@@ -30,6 +30,7 @@ export interface RunRecord {
   estimatedCostUsd: number
   promptTokens: number
   completionTokens: number
+  cacheReadTokens: number
   blockReason: string | null
   parentRunId: string | null
   /**
@@ -133,6 +134,7 @@ export class RunManager {
       'estimatedCostUsd',
       'promptTokens',
       'completionTokens',
+      'cacheReadTokens',
       'blockReason',
       'parentRunId',
     ] as const
@@ -155,6 +157,7 @@ export class RunManager {
       estimatedCostUsd: 'estimated_cost_usd',
       promptTokens: 'prompt_tokens',
       completionTokens: 'completion_tokens',
+      cacheReadTokens: 'cache_read_tokens',
       blockReason: 'block_reason',
       parentRunId: 'parent_run_id',
     }
@@ -404,6 +407,7 @@ export class RunManager {
       estimatedCostUsd: row.estimated_cost_usd ?? 0,
       promptTokens: row.prompt_tokens ?? 0,
       completionTokens: row.completion_tokens ?? 0,
+      cacheReadTokens: row.cache_read_tokens ?? 0,
       blockReason: row.block_reason ?? null,
       parentRunId: row.parent_run_id ?? null,
       retryCount: row.retry_count ?? 0,
@@ -453,6 +457,7 @@ interface RawRunRow {
   estimated_cost_usd: number | null
   prompt_tokens: number | null
   completion_tokens: number | null
+  cache_read_tokens: number | null
   block_reason: string | null
   parent_run_id: string | null
   retry_count: number | null

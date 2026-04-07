@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import {
   CostPricingModelSchema,
+  SubscriptionMeteredSchema,
   WorkerProfileSchema,
 } from '../../config/schema.js'
 import type { JsonValue, SettingDefinition, SettingValue } from '../registry.js'
@@ -12,6 +13,7 @@ import {
 } from '../registry.js'
 
 const CostPricingModelsOverrideSchema = z.record(CostPricingModelSchema)
+const SubscriptionMeteredOverrideSchema = SubscriptionMeteredSchema
 const WorkerProfilesOverrideSchema = z.record(WorkerProfileSchema)
 
 export function securityDefinitions(): SettingDefinition[] {
@@ -65,10 +67,27 @@ export function securityDefinitions(): SettingDefinition[] {
       key: 'cost.model',
       label: 'Cost Model',
       description: 'Cost enforcement model.',
-      details: 'pay-per-use enforces spend caps; subscription treats USD as advisory.',
+      details: 'pay-per-use enforces spend caps; subscription is advisory-only; subscription-metered tracks advisory spend with optional enforcement.',
       defaultValue: 'pay-per-use',
       yamlPath: ['cost', 'model'],
-      options: ['pay-per-use', 'subscription'],
+      options: ['pay-per-use', 'subscription', 'subscription-metered'],
+    }),
+    jsonSetting({
+      key: 'cost.subscriptionMetered',
+      label: 'Subscription Metered Options',
+      description: 'Warning and optional enforcement controls for subscription-metered mode.',
+      details: 'advisoryThresholdUsd logs warnings; enforcePerRunLimit/enforceDailyLimit turn security caps into hard blocks.',
+      defaultValue: {
+        advisoryThresholdUsd: null,
+        enforcePerRunLimit: false,
+        enforceDailyLimit: false,
+      },
+      yamlPath: ['cost', 'subscriptionMetered'],
+      normalize: (value) => validateJsonSettingShape(
+        value,
+        SubscriptionMeteredOverrideSchema,
+        'cost.subscriptionMetered',
+      ),
     }),
     stringSetting({
       key: 'cost.pricing.defaultModel',

@@ -26,6 +26,7 @@ export function Header({
   buildInfo,
 }: HeaderProps): React.ReactElement {
   const shortSha = buildInfo.gitSha ? buildInfo.gitSha.slice(0, 12) : 'unknown'
+  const usageFirst = status.cost.model === 'subscription' || status.cost.model === 'subscription-metered'
 
   return (
     <Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="blue" paddingX={1}>
@@ -49,7 +50,7 @@ export function Header({
       </Box>
       <Text dimColor>
         runs {status.overview.totalRuns}  active {status.overview.activeRuns}  queued {status.overview.queuedRuns}  running {status.overview.runningRuns}
-        {status.cost.model === 'subscription'
+        {usageFirst
           ? `  tokens today ${formatTokenCount(status.usage.todayTotalTokens)}`
           : `  cost today $${status.cost.todayCostUsd.toFixed(2)}`}
       </Text>

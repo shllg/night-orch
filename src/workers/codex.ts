@@ -88,6 +88,16 @@ export class CodexWorkerAdapter implements WorkerAdapter {
     // Extract thread ID from Codex streaming events for session continuity
     const sessionId = extractCodexThreadId(result.stdout)
     const tokenUsage = extractCodexTokenUsage(result.stdout)
+    if (!tokenUsage && result.stdout.trim().length > 0) {
+      logger.warn(
+        {
+          runId: input.runId ?? null,
+          role: input.role,
+          phase: input.phase ?? null,
+        },
+        'Codex token extraction unavailable; falling back to duration-based cost estimate',
+      )
+    }
 
     // Parse output based on role
     const { parsed, parseError } = parseOutput(input.role, assistantText)
@@ -273,43 +283,50 @@ function extractCodexTokenUsage(raw: string): WorkerTaskResult['tokenUsage'] {
     ? fromResponseCompleted
     : sumUsageForEventType(events, 'turn.completed')
 
-  if (totals.promptTokens <= 0 && totals.completionTokens <= 0) return undefined
+  if (totals.promptTokens <= 0 && totals.completionTokens <= 0 && totals.cacheReadTokens <= 0) return undefined
   return {
     promptTokens: totals.promptTokens,
     completionTokens: totals.completionTokens,
+    ...(totals.cacheReadTokens > 0 ? { cacheReadTokens: totals.cacheReadTokens } : {}),
   }
 }
 
-function sumUsageForEventType(
-  events: unknown[],
-  expectedType: string,
-): { seen: boolean; promptTokens: number; completionTokens: number } {
+function sumUsageForEventType(events: unknown[], expectedType: string): {
+  seen: boolean
+  promptTokens: number
+  completionTokens: number
+  cacheReadTokens: number
+} {
   let promptTokens = 0
   let completionTokens = 0
+  let cacheReadTokens = 0
   let seen = false
 
   for (const event of events) {
     if (!isRecord(event)) continue
     if (event['type'] !== expectedType) continue
     const usage = extractUsageFromCodexEvent(event)
-    if (usage.promptTokens <= 0 && usage.completionTokens <= 0) continue
+    if (usage.promptTokens <= 0 && usage.completionTokens <= 0 && usage.cacheReadTokens <= 0) continue
     seen = true
     promptTokens += usage.promptTokens
     completionTokens += usage.completionTokens
+    cacheReadTokens += usage.cacheReadTokens
   }
 
-  return { seen, promptTokens, completionTokens }
+  return { seen, promptTokens, completionTokens, cacheReadTokens }
 }
 
 function extractUsageFromCodexEvent(event: Record<string, unknown>): {
   promptTokens: number
   completionTokens: number
+  cacheReadTokens: number
 } {
   const directUsage = event['usage']
   if (isRecord(directUsage)) {
     return {
       promptTokens: parseTokenCount(directUsage['input_tokens']),
       completionTokens: parseTokenCount(directUsage['output_tokens']),
+      cacheReadTokens: parseTokenCount(directUsage['cache_read_input_tokens']),
     }
   }
 
@@ -318,10 +335,11 @@ function extractUsageFromCodexEvent(event: Record<string, unknown>): {
     return {
       promptTokens: parseTokenCount(response['usage']['input_tokens']),
       completionTokens: parseTokenCount(response['usage']['output_tokens']),
+      cacheReadTokens: parseTokenCount(response['usage']['cache_read_input_tokens']),
     }
   }
 
-  return { promptTokens: 0, completionTokens: 0 }
+  return { promptTokens: 0, completionTokens: 0, cacheReadTokens: 0 }
 }
 
 /**

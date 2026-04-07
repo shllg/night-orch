@@ -1,69 +1,194 @@
 import type Database from 'better-sqlite3'
 import type { Config } from '../config/schema.js'
+import type { TokenUsage } from '../workers/types.js'
 import { IssueManager } from '../state/issues.js'
 import { RunManager } from '../state/runs.js'
 import { utcDayKey } from '../utils/time.js'
+import { logger } from '../utils/logger.js'
 
-interface TokenUsageInput {
-  promptTokens: number
-  completionTokens: number
-}
+type TokenUsageInput = TokenUsage
 
 export interface TokenUsageTotals {
   promptTokens: number
   completionTokens: number
+  cacheReadTokens: number
+  totalTokens: number
+}
+
+interface CostRecordMetadata {
+  stepId?: string
+  workerType?: string | null
+}
+
+interface SubscriptionMeteredPolicy {
+  advisoryThresholdUsd: number | null
+  enforcePerRunLimit: boolean
+  enforceDailyLimit: boolean
+}
+
+interface ResolvedCostPolicy {
+  model: Config['cost']['model']
+  subscriptionMetered: SubscriptionMeteredPolicy
+}
+
+export interface StepCostBreakdown {
+  stepId: string
+  costUsd: number
+  promptTokens: number
+  completionTokens: number
+  cacheReadTokens: number
+  totalTokens: number
+}
+
+export interface WorkerCostBreakdown {
+  workerType: string
+  costUsd: number
+  promptTokens: number
+  completionTokens: number
+  cacheReadTokens: number
   totalTokens: number
 }
 
 export class CostTracker {
   private issueManager: IssueManager
+  private advisoryWarnings = new Set<string>()
 
   constructor(private db: Database.Database) {
     this.issueManager = new IssueManager(db)
   }
 
-  recordCost(runId: string, costUsd: number, tokenUsage?: TokenUsageInput): void {
+  private persistCostRecord(
+    runId: string,
+    date: string,
+    usage: TokenUsageTotals,
+    usdAmount: number,
+    costStepId: string | null,
+    costWorkerType: string | null,
+  ): void {
+    const runUsageInsert = this.db
+      .prepare(
+        `INSERT INTO daily_run_usage (date, run_id)
+         VALUES (?, ?)
+         ON CONFLICT(date, run_id) DO NOTHING`,
+      )
+      .run(date, runId)
+    const dailyRunCountIncrement = runUsageInsert.changes > 0 ? 1 : 0
+
+    this.db
+      .prepare(
+        `INSERT INTO daily_costs (date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens, total_cache_read_tokens)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(date) DO UPDATE SET
+           total_cost_usd = total_cost_usd + excluded.total_cost_usd,
+           run_count = run_count + excluded.run_count,
+           total_prompt_tokens = total_prompt_tokens + excluded.total_prompt_tokens,
+           total_completion_tokens = total_completion_tokens + excluded.total_completion_tokens,
+           total_cache_read_tokens = total_cache_read_tokens + excluded.total_cache_read_tokens`,
+      )
+      .run(
+        date,
+        usdAmount,
+        dailyRunCountIncrement,
+        usage.promptTokens,
+        usage.completionTokens,
+        usage.cacheReadTokens,
+      )
+
+    this.db
+      .prepare(
+        `UPDATE runs
+         SET estimated_cost_usd = estimated_cost_usd + ?,
+             prompt_tokens = prompt_tokens + ?,
+             completion_tokens = completion_tokens + ?,
+             cache_read_tokens = cache_read_tokens + ?
+         WHERE id = ?`,
+      )
+      .run(usdAmount, usage.promptTokens, usage.completionTokens, usage.cacheReadTokens, runId)
+
+    if (costStepId !== null) {
+      this.db
+        .prepare(
+          `INSERT INTO run_cost_entries (
+             run_id,
+             step_id,
+             worker_type,
+             cost_usd,
+             prompt_tokens,
+             completion_tokens,
+             cache_read_tokens
+           )
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          runId,
+          costStepId,
+          costWorkerType,
+          usdAmount,
+          usage.promptTokens,
+          usage.completionTokens,
+          usage.cacheReadTokens,
+        )
+    }
+
+    this.issueManager.syncFromRunId(runId)
+  }
+
+  recordCost(
+    runId: string,
+    costUsd: number,
+    tokenUsage?: TokenUsageInput,
+    metadata: CostRecordMetadata = {},
+  ): void {
     const amountUsd = Number(Math.max(0, costUsd).toFixed(6))
     const normalizedTokens = normalizeTokenUsage(tokenUsage)
     if (amountUsd <= 0 && normalizedTokens.totalTokens <= 0) return
 
     const today = utcDayKey()
-    const tx = this.db.transaction((id: string, date: string, usage: TokenUsageTotals, usdAmount: number) => {
-      const runUsageInsert = this.db
-        .prepare(
-          `INSERT INTO daily_run_usage (date, run_id)
-           VALUES (?, ?)
-           ON CONFLICT(date, run_id) DO NOTHING`,
-        )
-        .run(date, id)
-      const dailyRunCountIncrement = runUsageInsert.changes > 0 ? 1 : 0
-
-      this.db
-        .prepare(
-          `INSERT INTO daily_costs (date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens)
-           VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT(date) DO UPDATE SET
-             total_cost_usd = total_cost_usd + excluded.total_cost_usd,
-             run_count = run_count + excluded.run_count,
-             total_prompt_tokens = total_prompt_tokens + excluded.total_prompt_tokens,
-             total_completion_tokens = total_completion_tokens + excluded.total_completion_tokens`,
-        )
-        .run(date, usdAmount, dailyRunCountIncrement, usage.promptTokens, usage.completionTokens)
-
-      this.db
-        .prepare(
-          `UPDATE runs
-           SET estimated_cost_usd = estimated_cost_usd + ?,
-               prompt_tokens = prompt_tokens + ?,
-               completion_tokens = completion_tokens + ?
-           WHERE id = ?`,
-        )
-        .run(usdAmount, usage.promptTokens, usage.completionTokens, id)
-
-      this.issueManager.syncFromRunId(id)
+    const costStepId = metadata.stepId?.trim() ? metadata.stepId : null
+    const costWorkerType = metadata.workerType?.trim() ? metadata.workerType : null
+    const tx = this.db.transaction((
+      id: string,
+      date: string,
+      usage: TokenUsageTotals,
+      usdAmount: number,
+    ) => {
+      this.persistCostRecord(id, date, usage, usdAmount, costStepId, costWorkerType)
     })
 
     tx(runId, today, normalizedTokens, amountUsd)
+  }
+
+  recordCostAndCheckBudget(
+    runId: string,
+    costUsd: number,
+    tokenUsage: TokenUsageInput | undefined,
+    metadata: CostRecordMetadata,
+    limits: Config['security'],
+    costPolicyInput: Config['cost']['model'] | Config['cost'] | undefined = 'pay-per-use',
+  ): BudgetStatus {
+    const amountUsd = Number(Math.max(0, costUsd).toFixed(6))
+    const normalizedTokens = normalizeTokenUsage(tokenUsage)
+    if (amountUsd <= 0 && normalizedTokens.totalTokens <= 0) {
+      return this.checkBudget(runId, limits, costPolicyInput)
+    }
+
+    const today = utcDayKey()
+    const costStepId = metadata.stepId?.trim() ? metadata.stepId : null
+    const costWorkerType = metadata.workerType?.trim() ? metadata.workerType : null
+
+    const tx = this.db.transaction((
+      id: string,
+      date: string,
+      usage: TokenUsageTotals,
+      usdAmount: number,
+      securityLimits: Config['security'],
+      policyInput: Config['cost']['model'] | Config['cost'] | undefined,
+    ): BudgetStatus => {
+      this.persistCostRecord(id, date, usage, usdAmount, costStepId, costWorkerType)
+      return this.checkBudget(id, securityLimits, policyInput)
+    })
+
+    return tx(runId, today, normalizedTokens, amountUsd, limits, costPolicyInput)
   }
 
   getDailyCost(): number {
@@ -84,30 +209,145 @@ export class CostTracker {
   getDailyTokenUsage(): TokenUsageTotals {
     const today = utcDayKey()
     const row = this.db
-      .prepare('SELECT total_prompt_tokens, total_completion_tokens FROM daily_costs WHERE date = ?')
+      .prepare('SELECT total_prompt_tokens, total_completion_tokens, total_cache_read_tokens FROM daily_costs WHERE date = ?')
       .get(today) as DailyTokenRow | undefined
 
     const promptTokens = row?.total_prompt_tokens ?? 0
     const completionTokens = row?.total_completion_tokens ?? 0
+    const cacheReadTokens = row?.total_cache_read_tokens ?? 0
     return {
       promptTokens,
       completionTokens,
-      totalTokens: promptTokens + completionTokens,
+      cacheReadTokens,
+      totalTokens: promptTokens + completionTokens + cacheReadTokens,
     }
   }
 
   getRunTokenUsage(runId: string): TokenUsageTotals {
     const row = this.db
-      .prepare('SELECT prompt_tokens, completion_tokens FROM runs WHERE id = ?')
+      .prepare('SELECT prompt_tokens, completion_tokens, cache_read_tokens FROM runs WHERE id = ?')
       .get(runId) as RunTokenRow | undefined
 
     const promptTokens = row?.prompt_tokens ?? 0
     const completionTokens = row?.completion_tokens ?? 0
+    const cacheReadTokens = row?.cache_read_tokens ?? 0
     return {
       promptTokens,
       completionTokens,
-      totalTokens: promptTokens + completionTokens,
+      cacheReadTokens,
+      totalTokens: promptTokens + completionTokens + cacheReadTokens,
     }
+  }
+
+  getRunCostBreakdownByStep(runId: string): StepCostBreakdown[] {
+    const rows = this.db
+      .prepare(
+        `SELECT
+           step_id,
+           SUM(cost_usd) AS cost_usd,
+           SUM(prompt_tokens) AS prompt_tokens,
+           SUM(completion_tokens) AS completion_tokens,
+           SUM(cache_read_tokens) AS cache_read_tokens
+         FROM run_cost_entries
+         WHERE run_id = ?
+         GROUP BY step_id
+         ORDER BY cost_usd DESC, step_id ASC`,
+      )
+      .all(runId) as Array<{
+        step_id: string
+        cost_usd: number | null
+        prompt_tokens: number | null
+        completion_tokens: number | null
+        cache_read_tokens: number | null
+      }>
+
+    return rows.map((row) => {
+      const promptTokens = row.prompt_tokens ?? 0
+      const completionTokens = row.completion_tokens ?? 0
+      const cacheReadTokens = row.cache_read_tokens ?? 0
+      return {
+        stepId: row.step_id,
+        costUsd: row.cost_usd ?? 0,
+        promptTokens,
+        completionTokens,
+        cacheReadTokens,
+        totalTokens: promptTokens + completionTokens + cacheReadTokens,
+      }
+    })
+  }
+
+  getDailyCostBreakdownByStep(date: string = utcDayKey()): StepCostBreakdown[] {
+    const rows = this.db
+      .prepare(
+        `SELECT
+           step_id,
+           SUM(cost_usd) AS cost_usd,
+           SUM(prompt_tokens) AS prompt_tokens,
+           SUM(completion_tokens) AS completion_tokens,
+           SUM(cache_read_tokens) AS cache_read_tokens
+         FROM run_cost_entries
+         WHERE date(created_at) = ?
+         GROUP BY step_id
+         ORDER BY cost_usd DESC, step_id ASC`,
+      )
+      .all(date) as Array<{
+        step_id: string
+        cost_usd: number | null
+        prompt_tokens: number | null
+        completion_tokens: number | null
+        cache_read_tokens: number | null
+      }>
+
+    return rows.map((row) => {
+      const promptTokens = row.prompt_tokens ?? 0
+      const completionTokens = row.completion_tokens ?? 0
+      const cacheReadTokens = row.cache_read_tokens ?? 0
+      return {
+        stepId: row.step_id,
+        costUsd: row.cost_usd ?? 0,
+        promptTokens,
+        completionTokens,
+        cacheReadTokens,
+        totalTokens: promptTokens + completionTokens + cacheReadTokens,
+      }
+    })
+  }
+
+  getDailyCostBreakdownByWorker(date: string = utcDayKey()): WorkerCostBreakdown[] {
+    const rows = this.db
+      .prepare(
+        `SELECT
+           COALESCE(worker_type, 'unknown') AS worker_type,
+           SUM(cost_usd) AS cost_usd,
+           SUM(prompt_tokens) AS prompt_tokens,
+           SUM(completion_tokens) AS completion_tokens,
+           SUM(cache_read_tokens) AS cache_read_tokens
+         FROM run_cost_entries
+         WHERE date(created_at) = ?
+         GROUP BY worker_type
+         ORDER BY cost_usd DESC, worker_type ASC`,
+      )
+      .all(date) as Array<{
+        worker_type: string
+        cost_usd: number | null
+        prompt_tokens: number | null
+        completion_tokens: number | null
+        cache_read_tokens: number | null
+      }>
+
+    return rows.map((row) => {
+      const promptTokens = row.prompt_tokens ?? 0
+      const completionTokens = row.completion_tokens ?? 0
+      const cacheReadTokens = row.cache_read_tokens ?? 0
+      return {
+        workerType: row.worker_type,
+        costUsd: row.cost_usd ?? 0,
+        promptTokens,
+        completionTokens,
+        cacheReadTokens,
+        totalTokens: promptTokens + completionTokens + cacheReadTokens,
+      }
+    })
   }
 
   /**
@@ -115,10 +355,9 @@ export class CostTracker {
    * Returns a discriminated status so callers can build messages that name
    * the specific limit that tripped (daily vs per-run) instead of guessing.
    *
-   * When `costModel === 'subscription'` (Claude Pro/Max, Codex Pro, etc.) the
-   * USD estimate is advisory only — the operator pays a flat subscription fee,
-   * not per-token — so enforcement is skipped entirely. Tokens and the
-   * advisory USD estimate continue to be written to the DB for analytics.
+   * In `subscription` mode, enforcement is always skipped.
+   * In `subscription-metered` mode, warnings can be emitted while enforcement
+   * is optional per configured knob.
    *
    * A non-null `cost_budget_override_usd` on the run row overrides the
    * per-run cap with the stored value AND exempts the run from the daily
@@ -132,20 +371,101 @@ export class CostTracker {
   checkBudget(
     runId: string,
     limits: Config['security'],
-    costModel: Config['cost']['model'] = 'pay-per-use',
+    costPolicyInput: Config['cost']['model'] | Config['cost'] | undefined = 'pay-per-use',
   ): BudgetStatus {
-    // Subscription plans are flat-rate. The per-token USD numbers the worker
-    // adapters report are "what this would have cost on the API" estimates and
-    // have no relationship to what the operator actually pays, so enforcing
-    // them would block every run the moment tokens add up.
-    if (costModel === 'subscription') {
+    const policy = resolveCostPolicy(costPolicyInput)
+
+    if (policy.model === 'subscription') {
       return { overBudget: false }
     }
+
     const override = this.getRunBudgetOverride(runId)
     const runCost = this.getRunCost(runId)
-
     const effectivePerRunLimit = override ?? limits.maxCostPerRunUsd
-    if (runCost >= effectivePerRunLimit) {
+    const runOverLimit = runCost >= effectivePerRunLimit
+
+    const dailyCost = this.getDailyCost()
+    const dailyCapOverride = this.getDailyCapOverride()
+    const effectiveDailyLimit = dailyCapOverride ?? limits.maxDailyCostUsd
+    const dailyOverLimit = dailyCost >= effectiveDailyLimit
+
+    if (policy.model === 'subscription-metered') {
+      const advisoryThreshold = policy.subscriptionMetered.advisoryThresholdUsd
+      if (advisoryThreshold !== null) {
+        if (runCost >= advisoryThreshold) {
+          this.logSubscriptionMeteredWarningOnce(
+            `${runId}:advisory:run:${advisoryThreshold}`,
+            {
+              runId,
+              thresholdUsd: advisoryThreshold,
+              runCostUsd: runCost,
+            },
+            'subscription-metered advisory threshold exceeded (run)',
+          )
+        }
+        if (dailyCost >= advisoryThreshold) {
+          this.logSubscriptionMeteredWarningOnce(
+            `${runId}:advisory:daily:${advisoryThreshold}:${utcDayKey()}`,
+            {
+              runId,
+              thresholdUsd: advisoryThreshold,
+              dailyCostUsd: dailyCost,
+            },
+            'subscription-metered advisory threshold exceeded (daily)',
+          )
+        }
+      }
+
+      if (runOverLimit && !policy.subscriptionMetered.enforcePerRunLimit) {
+        this.logSubscriptionMeteredWarningOnce(
+          `${runId}:soft:per-run:${effectivePerRunLimit}`,
+          {
+            runId,
+            runCostUsd: runCost,
+            effectivePerRunLimitUsd: effectivePerRunLimit,
+          },
+          'subscription-metered soft per-run limit exceeded',
+        )
+      }
+
+      if (runOverLimit && policy.subscriptionMetered.enforcePerRunLimit) {
+        return {
+          overBudget: true,
+          limit: 'per-run',
+          actualUsd: runCost,
+          limitUsd: effectivePerRunLimit,
+        }
+      }
+
+      if (override !== null) {
+        return { overBudget: false }
+      }
+
+      if (dailyOverLimit && !policy.subscriptionMetered.enforceDailyLimit) {
+        this.logSubscriptionMeteredWarningOnce(
+          `${runId}:soft:daily:${effectiveDailyLimit}:${utcDayKey()}`,
+          {
+            runId,
+            dailyCostUsd: dailyCost,
+            effectiveDailyLimitUsd: effectiveDailyLimit,
+          },
+          'subscription-metered soft daily limit exceeded',
+        )
+      }
+
+      if (dailyOverLimit && policy.subscriptionMetered.enforceDailyLimit) {
+        return {
+          overBudget: true,
+          limit: 'daily',
+          actualUsd: dailyCost,
+          limitUsd: effectiveDailyLimit,
+        }
+      }
+
+      return { overBudget: false }
+    }
+
+    if (runOverLimit) {
       return {
         overBudget: true,
         limit: 'per-run',
@@ -160,10 +480,7 @@ export class CostTracker {
       return { overBudget: false }
     }
 
-    const dailyCost = this.getDailyCost()
-    const dailyCapOverride = this.getDailyCapOverride()
-    const effectiveDailyLimit = dailyCapOverride ?? limits.maxDailyCostUsd
-    if (dailyCost >= effectiveDailyLimit) {
+    if (dailyOverLimit) {
       return {
         overBudget: true,
         limit: 'daily',
@@ -226,11 +543,21 @@ export class CostTracker {
     }
     this.db
       .prepare(
-        `INSERT INTO daily_costs (date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens, daily_cost_cap_override_usd)
-         VALUES (?, 0, 0, 0, 0, ?)
+        `INSERT INTO daily_costs (date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens, total_cache_read_tokens, daily_cost_cap_override_usd)
+         VALUES (?, 0, 0, 0, 0, 0, ?)
          ON CONFLICT(date) DO UPDATE SET daily_cost_cap_override_usd = excluded.daily_cost_cap_override_usd`,
       )
       .run(date, overrideUsd)
+  }
+
+  private logSubscriptionMeteredWarningOnce(
+    key: string,
+    data: Record<string, unknown>,
+    message: string,
+  ): void {
+    if (this.advisoryWarnings.has(key)) return
+    this.advisoryWarnings.add(key)
+    logger.warn(data, message)
   }
 }
 
@@ -270,10 +597,12 @@ export function costLimitRecoveryHint(limit: 'daily' | 'per-run'): string {
 function normalizeTokenUsage(tokenUsage: TokenUsageInput | undefined): TokenUsageTotals {
   const promptTokens = normalizeTokenCount(tokenUsage?.promptTokens)
   const completionTokens = normalizeTokenCount(tokenUsage?.completionTokens)
+  const cacheReadTokens = normalizeTokenCount(tokenUsage?.cacheReadTokens)
   return {
     promptTokens,
     completionTokens,
-    totalTokens: promptTokens + completionTokens,
+    cacheReadTokens,
+    totalTokens: promptTokens + completionTokens + cacheReadTokens,
   }
 }
 
@@ -285,9 +614,37 @@ function normalizeTokenCount(value: number | undefined): number {
 interface DailyTokenRow {
   total_prompt_tokens: number | null
   total_completion_tokens: number | null
+  total_cache_read_tokens: number | null
 }
 
 interface RunTokenRow {
   prompt_tokens: number | null
   completion_tokens: number | null
+  cache_read_tokens: number | null
+}
+
+function resolveCostPolicy(
+  input: Config['cost']['model'] | Config['cost'] | undefined,
+): ResolvedCostPolicy {
+  if (typeof input === 'string') {
+    return {
+      model: input,
+      subscriptionMetered: {
+        advisoryThresholdUsd: null,
+        enforcePerRunLimit: false,
+        enforceDailyLimit: false,
+      },
+    }
+  }
+
+  const model = input?.model ?? 'pay-per-use'
+  const subscriptionMetered = input?.subscriptionMetered
+  return {
+    model,
+    subscriptionMetered: {
+      advisoryThresholdUsd: subscriptionMetered?.advisoryThresholdUsd ?? null,
+      enforcePerRunLimit: subscriptionMetered?.enforcePerRunLimit ?? false,
+      enforceDailyLimit: subscriptionMetered?.enforceDailyLimit ?? false,
+    },
+  }
 }

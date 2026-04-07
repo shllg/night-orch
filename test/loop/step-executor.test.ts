@@ -326,6 +326,7 @@ describe('executeWorkerStep', () => {
       role: 'planner',
       workerType: 'claude',
       pricingModel: null,
+      fallbackMinuteUsd: null,
     })
   })
 

@@ -64,6 +64,16 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
     // Fall back to raw text if not parseable as JSON.
     const { assistantText, sessionId } = extractFromJsonOutput(result.stdout)
     const tokenUsage = extractClaudeTokenUsage(result.stdout)
+    if (!tokenUsage && result.stdout.trim().length > 0) {
+      logger.warn(
+        {
+          runId: input.runId ?? null,
+          role: input.role,
+          phase: input.phase ?? null,
+        },
+        'Claude token extraction unavailable; falling back to duration-based cost estimate',
+      )
+    }
 
     logger.info({ role: input.role, rawLength: result.stdout.length, textLength: assistantText.length, sessionId }, 'Claude output received')
 
@@ -300,14 +310,16 @@ function extractClaudeTokenUsage(raw: string): WorkerTaskResult['tokenUsage'] {
 
   let promptTokens = 0
   let completionTokens = 0
+  let cacheReadTokens = 0
 
   const addUsage = (usageCandidate: unknown) => {
     if (!isRecord(usageCandidate)) return
     const inputTokens = parseTokenCount(usageCandidate['input_tokens'])
       + parseTokenCount(usageCandidate['cache_creation_input_tokens'])
-      + parseTokenCount(usageCandidate['cache_read_input_tokens'])
+    const cacheRead = parseTokenCount(usageCandidate['cache_read_input_tokens'])
     const outputTokens = parseTokenCount(usageCandidate['output_tokens'])
     promptTokens += inputTokens
+    cacheReadTokens += cacheRead
     completionTokens += outputTokens
   }
 
@@ -323,10 +335,11 @@ function extractClaudeTokenUsage(raw: string): WorkerTaskResult['tokenUsage'] {
     }
   }
 
-  if (promptTokens <= 0 && completionTokens <= 0) return undefined
+  if (promptTokens <= 0 && completionTokens <= 0 && cacheReadTokens <= 0) return undefined
   return {
     promptTokens,
     completionTokens,
+    ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
   }
 }
 

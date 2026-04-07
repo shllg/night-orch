@@ -22,12 +22,19 @@ export interface WorkerTaskInput {
 export interface WorkerProfileInput {
   type: string
   pricingModel?: string
+  minuteUsd?: number
   command: string
   args: string[]
   workerTimeoutSeconds: number
   minimalEnv: boolean
   runtimeWrapper: string | null
   env: Record<string, string>
+}
+
+export interface TokenUsage {
+  promptTokens: number
+  completionTokens: number
+  cacheReadTokens?: number
 }
 
 /** Raw + parsed output from a worker invocation, including cost signals and session continuity. */
@@ -41,10 +48,7 @@ export interface WorkerTaskResult {
   /** Session/thread ID for continuing the conversation in subsequent phases. */
   sessionId: string | null
   /** Real token counts from the agent, when available. */
-  tokenUsage?: {
-    promptTokens: number
-    completionTokens: number
-  }
+  tokenUsage?: TokenUsage
   /** Set by worker adapters when a non-zero exit is classified as an auth failure. */
   authFailure?: boolean
 }

@@ -9,14 +9,15 @@ import { hashVerifyResults, assessProgress } from './progress.js'
 import { commitChanges } from './commit.js'
 import { executeStep, type StepDependencies } from './step-executor.js'
 import { Checkpoint } from './checkpoint.js'
-import { CostTracker, describeBudgetBlock, costLimitRecoveryHint } from './cost.js'
-import { estimateWorkerCostUsd } from './pricing.js'
+import { CostTracker, describeBudgetBlock, costLimitRecoveryHint, type BudgetStatus } from './cost.js'
+import { estimateWorkerCost } from './pricing.js'
 import { WorkerAuthError } from '../workers/errors.js'
 import { logger } from '../utils/logger.js'
 import { utcIsoFromMs } from '../utils/time.js'
 import type Database from 'better-sqlite3'
 import { buildPlanningPrdPath, isPlanningIssue } from '../planning/mode.js'
 import type { AgentEvent } from '../events/types.js'
+import type { TokenUsage } from '../workers/types.js'
 
 /** External services injected into the loop engine. Tests can substitute mocks for all of these. */
 export interface LoopDependencies {
@@ -96,7 +97,7 @@ export async function executeLoop(
 
     // Cost check before worker steps
     if (step.type === 'worker') {
-      const budget = costTracker.checkBudget(ctx.runId, config.security, config.cost?.model ?? 'pay-per-use')
+      const budget = costTracker.checkBudget(ctx.runId, config.security, config.cost)
       if (budget.overBudget) {
         const blockMessage = `${describeBudgetBlock(budget)}. ${costLimitRecoveryHint(budget.limit)}`
         logger.warn(
@@ -167,15 +168,47 @@ export async function executeLoop(
 
     // Cost tracking for worker steps
     if (step.type === 'worker') {
-      ctx = applyEstimatedWorkerCost(
+      const costResult = applyEstimatedWorkerCost(
         ctx,
         costTracker,
         config.cost,
+        config.security,
+        step.id,
         step.role,
         result.pricingIdentity,
         stepDurationMs,
         result.tokenUsage,
       )
+      ctx = costResult.ctx
+      if (costResult.budget?.overBudget) {
+        const blockMessage = `${describeBudgetBlock(costResult.budget)}. ${costLimitRecoveryHint(costResult.budget.limit)}`
+        logger.warn(
+          {
+            runId: ctx.runId,
+            phase: step.id,
+            limit: costResult.budget.limit,
+            actualUsd: costResult.budget.actualUsd,
+            limitUsd: costResult.budget.limitUsd,
+          },
+          'Cost limit exceeded after recording worker cost',
+        )
+        checkpoint.phaseBlocked(ctx.runId, step.id, blockMessage, ctx.iteration)
+        return recordPhase(
+          updateContext(ctx, {
+            currentPhase: 'blocked',
+            terminalStatus: 'blocked',
+            blockReason: 'cost_limit',
+            stepOutputs: {
+              ...ctx.stepOutputs,
+              blockMessage,
+            },
+          }),
+          step.id,
+          'failure',
+          {},
+          stepStartedAt,
+        )
+      }
       try { metrics?.observePhaseDuration(step.id, stepDurationMs / 1000) } catch { /* best-effort */ }
     }
     if (step.type === 'verify') {
@@ -550,31 +583,72 @@ function applyEstimatedWorkerCost(
   ctx: RunContext,
   costTracker: CostTracker,
   costConfig: Config['cost'] | undefined,
+  securityConfig: Config['security'],
+  stepId: string,
   role: string,
   pricingIdentity: {
     role: string
     workerType: string
     pricingModel: string | null
+    fallbackMinuteUsd?: number | null
   } | undefined,
   durationMs: number,
-  tokenUsage?: { promptTokens: number; completionTokens: number },
-): RunContext {
-  const estimatedCost = estimateWorkerCostUsd({
+  tokenUsage?: TokenUsage,
+): {
+  ctx: RunContext
+  budget: BudgetStatus
+} {
+  const estimate = estimateWorkerCost({
     cost: costConfig,
     identity: {
       role,
       workerType: pricingIdentity?.workerType,
       pricingModel: pricingIdentity?.pricingModel,
+      fallbackMinuteUsd: pricingIdentity?.fallbackMinuteUsd,
     },
     durationMs,
     tokenUsage,
   })
+  const estimatedCost = estimate.usd
 
-  if (estimatedCost <= 0 && !tokenUsage) return ctx
-  costTracker.recordCost(ctx.runId, estimatedCost, tokenUsage)
-  if (estimatedCost <= 0) return ctx
+  if (estimate.usedDefaultModelFallback && pricingIdentity?.pricingModel) {
+    logger.warn(
+      {
+        runId: ctx.runId,
+        phase: stepId,
+        requestedModelKey: estimate.modelKey,
+        resolvedModelKey: estimate.resolvedModelKey,
+      },
+      'Worker pricing model key missing from cost.pricing.models; falling back to default model pricing',
+    )
+  }
 
-  return updateContext(ctx, {
-    estimatedCostUsd: Number((ctx.estimatedCostUsd + estimatedCost).toFixed(6)),
-  })
+  if (estimatedCost <= 0 && !tokenUsage) {
+    return {
+      ctx,
+      budget: { overBudget: false },
+    }
+  }
+
+  const budget = costTracker.recordCostAndCheckBudget(
+    ctx.runId,
+    estimatedCost,
+    tokenUsage,
+    {
+      stepId,
+      workerType: pricingIdentity?.workerType ?? null,
+    },
+    securityConfig,
+    costConfig,
+  )
+  if (estimatedCost <= 0) {
+    return { ctx, budget }
+  }
+
+  return {
+    ctx: updateContext(ctx, {
+      estimatedCostUsd: Number((ctx.estimatedCostUsd + estimatedCost).toFixed(6)),
+    }),
+    budget,
+  }
 }

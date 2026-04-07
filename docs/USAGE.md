@@ -482,7 +482,8 @@ security:
 
 When a budget is exceeded in `pay-per-use` mode, the run is blocked with
 reason `cost_limit`. In `subscription` mode, USD is advisory and cost-based
-blocking is skipped.
+blocking is skipped. In `subscription-metered` mode, enforcement depends on
+`cost.subscriptionMetered.enforcePerRunLimit` / `enforceDailyLimit`.
 
 ### Stuck-loop detection
 
@@ -492,27 +493,33 @@ Night-orch detects when the loop is stuck by comparing verify output hashes acro
 
 ```yaml
 cost:
-  model: pay-per-use   # or: subscription
+  model: pay-per-use   # or: subscription, subscription-metered
+  # subscriptionMetered:
+  #   advisoryThresholdUsd: 25
+  #   enforcePerRunLimit: false
+  #   enforceDailyLimit: false
   # pricing:
   #   defaultModel: claude-sonnet-4
   #   models:
   #     claude-sonnet-4:
   #       inputUsdPerMillionTokens: 3
   #       outputUsdPerMillionTokens: 15
+  #       cacheReadUsdPerMillionTokens: 0.3
   #       minuteUsd: 0.008
 ```
 
 - `pay-per-use` keeps USD spend as the primary dashboard metric and enforces `security.maxCostPerRunUsd` + `security.maxDailyCostUsd`.
-- `subscription` keeps token usage as the primary dashboard metric, defaults USD estimates to `$0.00`, and bypasses `cost_limit` enforcement (override commands do not affect loop gating in this mode).
+- `subscription` keeps token usage as the primary dashboard metric and bypasses `cost_limit` enforcement (USD remains advisory-estimated using pricing config/defaults).
+- `subscription-metered` tracks advisory USD like `subscription`, logs threshold warnings, and can optionally enforce run/day caps.
 - `cost.pricing.models` optionally enables model-aware USD estimation keyed by `workerProfiles.<name>.pricingModel` (or worker `type` when unset).
 
 ### Cost estimation
 
-- **Token-based** (preferred) — when the agent adapter reports token counts, cost is calculated from per-model input/output token rates
+- **Token-based** (preferred) — when the agent adapter reports token counts, cost is calculated from per-model input/output/cache-read token rates
 - **Time-based** (fallback) — when token counts aren't available, cost is estimated from each model's `minuteUsd`
 
 View costs/usage:
-- `night-orch status` — shows daily cost summary
+- `night-orch status` — shows daily cost summary (including cache-read tokens and phase cost breakdown)
 - `night-orch watch` — live cost/usage summaries
 - Prometheus metric: `night_orch_estimated_cost_dollars`
 

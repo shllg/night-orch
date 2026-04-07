@@ -59,26 +59,33 @@ security:
   maxCostPerRunUsd: 10
 
 cost:
-  model: pay-per-use # or: subscription
+  model: pay-per-use # or: subscription, subscription-metered
+  # Optional: controls for subscription-metered mode.
+  # subscriptionMetered:
+  #   advisoryThresholdUsd: null
+  #   enforcePerRunLimit: false
+  #   enforceDailyLimit: false
   # Optional: model-aware pricing overrides.
-  # If omitted, pay-per-use uses built-in defaults and subscription defaults
-  # USD estimation to 0.00.
+  # If omitted, built-in defaults are used for advisory/estimated USD.
   # pricing:
   #   defaultModel: claude-sonnet-4
   #   models:
   #     claude-sonnet-4:
   #       inputUsdPerMillionTokens: 3
   #       outputUsdPerMillionTokens: 15
+  #       cacheReadUsdPerMillionTokens: 0.3
   #       minuteUsd: 0.008
   #     gpt-5:
   #       inputUsdPerMillionTokens: 1.25
   #       outputUsdPerMillionTokens: 10
+  #       cacheReadUsdPerMillionTokens: 0.125
   #       minuteUsd: 0.01
 
 workerProfiles:
   claude-default:
     type: claude
     # pricingModel: claude-sonnet-4
+    # minuteUsd: 0.008
     command: claude
     args:
       - -p
@@ -87,6 +94,7 @@ workerProfiles:
   codex-default:
     type: codex
     # pricingModel: gpt-5
+    # minuteUsd: 0.01
     command: codex
     args:
       - exec

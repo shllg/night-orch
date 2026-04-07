@@ -13,7 +13,7 @@ export class AcpWorkerAdapter implements WorkerAdapter {
     let sessionId: string | null = null
     let exitCode = 0
     let timedOut = false
-    let tokenUsage: { promptTokens: number; completionTokens: number } | undefined
+    let tokenUsage: WorkerTaskResult['tokenUsage']
 
     const textParts: string[] = []
     emitWorkerEvent(input, 'session_start', {
@@ -23,6 +23,11 @@ export class AcpWorkerAdapter implements WorkerAdapter {
 
     const onSessionUpdate = (notification: Record<string, unknown>): void => {
       emitAcpUpdateEvent(notification, input)
+      const usageFromUpdate = extractAcpTokenUsageFromNotification(notification)
+      if (usageFromUpdate) {
+        const isTurnComplete = notification['type'] === 'turn_complete'
+        tokenUsage = mergeTokenUsage(tokenUsage, usageFromUpdate, isTurnComplete ? 'sum-completion' : 'max')
+      }
       if (notification['type'] === 'text' && typeof notification['text'] === 'string') {
         textParts.push(notification['text'])
       }
@@ -42,6 +47,7 @@ export class AcpWorkerAdapter implements WorkerAdapter {
             timeoutMs: input.timeoutSeconds * 1000,
           })
           sessionId = typeof result['sessionId'] === 'string' ? result['sessionId'] : null
+          tokenUsage = mergeTokenUsage(tokenUsage, extractAcpTokenUsageFromResult(result), 'max')
           assistantText = textParts.join('')
         } catch (resumeErr) {
           logger.warn({ role: input.role, err: resumeErr }, 'Session resume failed — falling back to runOnce')
@@ -58,6 +64,7 @@ export class AcpWorkerAdapter implements WorkerAdapter {
             sessionOptions: { maxTurns: 50 },
           })
           sessionId = typeof result['sessionId'] === 'string' ? result['sessionId'] : null
+          tokenUsage = mergeTokenUsage(tokenUsage, extractAcpTokenUsageFromResult(result), 'max')
           assistantText = textParts.join('')
         }
       } else {
@@ -73,6 +80,7 @@ export class AcpWorkerAdapter implements WorkerAdapter {
           sessionOptions: { maxTurns: 50 },
         })
         sessionId = typeof result['sessionId'] === 'string' ? result['sessionId'] : null
+        tokenUsage = mergeTokenUsage(tokenUsage, extractAcpTokenUsageFromResult(result), 'max')
         assistantText = textParts.join('')
       }
     } catch (err) {
@@ -101,6 +109,16 @@ export class AcpWorkerAdapter implements WorkerAdapter {
 
     const durationMs = Date.now() - start
     if (!assistantText) assistantText = textParts.join('')
+    if (!tokenUsage && assistantText.trim().length > 0) {
+      logger.warn(
+        {
+          runId: input.runId ?? null,
+          role: input.role,
+          phase: input.phase ?? null,
+        },
+        'ACP token extraction unavailable; falling back to duration-based cost estimate',
+      )
+    }
 
     logger.info(
       { role: input.role, textLength: assistantText.length, sessionId, durationMs },
@@ -207,4 +225,121 @@ function parseOutput(
     default:
       return { parsed: null, parseError: `Unknown role: ${role}` }
   }
+}
+
+function extractAcpTokenUsageFromNotification(notification: Record<string, unknown>): WorkerTaskResult['tokenUsage'] {
+  const directUsage = tokenUsageFromCandidate(notification['usage'])
+  if (directUsage) return directUsage
+
+  const eventUsage = tokenUsageFromCandidate(notification['event'])
+  if (eventUsage) return eventUsage
+
+  if (notification['sessionUpdate'] === 'usage_update') {
+    const usageUpdate = tokenUsageFromCandidate(notification)
+    if (usageUpdate) return usageUpdate
+  }
+
+  if (notification['type'] === 'turn_complete') {
+    const tokenCount = parseTokenCount(notification['tokenCount'])
+    if (tokenCount > 0) {
+      return {
+        promptTokens: 0,
+        completionTokens: tokenCount,
+      }
+    }
+  }
+
+  return undefined
+}
+
+function extractAcpTokenUsageFromResult(result: Record<string, unknown>): WorkerTaskResult['tokenUsage'] {
+  const directUsage = tokenUsageFromCandidate(result['usage'])
+  if (directUsage) return directUsage
+
+  const record = result['record']
+  if (isRecord(record)) {
+    const cumulative = tokenUsageFromCandidate(record['cumulative_token_usage'])
+    if (cumulative) return cumulative
+    const requestUsage = record['request_token_usage']
+    if (isRecord(requestUsage)) {
+      let merged: WorkerTaskResult['tokenUsage']
+      for (const value of Object.values(requestUsage)) {
+        merged = mergeTokenUsage(merged, tokenUsageFromCandidate(value), 'max')
+      }
+      if (merged) return merged
+    }
+  }
+
+  return undefined
+}
+
+function tokenUsageFromCandidate(candidate: unknown): WorkerTaskResult['tokenUsage'] {
+  if (!isRecord(candidate)) return undefined
+
+  const usageMeta = candidate['_meta']
+  const source = isRecord(usageMeta) && isRecord(usageMeta['usage'])
+    ? usageMeta['usage']
+    : candidate
+
+  const promptTokens = parseTokenCount(
+    source['input_tokens']
+      ?? source['inputTokens']
+      ?? source['cache_creation_input_tokens']
+      ?? source['cacheCreationInputTokens'],
+  )
+  const completionTokens = parseTokenCount(source['output_tokens'] ?? source['outputTokens'])
+  const cacheReadTokens = parseTokenCount(
+    source['cache_read_input_tokens']
+      ?? source['cacheReadInputTokens']
+      ?? source['cachedReadTokens'],
+  )
+
+  const promptFromSource = parseTokenCount(source['input_tokens'] ?? source['inputTokens'])
+    + parseTokenCount(source['cache_creation_input_tokens'] ?? source['cacheCreationInputTokens'])
+  const normalizedPromptTokens = promptFromSource > 0 ? promptFromSource : promptTokens
+
+  if (normalizedPromptTokens <= 0 && completionTokens <= 0 && cacheReadTokens <= 0) return undefined
+
+  return {
+    promptTokens: normalizedPromptTokens,
+    completionTokens,
+    ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
+  }
+}
+
+function mergeTokenUsage(
+  existing: WorkerTaskResult['tokenUsage'],
+  incoming: WorkerTaskResult['tokenUsage'],
+  strategy: 'max' | 'sum-completion',
+): WorkerTaskResult['tokenUsage'] {
+  if (!incoming) return existing
+  if (!existing) return incoming
+
+  const existingCache = existing.cacheReadTokens ?? 0
+  const incomingCache = incoming.cacheReadTokens ?? 0
+
+  if (strategy === 'sum-completion') {
+    const completionTokens = existing.completionTokens + incoming.completionTokens
+    const promptTokens = Math.max(existing.promptTokens, incoming.promptTokens)
+    const cacheReadTokens = Math.max(existingCache, incomingCache)
+    return {
+      promptTokens,
+      completionTokens,
+      ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
+    }
+  }
+
+  const promptTokens = Math.max(existing.promptTokens, incoming.promptTokens)
+  const completionTokens = Math.max(existing.completionTokens, incoming.completionTokens)
+  const cacheReadTokens = Math.max(existingCache, incomingCache)
+  return {
+    promptTokens,
+    completionTokens,
+    ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
+  }
+}
+
+function parseTokenCount(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0
+  return Math.max(0, Math.floor(value))
 }

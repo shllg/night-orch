@@ -38,7 +38,7 @@ export function StatsView({ stats, autoRefresh, pollIntervalMs, lastRefreshAt }:
   const staleWorktreeColor = colorForPresence(stats.resources.staleWorktrees, 1, 2)
   const tailLatencyRatio = stats.timing.p50Minutes > 0 ? stats.timing.p90Minutes / stats.timing.p50Minutes : 1
   const tailLatencyColor = colorForLowerIsBetter(tailLatencyRatio, 2.5, 4.5)
-  const usageFirst = stats.cost.model === 'subscription'
+  const usageFirst = stats.cost.model === 'subscription' || stats.cost.model === 'subscription-metered'
 
   return (
     <Box flexDirection="column" marginBottom={1}>
@@ -91,7 +91,7 @@ export function StatsView({ stats, autoRefresh, pollIntervalMs, lastRefreshAt }:
         <StatCard title="Cost & Usage" width="50%" marginRight={1}>
           {usageFirst ? (
             <>
-              <Text>model subscription</Text>
+              <Text>model {stats.cost.model}</Text>
               <Text>
                 today tokens <Text color={todayUsageColor}>{formatTokenCount(stats.usage.todayTotalTokens)}</Text> ({stats.cost.todayRunCount} runs)
               </Text>

@@ -66,7 +66,7 @@ Registered keys are visible via `night-orch settings list` (or Web/TUI Settings/
 - `notifications`: `channels`, `events.onRunStarted`, `events.onBlocked`, `events.onPrReady`, `events.onPrUpdated`, `events.onError`, `events.onRetryExhausted`
 - `loop`: `maxReviewIterations`, `maxTotalAgentPasses`, `stopOnPlannerFailure`, `requireVerificationPass`, `reviewApprovalKeyword`, `reviewNeedsChangesKeyword`, `blockOnAmbiguousReview`, `maxAutoRetries`, `decompose`, `maxSubtasks`, `maxConcurrentSubtasks`
 - `security`: `maxChangedFiles`, `maxChangedLines`, `maxDailyCostUsd`, `maxCostPerRunUsd`
-- `cost`: `model`, `pricing.defaultModel`, `pricing.models`
+- `cost`: `model`, `subscriptionMetered`, `pricing.defaultModel`, `pricing.models`
 - `workerProfiles`
 - `metrics`: `enabled`, `port`, `host`
 - `observability`: `agentStreaming`, `eventRetention`, `sessionLogs`, `sessionLogRetention`
@@ -114,7 +114,7 @@ Update surfaces:
 | `notifications` | object | no | object with defaults | Channel/event notification config. |
 | `loop` | object | no | object with defaults | Loop decision limits and behavior. |
 | `security` | object | no | object with defaults | Diff/cost safety limits. |
-| `cost` | object | no | object with defaults | Cost model (`pay-per-use` enforces USD caps; `subscription` treats USD as advisory). |
+| `cost` | object | no | object with defaults | Cost model (`pay-per-use` enforces USD caps; `subscription` is advisory-only; `subscription-metered` tracks advisory USD with optional enforcement). |
 | `workerProfiles` | record | no | `{}` | Named CLI profiles for agents. |
 | `metrics` | object | no | object with defaults | Prometheus exporter config. |
 | `observability` | object | no | object with defaults | Live agent event streaming/persistence settings. |
@@ -231,14 +231,18 @@ When `decompose: true`, issues classified as `standard` triage level with a body
 | --- | --- | --- | --- |
 | `maxChangedFiles` | positive number | `50` | Diff guard threshold. |
 | `maxChangedLines` | positive number | `5000` | Diff guard threshold. |
-| `maxDailyCostUsd` | positive number | `50` | Daily budget cap, enforced when `cost.model` is `pay-per-use`. |
-| `maxCostPerRunUsd` | positive number | `10` | Per-run budget cap, enforced when `cost.model` is `pay-per-use`. |
+| `maxDailyCostUsd` | positive number | `50` | Daily budget cap, enforced in `pay-per-use` and optionally in `subscription-metered` (`cost.subscriptionMetered.enforceDailyLimit`). |
+| `maxCostPerRunUsd` | positive number | `10` | Per-run budget cap, enforced in `pay-per-use` and optionally in `subscription-metered` (`cost.subscriptionMetered.enforcePerRunLimit`). |
 
 ### Unblocking a run hit by a cost cap
 
-These controls apply only when `cost.model: pay-per-use`. In
-`subscription` mode, estimated USD is advisory and runs are never blocked with
-`cost_limit`, so these overrides do not affect loop gating.
+These controls are interpreted by `cost.model`:
+
+- `pay-per-use`: always enforced
+- `subscription`: never enforced (USD advisory only)
+- `subscription-metered`: enforced only when
+  `cost.subscriptionMetered.enforcePerRunLimit` and/or
+  `cost.subscriptionMetered.enforceDailyLimit` are enabled
 
 When a run is blocked by a cost limit, there are three escape hatches — pick
 whichever matches the scope of the situation:
@@ -264,8 +268,17 @@ whichever matches the scope of the situation:
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `model` | `pay-per-use` or `subscription` | `pay-per-use` | `pay-per-use` enforces `security.maxDailyCostUsd`/`security.maxCostPerRunUsd`; `subscription` bypasses cost-limit blocking and treats USD as advisory while emphasizing token usage. |
-| `pricing` | object | unset | Optional model-aware pricing table. When unset, `pay-per-use` uses built-in defaults (input `$3/M`, output `$15/M`, fallback `$0.008/min`) and `subscription` defaults to `$0` USD estimates. |
+| `model` | `pay-per-use`, `subscription`, or `subscription-metered` | `pay-per-use` | `pay-per-use` enforces `security.maxDailyCostUsd`/`security.maxCostPerRunUsd`; `subscription` bypasses cost-limit blocking; `subscription-metered` logs advisory warnings and can optionally enforce caps via `cost.subscriptionMetered`. |
+| `subscriptionMetered` | object | `{ advisoryThresholdUsd: null, enforcePerRunLimit: false, enforceDailyLimit: false }` | Controls warning/enforcement behavior for `subscription-metered` mode. Ignored for other models. |
+| `pricing` | object | unset | Optional model-aware pricing table. When unset, built-in defaults are used (input `$3/M`, output `$15/M`, cache-read `$0.3/M`, fallback `$0.008/min`) for advisory/estimated USD. |
+
+### `cost.subscriptionMetered`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `advisoryThresholdUsd` | positive number or `null` | `null` | Logs warnings when run/day estimated cost meets or exceeds this threshold. |
+| `enforcePerRunLimit` | boolean | `false` | When true, applies `security.maxCostPerRunUsd` as a hard block in `subscription-metered`. |
+| `enforceDailyLimit` | boolean | `false` | When true, applies `security.maxDailyCostUsd` as a hard block in `subscription-metered`. |
 
 ### `cost.pricing`
 
@@ -280,7 +293,13 @@ whichever matches the scope of the situation:
 | --- | --- | --- | --- |
 | `inputUsdPerMillionTokens` | non-negative number | `3` | Prompt/input token price in USD per 1,000,000 tokens. |
 | `outputUsdPerMillionTokens` | non-negative number | `15` | Completion/output token price in USD per 1,000,000 tokens. |
+| `cacheReadUsdPerMillionTokens` | non-negative number | `0.3` | Cached-input read token price in USD per 1,000,000 tokens. |
 | `minuteUsd` | non-negative number | `0.008` | Time-based fallback price per minute when token counts are unavailable. |
+
+Validation notes:
+
+- `cost.pricing.defaultModel` must reference a key present under `cost.pricing.models` when models are provided.
+- `workerProfiles.<name>.pricingModel` must reference a key present under `cost.pricing.models`.
 
 ## `workerProfiles`
 
@@ -302,6 +321,7 @@ workerProfiles:
 | --- | --- | --- | --- | --- |
 | `type` | string | yes | none | Adapter type. Built-in: `claude`, `codex`, `acp`. OpenCode uses `acp` with `command: opencode`. |
 | `pricingModel` | string | no | none | Optional model key used by `cost.pricing.models` for cost estimation. Falls back to `type` when omitted. |
+| `minuteUsd` | non-negative number | no | none | Optional profile-level duration fallback override used when token usage is unavailable. |
 | `command` | string | yes | none | Binary to execute. |
 | `args` | string[] | no | `[]` | Base CLI args for every task invocation. |
 | `workerTimeoutSeconds` | positive number | no | `1800` | Base timeout before triage scaling. |

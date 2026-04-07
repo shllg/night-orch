@@ -33,9 +33,9 @@ export function decide(
   // (Primary check lives in the engine via CostTracker.checkBudget which also
   // covers the daily cap; this is a pure-function fallback that only sees the
   // run-local estimate, so it can only catch the per-run overrun here.)
-  // Skipped in subscription mode — the USD numbers are advisory-only estimates
-  // and don't correspond to what the operator actually pays.
-  if (costModel !== 'subscription' && ctx.estimatedCostUsd > securityConfig.maxCostPerRunUsd) {
+  // Skipped in subscription-like modes — the engine-level CostTracker handles
+  // enforcement policy for subscription-metered and advisory-only subscription.
+  if (costModel === 'pay-per-use' && ctx.estimatedCostUsd > securityConfig.maxCostPerRunUsd) {
     const reason =
       `Per-run cost limit exceeded: $${ctx.estimatedCostUsd.toFixed(2)} >= ` +
       `$${securityConfig.maxCostPerRunUsd.toFixed(2)}. ${costLimitRecoveryHint('per-run')}`

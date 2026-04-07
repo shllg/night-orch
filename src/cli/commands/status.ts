@@ -45,11 +45,26 @@ export async function statusCommand(globalOpts?: GlobalOpts): Promise<void> {
          total_cost_usd,
          run_count,
          total_prompt_tokens,
-         total_completion_tokens
+         total_completion_tokens,
+         total_cache_read_tokens
        FROM daily_costs
        WHERE date = date('now')`,
     )
     .get() as DailyUsageRow | undefined
+
+  const dailyPhaseCosts = db
+    .prepare(
+      `SELECT
+         step_id,
+         SUM(cost_usd) AS total_cost_usd,
+         SUM(prompt_tokens + completion_tokens + cache_read_tokens) AS total_tokens
+       FROM run_cost_entries
+       WHERE date(created_at) = date('now')
+       GROUP BY step_id
+       ORDER BY total_cost_usd DESC, step_id ASC
+       LIMIT 6`,
+    )
+    .all() as PhaseCostRow[]
 
   // Header
   console.log('\n  night-orch status\n')
@@ -78,15 +93,29 @@ export async function statusCommand(globalOpts?: GlobalOpts): Promise<void> {
   const cost = dailyUsage?.total_cost_usd ?? 0
   const promptTokens = dailyUsage?.total_prompt_tokens ?? 0
   const completionTokens = dailyUsage?.total_completion_tokens ?? 0
-  const totalTokens = promptTokens + completionTokens
+  const cacheReadTokens = dailyUsage?.total_cache_read_tokens ?? 0
+  const totalTokens = promptTokens + completionTokens + cacheReadTokens
   const budget = config.security.maxDailyCostUsd
   const costPct = budget > 0 ? Math.round((cost / budget) * 100) : 0
-  if (config.cost.model === 'subscription') {
+  const subscriptionLike = config.cost.model === 'subscription' || config.cost.model === 'subscription-metered'
+  if (subscriptionLike) {
     console.log(`\n  Daily usage:  ${formatTokenCount(totalTokens)} tokens (${dailyUsage?.run_count ?? 0} runs)`)
     console.log(`  Est. cost:    $${cost.toFixed(2)} / $${budget.toFixed(2)} (${costPct}%)`)
   } else {
     console.log(`\n  Daily cost:   $${cost.toFixed(2)} / $${budget.toFixed(2)} (${costPct}%)`)
     console.log(`  Token usage:  ${formatTokenCount(totalTokens)} tokens`)
+  }
+  if (cacheReadTokens > 0) {
+    console.log(`  Cache reads:  ${formatTokenCount(cacheReadTokens)} tokens`)
+  }
+
+  if (dailyPhaseCosts.length > 0) {
+    console.log('\n  Phase cost breakdown (today):')
+    for (const row of dailyPhaseCosts) {
+      console.log(
+        `    ${row.step_id.padEnd(12)} $${(row.total_cost_usd ?? 0).toFixed(2).padStart(7)}  ${formatTokenCount(row.total_tokens ?? 0)} tokens`,
+      )
+    }
   }
 
   // Recent runs
@@ -183,6 +212,13 @@ interface DailyUsageRow {
   run_count: number | null
   total_prompt_tokens: number | null
   total_completion_tokens: number | null
+  total_cache_read_tokens: number | null
+}
+
+interface PhaseCostRow {
+  step_id: string
+  total_cost_usd: number | null
+  total_tokens: number | null
 }
 
 function formatTokenCount(value: number): string {

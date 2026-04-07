@@ -54,6 +54,7 @@ export const AppMentionSchema = z.object({
 export const WorkerProfileSchema = z.object({
   type: z.string().min(1, 'Worker type must not be empty'),
   pricingModel: z.string().min(1).optional(),
+  minuteUsd: z.number().nonnegative().optional(),
   command: z.string(),
   args: z.array(z.string()).default([]),
   workerTimeoutSeconds: z.number().positive().default(1800),
@@ -286,11 +287,12 @@ const SecuritySchema = z.object({
 
 // --- Cost schema ---
 
-const CostModelSchema = z.enum(['pay-per-use', 'subscription'])
+const CostModelSchema = z.enum(['pay-per-use', 'subscription', 'subscription-metered'])
 
 export const CostPricingModelSchema = z.object({
   inputUsdPerMillionTokens: z.number().nonnegative().default(3),
   outputUsdPerMillionTokens: z.number().nonnegative().default(15),
+  cacheReadUsdPerMillionTokens: z.number().nonnegative().default(0.3),
   minuteUsd: z.number().nonnegative().default(0.008),
 })
 
@@ -299,9 +301,16 @@ const CostPricingSchema = z.object({
   models: z.record(CostPricingModelSchema).default({}),
 })
 
+export const SubscriptionMeteredSchema = z.object({
+  advisoryThresholdUsd: z.number().positive().nullable().default(null),
+  enforcePerRunLimit: z.boolean().default(false),
+  enforceDailyLimit: z.boolean().default(false),
+}).default({})
+
 const CostSchema = z.object({
   model: CostModelSchema.default('pay-per-use'),
   pricing: CostPricingSchema.optional(),
+  subscriptionMetered: SubscriptionMeteredSchema,
 })
 
 // --- Metrics schema ---
@@ -398,6 +407,32 @@ export const ConfigSchema = z.object({
   repos: z.array(RepoConfigSchema).min(1, 'At least one repository must be configured'),
 
   workflows: z.record(WorkflowSchema).default({}),
+}).superRefine((config, ctx) => {
+  const pricingModels = config.cost.pricing?.models ?? {}
+  const pricingModelKeys = new Set(Object.keys(pricingModels))
+
+  if (pricingModelKeys.size > 0) {
+    const defaultModel = config.cost.pricing?.defaultModel
+    if (defaultModel && !pricingModelKeys.has(defaultModel)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['cost', 'pricing', 'defaultModel'],
+        message: `cost.pricing.defaultModel "${defaultModel}" is not defined under cost.pricing.models.`,
+      })
+    }
+  }
+
+  for (const [profileName, profile] of Object.entries(config.workerProfiles)) {
+    const pricingModel = profile.pricingModel
+    if (!pricingModel) continue
+    if (!pricingModelKeys.has(pricingModel)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['workerProfiles', profileName, 'pricingModel'],
+        message: `workerProfiles.${profileName}.pricingModel "${pricingModel}" is not defined in cost.pricing.models.`,
+      })
+    }
+  }
 })
 
 /**

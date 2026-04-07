@@ -75,6 +75,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
         prTitle: publishResult.prTitle,
         endedAt: nowUtcIso(),
       })
+      runManager.setCostBudgetOverride(runId, null)
       const latestIssue = await forge.getIssue(issueRepo, issueNumber)
       await transitionLabels(
         forge,
@@ -114,6 +115,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
           lastError: err.message,
           endedAt: nowUtcIso(),
         })
+        runManager.setCostBudgetOverride(runId, null)
         const latestIssue = await forge.getIssue(issueRepo, issueNumber)
         await transitionLabels(
           forge,
@@ -146,6 +148,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
       const currentRun = runManager.getById(runId)
       const currentRetries = currentRun?.retryCount ?? 0
       runManager.update(runId, { status: 'error', iterationCount: finalCtx.iteration, lastError: errorMessage, endedAt: nowUtcIso() })
+      runManager.setCostBudgetOverride(runId, null)
       const latestIssue = await forge.getIssue(issueRepo, issueNumber)
       if (currentRetries < maxAutoRetries) {
         runManager.incrementRetryCount(runId)
@@ -218,6 +221,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
       blockReason: finalCtx.blockReason ?? null,
       endedAt: nowUtcIso(),
     })
+    runManager.setCostBudgetOverride(runId, null)
     const latestIssue = await forge.getIssue(issueRepo, issueNumber)
     await transitionLabels(
       forge,
@@ -265,6 +269,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
   const currentRunForUnexpected = runManager.getById(runId)
   const currentRetriesUnexpected = currentRunForUnexpected?.retryCount ?? 0
   runManager.update(runId, { status: 'error', iterationCount: finalCtx.iteration, lastError: unexpectedError, endedAt: nowUtcIso() })
+  runManager.setCostBudgetOverride(runId, null)
   const latestIssue = await forge.getIssue(issueRepo, issueNumber)
   if (currentRetriesUnexpected < maxAutoRetries) {
     runManager.incrementRetryCount(runId)

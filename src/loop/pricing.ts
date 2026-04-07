@@ -1,13 +1,12 @@
 import type { Config } from '../config/schema.js'
+import type { TokenUsage } from '../workers/types.js'
 
-interface TokenUsageInput {
-  promptTokens: number
-  completionTokens: number
-}
+type TokenUsageInput = TokenUsage
 
 interface ModelPricing {
   inputUsdPerMillionTokens: number
   outputUsdPerMillionTokens: number
+  cacheReadUsdPerMillionTokens: number
   minuteUsd: number
 }
 
@@ -20,6 +19,7 @@ export interface PricingIdentity {
   role: string
   workerType?: string | null
   pricingModel?: string | null
+  fallbackMinuteUsd?: number | null
 }
 
 export interface EstimateWorkerCostInput {
@@ -29,41 +29,54 @@ export interface EstimateWorkerCostInput {
   tokenUsage?: TokenUsageInput
 }
 
+export interface EstimateWorkerCostResult {
+  usd: number
+  modelKey: string
+  resolvedModelKey: string
+  usedDefaultModelFallback: boolean
+  usedProfileMinuteFallback: boolean
+}
+
 const DEFAULT_MODEL_KEY = 'default'
 
 const DEFAULT_PAY_PER_USE_PRICING: ModelPricing = {
   inputUsdPerMillionTokens: 3,
   outputUsdPerMillionTokens: 15,
+  cacheReadUsdPerMillionTokens: 0.3,
   minuteUsd: 0.008,
 }
 
-const DEFAULT_SUBSCRIPTION_PRICING: ModelPricing = {
-  inputUsdPerMillionTokens: 0,
-  outputUsdPerMillionTokens: 0,
-  minuteUsd: 0,
+export function estimateWorkerCostUsd(input: EstimateWorkerCostInput): number {
+  return estimateWorkerCost(input).usd
 }
 
-export function estimateWorkerCostUsd(input: EstimateWorkerCostInput): number {
-  const costModel = input.cost?.model === 'subscription' ? 'subscription' : 'pay-per-use'
-  const fallbackPricing = costModel === 'subscription'
-    ? DEFAULT_SUBSCRIPTION_PRICING
-    : DEFAULT_PAY_PER_USE_PRICING
+export function estimateWorkerCost(input: EstimateWorkerCostInput): EstimateWorkerCostResult {
+  const fallbackPricing = DEFAULT_PAY_PER_USE_PRICING
 
   const configuredPricing = input.cost?.pricing
   const configuredDefaultModel = normalizeModelKey(configuredPricing?.defaultModel) ?? DEFAULT_MODEL_KEY
   const modelKey = resolveModelKey(input.identity, configuredDefaultModel)
-  const modelPricing = resolveModelPricing(
+  const resolvedPricing = resolveModelPricing(
     configuredPricing?.models ?? {},
     modelKey,
     configuredDefaultModel,
     fallbackPricing,
   )
+  const modelPricing = resolvedPricing.pricing
 
+  const profileMinuteUsd = normalizeMinuteUsd(input.identity.fallbackMinuteUsd)
+  const minuteUsd = profileMinuteUsd ?? modelPricing.minuteUsd
   const usd = input.tokenUsage !== undefined
     ? estimateTokenCost(input.tokenUsage, modelPricing)
-    : estimateDurationCost(input.durationMs, modelPricing.minuteUsd)
+    : estimateDurationCost(input.durationMs, minuteUsd)
 
-  return Number(Math.max(0, usd).toFixed(6))
+  return {
+    usd: Number(Math.max(0, usd).toFixed(6)),
+    modelKey,
+    resolvedModelKey: resolvedPricing.resolvedModelKey,
+    usedDefaultModelFallback: resolvedPricing.usedDefaultModelFallback,
+    usedProfileMinuteFallback: profileMinuteUsd !== null,
+  }
 }
 
 function resolveModelKey(identity: PricingIdentity, defaultModel: string): string {
@@ -80,23 +93,40 @@ function resolveModelPricing(
   modelKey: string,
   defaultModel: string,
   fallback: ModelPricing,
-): ModelPricing {
-  const configured = models[modelKey] ?? models[defaultModel]
-  if (!configured) return fallback
+): { pricing: ModelPricing; resolvedModelKey: string; usedDefaultModelFallback: boolean } {
+  const direct = models[modelKey]
+  if (direct) {
+    return {
+      pricing: normalizeModelPricing(direct),
+      resolvedModelKey: modelKey,
+      usedDefaultModelFallback: false,
+    }
+  }
+
+  const defaultEntry = models[defaultModel]
+  if (defaultEntry) {
+    return {
+      pricing: normalizeModelPricing(defaultEntry),
+      resolvedModelKey: defaultModel,
+      usedDefaultModelFallback: modelKey !== defaultModel,
+    }
+  }
 
   return {
-    inputUsdPerMillionTokens: configured.inputUsdPerMillionTokens,
-    outputUsdPerMillionTokens: configured.outputUsdPerMillionTokens,
-    minuteUsd: configured.minuteUsd,
+    pricing: normalizeModelPricing(fallback),
+    resolvedModelKey: 'builtin-default',
+    usedDefaultModelFallback: false,
   }
 }
 
 function estimateTokenCost(tokenUsage: TokenUsageInput, pricing: ModelPricing): number {
   const promptTokens = normalizeTokenCount(tokenUsage.promptTokens)
   const completionTokens = normalizeTokenCount(tokenUsage.completionTokens)
+  const cacheReadTokens = normalizeTokenCount(tokenUsage.cacheReadTokens)
   return (
     (promptTokens / 1_000_000) * pricing.inputUsdPerMillionTokens +
-    (completionTokens / 1_000_000) * pricing.outputUsdPerMillionTokens
+    (completionTokens / 1_000_000) * pricing.outputUsdPerMillionTokens +
+    (cacheReadTokens / 1_000_000) * pricing.cacheReadUsdPerMillionTokens
   )
 }
 
@@ -105,8 +135,8 @@ function estimateDurationCost(durationMs: number, minuteUsd: number): number {
   return (durationMs / 60_000) * minuteUsd
 }
 
-function normalizeTokenCount(value: number): number {
-  if (!Number.isFinite(value) || value <= 0) return 0
+function normalizeTokenCount(value: number | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return 0
   return Math.floor(value)
 }
 
@@ -114,4 +144,40 @@ function normalizeModelKey(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+function normalizeModelPricing(value: Partial<ModelPricing>): ModelPricing {
+  const inputUsdPerMillionTokens = normalizeNonNegativeNumber(
+    value.inputUsdPerMillionTokens,
+    DEFAULT_PAY_PER_USE_PRICING.inputUsdPerMillionTokens,
+  )
+  const outputUsdPerMillionTokens = normalizeNonNegativeNumber(
+    value.outputUsdPerMillionTokens,
+    DEFAULT_PAY_PER_USE_PRICING.outputUsdPerMillionTokens,
+  )
+  const minuteUsd = normalizeNonNegativeNumber(
+    value.minuteUsd,
+    DEFAULT_PAY_PER_USE_PRICING.minuteUsd,
+  )
+  const cacheReadUsdPerMillionTokens = normalizeNonNegativeNumber(
+    value.cacheReadUsdPerMillionTokens,
+    Number((inputUsdPerMillionTokens * 0.1).toFixed(6)),
+  )
+
+  return {
+    inputUsdPerMillionTokens,
+    outputUsdPerMillionTokens,
+    cacheReadUsdPerMillionTokens,
+    minuteUsd,
+  }
+}
+
+function normalizeMinuteUsd(value: number | null | undefined): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null
+  return value
+}
+
+function normalizeNonNegativeNumber(value: number | undefined, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return fallback
+  return value
 }

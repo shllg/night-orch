@@ -57,11 +57,13 @@ describe('CostTracker', () => {
     expect(costTracker.getRunTokenUsage(runId)).toEqual({
       promptTokens: 120,
       completionTokens: 45,
+      cacheReadTokens: 0,
       totalTokens: 165,
     })
     expect(costTracker.getDailyTokenUsage()).toEqual({
       promptTokens: 120,
       completionTokens: 45,
+      cacheReadTokens: 0,
       totalTokens: 165,
     })
   })

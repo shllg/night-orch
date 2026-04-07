@@ -38,8 +38,27 @@ export interface DailyUsageAggregate {
   date: string
   promptTokens: number
   completionTokens: number
+  cacheReadTokens?: number
   totalTokens: number
   runCount: number
+}
+
+export interface StepCostAggregate {
+  stepId: string
+  totalCostUsd: number
+  promptTokens: number
+  completionTokens: number
+  cacheReadTokens: number
+  totalTokens: number
+}
+
+export interface WorkerCostAggregate {
+  workerType: string
+  totalCostUsd: number
+  promptTokens: number
+  completionTokens: number
+  cacheReadTokens: number
+  totalTokens: number
 }
 
 export interface ErrorPatternAggregate {
@@ -89,10 +108,13 @@ export interface TuiStatsSnapshot {
     cost30d: number
     avgDailyCost7d: number
     dailyHistory: DailyCostAggregate[]
+    phaseBreakdown7d?: StepCostAggregate[]
+    workerBreakdown7d?: WorkerCostAggregate[]
   }
   readonly usage: {
     todayPromptTokens: number
     todayCompletionTokens: number
+    todayCacheReadTokens?: number
     todayTotalTokens: number
     tokens7d: number
     tokens30d: number
@@ -219,7 +241,8 @@ export function loadTuiStats(
          SUM(COALESCE(estimated_cost_usd, 0)) AS total_cost_usd_7d,
          SUM(COALESCE(iteration_count, 0)) AS total_iterations_7d,
          SUM(COALESCE(prompt_tokens, 0)) AS total_prompt_tokens_7d,
-         SUM(COALESCE(completion_tokens, 0)) AS total_completion_tokens_7d
+         SUM(COALESCE(completion_tokens, 0)) AS total_completion_tokens_7d,
+         SUM(COALESCE(cache_read_tokens, 0)) AS total_cache_read_tokens_7d
        FROM runs
        WHERE datetime(created_at) >= datetime('now', '-7 days')`,
     )
@@ -232,24 +255,57 @@ export function loadTuiStats(
          SUM(CASE WHEN date = date('now') THEN run_count ELSE 0 END) AS today_run_count,
          SUM(CASE WHEN date = date('now') THEN total_prompt_tokens ELSE 0 END) AS today_prompt_tokens,
          SUM(CASE WHEN date = date('now') THEN total_completion_tokens ELSE 0 END) AS today_completion_tokens,
+         SUM(CASE WHEN date = date('now') THEN total_cache_read_tokens ELSE 0 END) AS today_cache_read_tokens,
          SUM(CASE WHEN date >= date('now', '-6 days') THEN total_cost_usd ELSE 0 END) AS cost_7d,
          SUM(CASE WHEN date >= date('now', '-29 days') THEN total_cost_usd ELSE 0 END) AS cost_30d,
          AVG(CASE WHEN date >= date('now', '-6 days') THEN total_cost_usd ELSE NULL END) AS avg_daily_cost_7d,
-         SUM(CASE WHEN date >= date('now', '-6 days') THEN total_prompt_tokens + total_completion_tokens ELSE 0 END) AS tokens_7d,
-         SUM(CASE WHEN date >= date('now', '-29 days') THEN total_prompt_tokens + total_completion_tokens ELSE 0 END) AS tokens_30d,
-         AVG(CASE WHEN date >= date('now', '-6 days') THEN total_prompt_tokens + total_completion_tokens ELSE NULL END) AS avg_daily_tokens_7d
+         SUM(CASE WHEN date >= date('now', '-6 days') THEN total_prompt_tokens + total_completion_tokens + total_cache_read_tokens ELSE 0 END) AS tokens_7d,
+         SUM(CASE WHEN date >= date('now', '-29 days') THEN total_prompt_tokens + total_completion_tokens + total_cache_read_tokens ELSE 0 END) AS tokens_30d,
+         AVG(CASE WHEN date >= date('now', '-6 days') THEN total_prompt_tokens + total_completion_tokens + total_cache_read_tokens ELSE NULL END) AS avg_daily_tokens_7d
        FROM daily_costs`,
     )
     .get() as CostRow | undefined
 
   const dailyHistory = db
     .prepare(
-      `SELECT date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens
+      `SELECT date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens, total_cache_read_tokens
        FROM daily_costs
        WHERE date >= date('now', '-6 days')
        ORDER BY date DESC`,
     )
     .all() as DailyCostRow[]
+
+  const phaseCostBreakdown = db
+    .prepare(
+      `SELECT
+         step_id,
+         SUM(cost_usd) AS total_cost_usd,
+         SUM(prompt_tokens) AS prompt_tokens,
+         SUM(completion_tokens) AS completion_tokens,
+         SUM(cache_read_tokens) AS cache_read_tokens
+       FROM run_cost_entries
+       WHERE datetime(created_at) >= datetime('now', '-7 days')
+       GROUP BY step_id
+       ORDER BY total_cost_usd DESC, step_id ASC
+       LIMIT 8`,
+    )
+    .all() as StepCostRow[]
+
+  const workerCostBreakdown = db
+    .prepare(
+      `SELECT
+         COALESCE(worker_type, 'unknown') AS worker_type,
+         SUM(cost_usd) AS total_cost_usd,
+         SUM(prompt_tokens) AS prompt_tokens,
+         SUM(completion_tokens) AS completion_tokens,
+         SUM(cache_read_tokens) AS cache_read_tokens
+       FROM run_cost_entries
+       WHERE datetime(created_at) >= datetime('now', '-7 days')
+       GROUP BY worker_type
+       ORDER BY total_cost_usd DESC, worker_type ASC
+       LIMIT 8`,
+    )
+    .all() as WorkerCostRow[]
 
   const errorMessages = db
     .prepare(
@@ -405,7 +461,8 @@ export function loadTuiStats(
   const totalIterations7d = toNumber(efficiencyRow?.total_iterations_7d)
   const totalPromptTokens7d = toNumber(efficiencyRow?.total_prompt_tokens_7d)
   const totalCompletionTokens7d = toNumber(efficiencyRow?.total_completion_tokens_7d)
-  const totalTokens7d = totalPromptTokens7d + totalCompletionTokens7d
+  const totalCacheReadTokens7d = toNumber(efficiencyRow?.total_cache_read_tokens_7d)
+  const totalTokens7d = totalPromptTokens7d + totalCompletionTokens7d + totalCacheReadTokens7d
   const runsForEfficiency = toNumber(efficiencyRow?.runs_7d)
 
   const avgCostPerRun7d = runsForEfficiency > 0 ? totalCostUsd7d / runsForEfficiency : 0
@@ -469,22 +526,54 @@ export function loadTuiStats(
         totalCostUsd: toNumber(row.total_cost_usd),
         runCount: toNumber(row.run_count),
       })),
+      phaseBreakdown7d: phaseCostBreakdown.map((row) => {
+        const promptTokens = toNumber(row.prompt_tokens)
+        const completionTokens = toNumber(row.completion_tokens)
+        const cacheReadTokens = toNumber(row.cache_read_tokens)
+        return {
+          stepId: row.step_id,
+          totalCostUsd: toNumber(row.total_cost_usd),
+          promptTokens,
+          completionTokens,
+          cacheReadTokens,
+          totalTokens: promptTokens + completionTokens + cacheReadTokens,
+        }
+      }),
+      workerBreakdown7d: workerCostBreakdown.map((row) => {
+        const promptTokens = toNumber(row.prompt_tokens)
+        const completionTokens = toNumber(row.completion_tokens)
+        const cacheReadTokens = toNumber(row.cache_read_tokens)
+        return {
+          workerType: row.worker_type,
+          totalCostUsd: toNumber(row.total_cost_usd),
+          promptTokens,
+          completionTokens,
+          cacheReadTokens,
+          totalTokens: promptTokens + completionTokens + cacheReadTokens,
+        }
+      }),
     },
     usage: {
       todayPromptTokens: toNumber(costRow?.today_prompt_tokens),
       todayCompletionTokens: toNumber(costRow?.today_completion_tokens),
-      todayTotalTokens: toNumber(costRow?.today_prompt_tokens) + toNumber(costRow?.today_completion_tokens),
+      todayCacheReadTokens: toNumber(costRow?.today_cache_read_tokens),
+      todayTotalTokens:
+        toNumber(costRow?.today_prompt_tokens) +
+        toNumber(costRow?.today_completion_tokens) +
+        toNumber(costRow?.today_cache_read_tokens),
       tokens7d: toNumber(costRow?.tokens_7d),
       tokens30d: toNumber(costRow?.tokens_30d),
       avgDailyTokens7d: toNumber(costRow?.avg_daily_tokens_7d),
       dailyHistory: dailyHistory.map((row) => {
         const promptTokens = toNumber(row.total_prompt_tokens)
         const completionTokens = toNumber(row.total_completion_tokens)
+        const cacheReadTokens = toNumber(row.total_cache_read_tokens)
         return {
           date: row.date,
           promptTokens,
           completionTokens,
-          totalTokens: promptTokens + completionTokens,
+          cacheReadTokens,
+          totalTokens: promptTokens + completionTokens + cacheReadTokens,
           runCount: toNumber(row.run_count),
         }
       }),
@@ -646,6 +735,7 @@ interface EfficiencyRow {
   total_iterations_7d: number | null
   total_prompt_tokens_7d: number | null
   total_completion_tokens_7d: number | null
+  total_cache_read_tokens_7d: number | null
 }
 
 interface CostRow {
@@ -653,6 +743,7 @@ interface CostRow {
   today_run_count: number | null
   today_prompt_tokens: number | null
   today_completion_tokens: number | null
+  today_cache_read_tokens: number | null
   cost_7d: number | null
   cost_30d: number | null
   avg_daily_cost_7d: number | null
@@ -676,6 +767,23 @@ interface DailyCostRow {
   run_count: number | null
   total_prompt_tokens: number | null
   total_completion_tokens: number | null
+  total_cache_read_tokens: number | null
+}
+
+interface StepCostRow {
+  step_id: string
+  total_cost_usd: number | null
+  prompt_tokens: number | null
+  completion_tokens: number | null
+  cache_read_tokens: number | null
+}
+
+interface WorkerCostRow {
+  worker_type: string
+  total_cost_usd: number | null
+  prompt_tokens: number | null
+  completion_tokens: number | null
+  cache_read_tokens: number | null
 }
 
 interface ErrorMessageRow {
