@@ -15,6 +15,10 @@ import {
   type InteractiveAgentSessionEventList,
   type InteractiveAgentType,
 } from './agent-session.js'
+import {
+  ShellSessionManager,
+  type ShellSessionEventList,
+} from './shell-session.js'
 import { loadTuiStats } from '../state/stats.js'
 import { getBuildInfo } from '../utils/build-info.js'
 import { logger } from '../utils/logger.js'
@@ -44,8 +48,10 @@ export interface WebServerOptions {
 }
 
 interface WsClientState {
+  isAuthenticated: boolean
   runSubscriptions: Map<string, number>
   agentSessionSubscriptions: Map<string, number>
+  shellSessionSubscriptions: Map<string, number>
 }
 
 interface DashboardSnapshot {
@@ -219,6 +225,10 @@ type WebSocketCommand =
   | { type: 'unsubscribe-run-events'; runId: string }
   | { type: 'subscribe-agent-session-events'; sessionId: string; since?: number }
   | { type: 'unsubscribe-agent-session-events'; sessionId: string }
+  | { type: 'subscribe-shell-session-events'; sessionId: string; since?: number }
+  | { type: 'unsubscribe-shell-session-events'; sessionId: string }
+  | { type: 'shell-input'; sessionId: string; data: string }
+  | { type: 'shell-resize'; sessionId: string; cols: number; rows: number }
   | { type: 'refresh' }
 
 const ONE_MEGABYTE = 1024 * 1024
@@ -279,6 +289,7 @@ export async function startWebServer(
   const agentSessionManager = new InteractiveAgentSessionManager(deps.config, {
     workspacePath: resolveAgentSessionWorkspacePath(deps),
   })
+  const shellSessionManager = new ShellSessionManager()
   const frontendDistPath = resolveWebFrontendDistPath(options.frontendDistPath)
   const hasFrontendAssets = existsSync(resolve(frontendDistPath, 'index.html'))
 
@@ -310,6 +321,7 @@ export async function startWebServer(
           operationsEnabled,
           options.rawConfig,
           agentSessionManager,
+          shellSessionManager,
         )
         return
       }
@@ -363,14 +375,17 @@ export async function startWebServer(
     }
 
     wsServer.handleUpgrade(req, socket, head, (ws) => {
-      wsServer.emit('connection', ws)
+      wsServer.emit('connection', ws, req)
     })
   })
 
-  wsServer.on('connection', (ws) => {
+  wsServer.on('connection', (ws, req) => {
+    const isAuthenticated = resolveWebSocketAuthenticationState(req, security)
     const state: WsClientState = {
+      isAuthenticated,
       runSubscriptions: new Map(),
       agentSessionSubscriptions: new Map(),
+      shellSessionSubscriptions: new Map(),
     }
     clients.set(ws, state)
 
@@ -385,7 +400,7 @@ export async function startWebServer(
         sendWebsocket(ws, { type: 'error', error: 'Unsupported websocket payload type' })
         return
       }
-      void handleWsMessage(ws, state, decoded, deps, agentSessionManager)
+      void handleWsMessage(ws, state, decoded, deps, agentSessionManager, shellSessionManager)
     })
 
     ws.on('close', () => {
@@ -412,6 +427,7 @@ export async function startWebServer(
         if (ws.readyState !== WebSocket.OPEN) continue
         await publishRunSubscriptions(ws, state, deps)
         publishAgentSessionSubscriptions(ws, state, agentSessionManager)
+        publishShellSessionSubscriptions(ws, state, shellSessionManager)
       }
     } catch (err) {
       logger.warn({ err }, 'Failed to publish websocket snapshot tick')
@@ -432,9 +448,18 @@ export async function startWebServer(
       publishAgentSessionSubscriptions(ws, state, agentSessionManager)
     }
   })
+  const stopShellSessionStreaming = shellSessionManager.onSessionEvent((sessionId) => {
+    for (const [ws, state] of clients.entries()) {
+      if (ws.readyState !== WebSocket.OPEN) continue
+      if (!state.shellSessionSubscriptions.has(sessionId)) continue
+      publishShellSessionSubscriptions(ws, state, shellSessionManager)
+    }
+  })
 
   httpServer.on('close', () => {
     stopAgentSessionStreaming()
+    stopShellSessionStreaming()
+    shellSessionManager.closeAll()
     clearInterval(interval)
     for (const ws of wsServer.clients) {
       ws.close()
@@ -465,6 +490,7 @@ async function handleApiRequest(
   operationsEnabled: boolean,
   rawConfig: unknown,
   agentSessionManager: InteractiveAgentSessionManager,
+  shellSessionManager: ShellSessionManager,
 ): Promise<void> {
   const method = req.method ?? 'GET'
   const { pathname, searchParams } = requestUrl
@@ -473,8 +499,18 @@ async function handleApiRequest(
     config: resolveConfigWithRuntimeSettings(deps.config, deps.db),
   }
 
+  if (method === 'GET' && pathname.startsWith('/api/shell/')) {
+    const shellReadGuardFailure = validateShellReadRequest(req, security)
+    if (shellReadGuardFailure) {
+      writeJson(res, shellReadGuardFailure.statusCode, { error: shellReadGuardFailure.error })
+      return
+    }
+  }
+
   if ((method === 'POST' || method === 'DELETE')
-    && (pathname.startsWith('/api/operations/') || pathname.startsWith('/api/agent/'))) {
+    && (pathname.startsWith('/api/operations/')
+      || pathname.startsWith('/api/agent/')
+      || pathname.startsWith('/api/shell/'))) {
     // Update is a supervisor operation — always allowed regardless of attach/standalone mode.
     if (!operationsEnabled && pathname !== '/api/operations/update') {
       writeJson(res, 409, { error: 'Web operations are disabled by server policy.' })
@@ -525,6 +561,11 @@ async function handleApiRequest(
 
   if (method === 'GET' && pathname === '/api/agent/sessions') {
     writeJson(res, 200, agentSessionManager.listSessions())
+    return
+  }
+
+  if (method === 'GET' && pathname === '/api/shell/sessions') {
+    writeJson(res, 200, shellSessionManager.listSessions())
     return
   }
 
@@ -582,6 +623,33 @@ async function handleApiRequest(
     if (agentSessionDetailMatch) {
       const sessionId = decodeURIComponent(agentSessionDetailMatch[1] ?? '')
       const session = agentSessionManager.getSession(sessionId)
+      if (!session) {
+        writeJson(res, 404, { error: `Session not found: ${sessionId}` })
+        return
+      }
+      writeJson(res, 200, { session })
+      return
+    }
+
+    const shellSessionEventsMatch = pathname.match(/^\/api\/shell\/sessions\/([^/]+)\/events$/)
+    if (shellSessionEventsMatch) {
+      const sessionId = decodeURIComponent(shellSessionEventsMatch[1] ?? '')
+      const since = toBoundedInt(searchParams.get('since'), 0, 0, Number.MAX_SAFE_INTEGER)
+      const limit = toBoundedInt(searchParams.get('limit'), 200, 1, 1_000)
+      try {
+        writeJson(res, 200, shellSessionManager.getEvents(sessionId, since, limit))
+      } catch (err) {
+        const message = (err as Error).message
+        const statusCode = message.startsWith('Session not found:') ? 404 : 400
+        writeJson(res, statusCode, { error: message })
+      }
+      return
+    }
+
+    const shellSessionDetailMatch = pathname.match(/^\/api\/shell\/sessions\/([^/]+)$/)
+    if (shellSessionDetailMatch) {
+      const sessionId = decodeURIComponent(shellSessionDetailMatch[1] ?? '')
+      const session = shellSessionManager.getSession(sessionId)
       if (!session) {
         writeJson(res, 404, { error: `Session not found: ${sessionId}` })
         return
@@ -1018,6 +1086,43 @@ async function handleApiRequest(
     return
   }
 
+  if (method === 'POST' && pathname === '/api/shell/sessions') {
+    const body = await readJsonBody(req)
+    const cwd = toNonEmptyString(body['cwd'])
+    const cols = toBoundedInt(body['cols'], NaN, 40, 400)
+    const rows = toBoundedInt(body['rows'], NaN, 10, 240)
+
+    try {
+      const session = shellSessionManager.createSession({
+        cwd,
+        cols: Number.isNaN(cols) ? undefined : cols,
+        rows: Number.isNaN(rows) ? undefined : rows,
+      })
+      writeJson(res, 200, { session })
+    } catch (err) {
+      writeJson(res, 400, { error: (err as Error).message })
+    }
+    return
+  }
+
+  const shellSessionCloseMatch = pathname.match(/^\/api\/shell\/sessions\/([^/]+)$/)
+  if (method === 'DELETE' && shellSessionCloseMatch) {
+    const sessionId = decodeURIComponent(shellSessionCloseMatch[1] ?? '')
+    try {
+      const session = shellSessionManager.closeSession(sessionId)
+      writeJson(res, 200, { session })
+    } catch (err) {
+      const message = (err as Error).message
+      const statusCode = message.startsWith('Session not found:')
+        ? 404
+        : message.includes('running')
+          ? 409
+          : 400
+      writeJson(res, statusCode, { error: message })
+    }
+    return
+  }
+
   writeJson(res, 404, { error: `Unknown API route: ${method} ${pathname}` })
 }
 
@@ -1156,6 +1261,22 @@ function validateMutationRequest(
     return { statusCode: 415, error: 'Content-Type must be application/json' }
   }
 
+  const webToken = getSingleHeaderValue(req.headers[WEB_AUTH_TOKEN_HEADER])
+  if (!webToken) {
+    return { statusCode: 401, error: `Missing required header: ${WEB_AUTH_TOKEN_HEADER}` }
+  }
+
+  if (!isMatchingToken(webToken, security.webMutationToken)) {
+    return { statusCode: 403, error: 'Invalid web auth token' }
+  }
+
+  return null
+}
+
+function validateShellReadRequest(
+  req: IncomingMessage,
+  security: WebSecurityContext,
+): { statusCode: number; error: string } | null {
   const webToken = getSingleHeaderValue(req.headers[WEB_AUTH_TOKEN_HEADER])
   if (!webToken) {
     return { statusCode: 401, error: `Missing required header: ${WEB_AUTH_TOKEN_HEADER}` }
@@ -1650,12 +1771,17 @@ async function handleWsMessage(
   rawMessage: string,
   deps: MCPDependencies,
   agentSessionManager: InteractiveAgentSessionManager,
+  shellSessionManager: ShellSessionManager,
 ): Promise<void> {
   let command: WebSocketCommand
   try {
     command = JSON.parse(rawMessage) as WebSocketCommand
   } catch {
     sendWebsocket(ws, { type: 'error', error: 'Invalid JSON message' })
+    return
+  }
+
+  if (!ensureWebSocketShellAuthorized(ws, state, command.type)) {
     return
   }
 
@@ -1707,6 +1833,78 @@ async function handleWsMessage(
 
     state.agentSessionSubscriptions.delete(sessionId)
     sendWebsocket(ws, { type: 'unsubscribed', payload: { sessionId } })
+    return
+  }
+
+  if (command.type === 'subscribe-shell-session-events') {
+    const sessionId = typeof command.sessionId === 'string' ? command.sessionId : ''
+    if (!sessionId) {
+      sendWebsocket(ws, { type: 'error', error: 'sessionId is required for subscribe-shell-session-events' })
+      return
+    }
+
+    const cursor = Number.isFinite(command.since) ? Math.max(0, Math.floor(command.since ?? 0)) : 0
+    state.shellSessionSubscriptions.set(sessionId, cursor)
+    sendWebsocket(ws, { type: 'subscribed', payload: { sessionId, since: cursor } })
+    publishShellSessionSubscriptions(ws, state, shellSessionManager)
+    return
+  }
+
+  if (command.type === 'unsubscribe-shell-session-events') {
+    const sessionId = typeof command.sessionId === 'string' ? command.sessionId : ''
+    if (!sessionId) {
+      sendWebsocket(ws, { type: 'error', error: 'sessionId is required for unsubscribe-shell-session-events' })
+      return
+    }
+
+    state.shellSessionSubscriptions.delete(sessionId)
+    sendWebsocket(ws, { type: 'unsubscribed', payload: { sessionId } })
+    return
+  }
+
+  if (command.type === 'shell-input') {
+    const sessionId = typeof command.sessionId === 'string' ? command.sessionId : ''
+    const data = typeof command.data === 'string' ? command.data : ''
+    if (!sessionId) {
+      sendWebsocket(ws, { type: 'error', error: 'sessionId is required for shell-input' })
+      return
+    }
+    if (!data) {
+      sendWebsocket(ws, { type: 'error', error: 'data is required for shell-input' })
+      return
+    }
+    try {
+      shellSessionManager.writeInput(sessionId, data)
+    } catch (err) {
+      sendWebsocket(ws, {
+        type: 'error',
+        error: `Failed to write shell input for ${sessionId}: ${(err as Error).message}`,
+      })
+    }
+    return
+  }
+
+  if (command.type === 'shell-resize') {
+    const sessionId = typeof command.sessionId === 'string' ? command.sessionId : ''
+    if (!sessionId) {
+      sendWebsocket(ws, { type: 'error', error: 'sessionId is required for shell-resize' })
+      return
+    }
+
+    const cols = typeof command.cols === 'number' ? command.cols : NaN
+    const rows = typeof command.rows === 'number' ? command.rows : NaN
+    if (!Number.isFinite(cols) || !Number.isFinite(rows)) {
+      sendWebsocket(ws, { type: 'error', error: 'cols and rows are required for shell-resize' })
+      return
+    }
+    try {
+      shellSessionManager.resize(sessionId, cols, rows)
+    } catch (err) {
+      sendWebsocket(ws, {
+        type: 'error',
+        error: `Failed to resize shell session ${sessionId}: ${(err as Error).message}`,
+      })
+    }
     return
   }
 
@@ -1795,6 +1993,41 @@ function publishAgentSessionSubscriptions(
   }
 }
 
+function publishShellSessionSubscriptions(
+  ws: WebSocket,
+  state: WsClientState,
+  manager: ShellSessionManager,
+): void {
+  for (const [sessionId, since] of state.shellSessionSubscriptions.entries()) {
+    let result: ShellSessionEventList
+    try {
+      result = manager.getEvents(sessionId, since, 500)
+    } catch (err) {
+      sendWebsocket(ws, {
+        type: 'error',
+        error: `Failed to stream shell-session events for ${sessionId}: ${(err as Error).message}`,
+      })
+      continue
+    }
+
+    state.shellSessionSubscriptions.set(sessionId, result.lastEventId)
+
+    if (result.events.length === 0) {
+      continue
+    }
+
+    sendWebsocket(ws, {
+      type: 'shell-session-events',
+      payload: {
+        sessionId,
+        status: result.status,
+        events: result.events,
+        lastEventId: result.lastEventId,
+      },
+    })
+  }
+}
+
 function toRunEventPayload(input: unknown): { events: unknown[]; lastEventId: number } | null {
   if (!input || typeof input !== 'object') return null
 
@@ -1808,6 +2041,51 @@ function toRunEventPayload(input: unknown): { events: unknown[]; lastEventId: nu
     events: maybeEvents,
     lastEventId: Math.max(0, Math.floor(maybeLastEventId)),
   }
+}
+
+function resolveWebSocketAuthenticationState(request: IncomingMessage, security: WebSecurityContext): boolean {
+  let requestUrl: URL
+  try {
+    requestUrl = getRequestUrl(request)
+  } catch {
+    return false
+  }
+
+  const queryToken = requestUrl.searchParams.get('token')
+  const headerToken = getSingleHeaderValue(request.headers[WEB_AUTH_TOKEN_HEADER])
+  const providedToken = toNonEmptyString(queryToken) ?? headerToken
+  if (!providedToken) {
+    return false
+  }
+
+  return isMatchingToken(providedToken, security.webMutationToken)
+}
+
+function requiresWebSocketShellAuth(commandType: WebSocketCommand['type']): boolean {
+  return commandType === 'subscribe-shell-session-events'
+    || commandType === 'unsubscribe-shell-session-events'
+    || commandType === 'shell-input'
+    || commandType === 'shell-resize'
+}
+
+function ensureWebSocketShellAuthorized(
+  ws: WebSocket,
+  state: WsClientState,
+  commandType: WebSocketCommand['type'],
+): boolean {
+  if (!requiresWebSocketShellAuth(commandType)) {
+    return true
+  }
+
+  if (state.isAuthenticated) {
+    return true
+  }
+
+  sendWebsocket(ws, {
+    type: 'error',
+    error: `Unauthorized websocket command: ${commandType}`,
+  })
+  return false
 }
 
 function sendWebsocket(ws: WebSocket, payload: unknown): void {

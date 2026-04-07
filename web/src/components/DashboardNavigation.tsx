@@ -22,7 +22,7 @@ const PAGES: PageDefinition[] = [
   { id: 'issues', label: 'issues', shortLabel: 'issues', Icon: IssuesIcon },
   { id: 'stats', label: 'stats', shortLabel: 'stats', Icon: StatsIcon },
   { id: 'projects', label: 'projects', shortLabel: 'projects', Icon: ProjectsIcon },
-  { id: 'agent', label: 'agent', shortLabel: 'agent', Icon: AgentIcon },
+  { id: 'agent', label: 'shell', shortLabel: 'shell', Icon: AgentIcon },
   { id: 'settings', label: 'settings', shortLabel: 'settings', Icon: SettingsIcon },
 ]
 

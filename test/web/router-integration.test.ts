@@ -8,10 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createDashboardRouter } from '../../web/src/router.js'
 import {
   type DashboardSnapshot,
-  type InteractiveAgentSessionsSnapshot,
   type ProjectsSnapshot,
   type SettingsSnapshot,
   type SessionResponse,
+  type ShellSessionsSnapshot,
 } from '../../web/src/types/dashboard.js'
 
 const SESSION_RESPONSE: SessionResponse = {
@@ -147,10 +147,9 @@ const SETTINGS_SNAPSHOT: SettingsSnapshot = {
   settings: [],
 }
 
-const AGENT_SESSIONS_SNAPSHOT: InteractiveAgentSessionsSnapshot = {
+const SHELL_SESSIONS_SNAPSHOT: ShellSessionsSnapshot = {
   generatedAt: '2026-04-06T10:00:00.000Z',
-  workspacePath: '/tmp/night-orch',
-  profiles: [],
+  homePath: '/home/test',
   sessions: [],
 }
 
@@ -198,7 +197,7 @@ function buildFetchMock() {
     if (pathname === '/api/session') return createJsonResponse(SESSION_RESPONSE)
     if (pathname === '/api/projects') return createJsonResponse(PROJECTS_SNAPSHOT)
     if (pathname === '/api/settings') return createJsonResponse(SETTINGS_SNAPSHOT)
-    if (pathname === '/api/agent/sessions') return createJsonResponse(AGENT_SESSIONS_SNAPSHOT)
+    if (pathname === '/api/shell/sessions') return createJsonResponse(SHELL_SESSIONS_SNAPSHOT)
     if (pathname === '/api/update-status') return createJsonResponse({}, 404)
 
     return createJsonResponse({ error: `Unhandled endpoint: ${pathname}` }, 404)
@@ -212,7 +211,7 @@ function renderDashboard(pathname: string) {
   return { ...rendered, router }
 }
 
-function expectPageActive(label: 'issues' | 'stats' | 'projects' | 'agent' | 'settings'): void {
+function expectPageActive(label: 'issues' | 'stats' | 'projects' | 'shell' | 'settings'): void {
   const pageButtons = screen
     .getAllByRole('button', { name: new RegExp(`^${label}$`, 'i') })
     .filter((button) => button.getAttribute('aria-label') === label)
@@ -256,15 +255,15 @@ describe('dashboard router integration (real App)', () => {
     expectPageActive('settings')
   })
 
-  it('renders /agent with interactive session workspace controls', async () => {
+  it('renders /agent with browser shell controls', async () => {
     const { router } = renderDashboard('/agent')
 
     await waitFor(() => {
       expect(router.state.location.pathname).toBe('/agent')
     })
 
-    expect(screen.getByText('Interactive Agent')).toBeDefined()
-    expectPageActive('agent')
+    expect(screen.getByText('Browser Shell')).toBeDefined()
+    expectPageActive('shell')
   })
 
   it('redirects invalid routes to /issues', async () => {
