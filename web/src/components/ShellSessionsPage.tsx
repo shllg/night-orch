@@ -1,7 +1,6 @@
 import { type FormEvent, type ReactElement, useEffect, useRef } from 'react'
-import { FitAddon } from '@xterm/addon-fit'
-import { Terminal } from '@xterm/xterm'
-import type { IDisposable } from '@xterm/xterm'
+import { FitAddon as XtermFitAddon } from '@xterm/addon-fit'
+import { Terminal as XtermTerminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 
 import {
@@ -29,6 +28,37 @@ interface ShellSessionsPageProps {
   onTerminalResize: (cols: number, rows: number) => void
 }
 
+interface XtermDisposable {
+  dispose(): void
+}
+
+interface XtermFitAddonLike {
+  fit(): void
+}
+
+interface XtermTerminalLike {
+  cols: number
+  rows: number
+  loadAddon(addon: XtermFitAddonLike): void
+  open(element: HTMLElement): void
+  onData(listener: (data: string) => void): XtermDisposable
+  reset(): void
+  writeln(data: string): void
+  write(data: string): void
+  dispose(): void
+}
+
+interface XtermTerminalCtor {
+  new (options: Record<string, unknown>): XtermTerminalLike
+}
+
+interface XtermFitAddonCtor {
+  new (): XtermFitAddonLike
+}
+
+const TerminalCtor = XtermTerminal as unknown as XtermTerminalCtor
+const FitAddonCtor = XtermFitAddon as unknown as XtermFitAddonCtor
+
 const STATUS_BADGE_CLASS: Record<ShellSessionDetail['status'], string> = {
   running: 'badge-success',
   closed: 'badge-neutral',
@@ -51,8 +81,8 @@ export function ShellSessionsPage({
   onTerminalResize,
 }: ShellSessionsPageProps): ReactElement {
   const terminalHostRef = useRef<HTMLDivElement | null>(null)
-  const terminalRef = useRef<Terminal | null>(null)
-  const fitAddonRef = useRef<FitAddon | null>(null)
+  const terminalRef = useRef<XtermTerminalLike | null>(null)
+  const fitAddonRef = useRef<XtermFitAddonLike | null>(null)
   const outputCursorRef = useRef(0)
   const selectedSessionIdRef = useRef(selectedSessionId)
   const onTerminalInputRef = useRef(onTerminalInput)
@@ -74,7 +104,7 @@ export function ShellSessionsPage({
     const host = terminalHostRef.current
     if (!host) return
 
-    const terminal = new Terminal({
+    const terminal = new TerminalCtor({
       cursorBlink: true,
       allowProposedApi: false,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
@@ -104,7 +134,7 @@ export function ShellSessionsPage({
         brightWhite: '#f8fafc',
       },
     })
-    const fitAddon = new FitAddon()
+    const fitAddon = new FitAddonCtor()
     terminal.loadAddon(fitAddon)
     terminal.open(host)
     terminalRef.current = terminal
@@ -307,7 +337,7 @@ export function ShellSessionsPage({
   )
 }
 
-function disposeSafely(disposable: IDisposable): void {
+function disposeSafely(disposable: XtermDisposable): void {
   try {
     disposable.dispose()
   } catch {

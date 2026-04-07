@@ -51,7 +51,7 @@ export function assessProgress(
   return { status: 'progressing', reason: 'Verify output differs from previous iteration' }
 }
 
-const ANSI_RE = /\x1b\[[0-9;]*[A-Za-z]/g
+const ANSI_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[A-Za-z]`, 'g')
 const TIMESTAMP_RE = /\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[\d.Z+:-]*/g
 const DURATION_RE = /\b\d+(\.\d+)?\s*(ms|s|sec|seconds|minutes|min|m)\b/gi
 const TEMP_PATH_RE = /\/tmp\/[^\s]+/g

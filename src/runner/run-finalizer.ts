@@ -1,7 +1,7 @@
 import type { Config } from '../config/schema.js'
 import type Database from 'better-sqlite3'
 import type { MetricsService } from '../metrics/service.js'
-import { createForgeAdapter } from '../forge/factory.js'
+import type { ForgeAdapter } from '../forge/types.js'
 import type { RunManager } from '../state/runs.js'
 import { publishPR } from '../publishing/publisher.js'
 import { MergeConflictError } from '../publishing/push.js'
@@ -38,7 +38,7 @@ export interface FinalizeRunOutcomeParams {
   issueRepo: string
   issueNumber: number
   db: Database.Database
-  forge: ReturnType<typeof createForgeAdapter>
+  forge: ForgeAdapter
   runManager: RunManager
   notifier: NotificationDispatcher
   metrics?: MetricsService

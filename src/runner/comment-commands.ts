@@ -2,7 +2,7 @@ import type { Config } from '../config/schema.js'
 import type Database from 'better-sqlite3'
 import type { RunManager } from '../state/runs.js'
 import type { LeaseManager } from '../state/leases.js'
-import { createForgeAdapter } from '../forge/factory.js'
+import type { ForgeAdapter } from '../forge/types.js'
 import { transitionLabels } from '../labels/manager.js'
 import { buildLabelConfig } from '../labels/config.js'
 import { queueRebase } from '../ops/rebase-and-check.js'
@@ -25,7 +25,7 @@ export const missingCommentCommandIssues = new Set<string>()
 export interface ProcessCommentCommandsParams {
   config: Config
   db: Database.Database
-  forge: ReturnType<typeof createForgeAdapter>
+  forge: ForgeAdapter
   runManager: RunManager
   leaseManager: LeaseManager
   repoConfig: Config['repos'][0]
@@ -167,7 +167,7 @@ export async function processCommentCommands(params: ProcessCommentCommandsParam
 }
 
 interface CanExecuteCommentCommandParams {
-  forge: ReturnType<typeof createForgeAdapter>
+  forge: ForgeAdapter
   repo: string
   user: string
   requireCollaborator: boolean
@@ -203,7 +203,7 @@ async function canExecuteCommentCommand(params: CanExecuteCommentCommandParams):
 interface ExecuteCommentCommandParams {
   command: OrchCommand
   db: Database.Database
-  forge: ReturnType<typeof createForgeAdapter>
+  forge: ForgeAdapter
   runManager: RunManager
   leaseManager: LeaseManager
   repoConfig: Config['repos'][0]
@@ -269,7 +269,7 @@ async function executeCommentCommand(params: ExecuteCommentCommandParams): Promi
 interface QueueRetryFromCommentParams {
   runManager: RunManager
   leaseManager: LeaseManager
-  forge: ReturnType<typeof createForgeAdapter>
+  forge: ForgeAdapter
   repoConfig: Config['repos'][0]
   issueRepo: string
   issueNumber: number
@@ -314,7 +314,7 @@ async function queueRetryFromComment(params: QueueRetryFromCommentParams): Promi
 interface CancelRunFromCommentParams {
   runManager: RunManager
   leaseManager: LeaseManager
-  forge: ReturnType<typeof createForgeAdapter>
+  forge: ForgeAdapter
   repoConfig: Config['repos'][0]
   issueRepo: string
   issueNumber: number

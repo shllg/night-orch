@@ -6,7 +6,7 @@ import type { DiscoveredIssue } from '../discovery/discover.js'
 import type { ResolvedWorkflow } from '../loop/workflow.js'
 import type { RunContext, BlockReason } from '../loop/types.js'
 import type { NotificationPayload } from '../notify/types.js'
-import { createForgeAdapter } from '../forge/factory.js'
+import type { ForgeAdapter } from '../forge/types.js'
 import { markerTag, upsertBotComment } from '../forge/bot-comment.js'
 import { formatStatusComment } from '../forge/status-comment.js'
 import { nowUtcIso } from '../utils/time.js'
@@ -183,7 +183,7 @@ export function makePayload(
 }
 
 export interface PostStatusCommentParams {
-  forge: ReturnType<typeof createForgeAdapter>
+  forge: ForgeAdapter
   issueRepo: string
   issueNumber: number
   botUser: string
@@ -205,7 +205,7 @@ export async function postStatusComment(params: PostStatusCommentParams): Promis
 }
 
 export interface PostErrorStatusCommentParams {
-  forge: ReturnType<typeof createForgeAdapter>
+  forge: ForgeAdapter
   issueRepo: string
   issueNumber: number
   botUser: string

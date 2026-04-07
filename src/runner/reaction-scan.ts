@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 import type { Config } from '../config/schema.js'
-import { createForgeAdapter } from '../forge/factory.js'
+import type { ForgeAdapter } from '../forge/types.js'
 import type { RunManager } from '../state/runs.js'
 import { scanForReactions } from '../reactions/scanner.js'
 import { handleReaction } from '../reactions/handler.js'
@@ -13,7 +13,7 @@ export const reactionCursors = new Map<string, ReactionCursor>()
 
 export interface ScanAndHandleReactionsParams {
   db: Database.Database
-  forge: ReturnType<typeof createForgeAdapter>
+  forge: ForgeAdapter
   runManager: RunManager
   repoConfig: Config['repos'][0]
   botUser: string

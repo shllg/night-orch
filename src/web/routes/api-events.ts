@@ -1,4 +1,4 @@
-import { WebSocket } from 'ws'
+import type { WebSocket } from 'ws'
 import type { MCPDependencies } from '../../mcp/server.js'
 import { handleToolCall } from '../../mcp/tools/index.js'
 import type {

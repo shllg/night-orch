@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { resolve, sep } from 'node:path'
 import * as nodePty from 'node-pty'
-import type { IPty } from 'node-pty'
 import { logger } from '../utils/logger.js'
 import { nowUtcIso } from '../utils/time.js'
 
@@ -45,7 +44,7 @@ interface ShellSessionState {
   exitSignal: number | null
   closeRequested: boolean
   events: ShellSessionEvent[]
-  ptyProcess: IPty | null
+  ptyProcess: PtyProcess | null
 }
 
 export interface ShellSessionList {
@@ -77,6 +76,35 @@ interface ManagerOptions {
   defaultCols?: number
   defaultRows?: number
 }
+
+interface PtyExitEvent {
+  exitCode?: number
+  signal?: number
+}
+
+interface PtyProcess {
+  onData(listener: (chunk: string) => void): void
+  onExit(listener: (event: PtyExitEvent) => void): void
+  write(data: string): void
+  resize(cols: number, rows: number): void
+  kill(): void
+}
+
+interface NodePtyModule {
+  spawn(
+    file: string,
+    args: string[],
+    options: {
+      name: string
+      cols: number
+      rows: number
+      cwd: string
+      env: NodeJS.ProcessEnv
+    },
+  ): PtyProcess
+}
+
+const ptyModule = nodePty as unknown as NodePtyModule
 
 const DEFAULT_MAX_EVENTS_PER_SESSION = 8_000
 const DEFAULT_COLS = 120
@@ -121,9 +149,9 @@ export class ShellSessionManager {
     const rows = clampInt(input.rows ?? this.defaultRows, 10, 240)
     const shell = resolveDefaultShell()
 
-    let ptyProcess: IPty
+    let ptyProcess: PtyProcess
     try {
-      ptyProcess = nodePty.spawn(shell, [], {
+      ptyProcess = ptyModule.spawn(shell, [], {
         name: 'xterm-256color',
         cols,
         rows,
@@ -161,12 +189,12 @@ export class ShellSessionManager {
       rows,
     })
 
-    ptyProcess.onData((chunk) => {
+    ptyProcess.onData((chunk: string) => {
       if (!chunk) return
       this.appendEvent(session, 'output', { text: chunk })
     })
 
-    ptyProcess.onExit((exit) => {
+    ptyProcess.onExit((exit: PtyExitEvent) => {
       session.status = 'closed'
       session.exitCode = typeof exit.exitCode === 'number' ? exit.exitCode : null
       session.exitSignal = typeof exit.signal === 'number' ? exit.signal : null

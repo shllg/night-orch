@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import type { z } from 'zod'
 import type { Config } from '../config/schema.js'
 import { githubDefinitions } from './definitions/github.js'
 import { loopDefinitions } from './definitions/loop.js'
