@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -37,12 +37,16 @@ export async function monitoringInitCommand(opts: MonitoringInitOpts): Promise<v
 
   mkdirSync(targetDir, { recursive: true })
 
-  // Copy docker-compose template
+  // Copy docker-compose template with volume paths adjusted for flat layout.
+  // The template uses ./monitoring/... paths (relative to repo root), but the
+  // extracted layout places everything as siblings of docker-compose.yaml.
   const composeTarget = resolve(targetDir, 'docker-compose.yaml')
   if (existsSync(composeTarget) && !opts.force) {
     console.log(`  skip  ${composeTarget} (already exists, use --force to overwrite)`)
   } else {
-    cpSync(composeTemplate, composeTarget)
+    let composeContent = readFileSync(composeTemplate, 'utf8')
+    composeContent = composeContent.replace(/\.\/monitoring\//g, './')
+    writeFileSync(composeTarget, composeContent)
     console.log(`  wrote ${composeTarget}`)
   }
 
