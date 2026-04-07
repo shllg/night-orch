@@ -990,6 +990,16 @@ describe('startWebServer', () => {
     await expect(agentCreate.json()).resolves.toMatchObject({
       error: 'Web operations are disabled by server policy.',
     })
+
+    const shellCreate = await fetch(`${baseUrl}/api/shell/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    expect(shellCreate.status).toBe(409)
+    await expect(shellCreate.json()).resolves.toMatchObject({
+      error: 'Web operations are disabled by server policy.',
+    })
   })
 
   it('requires application/json for mutating API requests', async () => {
@@ -1327,6 +1337,210 @@ describe('startWebServer', () => {
         status: 'closed',
       },
     })
+  })
+
+  it('creates shell sessions and streams PTY output over websocket', async () => {
+    server = await startWebServer(
+      deps,
+      {
+        host: '127.0.0.1',
+        port: 0,
+        frontendDistPath: frontendDir,
+        snapshotIntervalMs: 50,
+      },
+    )
+
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Unexpected address type')
+    }
+    baseUrl = `http://127.0.0.1:${address.port}`
+    const mutationToken = await getMutationToken(baseUrl)
+
+    const create = await fetch(`${baseUrl}/api/shell/sessions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+        [WEB_AUTH_TOKEN_HEADER]: mutationToken,
+      },
+      body: JSON.stringify({ cwd: '~' }),
+    })
+    expect(create.status).toBe(200)
+    const createPayload = await create.json() as {
+      session: { id: string; status: string; cwd: string }
+    }
+    const sessionId = createPayload.session.id
+    expect(createPayload.session.status).toBe('running')
+    expect(createPayload.session.cwd).toBeTruthy()
+
+    const wsOrigin = `http://127.0.0.1:${address.port}`
+    const ws = new WebSocket(
+      `ws://127.0.0.1:${address.port}/ws?token=${encodeURIComponent(mutationToken)}`,
+      { origin: wsOrigin },
+    )
+    await once(ws, 'open')
+    ws.send(JSON.stringify({ type: 'subscribe-shell-session-events', sessionId, since: 0 }))
+    ws.send(JSON.stringify({ type: 'shell-input', sessionId, data: "printf 'night-orch-shell-test\\n'\\n" }))
+
+    const shellEvents = await waitForWsMessage<{
+      type: string
+      payload: {
+        sessionId: string
+        events: Array<{ type: string; data?: { text?: unknown } }>
+      }
+    }>(ws, (payload) => {
+      if (!payload || typeof payload !== 'object') return null
+      const message = payload as { type?: unknown; payload?: unknown }
+      if (message.type !== 'shell-session-events' || !message.payload || typeof message.payload !== 'object') return null
+      const body = message.payload as {
+        sessionId?: unknown
+        events?: unknown
+      }
+      if (body.sessionId !== sessionId || !Array.isArray(body.events)) return null
+      const sawOutput = body.events.some((event) => {
+        if (!event || typeof event !== 'object') return false
+        if ((event as { type?: unknown }).type !== 'output') return false
+        const text = ((event as { data?: unknown }).data as { text?: unknown } | undefined)?.text
+        return typeof text === 'string' && text.includes('night-orch-shell-test')
+      })
+      if (!sawOutput) return null
+      return message as {
+        type: string
+        payload: {
+          sessionId: string
+          events: Array<{ type: string; data?: { text?: unknown } }>
+        }
+      }
+    }, 10_000)
+
+    expect(shellEvents.payload.sessionId).toBe(sessionId)
+    expect(shellEvents.payload.events.some((event) => {
+      const text = event.data?.text
+      return event.type === 'output' && typeof text === 'string' && text.includes('night-orch-shell-test')
+    })).toBe(true)
+
+    ws.close()
+
+    const close = await fetch(`${baseUrl}/api/shell/sessions/${encodeURIComponent(sessionId)}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+        [WEB_AUTH_TOKEN_HEADER]: mutationToken,
+      },
+    })
+    expect(close.status).toBe(200)
+    await expect(close.json()).resolves.toMatchObject({
+      session: {
+        id: sessionId,
+        status: 'closed',
+      },
+    })
+  })
+
+  it('requires auth token for shell read APIs and shell websocket commands', async () => {
+    server = await startWebServer(
+      deps,
+      {
+        host: '127.0.0.1',
+        port: 0,
+        frontendDistPath: frontendDir,
+        snapshotIntervalMs: 50,
+      },
+    )
+
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Unexpected address type')
+    }
+    baseUrl = `http://127.0.0.1:${address.port}`
+    const mutationToken = await getMutationToken(baseUrl)
+
+    const create = await fetch(`${baseUrl}/api/shell/sessions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+        [WEB_AUTH_TOKEN_HEADER]: mutationToken,
+      },
+      body: JSON.stringify({ cwd: '~' }),
+    })
+    expect(create.status).toBe(200)
+    const createPayload = await create.json() as {
+      session: { id: string }
+    }
+    const sessionId = createPayload.session.id
+
+    const unauthList = await fetch(`${baseUrl}/api/shell/sessions`)
+    expect(unauthList.status).toBe(401)
+    await expect(unauthList.json()).resolves.toMatchObject({
+      error: `Missing required header: ${WEB_AUTH_TOKEN_HEADER}`,
+    })
+
+    const authList = await fetch(`${baseUrl}/api/shell/sessions`, {
+      headers: {
+        [WEB_AUTH_TOKEN_HEADER]: mutationToken,
+      },
+    })
+    expect(authList.status).toBe(200)
+
+    const wsOrigin = `http://127.0.0.1:${address.port}`
+    const unauthWs = new WebSocket(`ws://127.0.0.1:${address.port}/ws`, { origin: wsOrigin })
+    await once(unauthWs, 'open')
+    unauthWs.send(JSON.stringify({ type: 'shell-input', sessionId, data: 'echo should-not-run\n' }))
+
+    const unauthError = await waitForWsMessage<{ type: string; error: string }>(unauthWs, (payload) => {
+      if (!payload || typeof payload !== 'object') return null
+      const message = payload as { type?: unknown; error?: unknown }
+      if (message.type !== 'error' || typeof message.error !== 'string') return null
+      if (!message.error.includes('Unauthorized websocket command: shell-input')) return null
+      return { type: message.type, error: message.error }
+    }, 5_000)
+    expect(unauthError.error).toContain('Unauthorized websocket command: shell-input')
+    unauthWs.close()
+
+    const authWs = new WebSocket(
+      `ws://127.0.0.1:${address.port}/ws?token=${encodeURIComponent(mutationToken)}`,
+      { origin: wsOrigin },
+    )
+    await once(authWs, 'open')
+    authWs.send(JSON.stringify({ type: 'subscribe-shell-session-events', sessionId, since: 0 }))
+    authWs.send(JSON.stringify({ type: 'shell-input', sessionId, data: "printf 'authorized-shell\\n'\\n" }))
+
+    const authShellEvents = await waitForWsMessage<{
+      type: string
+      payload: {
+        sessionId: string
+        events: Array<{ type: string; data?: { text?: unknown } }>
+      }
+    }>(authWs, (payload) => {
+      if (!payload || typeof payload !== 'object') return null
+      const message = payload as { type?: unknown; payload?: unknown }
+      if (message.type !== 'shell-session-events' || !message.payload || typeof message.payload !== 'object') return null
+      const body = message.payload as {
+        sessionId?: unknown
+        events?: unknown
+      }
+      if (body.sessionId !== sessionId || !Array.isArray(body.events)) return null
+      const sawOutput = body.events.some((event) => {
+        if (!event || typeof event !== 'object') return false
+        if ((event as { type?: unknown }).type !== 'output') return false
+        const text = ((event as { data?: unknown }).data as { text?: unknown } | undefined)?.text
+        return typeof text === 'string' && text.includes('authorized-shell')
+      })
+      if (!sawOutput) return null
+      return message as {
+        type: string
+        payload: {
+          sessionId: string
+          events: Array<{ type: string; data?: { text?: unknown } }>
+        }
+      }
+    }, 10_000)
+
+    expect(authShellEvents.payload.sessionId).toBe(sessionId)
+    authWs.close()
   })
 
   it('streams run events over websocket subscriptions', async () => {

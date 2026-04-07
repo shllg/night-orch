@@ -251,6 +251,45 @@ export interface InteractiveAgentSessionEventsPayload {
   lastEventId: number
 }
 
+export type ShellSessionStatus = 'running' | 'closed'
+export type ShellSessionEventType = 'status' | 'output' | 'exit'
+
+export interface ShellSessionSummary {
+  id: string
+  status: ShellSessionStatus
+  shell: string
+  cwd: string
+  cols: number
+  rows: number
+  createdAt: string
+  updatedAt: string
+  exitCode: number | null
+  exitSignal: number | null
+}
+
+export type ShellSessionDetail = ShellSessionSummary
+
+export interface ShellSessionEvent {
+  id: number
+  sessionId: string
+  timestamp: string
+  type: ShellSessionEventType
+  data: Record<string, unknown>
+}
+
+export interface ShellSessionsSnapshot {
+  generatedAt: string
+  homePath: string
+  sessions: ShellSessionSummary[]
+}
+
+export interface ShellSessionEventsPayload {
+  sessionId: string
+  status: ShellSessionStatus
+  events: ShellSessionEvent[]
+  lastEventId: number
+}
+
 export interface WsEnvelope {
   type: string
   payload?: unknown
