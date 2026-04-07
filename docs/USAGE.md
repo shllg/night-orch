@@ -444,6 +444,17 @@ Send a test notification through all configured channels. Verifies webhook/Disco
 
 Start the MCP server on stdio transport (for Claude Code integration). Exposes 18 tools and 3 resources for querying and controlling night-orch.
 
+### `night-orch monitoring`
+
+Manage the external Prometheus + Grafana monitoring stack. Night-orch bundles Docker Compose configs, Prometheus scrape config, and a pre-built Grafana dashboard.
+
+- `night-orch monitoring init [--dir <path>] [--force]` — extract bundled monitoring configs to `~/.config/night-orch/monitoring/` (or a custom directory). Use `--force` to overwrite existing files.
+- `night-orch monitoring up [--dir <path>]` — start the monitoring stack (`docker compose up -d`)
+- `night-orch monitoring down [--dir <path>]` — stop the monitoring stack (`docker compose down`)
+- `night-orch monitoring logs [--dir <path>]` — tail monitoring stack logs
+
+After running `monitoring init`, set `GRAFANA_ADMIN_PASSWORD` in your environment and run `monitoring up`. Grafana is available at `http://localhost:3001` by default.
+
 ---
 
 ## Cost Management

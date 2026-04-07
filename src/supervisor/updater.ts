@@ -1,7 +1,11 @@
+import { existsSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { execa } from 'execa'
 import { logger } from '../utils/logger.js'
 import { nowUtcIso } from '../utils/time.js'
 import type { UpdateStatusTracker } from './status.js'
+
+export type InstallMode = 'git' | 'npm'
 
 export interface UpdateCheckpoint {
   previousCommit: string
@@ -14,7 +18,26 @@ export interface UpdateResult extends UpdateCheckpoint {
   error?: string
 }
 
+/** Check whether the package root is a git checkout or an npm global install. */
+export function detectInstallMode(projectRoot: string): InstallMode {
+  return existsSync(resolve(projectRoot, '.git')) ? 'git' : 'npm'
+}
+
 export async function runUpdate(
+  projectRoot: string,
+  status: UpdateStatusTracker,
+): Promise<UpdateResult> {
+  const mode = detectInstallMode(projectRoot)
+  return mode === 'git'
+    ? runGitUpdate(projectRoot, status)
+    : runNpmUpdate(projectRoot, status)
+}
+
+// ---------------------------------------------------------------------------
+// Git-based update (existing behaviour for development installs)
+// ---------------------------------------------------------------------------
+
+async function runGitUpdate(
   projectRoot: string,
   status: UpdateStatusTracker,
 ): Promise<UpdateResult> {
@@ -51,7 +74,7 @@ export async function runUpdate(
   // Build
   status.transition('building', { targetCommit: newCommit })
   try {
-    await runBuild(projectRoot)
+    await runGitBuild(projectRoot)
   } catch (err) {
     const message = formatCommandFailure('Build failed', err)
     logger.error({ err, targetCommit: newCommit }, message)
@@ -74,6 +97,119 @@ export async function runUpdate(
   return { success: true, previousCommit, previousRef, newCommit }
 }
 
+// ---------------------------------------------------------------------------
+// npm-based update (for `npm install -g night-orch`)
+// ---------------------------------------------------------------------------
+
+function readLocalVersion(projectRoot: string): string {
+  try {
+    const raw = readFileSync(resolve(projectRoot, 'package.json'), 'utf8')
+    const parsed = JSON.parse(raw) as { version?: unknown }
+    return typeof parsed.version === 'string' ? parsed.version.trim() : '0.0.0'
+  } catch {
+    return '0.0.0'
+  }
+}
+
+async function runNpmUpdate(
+  projectRoot: string,
+  status: UpdateStatusTracker,
+): Promise<UpdateResult> {
+  const previousVersion = readLocalVersion(projectRoot)
+
+  // Check registry for latest version
+  status.transition('pulling', {
+    startedAt: nowUtcIso(),
+    completedAt: undefined,
+    error: undefined,
+    previousCommit: previousVersion,
+    targetCommit: undefined,
+  })
+
+  let latestVersion: string
+  try {
+    const result = await execa('npm', ['view', 'night-orch', 'version'])
+    latestVersion = result.stdout.trim()
+  } catch (err) {
+    const message = formatCommandFailure('npm view failed', err)
+    logger.error({ err }, message)
+    status.transition('failed', { error: message, completedAt: nowUtcIso() })
+    return {
+      success: false,
+      previousCommit: previousVersion,
+      previousRef: null,
+      newCommit: previousVersion,
+      error: message,
+    }
+  }
+
+  if (latestVersion === previousVersion) {
+    logger.info({ version: previousVersion }, 'Already at latest version')
+    status.transition('idle', { completedAt: nowUtcIso() })
+    return {
+      success: true,
+      previousCommit: previousVersion,
+      previousRef: null,
+      newCommit: previousVersion,
+    }
+  }
+
+  // Install the new version
+  status.transition('building', { targetCommit: latestVersion })
+  try {
+    await execa('npm', ['install', '-g', `night-orch@${latestVersion}`])
+  } catch (err) {
+    const message = formatCommandFailure('npm install -g failed', err)
+    logger.error({ err, targetVersion: latestVersion }, message)
+
+    const rollback = await rollbackNpm(status, previousVersion, message)
+    const finalError = rollback.success
+      ? message
+      : `${message}; rollback failed: ${rollback.error ?? 'unknown rollback error'}`
+
+    status.transition('failed', { error: finalError, completedAt: nowUtcIso() })
+    return {
+      success: false,
+      previousCommit: previousVersion,
+      previousRef: null,
+      newCommit: previousVersion,
+      error: finalError,
+    }
+  }
+
+  return {
+    success: true,
+    previousCommit: previousVersion,
+    previousRef: null,
+    newCommit: latestVersion,
+  }
+}
+
+async function rollbackNpm(
+  status: UpdateStatusTracker,
+  previousVersion: string,
+  reason: string,
+): Promise<RollbackResult> {
+  status.transition('rolling-back', {
+    error: reason,
+    targetCommit: previousVersion,
+  })
+
+  try {
+    await execa('npm', ['install', '-g', `night-orch@${previousVersion}`])
+    logger.info({ previousVersion }, 'Rolled back to previous npm version')
+    return { success: true }
+  } catch (err) {
+    const message = formatCommandFailure('npm rollback failed', err)
+    logger.error({ err }, message)
+    return { success: false, error: message }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Git rollback + build (development installs)
+// ---------------------------------------------------------------------------
+
 interface RollbackResult {
   success: boolean
   error?: string
@@ -87,6 +223,11 @@ export async function rollbackToCheckpoint(
   checkpoint: UpdateCheckpoint,
   reason: string,
 ): Promise<RollbackResult> {
+  const mode = detectInstallMode(projectRoot)
+  if (mode === 'npm') {
+    return rollbackNpm(status, checkpoint.previousCommit, reason)
+  }
+
   const git = (args: string[]) => execa('git', args, { cwd: projectRoot })
   status.transition('rolling-back', {
     error: reason,
@@ -99,7 +240,7 @@ export async function rollbackToCheckpoint(
     } else {
       await git(['checkout', checkpoint.previousCommit])
     }
-    await runBuild(projectRoot)
+    await runGitBuild(projectRoot)
     logger.info(
       {
         previousCommit: checkpoint.previousCommit,
@@ -115,7 +256,7 @@ export async function rollbackToCheckpoint(
   }
 }
 
-async function runBuild(projectRoot: string): Promise<void> {
+async function runGitBuild(projectRoot: string): Promise<void> {
   await execa('pnpm', ['install', '--frozen-lockfile'], { cwd: projectRoot })
   await execa('pnpm', ['build'], { cwd: projectRoot })
   await execa('pnpm', ['install-global'], { cwd: projectRoot })

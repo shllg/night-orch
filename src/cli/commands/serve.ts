@@ -1,6 +1,7 @@
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { mkdirSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { Supervisor } from '../../supervisor/index.js'
 import { logger } from '../../utils/logger.js'
 
@@ -21,7 +22,9 @@ export async function serveCommand(
   commandOpts: ServeCommandOpts,
   globalOpts?: GlobalOpts,
 ): Promise<void> {
-  const projectRoot = process.cwd()
+  // Resolve from the compiled module location (dist/cli/commands/serve.js)
+  // up to the package root. Works for both git checkout and npm global install.
+  const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 
   // docker-compose.yaml is optional — only required when the monitoring
   // stack (Prometheus + Grafana) is explicitly requested via mise run dev.

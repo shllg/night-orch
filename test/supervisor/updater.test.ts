@@ -1,10 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { execa } from 'execa'
+import { existsSync } from 'node:fs'
 import { rollbackToCheckpoint, runUpdate } from '../../src/supervisor/updater.js'
 
 vi.mock('execa', () => ({
   execa: vi.fn(),
 }))
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  return {
+    ...actual,
+    existsSync: vi.fn(),
+    readFileSync: vi.fn(),
+  }
+})
 
 vi.mock('../../src/utils/logger.js', () => ({
   logger: {
@@ -16,6 +26,7 @@ vi.mock('../../src/utils/logger.js', () => ({
 }))
 
 const mockExeca = vi.mocked(execa)
+const mockExistsSync = vi.mocked(existsSync)
 
 function createStatusTrackerMock() {
   return {
@@ -23,9 +34,11 @@ function createStatusTrackerMock() {
   }
 }
 
-describe('runUpdate', () => {
+describe('runUpdate (git mode)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // Simulate git checkout: .git directory exists
+    mockExistsSync.mockReturnValue(true)
   })
 
   it('returns success when pull + build complete', async () => {
@@ -80,9 +93,53 @@ describe('runUpdate', () => {
   })
 })
 
-describe('rollbackToCheckpoint', () => {
+describe('runUpdate (npm mode)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // Simulate npm install: no .git directory
+    mockExistsSync.mockReturnValue(false)
+  })
+
+  it('returns success when newer version is available', async () => {
+    const { readFileSync } = await import('node:fs')
+    const mockReadFileSync = vi.mocked(readFileSync)
+    mockReadFileSync.mockReturnValueOnce(JSON.stringify({ version: '0.2.0' }))
+
+    const status = createStatusTrackerMock()
+    mockExeca
+      .mockResolvedValueOnce({ stdout: '0.3.0\n', stderr: '', exitCode: 0 } as never) // npm view
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 } as never) // npm install -g
+
+    const result = await runUpdate('/pkg', status as never)
+
+    expect(result.success).toBe(true)
+    expect(result.previousCommit).toBe('0.2.0')
+    expect(result.newCommit).toBe('0.3.0')
+    expect(mockExeca).toHaveBeenCalledWith('npm', ['install', '-g', 'night-orch@0.3.0'])
+  })
+
+  it('returns success immediately when already at latest', async () => {
+    const { readFileSync } = await import('node:fs')
+    const mockReadFileSync = vi.mocked(readFileSync)
+    mockReadFileSync.mockReturnValueOnce(JSON.stringify({ version: '0.2.0' }))
+
+    const status = createStatusTrackerMock()
+    mockExeca
+      .mockResolvedValueOnce({ stdout: '0.2.0\n', stderr: '', exitCode: 0 } as never) // npm view
+
+    const result = await runUpdate('/pkg', status as never)
+
+    expect(result.success).toBe(true)
+    expect(result.previousCommit).toBe('0.2.0')
+    expect(result.newCommit).toBe('0.2.0')
+    expect(status.transition).toHaveBeenCalledWith('idle', expect.objectContaining({ completedAt: expect.any(String) }))
+  })
+})
+
+describe('rollbackToCheckpoint (git mode)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockExistsSync.mockReturnValue(true)
   })
 
   it('checks out commit directly when previous ref is unknown', async () => {
@@ -106,5 +163,28 @@ describe('rollbackToCheckpoint', () => {
       ['checkout', 'abc123'],
       expect.objectContaining({ cwd: '/repo' }),
     )
+  })
+})
+
+describe('rollbackToCheckpoint (npm mode)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockExistsSync.mockReturnValue(false)
+  })
+
+  it('runs npm install -g with previous version', async () => {
+    const status = createStatusTrackerMock()
+    mockExeca
+      .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 } as never) // npm install -g
+
+    const result = await rollbackToCheckpoint(
+      '/pkg',
+      status as never,
+      { previousCommit: '0.2.0', previousRef: null },
+      'health checks failed',
+    )
+
+    expect(result.success).toBe(true)
+    expect(mockExeca).toHaveBeenCalledWith('npm', ['install', '-g', 'night-orch@0.2.0'])
   })
 })

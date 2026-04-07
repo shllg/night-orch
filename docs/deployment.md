@@ -6,10 +6,9 @@ This guide covers deploying night-orch on a Debian server behind Tailscale.
 
 - Debian 13+ server accessible only via Tailscale
 - Root access for one-time system setup (`useradd`, systemd, packages)
-- `mise` installed (for Node.js management)
+- Node.js 24+ installed (via `mise`, `nvm`, or system package)
 - Docker installed (`apt install docker.io docker-cli docker-compose`)
 - Caddy installed (`apt install caddy`)
-- Git access to the night-orch repository
 
 ## Initial Setup
 
@@ -29,16 +28,10 @@ If you already switched users but `echo $HOME` is not `/home/orch`, re-enter wit
 sudo -iu orch
 ```
 
-### 2. Clone and Build
+### 2. Install
 
 ```bash
-mkdir -p ~/apps
-git clone https://github.com/shllg/night-orch.git ~/apps/night-orch
-cd ~/apps/night-orch
-mise install              # installs Node.js per mise.toml
-mise use --global node@24
-mise use --global pnpm@latest
-pnpm install && pnpm build && pnpm install-global
+npm install -g night-orch
 ```
 
 Verify: `night-orch --help`
@@ -65,34 +58,42 @@ login shell. Re-enter with `sudo -iu orch` and retry.
 
 ### 4. Configuration
 
-Copy and edit the example config:
+Run the interactive setup wizard:
+
+```bash
+night-orch init
+```
+
+Or configure manually:
 
 ```bash
 mkdir -p ~/.night-orch
-cp ~/apps/night-orch/examples/config.example.yaml ~/.night-orch/config.yaml
-# Edit with your repos, tokens, and settings
+night-orch init  # copies example config and walks through setup
+# Or manually create ~/.night-orch/config.yaml
 ```
 
 Create the environment file with secrets:
 
 ```bash
-cat > ~/apps/night-orch/.env << 'EOF'
+cat > ~/.night-orch/.env << 'EOF'
 GITHUB_TOKEN=ghp_...
+GRAFANA_ADMIN_PASSWORD=changeme
 EOF
-chmod 0600 ~/apps/night-orch/.env
+chmod 0600 ~/.night-orch/.env
 ```
 
-### 5. Docker Compose (Monitoring Stack)
+### 5. Monitoring Stack (Prometheus + Grafana)
 
-The monitoring stack (Prometheus + Grafana) ships as `docker-compose.example.yaml`.
-Copy and customize for your environment:
+Night-orch bundles Prometheus and Grafana configs. Extract them:
 
 ```bash
-cd ~/apps/night-orch
-cp docker-compose.example.yaml docker-compose.yaml
+night-orch monitoring init
 ```
 
-For production, bind ports to localhost only:
+This creates `~/.config/night-orch/monitoring/` with a Docker Compose file,
+Prometheus scrape config, and Grafana dashboards.
+
+For production, edit the compose file to bind ports to localhost only:
 
 ```yaml
 services:
@@ -107,8 +108,11 @@ services:
 If using `network_mode: host` for Prometheus (to scrape host-local metrics without
 firewall issues), set `--web.listen-address=127.0.0.1:9091` in the command.
 
-`docker-compose.yaml` is gitignored. `night-orch run` and `night-orch serve`
-will refuse to start if the file is missing.
+Start the monitoring stack:
+
+```bash
+night-orch monitoring up
+```
 
 ### 6. AppArmor Fix for Docker
 
@@ -139,7 +143,7 @@ This spawns:
 The supervisor handles:
 - Auto-respawn on child crash (with exponential backoff)
 - Graceful drain and restart on self-update
-- Rollback if a build fails or if post-update health checks fail
+- Rollback if an update fails or if post-update health checks fail
 
 ### Systemd Unit
 
@@ -156,21 +160,16 @@ Requires=wait-for-tailscale.service
 Type=simple
 User=orch
 Group=orch
-WorkingDirectory=/home/orch/apps/night-orch
+WorkingDirectory=/home/orch
 Environment=HOME=/home/orch
 Environment=XDG_CONFIG_HOME=/home/orch/.config
 Environment=XDG_DATA_HOME=/home/orch/.local/share
 Environment=XDG_CACHE_HOME=/home/orch/.cache
 Environment=XDG_STATE_HOME=/home/orch/.local/state
-Environment=MISE_CONFIG_DIR=/home/orch/.config/mise
-Environment=MISE_DATA_DIR=/home/orch/.local/share/mise
-Environment=MISE_CACHE_DIR=/home/orch/.cache/mise
-Environment=MISE_STATE_DIR=/home/orch/.local/state/mise
-Environment=PNPM_HOME=/home/orch/.local/share/pnpm
-Environment=PATH=/home/orch/.local/bin:/home/orch/.local/share/pnpm:/home/orch/.local/share/mise/shims:/home/orch/.local/share/mise/installs/node/24.14.1/bin:/usr/local/bin:/usr/bin:/bin
-ExecStartPre=/usr/bin/docker compose -f /home/orch/apps/night-orch/docker-compose.yaml up -d
-ExecStart=/home/orch/.local/share/pnpm/night-orch serve --allowed-host night-orch.hllg.eu --config /home/orch/.night-orch/config.yaml
-EnvironmentFile=-/home/orch/apps/night-orch/.env
+Environment=PATH=/home/orch/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStartPre=/home/orch/.local/bin/night-orch monitoring up
+ExecStart=/home/orch/.local/bin/night-orch serve --allowed-host night-orch.hllg.eu --config /home/orch/.night-orch/config.yaml
+EnvironmentFile=-/home/orch/.night-orch/.env
 Restart=on-failure
 RestartSec=5
 MemoryMax=6G
@@ -255,7 +254,7 @@ systemctl daemon-reload
 
 ## Self-Update
 
-Night-orch supports one-button self-update that pulls the latest code, rebuilds,
+Night-orch supports one-button self-update that installs the latest version
 and restarts all services without downtime.
 
 ### From the Web UI
@@ -278,17 +277,30 @@ Use the `night-orch-update` tool.
 
 ### Update Flow
 
+The update mechanism auto-detects how night-orch was installed:
+
+**npm global install** (default):
 1. Supervisor receives update trigger
 2. Sends SIGTERM to both children (waits up to 5 min for active runs to finish)
+3. Checks npm registry for latest version
+4. `npm install -g night-orch@latest`
+5. Respawns both children with new code
+6. Runs health checks (see below)
+7. On failure: rolls back via `npm install -g night-orch@<previous-version>`
+
+**Git checkout** (development):
+1. Supervisor receives update trigger
+2. Sends SIGTERM to both children
 3. `git pull --ff-only`
 4. `pnpm install && pnpm build && pnpm install-global`
 5. Respawns both children with new code
-6. Runs health checks:
-   - run server (`/health` on MCP HTTP endpoint when MCP is enabled, otherwise process liveness stabilization)
-   - web API (`/api/health`)
-   - web frontend (`/`)
-7. On health-check failure: captures diagnostics, rolls back to the previous commit, rebuilds, and respawns known-good code
-8. On build failure: rolls back to previous commit, rebuilds, respawns old code
+6. Runs health checks (see below)
+7. On failure: rolls back to previous commit, rebuilds, respawns
+
+**Health checks** (both modes):
+- run server (`/health` on MCP HTTP endpoint when MCP is enabled, otherwise process liveness stabilization)
+- web API (`/api/health`)
+- web frontend (`/`)
 
 ### Update Status
 

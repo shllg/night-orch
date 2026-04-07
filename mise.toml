@@ -2,59 +2,48 @@
 node = "24"
 
 [tasks.dev]
-dir = "{{config_root}}"
 run = """
-trap 'docker compose down; kill 0' EXIT
-docker compose up -d
+trap 'night-orch monitoring down; kill 0' EXIT
+night-orch monitoring up
 echo "Grafana:    http://localhost:3001 (admin/nightorch)"
 echo "Prometheus: http://localhost:9091"
 echo "MCP SSE:    http://localhost:3100/sse"
-set -a && . ./.env && set +a
-pnpm exec tsx src/cli/index.ts run --config ${NIGHT_ORCH_CONFIG:-config.yaml}
+night-orch run --config ${NIGHT_ORCH_CONFIG:-config.yaml}
 """
 description = "Run night-orch + monitoring stack (Prometheus + Grafana)"
 
 [tasks.dev-solo]
-dir = "{{config_root}}"
-run = "set -a && . ./.env && set +a && pnpm exec tsx src/cli/index.ts run --config ${NIGHT_ORCH_CONFIG:-config.yaml}"
+run = "night-orch run --config ${NIGHT_ORCH_CONFIG:-config.yaml}"
 description = "Run night-orch without monitoring stack"
 
 [tasks.run-once]
-dir = "{{config_root}}"
-run = "set -a && . ./.env && set +a && pnpm exec tsx src/cli/index.ts run-once --config ${NIGHT_ORCH_CONFIG:-config.yaml}"
+run = "night-orch run-once --config ${NIGHT_ORCH_CONFIG:-config.yaml}"
 description = "Single poll cycle"
 
 [tasks.doctor]
-dir = "{{config_root}}"
-run = "set -a && . ./.env && set +a && pnpm exec tsx src/cli/index.ts doctor --config ${NIGHT_ORCH_CONFIG:-config.yaml}"
+run = "night-orch doctor --config ${NIGHT_ORCH_CONFIG:-config.yaml}"
 description = "Run doctor checks"
 
 [tasks.labels-init]
-dir = "{{config_root}}"
-run = "set -a && . ./.env && set +a && pnpm exec tsx src/cli/index.ts labels-init --config ${NIGHT_ORCH_CONFIG:-config.yaml}"
+run = "night-orch labels-init --config ${NIGHT_ORCH_CONFIG:-config.yaml}"
 description = "Create/update orchestration labels in GitHub"
 
 [tasks.poll]
-dir = "{{config_root}}"
-run = "set -a && . ./.env && set +a && pnpm exec tsx src/cli/index.ts run-once --config ${NIGHT_ORCH_CONFIG:-config.yaml}"
+run = "night-orch run-once --config ${NIGHT_ORCH_CONFIG:-config.yaml}"
 description = "Manually trigger a single poll cycle"
 
 [tasks.status]
-dir = "{{config_root}}"
-run = "set -a && . ./.env && set +a && pnpm exec tsx src/cli/index.ts status --config ${NIGHT_ORCH_CONFIG:-config.yaml}"
+run = "night-orch status --config ${NIGHT_ORCH_CONFIG:-config.yaml}"
 description = "Show active runs, recent history, costs"
 
 [tasks.monitoring-up]
-dir = "{{config_root}}"
-run = "docker compose up -d"
+run = "night-orch monitoring up"
 description = "Start monitoring stack"
 
 [tasks.monitoring-down]
-dir = "{{config_root}}"
-run = "docker compose down"
+run = "night-orch monitoring down"
 description = "Stop monitoring stack"
 
 [tasks.monitoring-logs]
-dir = "{{config_root}}"
-run = "docker compose logs -f"
+run = "night-orch monitoring logs"
 description = "Tail monitoring stack logs"

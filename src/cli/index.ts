@@ -48,6 +48,12 @@ import {
   settingsSetCommand,
   settingsUnsetCommand,
 } from './commands/settings.js'
+import {
+  monitoringInitCommand,
+  monitoringUpCommand,
+  monitoringDownCommand,
+  monitoringLogsCommand,
+} from './commands/monitoring.js'
 
 const program = new Command()
 
@@ -272,5 +278,34 @@ settingsCommand
     const globalOpts = resolveRootGlobalOpts(cmd)
     return settingsUnsetCommand(key, globalOpts)
   })
+
+const monitoringCommand = program
+  .command('monitoring')
+  .description('Manage the Prometheus + Grafana monitoring stack')
+
+monitoringCommand
+  .command('init')
+  .description('Extract bundled monitoring configs (docker-compose, Prometheus, Grafana)')
+  .option('--dir <path>', 'Target directory', undefined)
+  .option('--force', 'Overwrite existing files')
+  .action((opts: { dir?: string; force?: boolean }) => monitoringInitCommand(opts))
+
+monitoringCommand
+  .command('up')
+  .description('Start the monitoring stack (docker compose up -d)')
+  .option('--dir <path>', 'Monitoring directory', undefined)
+  .action((opts: { dir?: string }) => monitoringUpCommand(opts))
+
+monitoringCommand
+  .command('down')
+  .description('Stop the monitoring stack (docker compose down)')
+  .option('--dir <path>', 'Monitoring directory', undefined)
+  .action((opts: { dir?: string }) => monitoringDownCommand(opts))
+
+monitoringCommand
+  .command('logs')
+  .description('Tail monitoring stack logs')
+  .option('--dir <path>', 'Monitoring directory', undefined)
+  .action((opts: { dir?: string }) => monitoringLogsCommand(opts))
 
 program.parse()
