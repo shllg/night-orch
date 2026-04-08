@@ -582,15 +582,13 @@ export function describeBudgetBlock(
 export function costLimitRecoveryHint(limit: 'daily' | 'per-run'): string {
   if (limit === 'daily') {
     return (
-      'Run `night-orch daily-cost-override <amount>` to raise today\'s cap (auto-expires at 00:00 UTC), ' +
-      'grant this specific run a budget override via `night-orch cost-override <repo> <issue> <amount>`, ' +
-      'permanently raise `security.maxDailyCostUsd` via `night-orch settings set`, ' +
+      'Raise today\'s cap via the web dashboard or Settings (auto-expires at 00:00 UTC), ' +
+      'grant this run a budget override, ' +
       'or wait until 00:00 UTC for the daily counter to reset.'
     )
   }
   return (
-    'Raise `security.maxCostPerRunUsd` in Settings (TUI/web/CLI `night-orch settings set`) ' +
-    'or grant this run a budget override to continue.'
+    'Raise `security.maxCostPerRunUsd` via Settings or grant this run a budget override to continue.'
   )
 }
 

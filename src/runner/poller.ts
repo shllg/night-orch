@@ -395,7 +395,7 @@ export async function pollOnce(
                       botUser,
                       body: formatStatusComment({
                         blockReason: 'Rebase failed due to merge conflicts while replaying the branch onto the latest base.',
-                        nextStep: 'Run /orch retry to reset the branch to base and re-implement on top of latest main.',
+                        nextStep: 'Use /orch retry to reset the branch and re-implement, or /orch continue to auto-merge and fix.',
                       }),
                       warnMessage: 'Failed to post rebase merge-conflict status comment',
                     })
@@ -740,7 +740,7 @@ export async function pollOnce(
                         error: `Failed after ${attemptCount} attempts. Last error: ${errorMessage}`,
                         retryCount: attemptCount,
                         maxRetries,
-                        nextStep: 'Manual action required: inspect the failure, then run /orch retry or /orch continue.',
+                        nextStep: 'Inspect the failure, then use /orch retry or /orch continue.',
                         warnMessage: 'Failed to post retry-exhausted status comment',
                       })
                       const sanitizedErrorForSummary = sanitizeErrorForComment(errorMessage)

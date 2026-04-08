@@ -134,7 +134,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
           botUser,
           body: formatStatusComment({
             blockReason: 'Publish failed due to merge conflicts while pushing branch updates.',
-            nextStep: 'Run /orch retry to reset the branch to base and re-implement on top of latest main.',
+            nextStep: 'Use /orch retry to reset the branch and re-implement, or /orch continue to auto-merge and fix.',
           }),
           warnMessage: 'Failed to post publish merge-conflict status comment',
         })
@@ -192,7 +192,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
           error: `Failed after ${attemptCount} attempts. Last error: ${errorMessage}`,
           retryCount: attemptCount,
           maxRetries: maxAutoRetries,
-          nextStep: 'Manual action required: inspect the failure, then run /orch retry or /orch continue.',
+          nextStep: 'Inspect the failure, then use /orch retry or /orch continue.',
           warnMessage: 'Failed to post publish retry-exhausted status comment',
         })
         const sanitizedErrorForSummary = sanitizeErrorForComment(errorMessage)
@@ -313,7 +313,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
       error: `Failed after ${attemptCount} attempts. Last error: ${unexpectedError}`,
       retryCount: attemptCount,
       maxRetries: maxAutoRetries,
-      nextStep: 'Manual action required: inspect the failure, then run /orch retry or /orch continue.',
+      nextStep: 'Inspect the failure, then use /orch retry or /orch continue.',
       warnMessage: 'Failed to post unexpected-state retry-exhausted status comment',
     })
   }

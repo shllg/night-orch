@@ -125,23 +125,23 @@ export function buildBlockReason(ctx: RunContext): string {
 export function blockReasonSummary(reason: BlockReason, ctx: RunContext): string {
   switch (reason) {
     case 'cost_limit':
-      return `Cost limit exceeded for this run (estimated run cost: $${ctx.estimatedCostUsd.toFixed(4)})`
+      return `Cost limit exceeded (estimated: $${ctx.estimatedCostUsd.toFixed(4)}). Grant a budget override or raise the limit in Settings to continue.`
     case 'iteration_limit':
-      return `Maximum review iterations reached (${ctx.iteration}/${ctx.adjustedLimits.maxReviewIterations})`
+      return `Maximum review iterations reached (${ctx.iteration}/${ctx.adjustedLimits.maxReviewIterations}). Use /orch continue to add more iterations with PR context, or raise the limit in Settings.`
     case 'agent_pass_limit':
-      return `Maximum total agent passes reached (${ctx.totalAgentPasses}/${ctx.adjustedLimits.maxTotalAgentPasses})`
+      return `Maximum total agent passes reached (${ctx.totalAgentPasses}/${ctx.adjustedLimits.maxTotalAgentPasses}). Use /orch continue to resume, or raise the limit in Settings.`
     case 'reviewer_blocked':
-      return 'Reviewer marked this run as blocked'
+      return 'Reviewer marked this run as blocked. Address the review findings, then use /orch continue.'
     case 'ambiguous_review':
-      return 'Review output was not parseable and blockOnAmbiguousReview is enabled'
+      return 'Review output was not parseable. Use /orch retry to re-run, or disable blockOnAmbiguousReview in Settings.'
     case 'verify_config':
-      return 'Verification is required but verify commands or results are unavailable'
+      return 'Verification is required but verify commands or results are unavailable. Check repo verify config.'
     case 'merge_conflict':
-      return 'Merge conflict encountered while applying updates'
+      return 'Merge conflict encountered. Use /orch continue (auto-merges from base) or /orch retry to start fresh.'
     case 'auth_failure':
-      return 'Worker CLI authentication expired — re-authenticate and retry'
+      return 'Worker CLI authentication expired. Re-authenticate the worker CLI, then use /orch retry.'
     default:
-      return `Blocked in phase ${ctx.currentPhase}`
+      return `Blocked in phase ${ctx.currentPhase}. Use /orch retry to re-run or /orch continue to resume.`
   }
 }
 

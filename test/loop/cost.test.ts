@@ -206,13 +206,15 @@ describe('CostTracker', () => {
     expect(msg).toBe('Per-run cost limit exceeded: $8.12 >= $8.00')
   })
 
-  it('costLimitRecoveryHint mentions the matching setting key', () => {
-    expect(costLimitRecoveryHint('daily')).toContain('security.maxDailyCostUsd')
-    expect(costLimitRecoveryHint('per-run')).toContain('security.maxCostPerRunUsd')
+  it('costLimitRecoveryHint mentions actionable recovery options', () => {
+    expect(costLimitRecoveryHint('daily')).toContain('Settings')
+    expect(costLimitRecoveryHint('per-run')).toContain('Settings')
+    expect(costLimitRecoveryHint('per-run')).toContain('budget override')
   })
 
-  it('costLimitRecoveryHint for daily mentions the daily-cost-override command', () => {
-    expect(costLimitRecoveryHint('daily')).toContain('daily-cost-override')
+  it('costLimitRecoveryHint for daily mentions dashboard and UTC reset', () => {
+    expect(costLimitRecoveryHint('daily')).toContain('dashboard')
+    expect(costLimitRecoveryHint('daily')).toContain('00:00 UTC')
   })
 
   describe('subscription cost model', () => {

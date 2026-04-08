@@ -773,7 +773,7 @@ describe('pollOnce', () => {
     )
     expect(statusComment).toBeDefined()
     expect(statusComment?.[2]).toContain('**Status:** Error')
-    expect(statusComment?.[2]).toContain('Manual action required')
+    expect(statusComment?.[2]).toContain('Inspect the failure')
   })
 
   it('sanitizes error content before posting status comments', async () => {
@@ -1000,7 +1000,7 @@ describe('pollOnce', () => {
       (call) => typeof call[2] === 'string' && call[2].includes('Rebase failed due to merge conflicts'),
     )
     expect(statusComment).toBeDefined()
-    expect(statusComment?.[2]).toContain('Run /orch retry')
+    expect(statusComment?.[2]).toContain('Use /orch retry')
 
     const run = db
       .prepare('SELECT status, block_reason FROM runs WHERE id = ?')
