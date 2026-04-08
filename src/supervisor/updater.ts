@@ -48,6 +48,7 @@ async function runGitUpdate(
 
   // Pull
   status.transition('pulling', {
+    installMethod: 'git',
     startedAt: nowUtcIso(),
     completedAt: undefined,
     error: undefined,
@@ -119,6 +120,7 @@ async function runNpmUpdate(
 
   // Check registry for latest version
   status.transition('pulling', {
+    installMethod: 'npm',
     startedAt: nowUtcIso(),
     completedAt: undefined,
     error: undefined,

@@ -11,6 +11,7 @@ interface OperationsPanelProps {
   operationsEnabled: boolean
   activeOperation: string | null
   updateStatus: UpdateStatus | null
+  installMethod?: 'git' | 'npm' | 'unknown'
   repos: string[]
   labelsInitForm: LabelsInitFormState
   onLabelsInitFormChange: (patch: Partial<LabelsInitFormState>) => void
@@ -25,6 +26,7 @@ export function OperationsPanel({
   operationsEnabled,
   activeOperation,
   updateStatus,
+  installMethod = 'unknown',
   repos,
   labelsInitForm,
   onLabelsInitFormChange,
@@ -37,6 +39,13 @@ export function OperationsPanel({
   const updateRunning =
     activeOperation === 'update' ||
     (updateStatus != null && updateStatus.state !== 'idle' && updateStatus.state !== 'failed')
+
+  const updateButtonLabel = ((): string => {
+    if (updateStatus && updateStatus.state !== 'idle' && updateStatus.state !== 'failed') {
+      return `Updating (${updateStatus.state})...`
+    }
+    return installMethod === 'npm' ? 'Update Package' : 'Pull & Restart'
+  })()
 
   return (
     <div className="card border border-base-300/60 bg-base-200/60 shadow-panel backdrop-blur">
@@ -85,11 +94,7 @@ export function OperationsPanel({
             <ActionButton
               busy={updateRunning}
               onClick={onUpdate}
-              label={
-                updateStatus && updateStatus.state !== 'idle' && updateStatus.state !== 'failed'
-                  ? `Updating (${updateStatus.state})...`
-                  : 'Pull & Restart'
-              }
+              label={updateButtonLabel}
             />
             {updateStatus && updateStatus.state === 'failed' && (
               <div className="text-xs text-error">{updateStatus.error}</div>

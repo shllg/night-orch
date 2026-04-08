@@ -354,6 +354,10 @@ export type UpdateState =
 
 export interface UpdateStatus {
   state: UpdateState
+  installMethod?: 'git' | 'npm'
+  startedAt?: string
+  previousCommit?: string
+  targetCommit?: string
   error?: string
 }
 

@@ -90,10 +90,16 @@ export const handleOperationRoutes: RouteHandler = async (req, res, method, path
     const statusPath = resolve(homedir(), '.config', 'night-orch', 'update-status.json')
     try {
       const parsed = JSON.parse(readFileSync(statusPath, 'utf-8')) as Record<string, unknown>
-      const status = {
+      const status: Record<string, unknown> = {
         state: typeof parsed['state'] === 'string' ? parsed['state'] : 'idle',
-        ...(typeof parsed['error'] === 'string' ? { error: parsed['error'] } : {}),
       }
+      if (typeof parsed['error'] === 'string') status['error'] = parsed['error']
+      if (parsed['installMethod'] === 'git' || parsed['installMethod'] === 'npm') {
+        status['installMethod'] = parsed['installMethod']
+      }
+      if (typeof parsed['startedAt'] === 'string') status['startedAt'] = parsed['startedAt']
+      if (typeof parsed['previousCommit'] === 'string') status['previousCommit'] = parsed['previousCommit']
+      if (typeof parsed['targetCommit'] === 'string') status['targetCommit'] = parsed['targetCommit']
       writeJson(res, 200, status)
     } catch {
       writeJson(res, 200, { state: 'idle' })

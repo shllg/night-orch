@@ -13,7 +13,7 @@ import { ProjectsPage } from './components/ProjectsPage.js'
 import { RunsPanel } from './components/RunsPanel.js'
 import { SettingsPage } from './components/SettingsPage.js'
 import { StatsPage } from './components/StatsPage.js'
-import { UpdateProgressModal } from './components/UpdateProgressModal.js'
+import { UpdateProgressModal, GIT_STATE_ORDER, NPM_STATE_ORDER } from './components/UpdateProgressModal.js'
 import { extractMessage } from './lib/format.js'
 import { STATUS_BADGE_TONE } from './lib/run-tone.js'
 import { asRunEventsPayload, mergeRunEvents } from './lib/run-events.js'
@@ -119,6 +119,8 @@ export function App({
   const [labelsInitRepo, setLabelsInitRepo] = useState('')
 
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
+  const [updateStartedAt, setUpdateStartedAt] = useState<number | null>(null)
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
 
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
@@ -622,10 +624,14 @@ export function App({
           // infer the stage from how long the server has been unreachable.
           setUpdateStatus((prev) => {
             if (!prev) return prev
+            const stateOrder = prev.installMethod === 'npm' ? NPM_STATE_ORDER : GIT_STATE_ORDER
+            const currentIdx = stateOrder.indexOf(prev.state)
+            if (currentIdx < 0 || currentIdx >= stateOrder.length - 1) return prev
             const elapsed = consecutiveFailures * 2 // ~2s per poll
-            if (elapsed >= 12 && prev.state === 'draining') return { ...prev, state: 'restarting' }
-            if (elapsed >= 8 && prev.state === 'draining') return { ...prev, state: 'building' }
-            if (elapsed >= 4 && prev.state === 'draining') return { ...prev, state: 'pulling' }
+            if (elapsed >= 4 * (currentIdx + 1)) {
+              const nextState = stateOrder[currentIdx + 1]
+              if (nextState) return { ...prev, state: nextState }
+            }
             return prev
           })
         }
@@ -642,6 +648,14 @@ export function App({
       window.clearInterval(interval)
     }
   }, [readUpdateStatus, updateInProgress])
+
+  useEffect(() => {
+    if (!updateStartedAt) return
+    const interval = window.setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - updateStartedAt) / 1000))
+    }, 1000)
+    return () => window.clearInterval(interval)
+  }, [updateStartedAt])
 
   const runOperation = useCallback(async (
     operationName: string,
@@ -817,7 +831,9 @@ export function App({
   }, [navigate])
 
   const submitUpdate = useCallback(async () => {
-    if (!confirmSelfUpdate((message) => window.confirm(message))) {
+    const method = snapshot?.build?.installMethod
+    const installMethod = method === 'git' || method === 'npm' ? method : 'unknown'
+    if (!confirmSelfUpdate((message) => window.confirm(message), installMethod)) {
       return
     }
 
@@ -833,7 +849,12 @@ export function App({
     }
 
     updateTransitionRef.current = createUpdateTransitionState(Date.now())
-    setUpdateStatus({ state: 'draining' })
+    setUpdateStatus({
+      state: 'draining',
+      installMethod: method === 'git' || method === 'npm' ? method : undefined,
+    })
+    setUpdateStartedAt(Date.now())
+    setElapsedSeconds(0)
 
     try {
       const status = await readUpdateStatus()
@@ -1159,6 +1180,7 @@ export function App({
                       operationsEnabled={operationsEnabled}
                       activeOperation={activeOperation}
                       updateStatus={updateStatus}
+                      installMethod={snapshot?.build?.installMethod}
                       repos={repos}
                       labelsInitForm={{
                         repo: labelsInitRepo,
@@ -1286,7 +1308,7 @@ export function App({
       </div>
 
       {updateInProgress && updateStatus && (
-        <UpdateProgressModal status={updateStatus} serverUnreachable={serverUnreachable} />
+        <UpdateProgressModal status={updateStatus} serverUnreachable={serverUnreachable} elapsedSeconds={elapsedSeconds} />
       )}
     </main>
   )
