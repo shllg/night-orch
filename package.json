@@ -97,12 +97,16 @@
     "vitest": "^4.1.0"
   },
   "overrides": {
+    "@hono/node-server": "^1.19.13",
+    "hono": "^4.12.12",
     "yaml": "^2.8.3",
     "path-to-regexp": "^8.4.0",
     "picomatch": "^4.0.4"
   },
   "pnpm": {
     "overrides": {
+      "@hono/node-server": "^1.19.13",
+      "hono": "^4.12.12",
       "yaml": "^2.8.3",
       "path-to-regexp": "^8.4.0",
       "picomatch": "^4.0.4",
