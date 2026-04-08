@@ -3,29 +3,6 @@ import { type FormEvent, type ReactElement } from 'react'
 import { type UpdateStatus } from '../types/dashboard.js'
 import { ActionButton } from './ActionButton.js'
 
-interface RetryFormState {
-  repo: string
-  issueNumber: string
-  resetPlan: boolean
-  fresh: boolean
-}
-
-interface RebaseFormState {
-  repo: string
-  issueNumber: string
-}
-
-interface ContinueFormState {
-  repo: string
-  issueNumber: string
-}
-
-interface DeleteEntryFormState {
-  repo: string
-  issueNumber: string
-  force: boolean
-}
-
 interface LabelsInitFormState {
   repo: string
 }
@@ -35,24 +12,12 @@ interface OperationsPanelProps {
   activeOperation: string | null
   updateStatus: UpdateStatus | null
   repos: string[]
-  retryForm: RetryFormState
-  rebaseForm: RebaseFormState
-  continueForm: ContinueFormState
-  deleteEntryForm: DeleteEntryFormState
   labelsInitForm: LabelsInitFormState
-  onRetryFormChange: (patch: Partial<RetryFormState>) => void
-  onRebaseFormChange: (patch: Partial<RebaseFormState>) => void
-  onContinueFormChange: (patch: Partial<ContinueFormState>) => void
-  onDeleteEntryFormChange: (patch: Partial<DeleteEntryFormState>) => void
   onLabelsInitFormChange: (patch: Partial<LabelsInitFormState>) => void
   onPoll: () => void
   onSync: () => void
   onCleanup: () => void
   onLabelsInitSubmit: (event: FormEvent<HTMLFormElement>) => void
-  onRetrySubmit: (event: FormEvent<HTMLFormElement>) => void
-  onRebaseSubmit: (event: FormEvent<HTMLFormElement>) => void
-  onContinueSubmit: (event: FormEvent<HTMLFormElement>) => void
-  onDeleteEntrySubmit: (event: FormEvent<HTMLFormElement>) => void
   onUpdate: () => void
 }
 
@@ -61,24 +26,12 @@ export function OperationsPanel({
   activeOperation,
   updateStatus,
   repos,
-  retryForm,
-  rebaseForm,
-  continueForm,
-  deleteEntryForm,
   labelsInitForm,
-  onRetryFormChange,
-  onRebaseFormChange,
-  onContinueFormChange,
-  onDeleteEntryFormChange,
   onLabelsInitFormChange,
   onPoll,
   onSync,
   onCleanup,
   onLabelsInitSubmit,
-  onRetrySubmit,
-  onRebaseSubmit,
-  onContinueSubmit,
-  onDeleteEntrySubmit,
   onUpdate,
 }: OperationsPanelProps): ReactElement {
   const updateRunning =
@@ -122,165 +75,6 @@ export function OperationsPanel({
                 </select>
               </label>
               <ActionButton busy={activeOperation === 'labels-init'} label="Bootstrap Labels" submit />
-            </div>
-          </form>
-
-          <form className="rounded-box border border-base-300/70 bg-base-100/60 p-3" onSubmit={onRetrySubmit}>
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-info">Retry</h3>
-            <div className="mt-2 space-y-2">
-              <label className="form-control">
-                <div className="label py-0 pb-1">
-                  <span className="label-text text-xs">Repo</span>
-                </div>
-                <select
-                  className="select select-bordered select-sm w-full bg-base-100/90"
-                  value={retryForm.repo}
-                  onChange={(event) => onRetryFormChange({ repo: event.target.value })}
-                >
-                  {repos.map((repo) => (
-                    <option key={repo} value={repo}>{repo}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="form-control">
-                <div className="label py-0 pb-1">
-                  <span className="label-text text-xs">Issue Number</span>
-                </div>
-                <input
-                  className="input input-bordered input-sm w-full bg-base-100/90"
-                  value={retryForm.issueNumber}
-                  onChange={(event) => onRetryFormChange({ issueNumber: event.target.value })}
-                  inputMode="numeric"
-                  placeholder="123"
-                />
-              </label>
-              <label className="label cursor-pointer justify-start gap-2 py-0">
-                <input
-                  type="checkbox"
-                  className="checkbox checkbox-info checkbox-sm"
-                  checked={retryForm.resetPlan}
-                  onChange={(event) => onRetryFormChange({ resetPlan: event.target.checked })}
-                />
-                <span className="label-text text-xs">Reset saved plan</span>
-              </label>
-              <label className="label cursor-pointer justify-start gap-2 py-0">
-                <input
-                  type="checkbox"
-                  className="checkbox checkbox-info checkbox-sm"
-                  checked={retryForm.fresh}
-                  onChange={(event) => onRetryFormChange({ fresh: event.target.checked })}
-                />
-                <span className="label-text text-xs">Fresh branch reset</span>
-              </label>
-              <ActionButton busy={activeOperation === 'retry'} label="Queue Retry" submit />
-            </div>
-          </form>
-
-          <form className="rounded-box border border-base-300/70 bg-base-100/60 p-3" onSubmit={onRebaseSubmit}>
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-info">Rebase</h3>
-            <div className="mt-2 space-y-2">
-              <label className="form-control">
-                <div className="label py-0 pb-1">
-                  <span className="label-text text-xs">Repo</span>
-                </div>
-                <select
-                  className="select select-bordered select-sm w-full bg-base-100/90"
-                  value={rebaseForm.repo}
-                  onChange={(event) => onRebaseFormChange({ repo: event.target.value })}
-                >
-                  {repos.map((repo) => (
-                    <option key={repo} value={repo}>{repo}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="form-control">
-                <div className="label py-0 pb-1">
-                  <span className="label-text text-xs">Issue Number</span>
-                </div>
-                <input
-                  className="input input-bordered input-sm w-full bg-base-100/90"
-                  value={rebaseForm.issueNumber}
-                  onChange={(event) => onRebaseFormChange({ issueNumber: event.target.value })}
-                  inputMode="numeric"
-                  placeholder="123"
-                />
-              </label>
-              <ActionButton busy={activeOperation === 'rebase'} label="Queue Rebase" submit />
-            </div>
-          </form>
-
-          <form className="rounded-box border border-base-300/70 bg-base-100/60 p-3" onSubmit={onContinueSubmit}>
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-info">Continue</h3>
-            <div className="mt-2 space-y-2">
-              <label className="form-control">
-                <div className="label py-0 pb-1">
-                  <span className="label-text text-xs">Repo</span>
-                </div>
-                <select
-                  className="select select-bordered select-sm w-full bg-base-100/90"
-                  value={continueForm.repo}
-                  onChange={(event) => onContinueFormChange({ repo: event.target.value })}
-                >
-                  {repos.map((repo) => (
-                    <option key={repo} value={repo}>{repo}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="form-control">
-                <div className="label py-0 pb-1">
-                  <span className="label-text text-xs">Issue Number</span>
-                </div>
-                <input
-                  className="input input-bordered input-sm w-full bg-base-100/90"
-                  value={continueForm.issueNumber}
-                  onChange={(event) => onContinueFormChange({ issueNumber: event.target.value })}
-                  inputMode="numeric"
-                  placeholder="123"
-                />
-              </label>
-              <ActionButton busy={activeOperation === 'continue'} label="Queue Continue Pass" submit />
-            </div>
-          </form>
-
-          <form className="rounded-box border border-base-300/70 bg-base-100/60 p-3" onSubmit={onDeleteEntrySubmit}>
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-info">Delete Entry</h3>
-            <div className="mt-2 space-y-2">
-              <label className="form-control">
-                <div className="label py-0 pb-1">
-                  <span className="label-text text-xs">Repo</span>
-                </div>
-                <select
-                  className="select select-bordered select-sm w-full bg-base-100/90"
-                  value={deleteEntryForm.repo}
-                  onChange={(event) => onDeleteEntryFormChange({ repo: event.target.value })}
-                >
-                  {repos.map((repo) => (
-                    <option key={repo} value={repo}>{repo}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="form-control">
-                <div className="label py-0 pb-1">
-                  <span className="label-text text-xs">Issue Number</span>
-                </div>
-                <input
-                  className="input input-bordered input-sm w-full bg-base-100/90"
-                  value={deleteEntryForm.issueNumber}
-                  onChange={(event) => onDeleteEntryFormChange({ issueNumber: event.target.value })}
-                  inputMode="numeric"
-                  placeholder="123"
-                />
-              </label>
-              <label className="label cursor-pointer justify-start gap-2 py-0">
-                <input
-                  type="checkbox"
-                  className="checkbox checkbox-warning checkbox-sm"
-                  checked={deleteEntryForm.force}
-                  onChange={(event) => onDeleteEntryFormChange({ force: event.target.checked })}
-                />
-                <span className="label-text text-xs">Force delete if running</span>
-              </label>
-              <ActionButton busy={activeOperation === 'delete-entry'} label="Delete Local Entry" submit />
             </div>
           </form>
         </fieldset>

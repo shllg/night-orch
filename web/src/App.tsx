@@ -36,6 +36,7 @@ import {
   type ProjectsSnapshot,
   type RuntimeSettingValue,
   type RunEvent,
+  type RunSummary,
   type ShellSessionDetail,
   type ShellSessionEvent,
   type ShellSessionsSnapshot,
@@ -114,21 +115,7 @@ export function App({
     issueNumber: '',
     amount: '',
   })
-
-  const [retryRepo, setRetryRepo] = useState('')
-  const [retryIssueNumber, setRetryIssueNumber] = useState('')
-  const [retryResetPlan, setRetryResetPlan] = useState(false)
-  const [retryFresh, setRetryFresh] = useState(false)
-
-  const [rebaseRepo, setRebaseRepo] = useState('')
-  const [rebaseIssueNumber, setRebaseIssueNumber] = useState('')
-  const [continueRepo, setContinueRepo] = useState('')
-  const [continueIssueNumber, setContinueIssueNumber] = useState('')
   const [labelsInitRepo, setLabelsInitRepo] = useState('')
-
-  const [deleteRepo, setDeleteRepo] = useState('')
-  const [deleteIssueNumber, setDeleteIssueNumber] = useState('')
-  const [deleteForce, setDeleteForce] = useState(false)
 
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
 
@@ -341,19 +328,11 @@ export function App({
 
   useEffect(() => {
     if (repos.length === 0) {
-      setRetryRepo('')
-      setRebaseRepo('')
-      setContinueRepo('')
       setLabelsInitRepo('')
-      setDeleteRepo('')
       return
     }
 
-    setRetryRepo((prev) => (prev && repos.includes(prev) ? prev : repos[0] ?? ''))
-    setRebaseRepo((prev) => (prev && repos.includes(prev) ? prev : repos[0] ?? ''))
-    setContinueRepo((prev) => (prev && repos.includes(prev) ? prev : repos[0] ?? ''))
     setLabelsInitRepo((prev) => (prev && repos.includes(prev) ? prev : repos[0] ?? ''))
-    setDeleteRepo((prev) => (prev && repos.includes(prev) ? prev : repos[0] ?? ''))
     setSelectedRepo((prev) => (prev === 'all' || repos.includes(prev) ? prev : 'all'))
   }, [repos])
 
@@ -826,65 +805,78 @@ export function App({
     }
   }, [readUpdateStatus, runOperation])
 
-  const submitRetry = useCallback(async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const issueNumber = Number.parseInt(retryIssueNumber, 10)
-    if (!retryRepo || !Number.isFinite(issueNumber) || issueNumber <= 0) {
-      setErrorMessage('Retry requires a repo and a positive issue number')
+  const runIssueOperation = useCallback(async (
+    run: RunSummary,
+    options: {
+      operationName: string
+      endpoint: string
+      confirmMessage: string
+      fallbackMessage: string
+      payload?: Record<string, unknown>
+    },
+  ) => {
+    if (!window.confirm(options.confirmMessage)) {
       return
     }
 
     await runOperation(
-      'retry',
-      '/api/operations/retry',
+      options.operationName,
+      options.endpoint,
       {
-        repo: retryRepo,
-        issueNumber,
-        resetPlan: retryResetPlan,
-        fresh: retryFresh,
+        repo: run.repo,
+        issueNumber: run.issue,
+        ...options.payload,
       },
-      `Retry queued for ${retryRepo}#${issueNumber}`,
+      options.fallbackMessage,
     )
-  }, [retryFresh, retryIssueNumber, retryRepo, retryResetPlan, runOperation])
+  }, [runOperation])
 
-  const submitRebase = useCallback(async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const issueNumber = Number.parseInt(rebaseIssueNumber, 10)
-    if (!rebaseRepo || !Number.isFinite(issueNumber) || issueNumber <= 0) {
-      setErrorMessage('Rebase requires a repo and a positive issue number')
-      return
-    }
-
-    await runOperation(
-      'rebase',
-      '/api/operations/rebase',
-      {
-        repo: rebaseRepo,
-        issueNumber,
+  const triggerIssueRetry = useCallback((run: RunSummary) => {
+    void runIssueOperation(run, {
+      operationName: 'retry',
+      endpoint: '/api/operations/retry',
+      confirmMessage: `Queue retry for ${run.repo}#${run.issue}?`,
+      fallbackMessage: `Retry queued for ${run.repo}#${run.issue}`,
+      payload: {
+        resetPlan: false,
+        fresh: false,
       },
-      `Rebase queued for ${rebaseRepo}#${issueNumber}`,
-    )
-  }, [rebaseIssueNumber, rebaseRepo, runOperation])
+    })
+  }, [runIssueOperation])
 
-  const submitDeleteEntry = useCallback(async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const issueNumber = Number.parseInt(deleteIssueNumber, 10)
-    if (!deleteRepo || !Number.isFinite(issueNumber) || issueNumber <= 0) {
-      setErrorMessage('Delete entry requires a repo and a positive issue number')
-      return
-    }
+  const triggerIssueRebase = useCallback((run: RunSummary) => {
+    void runIssueOperation(run, {
+      operationName: 'rebase',
+      endpoint: '/api/operations/rebase',
+      confirmMessage: `Queue rebase for ${run.repo}#${run.issue}?`,
+      fallbackMessage: `Rebase queued for ${run.repo}#${run.issue}`,
+    })
+  }, [runIssueOperation])
 
-    await runOperation(
-      'delete-entry',
-      '/api/operations/delete-entry',
-      {
-        repo: deleteRepo,
-        issueNumber,
-        force: deleteForce,
+  const triggerIssueContinue = useCallback((run: RunSummary) => {
+    void runIssueOperation(run, {
+      operationName: 'continue',
+      endpoint: '/api/operations/continue',
+      confirmMessage: `Queue continue pass for ${run.repo}#${run.issue}?`,
+      fallbackMessage: `Continue pass queued for ${run.repo}#${run.issue}`,
+    })
+  }, [runIssueOperation])
+
+  const triggerIssueDeleteEntry = useCallback((run: RunSummary, force: boolean) => {
+    void runIssueOperation(run, {
+      operationName: 'delete-entry',
+      endpoint: '/api/operations/delete-entry',
+      confirmMessage: force
+        ? `Force delete local entry for ${run.repo}#${run.issue}? This can remove run-local state while shared issue state is still active elsewhere.`
+        : `Delete local entry for ${run.repo}#${run.issue}?`,
+      fallbackMessage: force
+        ? `Force-deleted local entry for ${run.repo}#${run.issue}`
+        : `Deleted local entry for ${run.repo}#${run.issue}`,
+      payload: {
+        force,
       },
-      `Deleted local entry for ${deleteRepo}#${issueNumber}`,
-    )
-  }, [deleteForce, deleteIssueNumber, deleteRepo, runOperation])
+    })
+  }, [runIssueOperation])
 
   const submitLabelsInit = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -902,25 +894,6 @@ export function App({
       `Labels initialized for ${labelsInitRepo}`,
     )
   }, [labelsInitRepo, runOperation])
-
-  const submitContinue = useCallback(async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const issueNumber = Number.parseInt(continueIssueNumber, 10)
-    if (!continueRepo || !Number.isFinite(issueNumber) || issueNumber <= 0) {
-      setErrorMessage('Continue requires a repo and a positive issue number')
-      return
-    }
-
-    await runOperation(
-      'continue',
-      '/api/operations/continue',
-      {
-        repo: continueRepo,
-        issueNumber,
-      },
-      `Continue pass queued for ${continueRepo}#${issueNumber}`,
-    )
-  }, [continueIssueNumber, continueRepo, runOperation])
 
   const applySetting = useCallback(async (key: string) => {
     const value = settingsDrafts[key]
@@ -1114,6 +1087,12 @@ export function App({
                   run={selectedIssueDetailRun}
                   runId={decodedIssueDetailRunId ?? ''}
                   runEvents={runEvents}
+                  operationsEnabled={operationsEnabled}
+                  activeOperation={activeOperation}
+                  onRetry={triggerIssueRetry}
+                  onRebase={triggerIssueRebase}
+                  onContinue={triggerIssueContinue}
+                  onDeleteEntry={triggerIssueDeleteEntry}
                   onBack={closeIssueDetail}
                 />
               ) : (
@@ -1137,46 +1116,8 @@ export function App({
                       activeOperation={activeOperation}
                       updateStatus={updateStatus}
                       repos={repos}
-                      retryForm={{
-                        repo: retryRepo,
-                        issueNumber: retryIssueNumber,
-                        resetPlan: retryResetPlan,
-                        fresh: retryFresh,
-                      }}
-                      rebaseForm={{
-                        repo: rebaseRepo,
-                        issueNumber: rebaseIssueNumber,
-                      }}
-                      continueForm={{
-                        repo: continueRepo,
-                        issueNumber: continueIssueNumber,
-                      }}
-                      deleteEntryForm={{
-                        repo: deleteRepo,
-                        issueNumber: deleteIssueNumber,
-                        force: deleteForce,
-                      }}
                       labelsInitForm={{
                         repo: labelsInitRepo,
-                      }}
-                      onRetryFormChange={(patch) => {
-                        if (patch.repo !== undefined) setRetryRepo(patch.repo)
-                        if (patch.issueNumber !== undefined) setRetryIssueNumber(patch.issueNumber)
-                        if (patch.resetPlan !== undefined) setRetryResetPlan(patch.resetPlan)
-                        if (patch.fresh !== undefined) setRetryFresh(patch.fresh)
-                      }}
-                      onRebaseFormChange={(patch) => {
-                        if (patch.repo !== undefined) setRebaseRepo(patch.repo)
-                        if (patch.issueNumber !== undefined) setRebaseIssueNumber(patch.issueNumber)
-                      }}
-                      onContinueFormChange={(patch) => {
-                        if (patch.repo !== undefined) setContinueRepo(patch.repo)
-                        if (patch.issueNumber !== undefined) setContinueIssueNumber(patch.issueNumber)
-                      }}
-                      onDeleteEntryFormChange={(patch) => {
-                        if (patch.repo !== undefined) setDeleteRepo(patch.repo)
-                        if (patch.issueNumber !== undefined) setDeleteIssueNumber(patch.issueNumber)
-                        if (patch.force !== undefined) setDeleteForce(patch.force)
                       }}
                       onLabelsInitFormChange={(patch) => {
                         if (patch.repo !== undefined) setLabelsInitRepo(patch.repo)
@@ -1186,18 +1127,6 @@ export function App({
                       onCleanup={triggerCleanup}
                       onLabelsInitSubmit={(event) => {
                         void submitLabelsInit(event)
-                      }}
-                      onRetrySubmit={(event) => {
-                        void submitRetry(event)
-                      }}
-                      onRebaseSubmit={(event) => {
-                        void submitRebase(event)
-                      }}
-                      onContinueSubmit={(event) => {
-                        void submitContinue(event)
-                      }}
-                      onDeleteEntrySubmit={(event) => {
-                        void submitDeleteEntry(event)
                       }}
                       onUpdate={() => {
                         void submitUpdate()
