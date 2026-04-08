@@ -33,6 +33,7 @@ import { executeRebase } from '../ops/rebase-and-check.js'
 import { markerTag, upsertBotComment } from '../forge/bot-comment.js'
 import { formatStatusComment } from '../forge/status-comment.js'
 import { processMergeQueue } from '../merge-queue/runner.js'
+import { scanCostBlockedRuns } from '../ops/cost-resume.js'
 import { decomposeIssue, shouldAttemptDecompose } from '../discovery/decomposer.js'
 import { executeParallelSubtasks } from '../loop/parallel.js'
 import { buildWorkerEnv } from '../workers/env.js'
@@ -165,6 +166,13 @@ export async function pollOnce(
             await processMergeQueue(db, forge, repoConfig)
           } catch (err) {
             logger.warn({ repo: repoConfig.repo, err }, 'Merge queue processing failed — continuing')
+          }
+
+          // --- Cost-blocked run resume: auto-resume when budget clears ---
+          try {
+            await scanCostBlockedRuns(db, config, forge, repoConfig, botUser)
+          } catch (err) {
+            logger.warn({ repo: repoConfig.repo, err }, 'Cost-resume scan failed — continuing')
           }
 
           // --- Comment commands: /orch retry|rebase|continue|cancel ---

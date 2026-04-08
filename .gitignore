@@ -7,6 +7,7 @@ docs/.vitepress/cache
 node_modules/
 *.tsbuildinfo
 .env
+.mcp.json
 /config.yaml
 /config.yml
 /docker-compose.yaml

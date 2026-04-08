@@ -1,4 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('node-pty', () => ({
+  spawn: vi.fn(() => {
+    let dataListener: ((chunk: string) => void) | null = null
+    let exitListener: ((event: { exitCode?: number; signal?: number }) => void) | null = null
+    return {
+      onData: vi.fn((listener: (chunk: string) => void) => { dataListener = listener }),
+      onExit: vi.fn((listener: (event: { exitCode?: number; signal?: number }) => void) => { exitListener = listener }),
+      write: vi.fn((data: string) => {
+        if (dataListener) {
+          queueMicrotask(() => dataListener!(data))
+        }
+      }),
+      resize: vi.fn(),
+      kill: vi.fn(() => {
+        if (exitListener) {
+          queueMicrotask(() => exitListener!({ exitCode: 0 }))
+        }
+      }),
+      pid: 12345,
+    }
+  }),
+}))
+
 import { request as httpRequest, type OutgoingHttpHeaders, type Server } from 'node:http'
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'

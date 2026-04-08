@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "night-orch": {
-      "type": "sse",
-      "url": "http://127.0.0.1:3100/sse"
+      "type": "http",
+      "url": "http://100.94.242.23:8808/mcp"
     }
   }
 }

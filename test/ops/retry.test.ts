@@ -170,6 +170,33 @@ describe('RetryEngine', () => {
     expect(row.phase_data).toBeNull()
   })
 
+  it('resets cost fields on retry', async () => {
+    const forge = makeMockForge()
+    const runId = insertRun(db, {
+      status: 'error',
+      estimated_cost_usd: 15.5,
+      prompt_tokens: 1000,
+      completion_tokens: 500,
+      cache_read_tokens: 100,
+    })
+
+    const engine = new RetryEngine(db, makeConfig(), () => forge)
+    await engine.retry('org/repo', 1)
+
+    const row = db.prepare(
+      'SELECT estimated_cost_usd, prompt_tokens, completion_tokens, cache_read_tokens FROM runs WHERE id = ?'
+    ).get(runId) as {
+      estimated_cost_usd: number
+      prompt_tokens: number
+      completion_tokens: number
+      cache_read_tokens: number
+    }
+    expect(row.estimated_cost_usd).toBe(0)
+    expect(row.prompt_tokens).toBe(0)
+    expect(row.completion_tokens).toBe(0)
+    expect(row.cache_read_tokens).toBe(0)
+  })
+
   it('--immediate starts loop directly', async () => {
     const { pollOnce } = await import('../../src/runner/poller.js')
     const forge = makeMockForge()

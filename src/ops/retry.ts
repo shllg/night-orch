@@ -71,6 +71,11 @@ export class RetryEngine {
       currentPhase: null,
       lastError: null,
       endedAt: null,
+      // Reset cost accumulators so retry doesn't immediately re-block on per-run limit
+      estimatedCostUsd: 0,
+      promptTokens: 0,
+      completionTokens: 0,
+      cacheReadTokens: 0,
     }
 
     if (opts.resetPlan || opts.resetBranch) {
