@@ -2,11 +2,18 @@ import { type ReactElement, useEffect, useMemo, useRef, useState } from 'react'
 
 import { describeEventData, formatTimestamp, truncate } from '../lib/format.js'
 import { type RunEvent, type RunSummary } from '../types/dashboard.js'
+import { ActionButton } from './ActionButton.js'
 
 interface IssueDetailPageProps {
   run: RunSummary | null
   runId: string
   runEvents: RunEvent[]
+  operationsEnabled: boolean
+  activeOperation: string | null
+  onRetry: (run: RunSummary) => void
+  onRebase: (run: RunSummary) => void
+  onContinue: (run: RunSummary) => void
+  onDeleteEntry: (run: RunSummary, force: boolean) => void
   onBack: () => void
 }
 
@@ -17,9 +24,16 @@ export function IssueDetailPage({
   run,
   runId,
   runEvents,
+  operationsEnabled,
+  activeOperation,
+  onRetry,
+  onRebase,
+  onContinue,
+  onDeleteEntry,
   onBack,
 }: IssueDetailPageProps): ReactElement {
   const [autoScroll, setAutoScroll] = useState(true)
+  const [forceDelete, setForceDelete] = useState(false)
   const eventsContainerRef = useRef<HTMLDivElement | null>(null)
 
   const visibleEvents = useMemo(
@@ -35,6 +49,7 @@ export function IssueDetailPage({
 
   useEffect(() => {
     setAutoScroll(true)
+    setForceDelete(false)
   }, [runId])
 
   return (
@@ -90,6 +105,52 @@ export function IssueDetailPage({
                 {'  ·  '}
                 ended {run.endedAt ? formatTimestamp(run.endedAt) : '-'}
               </p>
+            </section>
+
+            <section className="min-w-0 rounded-box border border-base-300/70 bg-base-100/70 px-3 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-base-content">Issue Actions</h3>
+                <p className="text-xs text-base-content/65">Each action requires confirmation.</p>
+              </div>
+              {!operationsEnabled && (
+                <div className="alert alert-warning mt-3 text-xs">
+                  <span>Operations are disabled by server policy for this web instance.</span>
+                </div>
+              )}
+              <fieldset
+                disabled={!operationsEnabled}
+                className={`mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 ${!operationsEnabled ? 'opacity-60' : ''}`}
+              >
+                <ActionButton
+                  busy={activeOperation === 'retry'}
+                  onClick={() => onRetry(run)}
+                  label="Queue Retry"
+                />
+                <ActionButton
+                  busy={activeOperation === 'rebase'}
+                  onClick={() => onRebase(run)}
+                  label="Queue Rebase"
+                />
+                <ActionButton
+                  busy={activeOperation === 'continue'}
+                  onClick={() => onContinue(run)}
+                  label="Queue Continue Pass"
+                />
+                <label className="label cursor-pointer justify-start gap-2 py-0 sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    className="checkbox checkbox-warning checkbox-sm"
+                    checked={forceDelete}
+                    onChange={(event) => setForceDelete(event.target.checked)}
+                  />
+                  <span className="label-text text-xs">Force delete (for active/shared issue state)</span>
+                </label>
+                <ActionButton
+                  busy={activeOperation === 'delete-entry'}
+                  onClick={() => onDeleteEntry(run, forceDelete)}
+                  label={forceDelete ? 'Force Delete Local Entry' : 'Delete Local Entry'}
+                />
+              </fieldset>
             </section>
 
             {!run.hasRun ? (

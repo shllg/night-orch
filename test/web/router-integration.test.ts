@@ -9,6 +9,7 @@ import { createDashboardRouter } from '../../web/src/router.js'
 import {
   type DashboardSnapshot,
   type ProjectsSnapshot,
+  type RunSummary,
   type SettingsSnapshot,
   type SessionResponse,
   type ShellSessionsSnapshot,
@@ -132,6 +133,22 @@ const DASHBOARD_SNAPSHOT: DashboardSnapshot = {
   },
 }
 
+const ISSUE_DETAIL_RUN: RunSummary = {
+  runId: 'run-issue-1',
+  hasRun: true,
+  repo: 'org/repo',
+  issue: 42,
+  issueTitle: 'Issue detail action coverage',
+  status: 'blocked',
+  prNumber: 123,
+  phase: 'verify',
+  iterations: 2,
+  costUsd: 1.25,
+  lastError: null,
+  startedAt: '2026-04-06T09:55:00.000Z',
+  endedAt: null,
+}
+
 const PROJECTS_SNAPSHOT: ProjectsSnapshot = {
   generatedAt: '2026-04-06T10:00:00.000Z',
   githubDefaults: {
@@ -184,24 +201,66 @@ function createJsonResponse(payload: unknown, status = 200): Response {
   })
 }
 
-function buildFetchMock() {
-  return vi.fn(async (input: string | URL | Request) => {
+function withRuns(runs: RunSummary[]): DashboardSnapshot {
+  return {
+    ...DASHBOARD_SNAPSHOT,
+    runs: {
+      count: runs.length,
+      runs,
+    },
+  }
+}
+
+function buildFetchMock(snapshot: DashboardSnapshot = DASHBOARD_SNAPSHOT) {
+  return vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const rawUrl = typeof input === 'string'
       ? input
       : input instanceof URL
         ? input.toString()
         : input.url
     const pathname = new URL(rawUrl, window.location.origin).pathname
+    const method = init?.method ?? (input instanceof Request ? input.method : 'GET')
 
-    if (pathname === '/api/dashboard') return createJsonResponse(DASHBOARD_SNAPSHOT)
+    if (pathname === '/api/dashboard') return createJsonResponse(snapshot)
     if (pathname === '/api/session') return createJsonResponse(SESSION_RESPONSE)
     if (pathname === '/api/projects') return createJsonResponse(PROJECTS_SNAPSHOT)
     if (pathname === '/api/settings') return createJsonResponse(SETTINGS_SNAPSHOT)
     if (pathname === '/api/shell/sessions') return createJsonResponse(SHELL_SESSIONS_SNAPSHOT)
     if (pathname === '/api/update-status') return createJsonResponse({}, 404)
+    if (method === 'POST' && pathname.startsWith('/api/operations/')) {
+      return createJsonResponse({ message: `${pathname} accepted` })
+    }
 
     return createJsonResponse({ error: `Unhandled endpoint: ${pathname}` }, 404)
   })
+}
+
+interface OperationCall {
+  pathname: string
+  body: Record<string, unknown>
+}
+
+function listOperationCalls(fetchMock: ReturnType<typeof buildFetchMock>): OperationCall[] {
+  return fetchMock.mock.calls
+    .map(([input, init]) => {
+      const rawUrl = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url
+      const pathname = new URL(rawUrl, window.location.origin).pathname
+      const method = init?.method ?? (input instanceof Request ? input.method : 'GET')
+      if (method !== 'POST' || !pathname.startsWith('/api/operations/')) {
+        return null
+      }
+
+      const rawBody = init?.body
+      if (typeof rawBody !== 'string') {
+        return { pathname, body: {} }
+      }
+      return { pathname, body: JSON.parse(rawBody) as Record<string, unknown> }
+    })
+    .filter((call): call is OperationCall => call !== null)
 }
 
 function renderDashboard(pathname: string) {
@@ -322,6 +381,72 @@ describe('dashboard router integration (real App)', () => {
     await waitFor(() => {
       expect(router.state.location.pathname).toBe('/issues')
     })
+  })
+
+  it('runs issue detail actions after confirmation and forwards force delete payload', async () => {
+    const fetchMock = buildFetchMock(withRuns([ISSUE_DETAIL_RUN]))
+    vi.stubGlobal('fetch', fetchMock)
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    const { router } = renderDashboard('/issues/run-issue-1')
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/issues/run-issue-1')
+    })
+
+    expect(screen.getByText('Issue Detail')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Queue Retry' })).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Queue Retry' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Queue Rebase' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Queue Continue Pass' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Local Entry' }))
+
+    await waitFor(() => {
+      expect(listOperationCalls(fetchMock)).toHaveLength(4)
+    })
+
+    fireEvent.click(screen.getByLabelText('Force delete (for active/shared issue state)'))
+    fireEvent.click(screen.getByRole('button', { name: 'Force Delete Local Entry' }))
+
+    await waitFor(() => {
+      expect(listOperationCalls(fetchMock)).toHaveLength(5)
+    })
+
+    const operationCalls = listOperationCalls(fetchMock)
+    expect(operationCalls.map((call) => call.pathname)).toEqual([
+      '/api/operations/retry',
+      '/api/operations/rebase',
+      '/api/operations/continue',
+      '/api/operations/delete-entry',
+      '/api/operations/delete-entry',
+    ])
+
+    expect(operationCalls[0]?.body).toMatchObject({ repo: 'org/repo', issueNumber: 42, resetPlan: false, fresh: false })
+    expect(operationCalls[1]?.body).toMatchObject({ repo: 'org/repo', issueNumber: 42 })
+    expect(operationCalls[2]?.body).toMatchObject({ repo: 'org/repo', issueNumber: 42 })
+    expect(operationCalls[3]?.body).toMatchObject({ repo: 'org/repo', issueNumber: 42, force: false })
+    expect(operationCalls[4]?.body).toMatchObject({ repo: 'org/repo', issueNumber: 42, force: true })
+
+    expect(confirmSpy).toHaveBeenCalledTimes(5)
+  })
+
+  it('skips issue detail operations when confirmation is declined', async () => {
+    const fetchMock = buildFetchMock(withRuns([ISSUE_DETAIL_RUN]))
+    vi.stubGlobal('fetch', fetchMock)
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+
+    const { router } = renderDashboard('/issues/run-issue-1')
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/issues/run-issue-1')
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Queue Retry' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Queue Rebase' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Queue Continue Pass' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Local Entry' }))
+
+    expect(confirmSpy).toHaveBeenCalledTimes(4)
+    expect(listOperationCalls(fetchMock)).toHaveLength(0)
   })
 
   it('renders project detail route and navigates back to projects list', async () => {
