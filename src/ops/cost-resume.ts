@@ -81,6 +81,11 @@ export async function scanCostBlockedRuns(
 
     // Atomic transition: update run state, zero cost fields, release leases
     const transition = db.transaction(() => {
+      // Subtract the run's cost from the daily total BEFORE zeroing
+      // the per-run accumulators — otherwise the daily budget check
+      // still sees the old accumulated total and re-blocks immediately.
+      costTracker.subtractRunCostFromDaily(runId)
+
       runManager.update(runId, {
         status: 'queued',
         currentPhase: null,

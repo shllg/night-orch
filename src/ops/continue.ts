@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3'
 import type { ForgeAdapter, ForgeComment } from '../forge/types.js'
 import type { RepoConfig } from '../config/schema.js'
 import type { Reaction, ReactionCursor, ReactionType } from '../reactions/types.js'
+import { CostTracker } from '../loop/cost.js'
 import { RunManager } from '../state/runs.js'
 import { LeaseManager } from '../state/leases.js'
 import { transitionLabels } from '../labels/manager.js'
@@ -73,7 +74,13 @@ export async function queueContinue(
   // Atomic state transition: update run + release leases in a single
   // DB transaction so a crash in between cannot leave the issue
   // queued-but-leased.
+  const costTracker = new CostTracker(db)
   const transition = db.transaction(() => {
+    // Subtract the run's cost from the daily total BEFORE zeroing
+    // the per-run accumulators — otherwise the daily budget check
+    // still sees the old accumulated total and re-blocks immediately.
+    costTracker.subtractRunCostFromDaily(run.id)
+
     runManager.update(run.id, {
       status: 'queued',
       currentPhase: resumePhase,

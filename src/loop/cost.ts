@@ -550,6 +550,46 @@ export class CostTracker {
       .run(date, overrideUsd)
   }
 
+  /**
+   * Subtract a run's accumulated cost and token counts from today's
+   * `daily_costs` row. Call this inside a transaction **before** zeroing
+   * the per-run accumulators so the daily totals stay consistent.
+   *
+   * Clamps to zero — never produces negative daily totals even if the
+   * run's recorded cost drifted from the daily aggregate.
+   */
+  subtractRunCostFromDaily(runId: string, date: string = utcDayKey()): void {
+    const run = this.db
+      .prepare(
+        'SELECT estimated_cost_usd, prompt_tokens, completion_tokens, cache_read_tokens FROM runs WHERE id = ?',
+      )
+      .get(runId) as {
+        estimated_cost_usd: number
+        prompt_tokens: number
+        completion_tokens: number
+        cache_read_tokens: number
+      } | undefined
+
+    if (!run || run.estimated_cost_usd <= 0) return
+
+    this.db
+      .prepare(
+        `UPDATE daily_costs
+         SET total_cost_usd        = MAX(0, total_cost_usd - ?),
+             total_prompt_tokens    = MAX(0, total_prompt_tokens - ?),
+             total_completion_tokens = MAX(0, total_completion_tokens - ?),
+             total_cache_read_tokens = MAX(0, total_cache_read_tokens - ?)
+         WHERE date = ?`,
+      )
+      .run(
+        run.estimated_cost_usd,
+        run.prompt_tokens,
+        run.completion_tokens,
+        run.cache_read_tokens,
+        date,
+      )
+  }
+
   private logSubscriptionMeteredWarningOnce(
     key: string,
     data: Record<string, unknown>,
