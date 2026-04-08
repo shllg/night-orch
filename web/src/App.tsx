@@ -50,7 +50,8 @@ const MUTATION_INTENT_HEADER = 'x-night-orch-intent'
 const MUTATION_INTENT_VALUE = 'mutate'
 const WEB_AUTH_TOKEN_HEADER = 'x-night-orch-web-token'
 const FRONTEND_BUILD_VERSION = import.meta.env.VITE_BUILD_VERSION ?? 'unknown'
-const FRONTEND_BUILD_GIT_SHA = import.meta.env.VITE_BUILD_GIT_SHA ?? 'unknown'
+
+const AUTO_POLL_COOLDOWN_MS = 60_000
 
 interface RunOperationOptions {
   refreshAfterSuccess?: boolean
@@ -126,6 +127,10 @@ export function App({
   const subscribedRunRef = useRef('')
   const subscribedShellSessionRef = useRef('')
   const updateTransitionRef = useRef<UpdateTransitionState>(clearUpdateTransitionState())
+  const lastPollTriggeredAtRef = useRef(Date.now())
+  const operationsEnabledRef = useRef(operationsEnabled)
+  const activeOperationRef = useRef(activeOperation)
+  const webMutationTokenRef = useRef(webMutationToken)
 
   const repos = snapshot?.config.repos ?? []
   const allRuns = snapshot?.runs.runs ?? []
@@ -188,6 +193,16 @@ export function App({
       toneClass: 'badge-neutral',
     }
   }, [queuedRuns, runningRuns, socketConnected, updateInProgress, updateStatus?.state])
+
+  const buildVersionLabel = useMemo(() => {
+    const version = snapshot?.build?.version ?? FRONTEND_BUILD_VERSION
+    const sha = snapshot?.build?.gitSha
+    const isGit = snapshot?.build?.installMethod === 'git'
+    if (isGit && sha) {
+      return `v${version} · ${sha.slice(0, 8)}`
+    }
+    return `v${version}`
+  }, [snapshot?.build])
 
   const loadDashboard = useCallback(async () => {
     const response = await fetch('/api/dashboard')
@@ -335,6 +350,18 @@ export function App({
     setLabelsInitRepo((prev) => (prev && repos.includes(prev) ? prev : repos[0] ?? ''))
     setSelectedRepo((prev) => (prev === 'all' || repos.includes(prev) ? prev : 'all'))
   }, [repos])
+
+  useEffect(() => {
+    operationsEnabledRef.current = operationsEnabled
+  }, [operationsEnabled])
+
+  useEffect(() => {
+    activeOperationRef.current = activeOperation
+  }, [activeOperation])
+
+  useEffect(() => {
+    webMutationTokenRef.current = webMutationToken
+  }, [webMutationToken])
 
   useEffect(() => {
     if (!decodedIssueDetailRunId) return
@@ -730,8 +757,29 @@ export function App({
   }, [activePage, loadDashboard, loadProjects, loadSettings, loadShellSessions])
 
   const triggerPoll = useCallback(() => {
+    lastPollTriggeredAtRef.current = Date.now()
     void runOperation('poll', '/api/operations/poll', {}, 'Manual poll requested')
   }, [runOperation])
+
+  useEffect(() => {
+    const handleVisibilityChange = (): void => {
+      if (document.visibilityState !== 'visible') return
+
+      const cooldownElapsed = Date.now() - lastPollTriggeredAtRef.current >= AUTO_POLL_COOLDOWN_MS
+      const canPoll = operationsEnabledRef.current
+        && activeOperationRef.current === null
+        && webMutationTokenRef.current !== null
+
+      if (cooldownElapsed && canPoll) {
+        triggerPoll()
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [triggerPoll])
 
   const triggerSync = useCallback(() => {
     void runOperation('sync', '/api/operations/sync', {}, 'Sync completed')
@@ -1048,10 +1096,6 @@ export function App({
         activeRuns={snapshot?.status.activeRuns ?? 0}
         runningRuns={runningRuns}
         queuedRuns={queuedRuns}
-        frontendVersion={FRONTEND_BUILD_VERSION}
-        frontendGitSha={FRONTEND_BUILD_GIT_SHA}
-        backendVersion={snapshot?.build?.version ?? 'unknown'}
-        backendGitSha={snapshot?.build?.gitSha ?? null}
         operationsEnabled={operationsEnabled}
         activeOperation={activeOperation}
         isRefreshing={isHeaderRefreshing}
@@ -1227,7 +1271,7 @@ export function App({
           </div>
         </div>
 
-        <div className="flex justify-center pb-16 pt-1 md:pb-2">
+        <div className="flex flex-col items-center gap-2 pb-16 pt-1 md:pb-2">
           <button
             type="button"
             className="btn btn-outline btn-sm border-primary/55 bg-base-200/45 text-primary hover:bg-primary/15"
@@ -1237,6 +1281,7 @@ export function App({
           >
             UI reload
           </button>
+          <span className="text-[10px] text-base-content/50">{buildVersionLabel}</span>
         </div>
       </div>
 

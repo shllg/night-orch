@@ -24,6 +24,7 @@ interface DashboardSnapshot {
   build: {
     version: string
     gitSha: string | null
+    installMethod: 'git' | 'npm' | 'unknown'
   }
   config: {
     repos: string[]

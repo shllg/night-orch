@@ -17,6 +17,7 @@ function buildProps(overrides: Partial<DashboardHeaderProps>): DashboardHeaderPr
   return {
     currentStateLabel: 'idle',
     currentStateToneClass: 'badge-ghost',
+    isWorking: false,
     socketConnected: true,
     lastRefreshAt: '2026-04-01T10:00:00.000Z',
     pollIntervalSeconds: 30,
@@ -24,10 +25,6 @@ function buildProps(overrides: Partial<DashboardHeaderProps>): DashboardHeaderPr
     activeRuns: 1,
     runningRuns: 1,
     queuedRuns: 0,
-    frontendVersion: '1.2.3',
-    frontendGitSha: '1111111111111111111111111111111111111111',
-    backendVersion: '2.3.4',
-    backendGitSha: '1111111111111111111111111111111111111111',
     operationsEnabled: true,
     activeOperation: null,
     isRefreshing: false,
@@ -81,29 +78,12 @@ function findButton(buttons: ReactElement<ButtonProps>[], label: string): ReactE
 }
 
 describe('DashboardHeader', () => {
-  it('renders compact git stats with shared and split sha formatting', () => {
-    const sameShaText = renderHeaderText({})
-    expect(sameShaText).toContain('git v2.3.4 · 111111111111')
-
-    const splitShaText = renderHeaderText({
-      frontendGitSha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-      backendGitSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-    })
-    expect(splitShaText).toContain('git fe aaaaaaaaaaaa / be bbbbbbbbbbbb')
-  })
-
-  it('keeps unknown SHA handling stable in compact stats', () => {
-    const knownVsUnknown = renderHeaderText({
-      frontendGitSha: 'cccccccccccccccccccccccccccccccccccccccc',
-      backendGitSha: null,
-    })
-    expect(knownVsUnknown).toContain('git fe cccccccccccc / be unknown')
-
-    const unknownVsUnknown = renderHeaderText({
-      frontendGitSha: 'unknown',
-      backendGitSha: null,
-    })
-    expect(unknownVsUnknown).toContain('git v2.3.4 · unknown')
+  it('renders compact run stats', () => {
+    const text = renderHeaderText({})
+    expect(text).toContain('active 1')
+    expect(text).toContain('running 1')
+    expect(text).toContain('queued 0')
+    expect(text).toContain('repos 2')
   })
 
   it('wires action buttons to callbacks with accessible labels', () => {

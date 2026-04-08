@@ -11,10 +11,6 @@ interface DashboardHeaderProps {
   activeRuns: number
   runningRuns: number
   queuedRuns: number
-  frontendVersion: string
-  frontendGitSha: string
-  backendVersion: string
-  backendGitSha: string | null
   operationsEnabled: boolean
   activeOperation: string | null
   isRefreshing: boolean
@@ -22,32 +18,6 @@ interface DashboardHeaderProps {
   onPoll: () => void
   onSync: () => void
   onGoToSettings: () => void
-}
-
-function normalizeShaForCompare(sha: string | null): string {
-  const normalized = (sha ?? 'unknown').trim().toLowerCase()
-  return normalized.length > 0 ? normalized : 'unknown'
-}
-
-function shasRepresentSameCommit(frontendSha: string, backendSha: string | null): boolean {
-  const frontendNormalized = normalizeShaForCompare(frontendSha)
-  const backendNormalized = normalizeShaForCompare(backendSha)
-
-  if (frontendNormalized === 'unknown' || backendNormalized === 'unknown') {
-    return frontendNormalized === backendNormalized
-  }
-
-  return (
-    frontendNormalized === backendNormalized
-    || frontendNormalized.startsWith(backendNormalized)
-    || backendNormalized.startsWith(frontendNormalized)
-  )
-}
-
-function shortSha(sha: string | null): string {
-  const normalized = (sha ?? 'unknown').trim()
-  if (normalized.length === 0) return 'unknown'
-  return normalized.toLowerCase() === 'unknown' ? 'unknown' : normalized.slice(0, 12)
 }
 
 export function DashboardHeader({
@@ -61,10 +31,6 @@ export function DashboardHeader({
   activeRuns,
   runningRuns,
   queuedRuns,
-  frontendVersion: _frontendVersion,
-  frontendGitSha,
-  backendVersion,
-  backendGitSha,
   operationsEnabled,
   activeOperation,
   isRefreshing,
@@ -73,15 +39,9 @@ export function DashboardHeader({
   onSync,
   onGoToSettings,
 }: DashboardHeaderProps): ReactElement {
-  const frontendShortSha = shortSha(frontendGitSha)
-  const backendShortSha = shortSha(backendGitSha)
-  const shasMatch = shasRepresentSameCommit(frontendGitSha, backendGitSha)
   const mutationBusy = activeOperation !== null
   const canRunMutations = operationsEnabled && !mutationBusy
   const lastRefreshLabel = formatLastRefresh(lastRefreshAt)
-  const buildLabel = shasMatch
-    ? `v${backendVersion} · ${backendShortSha}`
-    : `fe ${frontendShortSha} / be ${backendShortSha}`
 
   return (
     <header className="sticky top-0 z-50 border-b border-base-300/60 bg-base-300/88 backdrop-blur">
@@ -107,7 +67,6 @@ export function DashboardHeader({
               <StatPill label="running" value={runningRuns} />
               <StatPill label="queued" value={queuedRuns} />
               <StatPill label="repos" value={reposCount} />
-              <StatPill label="git" value={buildLabel} monospace />
             </div>
           </div>
 

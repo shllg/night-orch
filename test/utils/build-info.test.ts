@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { mockExecFileSync, mockReadFileSync } = vi.hoisted(() => ({
+const { mockExecFileSync, mockReadFileSync, mockExistsSync } = vi.hoisted(() => ({
   mockExecFileSync: vi.fn(),
   mockReadFileSync: vi.fn(),
+  mockExistsSync: vi.fn(),
 }))
 
 vi.mock('node:child_process', () => ({
@@ -11,6 +12,11 @@ vi.mock('node:child_process', () => ({
 
 vi.mock('node:fs', () => ({
   readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
+  existsSync: (...args: unknown[]) => mockExistsSync(...args),
+}))
+
+vi.mock('../../src/utils/project-root.js', () => ({
+  resolveProjectRoot: () => '/mock/project/root',
 }))
 
 describe('getBuildInfo', () => {
@@ -23,11 +29,13 @@ describe('getBuildInfo', () => {
   it('prefers NIGHT_ORCH_GIT_SHA over git command output', async () => {
     process.env.NIGHT_ORCH_GIT_SHA = 'ABCDEF1234567'
     mockReadFileSync.mockReturnValueOnce('{"version":"2.3.4"}')
+    mockExistsSync.mockReturnValueOnce(true)
 
     const { getBuildInfo } = await import('../../src/utils/build-info.js')
     expect(getBuildInfo()).toEqual({
       version: '2.3.4',
       gitSha: 'abcdef1234567',
+      installMethod: 'git',
     })
     expect(mockExecFileSync).not.toHaveBeenCalled()
   })
@@ -36,11 +44,13 @@ describe('getBuildInfo', () => {
     process.env.NIGHT_ORCH_GIT_SHA = 'not-a-sha'
     mockReadFileSync.mockReturnValueOnce('{"version":"3.0.0"}')
     mockExecFileSync.mockReturnValueOnce('1234567890ABCDEF\n')
+    mockExistsSync.mockReturnValueOnce(true)
 
     const { getBuildInfo } = await import('../../src/utils/build-info.js')
     expect(getBuildInfo()).toEqual({
       version: '3.0.0',
       gitSha: '1234567890abcdef',
+      installMethod: 'git',
     })
     expect(mockExecFileSync).toHaveBeenCalledTimes(1)
   })
@@ -52,22 +62,26 @@ describe('getBuildInfo', () => {
     mockExecFileSync.mockImplementationOnce(() => {
       throw new Error('git unavailable')
     })
+    mockExistsSync.mockReturnValueOnce(false)
 
     const { getBuildInfo } = await import('../../src/utils/build-info.js')
     expect(getBuildInfo()).toEqual({
       version: '0.1.0',
       gitSha: null,
+      installMethod: 'unknown',
     })
   })
 
   it('rejects invalid git outputs', async () => {
     mockReadFileSync.mockReturnValueOnce('{"version":"1.0.0"}')
     mockExecFileSync.mockReturnValueOnce('definitely-not-a-sha')
+    mockExistsSync.mockReturnValueOnce(false)
 
     const { getBuildInfo } = await import('../../src/utils/build-info.js')
     expect(getBuildInfo()).toEqual({
       version: '1.0.0',
       gitSha: null,
+      installMethod: 'unknown',
     })
   })
 })
