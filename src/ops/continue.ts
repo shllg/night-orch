@@ -80,6 +80,11 @@ export async function queueContinue(
       endedAt: null,
       lastError: null,
       blockReason: null,
+      // Reset cost accumulators so continue doesn't immediately re-block on per-run limit
+      estimatedCostUsd: 0,
+      promptTokens: 0,
+      completionTokens: 0,
+      cacheReadTokens: 0,
       phaseData: {
         ...existingPhaseData,
         issueRepo,

@@ -17,18 +17,26 @@ function makeRepoConfig(): RepoConfig {
   return {
     repo: 'org/repo',
     forge: 'github',
+    linkedProjects: [],
+    maxConcurrentRuns: 1,
     localPath: '/tmp/repo',
     baseBranch: 'main',
     branchPrefix: 'orch',
+    updateStrategy: 'merge',
     labels: {
       ready: ['orch:ready'],
       running: 'orch:running',
-      blocked: ['orch:blocked'],
+      blocked: 'orch:blocked',
+      needsHuman: 'orch:needs-human',
       reviewReady: 'orch:review-ready',
       error: 'orch:error',
       retry: 'orch:retry',
       planning: 'orch:planning',
+      mergeQueued: 'orch:merge-queued',
+      merging: 'orch:merging',
+      mergeFailed: 'orch:merge-failed',
     },
+    labelConfig: {},
     defaults: {
       planner: 'claude',
       coder: 'claude',
@@ -41,6 +49,7 @@ function makeRepoConfig(): RepoConfig {
     selectors: { includeLabelsAny: [], excludeLabelsAny: [] },
     agents: {},
     planning: { prdDirectory: 'docs/prd' },
+    mergeQueue: { enabled: false, batchSize: 5, mergeMethod: 'merge', retryFlakyOnce: true, requireApproval: true, stagingBranchPrefix: 'orch/staging' },
   }
 }
 
@@ -325,5 +334,40 @@ describe('queueContinue', () => {
     expect(forge.commentOnIssue).not.toHaveBeenCalled()
     expect(forge.addLabels).not.toHaveBeenCalled()
     expect(forge.removeLabels).not.toHaveBeenCalled()
+  })
+
+  it('resets cost fields on continue', async () => {
+    const runManager = new RunManager(db)
+    const run = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 64,
+      issueNodeId: 'node-64',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(run.id, {
+      status: 'blocked',
+      blockReason: 'cost_limit',
+      endedAt: '2026-02-01T12:00:00Z',
+      lastError: 'Per-run cost limit exceeded',
+      estimatedCostUsd: 15.5,
+      promptTokens: 1000,
+      completionTokens: 500,
+      cacheReadTokens: 100,
+    })
+
+    const forge = makeForge({
+      listIssueComments: vi.fn().mockResolvedValue([]),
+    })
+    const result = await queueContinue(db, forge, makeRepoConfig(), 64, '')
+
+    expect(result.queued).toBe(true)
+    const updated = runManager.getByRepoAndIssue('org/repo', 64)
+    expect(updated?.status).toBe('queued')
+    expect(updated?.estimatedCostUsd).toBe(0)
+    expect(updated?.promptTokens).toBe(0)
+    expect(updated?.completionTokens).toBe(0)
+    expect(updated?.cacheReadTokens).toBe(0)
   })
 })
