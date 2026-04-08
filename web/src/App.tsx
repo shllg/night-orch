@@ -116,7 +116,6 @@ export function App({
     issueNumber: '',
     amount: '',
   })
-  const [labelsInitRepo, setLabelsInitRepo] = useState('')
 
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
   const [updateStartedAt, setUpdateStartedAt] = useState<number | null>(null)
@@ -344,12 +343,6 @@ export function App({
   }, [readUpdateStatus])
 
   useEffect(() => {
-    if (repos.length === 0) {
-      setLabelsInitRepo('')
-      return
-    }
-
-    setLabelsInitRepo((prev) => (prev && repos.includes(prev) ? prev : repos[0] ?? ''))
     setSelectedRepo((prev) => (prev === 'all' || repos.includes(prev) ? prev : 'all'))
   }, [repos])
 
@@ -947,22 +940,19 @@ export function App({
     })
   }, [runIssueOperation])
 
-  const submitLabelsInit = useCallback(async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (!labelsInitRepo) {
-      setErrorMessage('Labels init requires a repo')
+  const triggerProjectLabelsInit = useCallback((repo: string) => {
+    if (!window.confirm(`Bootstrap orchestration labels for ${repo}?`)) {
       return
     }
-
-    await runOperation(
+    void runOperation(
       'labels-init',
       '/api/operations/labels-init',
       {
-        repo: labelsInitRepo,
+        repo,
       },
-      `Labels initialized for ${labelsInitRepo}`,
+      `Labels initialized for ${repo}`,
     )
-  }, [labelsInitRepo, runOperation])
+  }, [runOperation])
 
   const applySetting = useCallback(async (key: string) => {
     const value = settingsDrafts[key]
@@ -1181,19 +1171,9 @@ export function App({
                       activeOperation={activeOperation}
                       updateStatus={updateStatus}
                       installMethod={snapshot?.build?.installMethod}
-                      repos={repos}
-                      labelsInitForm={{
-                        repo: labelsInitRepo,
-                      }}
-                      onLabelsInitFormChange={(patch) => {
-                        if (patch.repo !== undefined) setLabelsInitRepo(patch.repo)
-                      }}
                       onPoll={triggerPoll}
                       onSync={triggerSync}
                       onCleanup={triggerCleanup}
-                      onLabelsInitSubmit={(event) => {
-                        void submitLabelsInit(event)
-                      }}
                       onUpdate={() => {
                         void submitUpdate()
                       }}
@@ -1211,6 +1191,9 @@ export function App({
                   snapshot={projectsSnapshot}
                   repo={decodedProjectDetailRepo ?? ''}
                   isLoading={isProjectsLoading}
+                  operationsEnabled={operationsEnabled}
+                  activeOperation={activeOperation}
+                  onLabelsInit={triggerProjectLabelsInit}
                   onBack={closeProjectDetail}
                 />
               ) : (
