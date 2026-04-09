@@ -280,6 +280,39 @@ export async function pollOnce(
                   const replayableRun = queuedRun
                     ? null
                     : selectReplayableRun(runManager.getByRepoAndIssue(repoConfig.repo, discoveredIssue.issue.number))
+                  // Circuit breaker: stop retrying after N consecutive blocks
+                  if (replayableRun && !queuedRun) {
+                    const consecutiveBlocks = runManager.countConsecutiveBlocks(repoConfig.repo, discoveredIssue.issue.number)
+                    const maxBlocks = config.loop.maxConsecutiveBlocks
+                    if (consecutiveBlocks >= maxBlocks) {
+                      logger.warn(
+                        { repo: repoConfig.repo, issue: discoveredIssue.issue.number, consecutiveBlocks, maxBlocks },
+                        'Circuit breaker: too many consecutive blocks — skipping issue',
+                      )
+                      const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
+                      await transitionLabels(
+                        forge,
+                        issueRepo,
+                        discoveredIssue.issue.number,
+                        latestIssue.labels,
+                        replayableRun.status,
+                        'blocked',
+                        buildLabelConfig(repoConfig, latestIssue.labels),
+                      )
+                      await postStatusComment({
+                        forge,
+                        issueRepo,
+                        issueNumber: discoveredIssue.issue.number,
+                        botUser,
+                        body: formatStatusComment({
+                          blockReason: `Circuit breaker: ${consecutiveBlocks} consecutive blocked runs. This issue needs human intervention — the task may be too large, ambiguous, or hitting a systematic failure. Use /orch retry --fresh after addressing the root cause.`,
+                        }),
+                        warnMessage: 'Failed to post circuit breaker status comment',
+                      })
+                      continue
+                    }
+                  }
+
                   const activeRun = queuedRun ?? replayableRun
                   const roles = activeRun
                     ? {

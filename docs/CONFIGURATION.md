@@ -64,7 +64,7 @@ Registered keys are visible via `night-orch settings list` (or Web/TUI Settings/
 - `github`: `tokenEnv`, `apiBaseUrl`, `pollIntervalSeconds`, `appMentions`
 - `storage`: `dbPath` (read-only), `worktreeRoot`, `logsRoot`, `autoCleanup.enabled`, `autoCleanup.intervalMinutes`, `retention.worktreeAgeDays`, `retention.detailDays`, `retention.archiveDays`
 - `notifications`: `channels`, `events.onRunStarted`, `events.onBlocked`, `events.onPrReady`, `events.onPrUpdated`, `events.onError`, `events.onRetryExhausted`
-- `loop`: `maxReviewIterations`, `maxTotalAgentPasses`, `stopOnPlannerFailure`, `requireVerificationPass`, `reviewApprovalKeyword`, `reviewNeedsChangesKeyword`, `blockOnAmbiguousReview`, `maxAutoRetries`, `decompose`, `maxSubtasks`, `maxConcurrentSubtasks`
+- `loop`: `maxReviewIterations`, `maxTotalAgentPasses`, `stopOnPlannerFailure`, `requireVerificationPass`, `reviewApprovalKeyword`, `reviewNeedsChangesKeyword`, `blockOnAmbiguousReview`, `maxAutoRetries`, `maxConsecutiveBlocks`, `decompose`, `maxSubtasks`, `maxConcurrentSubtasks`
 - `security`: `maxChangedFiles`, `maxChangedLines`, `maxDailyCostUsd`, `maxCostPerRunUsd`
 - `cost`: `model`, `subscriptionMetered`, `pricing.defaultModel`, `pricing.models`
 - `workerProfiles`
@@ -216,6 +216,7 @@ Discriminated by `type`:
 | `blockOnAmbiguousReview` | boolean | `true` | Parse failures in review phase become blocked state. |
 | `maxAutoRetries` | int >= 0 | `3` | Auto-retry count for infrastructure errors. |
 | `maxEmptyDiffRetries` | int 0-5 | `2` | Auto-retry count when coder produces no file changes. |
+| `maxConsecutiveBlocks` | int 1-20 | `4` | Circuit breaker: stop retrying after this many consecutive blocked runs on the same issue. |
 | `decompose` | boolean | `false` | Enable automatic issue decomposition into sub-tasks. |
 | `maxSubtasks` | int 1-10 | `5` | Maximum sub-tasks per decomposition. |
 | `maxConcurrentSubtasks` | int 1-10 | `3` | Max parallel sub-task worktrees. |

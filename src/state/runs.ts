@@ -349,6 +349,28 @@ export class RunManager {
     return row ? this.mapRow(row) : null
   }
 
+  /**
+   * Count how many of the most recent finished runs for an issue are
+   * consecutive blocks. Stops counting at the first non-blocked run.
+   * Used as a circuit breaker to avoid infinite retry loops.
+   */
+  countConsecutiveBlocks(repo: string, issueNumber: number): number {
+    const rows = this.db
+      .prepare(
+        `SELECT status FROM runs
+         WHERE repo = ? AND issue_number = ?
+         AND status NOT IN ('queued', 'running')
+         ORDER BY created_at DESC LIMIT 20`,
+      )
+      .all(repo, issueNumber) as Array<{ status: string }>
+    let count = 0
+    for (const row of rows) {
+      if (row.status === 'blocked') count++
+      else break
+    }
+    return count
+  }
+
   getActive(): RunRecord[] {
     const rows = this.db
       .prepare(

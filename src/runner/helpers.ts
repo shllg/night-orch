@@ -16,7 +16,6 @@ export const STATUS_MARKER = markerTag('status')
 
 export const TAINTED_BLOCK_REASONS = new Set([
   'agent_pass_limit',
-  'cost_limit',
   'merge_conflict',
   'auth_failure',
   'empty_diff',
