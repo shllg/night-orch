@@ -17,6 +17,7 @@ interface DashboardHeaderProps {
   onRefresh: () => void
   onPoll: () => void
   onSync: () => void
+  onCleanup: () => void
   onGoToSettings: () => void
 }
 
@@ -37,6 +38,7 @@ export function DashboardHeader({
   onRefresh,
   onPoll,
   onSync,
+  onCleanup,
   onGoToSettings,
 }: DashboardHeaderProps): ReactElement {
   const mutationBusy = activeOperation !== null
@@ -94,6 +96,14 @@ export function DashboardHeader({
               busy={activeOperation === 'sync'}
             >
               <SyncIcon />
+            </ActionIconButton>
+            <ActionIconButton
+              label={activeOperation === 'cleanup' ? 'Cleaning up...' : 'Run cleanup'}
+              onClick={onCleanup}
+              disabled={!canRunMutations}
+              busy={activeOperation === 'cleanup'}
+            >
+              <CleanupIcon />
             </ActionIconButton>
             <ActionIconButton label="Open settings" onClick={onGoToSettings}>
               <SettingsIcon />
@@ -204,6 +214,18 @@ function SyncIcon(): ReactElement {
       <path d="M10.4 8.8V5.7H7.3" />
       <path d="M13.8 17.8a4.4 4.4 0 1 0 2.8-6.5" />
       <path d="M13.6 15.2v3.1h3.1" />
+    </>,
+  )
+}
+
+function CleanupIcon(): ReactElement {
+  return svgIcon(
+    <>
+      <path d="M4 7h16" />
+      <path d="m6 7 1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+      <path d="M9 7V4h6v3" />
     </>,
   )
 }
