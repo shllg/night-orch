@@ -149,6 +149,38 @@ const ISSUE_DETAIL_RUN: RunSummary = {
   endedAt: null,
 }
 
+const COMPLETED_HISTORY_RUN_PAGE_ONE: RunSummary = {
+  runId: 'run-completed-1',
+  hasRun: true,
+  repo: 'org/repo',
+  issue: 200,
+  issueTitle: 'First completed history run',
+  status: 'completed',
+  prNumber: 500,
+  phase: 'publish',
+  iterations: 1,
+  costUsd: 0.5,
+  lastError: null,
+  startedAt: '2026-04-05T10:00:00.000Z',
+  endedAt: '2026-04-05T10:10:00.000Z',
+}
+
+const COMPLETED_HISTORY_RUN_PAGE_TWO: RunSummary = {
+  runId: 'run-completed-2',
+  hasRun: true,
+  repo: 'org/repo',
+  issue: 201,
+  issueTitle: 'Second completed history run',
+  status: 'completed',
+  prNumber: 501,
+  phase: 'publish',
+  iterations: 2,
+  costUsd: 1.2,
+  lastError: null,
+  startedAt: '2026-04-04T10:00:00.000Z',
+  endedAt: '2026-04-04T10:15:00.000Z',
+}
+
 const PROJECTS_SNAPSHOT: ProjectsSnapshot = {
   generatedAt: '2026-04-06T10:00:00.000Z',
   githubDefaults: {
@@ -273,6 +305,7 @@ function withRuns(runs: RunSummary[]): DashboardSnapshot {
 function buildFetchMock(
   snapshot: DashboardSnapshot = DASHBOARD_SNAPSHOT,
   projectsSnapshot: ProjectsSnapshot = PROJECTS_SNAPSHOT,
+  runsResponseResolver?: (url: URL) => Record<string, unknown>,
 ) {
   return vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const rawUrl = typeof input === 'string'
@@ -280,13 +313,24 @@ function buildFetchMock(
       : input instanceof URL
         ? input.toString()
         : input.url
-    const pathname = new URL(rawUrl, window.location.origin).pathname
+    const url = new URL(rawUrl, window.location.origin)
+    const pathname = url.pathname
     const method = init?.method ?? (input instanceof Request ? input.method : 'GET')
 
     if (pathname === '/api/dashboard') return createJsonResponse(snapshot)
     if (pathname === '/api/session') return createJsonResponse(SESSION_RESPONSE)
     if (pathname === '/api/projects') return createJsonResponse(projectsSnapshot)
     if (pathname === '/api/settings') return createJsonResponse(SETTINGS_SNAPSHOT)
+    if (pathname === '/api/runs') {
+      return createJsonResponse(
+        runsResponseResolver?.(url) ?? {
+          count: 0,
+          runs: [],
+          hasMore: false,
+          nextOffset: null,
+        },
+      )
+    }
     if (pathname === '/api/shell/sessions') return createJsonResponse(SHELL_SESSIONS_SNAPSHOT)
     if (pathname === '/api/update-status') return createJsonResponse({}, 404)
     if (method === 'POST' && pathname.startsWith('/api/operations/')) {
@@ -363,6 +407,69 @@ describe('dashboard router integration (real App)', () => {
 
     expectPageActive('issues')
     expect(screen.getByText('24h Throughput')).toBeDefined()
+  })
+
+  it('browses completed run history with pagination', async () => {
+    const fetchMock = buildFetchMock(
+      DASHBOARD_SNAPSHOT,
+      PROJECTS_SNAPSHOT,
+      (url) => {
+        if (url.searchParams.get('view') !== 'completed') {
+          return {
+            count: 0,
+            runs: [],
+            hasMore: false,
+            nextOffset: null,
+          }
+        }
+
+        const offset = url.searchParams.get('offset') ?? '0'
+        if (offset === '0') {
+          return {
+            count: 1,
+            runs: [COMPLETED_HISTORY_RUN_PAGE_ONE],
+            hasMore: true,
+            nextOffset: 1,
+          }
+        }
+
+        if (offset === '1') {
+          return {
+            count: 1,
+            runs: [COMPLETED_HISTORY_RUN_PAGE_TWO],
+            hasMore: false,
+            nextOffset: null,
+          }
+        }
+
+        return {
+          count: 0,
+          runs: [],
+          hasMore: false,
+          nextOffset: null,
+        }
+      },
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { router } = renderDashboard('/issues')
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/issues')
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Completed' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('First completed history run')).toBeDefined()
+    })
+
+    const loadMore = screen.getByRole('button', { name: 'Load more' })
+    fireEvent.click(loadMore)
+
+    await waitFor(() => {
+      expect(screen.getByText('Second completed history run')).toBeDefined()
+    })
+    expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull()
   })
 
   it('renders /settings with real settings content and active nav state', async () => {

@@ -272,6 +272,95 @@ describe('MCP Tools', () => {
     })
   })
 
+  it('list-runs supports paginated history views', async () => {
+    const runManager = new RunManager(db)
+
+    const completed = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 101,
+      issueTitle: 'Completed history row',
+      issueNodeId: 'node-101',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(completed.id, {
+      status: 'completed',
+      endedAt: '2026-04-03T12:00:00.000Z',
+    })
+
+    const errored = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 102,
+      issueTitle: 'Errored history row',
+      issueNodeId: 'node-102',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(errored.id, {
+      status: 'error',
+      endedAt: '2026-04-03T12:05:00.000Z',
+      lastError: 'verify failed',
+    })
+
+    const blocked = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 103,
+      issueTitle: 'Blocked history row',
+      issueNodeId: 'node-103',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(blocked.id, {
+      status: 'blocked',
+      endedAt: '2026-04-03T12:10:00.000Z',
+      lastError: 'needs input',
+    })
+
+    const pageOne = await handleToolCall(
+      'night-orch-list-runs',
+      { view: 'all', limit: 2, offset: 0 },
+      deps,
+    ) as {
+      count: number
+      hasMore: boolean
+      nextOffset: number | null
+      runs: Array<{ runId: string; status: string }>
+    }
+
+    expect(pageOne.count).toBe(2)
+    expect(pageOne.hasMore).toBe(true)
+    expect(pageOne.nextOffset).toBe(2)
+
+    const pageTwo = await handleToolCall(
+      'night-orch-list-runs',
+      { view: 'all', limit: 2, offset: pageOne.nextOffset ?? 0 },
+      deps,
+    ) as {
+      count: number
+      hasMore: boolean
+      runs: Array<{ runId: string; status: string }>
+    }
+
+    expect(pageTwo.count).toBe(1)
+    expect(pageTwo.hasMore).toBe(false)
+    expect([...pageOne.runs, ...pageTwo.runs].map((run) => run.runId)).toContain(completed.id)
+    expect([...pageOne.runs, ...pageTwo.runs].map((run) => run.runId)).toContain(errored.id)
+    expect([...pageOne.runs, ...pageTwo.runs].map((run) => run.runId)).toContain(blocked.id)
+
+    const failed = await handleToolCall(
+      'night-orch-list-runs',
+      { view: 'failed', limit: 10, offset: 0 },
+      deps,
+    ) as {
+      runs: Array<{ runId: string; status: string }>
+    }
+    expect(failed.runs.map((run) => run.status)).toEqual(['blocked', 'error'])
+    expect(failed.runs.map((run) => run.runId)).not.toContain(completed.id)
+  })
+
   it('cost-report returns breakdown', async () => {
     const result = await handleToolCall('night-orch-cost-report', { days: 7 }, deps) as { totalCostUsd: number; dailyBudgetUsd: number }
     expect(result.totalCostUsd).toBe(0)

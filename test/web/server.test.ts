@@ -815,6 +815,98 @@ describe('startWebServer', () => {
     expect(trackedIssue?.runId.startsWith('issue:')).toBe(true)
   })
 
+  it('supports run history browsing with view filters and pagination on /api/runs', async () => {
+    const runManager = new RunManager(db)
+    const completed = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 71,
+      issueNodeId: 'node-71',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(completed.id, {
+      status: 'completed',
+      endedAt: '2026-04-05T10:00:00.000Z',
+    })
+
+    const errored = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 72,
+      issueNodeId: 'node-72',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(errored.id, {
+      status: 'error',
+      endedAt: '2026-04-05T10:05:00.000Z',
+    })
+
+    const blocked = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 73,
+      issueNodeId: 'node-73',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(blocked.id, {
+      status: 'blocked',
+      endedAt: '2026-04-05T10:10:00.000Z',
+    })
+
+    server = await startWebServer(
+      deps,
+      {
+        host: '127.0.0.1',
+        port: 0,
+        frontendDistPath: frontendDir,
+      },
+    )
+
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Unexpected address type')
+    }
+    baseUrl = `http://127.0.0.1:${address.port}`
+
+    const failedPageOne = await fetch(`${baseUrl}/api/runs?repo=org%2Frepo&view=failed&limit=1&offset=0`)
+    expect(failedPageOne.status).toBe(200)
+    const failedPageOnePayload = await failedPageOne.json() as {
+      count: number
+      hasMore: boolean
+      nextOffset: number | null
+      runs: Array<{ runId: string; status: string }>
+    }
+    expect(failedPageOnePayload.count).toBe(1)
+    expect(failedPageOnePayload.hasMore).toBe(true)
+    expect(failedPageOnePayload.nextOffset).toBe(1)
+    expect(failedPageOnePayload.runs[0]?.status).toBe('blocked')
+
+    const failedPageTwo = await fetch(`${baseUrl}/api/runs?repo=org%2Frepo&view=failed&limit=1&offset=1`)
+    expect(failedPageTwo.status).toBe(200)
+    const failedPageTwoPayload = await failedPageTwo.json() as {
+      count: number
+      hasMore: boolean
+      nextOffset: number | null
+      runs: Array<{ runId: string; status: string }>
+    }
+    expect(failedPageTwoPayload.count).toBe(1)
+    expect(failedPageTwoPayload.hasMore).toBe(false)
+    expect(failedPageTwoPayload.nextOffset).toBeNull()
+    expect(failedPageTwoPayload.runs[0]?.status).toBe('error')
+
+    const allRuns = await fetch(`${baseUrl}/api/runs?repo=org%2Frepo&view=all&limit=10&offset=0`)
+    expect(allRuns.status).toBe(200)
+    const allRunsPayload = await allRuns.json() as {
+      runs: Array<{ runId: string }>
+    }
+    expect(allRunsPayload.runs.map((run) => run.runId)).toContain(completed.id)
+    expect(allRunsPayload.runs.map((run) => run.runId)).toContain(errored.id)
+    expect(allRunsPayload.runs.map((run) => run.runId)).toContain(blocked.id)
+  })
+
   it('dashboard includes full stats snapshot fields for the web stats page', async () => {
     server = await startWebServer(
       deps,

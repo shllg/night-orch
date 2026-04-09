@@ -12,7 +12,11 @@ interface RunTimingRow {
   ended_at: string | null
 }
 
-interface CompletedRunRow extends RunTimingRow {
+type RunListView = 'active' | 'completed' | 'failed' | 'all'
+
+const RUN_LIST_VIEWS: readonly RunListView[] = ['active', 'completed', 'failed', 'all']
+
+interface HistoryRunRow extends RunTimingRow {
   repo: string
   issue_number: number
   status: string
@@ -43,43 +47,90 @@ function parseEventData(data: string | null): unknown {
   }
 }
 
-function queryCompletedRuns(
-  deps: MCPDependencies,
-  repo: string | undefined,
-  limit: number,
-): CompletedRunRow[] {
-  const params: unknown[] = []
-  const repoClause = repo ? 'AND repo = ?' : ''
-  if (repo) {
-    params.push(repo)
-  }
-  params.push(limit)
+interface QueryRunHistoryPageOptions {
+  repo?: string
+  statuses?: string[]
+  limit: number
+  offset: number
+}
 
-  return deps.db
+interface RunPage<T> {
+  rows: T[]
+  hasMore: boolean
+}
+
+function queryRunHistoryPage(
+  deps: MCPDependencies,
+  options: QueryRunHistoryPageOptions,
+): RunPage<HistoryRunRow> {
+  const params: unknown[] = []
+  const conditions: string[] = []
+
+  if (options.repo) {
+    conditions.push('r.repo = ?')
+    params.push(options.repo)
+  }
+
+  if (options.statuses && options.statuses.length > 0) {
+    const placeholders = options.statuses.map(() => '?').join(', ')
+    conditions.push(`r.status IN (${placeholders})`)
+    params.push(...options.statuses)
+  }
+
+  const whereClause = conditions.length > 0
+    ? `WHERE ${conditions.join(' AND ')}`
+    : ''
+
+  params.push(options.limit + 1, options.offset)
+
+  const rows = deps.db
     .prepare(
       `SELECT
-         id,
-         repo,
-         issue_number,
-         status,
-         issue_title,
-         pr_number,
-         current_phase,
-         iteration_count,
-         estimated_cost_usd,
-         last_error,
-         started_at,
-         ended_at
-       FROM runs
-       WHERE status = 'completed'
-         ${repoClause}
+         r.id,
+         r.repo,
+         r.issue_number,
+         r.status,
+         COALESCE(
+           NULLIF(TRIM(r.issue_title), ''),
+           (
+             SELECT NULLIF(TRIM(r2.issue_title), '')
+             FROM runs r2
+             WHERE r2.repo = r.repo
+               AND r2.issue_number = r.issue_number
+               AND r2.issue_title IS NOT NULL
+               AND TRIM(r2.issue_title) != ''
+             ORDER BY
+               COALESCE(julianday(r2.created_at), 0) DESC,
+               COALESCE(julianday(r2.updated_at), 0) DESC,
+               r2.rowid DESC,
+               r2.id DESC
+             LIMIT 1
+           )
+         ) AS issue_title,
+         r.pr_number,
+         r.current_phase,
+         r.iteration_count,
+         r.estimated_cost_usd,
+         r.last_error,
+         r.started_at,
+         r.ended_at
+       FROM runs r
+       ${whereClause}
        ORDER BY
-         COALESCE(julianday(created_at), 0) DESC,
-         COALESCE(julianday(updated_at), 0) DESC,
-         id DESC
-       LIMIT ?`,
+         COALESCE(julianday(r.created_at), 0) DESC,
+         COALESCE(julianday(r.updated_at), 0) DESC,
+         r.rowid DESC,
+         r.id DESC
+       LIMIT ?
+       OFFSET ?`,
     )
-    .all(...params) as CompletedRunRow[]
+    .all(...params) as HistoryRunRow[]
+
+  const hasMore = rows.length > options.limit
+  return {
+    rows: hasMore ? rows.slice(0, options.limit) : rows,
+    hasMore,
+  }
 }
 
 function loadRunTimingsByRunId(
@@ -105,6 +156,55 @@ function normalizeListRunsLimit(limit: number | undefined): number {
   }
 
   return Math.min(500, Math.max(1, Math.floor(limit)))
+}
+
+function normalizeListRunsOffset(offset: number | undefined): number {
+  if (typeof offset !== 'number' || !Number.isFinite(offset)) {
+    return 0
+  }
+
+  return Math.max(0, Math.floor(offset))
+}
+
+function normalizeRunListView(view: string | undefined): RunListView | null {
+  if (!view) return null
+  return RUN_LIST_VIEWS.includes(view as RunListView)
+    ? (view as RunListView)
+    : null
+}
+
+function mapRunRow(
+  row: HistoryRunRow,
+): {
+  runId: string
+  hasRun: boolean
+  repo: string
+  issue: number
+  status: string
+  issueTitle: string | null
+  prNumber: number | null
+  phase: string | null
+  iterations: number
+  costUsd: number
+  lastError: string | null
+  startedAt: string | null
+  endedAt: string | null
+} {
+  return {
+    runId: row.id,
+    hasRun: true,
+    repo: row.repo,
+    issue: row.issue_number,
+    status: row.status,
+    issueTitle: row.issue_title,
+    prNumber: row.pr_number,
+    phase: row.current_phase,
+    iterations: row.iteration_count ?? 0,
+    costUsd: row.estimated_cost_usd ?? 0,
+    lastError: row.last_error,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+  }
 }
 
 export async function handleStatus(args: { repo?: string }, deps: MCPDependencies): Promise<unknown> {
@@ -171,48 +271,60 @@ export async function handleRunDetail(args: { runId: string }, deps: MCPDependen
 }
 
 export async function handleListRuns(
-  args: { repo?: string; status?: string; limit?: number },
+  args: { repo?: string; status?: string; limit?: number; offset?: number; view?: string },
   deps: MCPDependencies,
 ): Promise<unknown> {
   const limit = normalizeListRunsLimit(args.limit)
+  const offset = normalizeListRunsOffset(args.offset)
+  const view = normalizeRunListView(args.view)
 
-  if (args.status === 'completed') {
-    const rows = queryCompletedRuns(deps, args.repo, limit)
+  const historyStatuses = view === 'completed'
+    ? ['completed']
+    : view === 'failed'
+      ? ['blocked', 'error']
+      : view === 'all'
+        ? undefined
+        : args.status === 'completed'
+          ? ['completed']
+          : undefined
+
+  if (historyStatuses || view === 'all') {
+    const page = queryRunHistoryPage(deps, {
+      repo: args.repo,
+      statuses: historyStatuses,
+      limit,
+      offset,
+    })
+
     return {
-      count: rows.length,
-      runs: rows.map((row) => ({
-        runId: row.id,
-        hasRun: true,
-        repo: row.repo,
-        issue: row.issue_number,
-        status: row.status,
-        issueTitle: row.issue_title,
-        prNumber: row.pr_number,
-        phase: row.current_phase,
-        iterations: row.iteration_count ?? 0,
-        costUsd: row.estimated_cost_usd ?? 0,
-        lastError: row.last_error,
-        startedAt: row.started_at,
-        endedAt: row.ended_at,
-      })),
+      count: page.rows.length,
+      runs: page.rows.map((row) => mapRunRow(row)),
+      limit,
+      offset,
+      hasMore: page.hasMore,
+      nextOffset: page.hasMore ? offset + page.rows.length : null,
+      view: view ?? null,
     }
   }
 
   const filteredRows = loadRuns(deps.db, {
-    limit,
+    limit: limit + 1,
+    offset,
     repo: args.repo,
     status: args.status,
   })
+  const hasMore = filteredRows.length > limit
+  const pageRows = hasMore ? filteredRows.slice(0, limit) : filteredRows
   const runTimings = loadRunTimingsByRunId(
     deps,
-    filteredRows
+    pageRows
       .map((row) => row.id)
       .filter((runId) => !runId.startsWith('issue:')),
   )
 
   return {
-    count: filteredRows.length,
-    runs: filteredRows.map((row) => {
+    count: pageRows.length,
+    runs: pageRows.map((row) => {
       const hasRun = !row.id.startsWith('issue:')
       const timing = hasRun ? runTimings.get(row.id) : undefined
 
@@ -232,6 +344,11 @@ export async function handleListRuns(
         endedAt: hasRun ? timing?.ended_at ?? null : null,
       }
     }),
+    limit,
+    offset,
+    hasMore,
+    nextOffset: hasMore ? offset + pageRows.length : null,
+    view: view ?? null,
   }
 }
 
