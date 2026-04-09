@@ -30,6 +30,14 @@ vi.mock('../../src/workers/env.js', () => ({
   buildVerifierEnv: vi.fn().mockReturnValue({ PATH: '/usr/bin' }),
 }))
 
+vi.mock('../../src/git/repo.js', () => ({
+  getDiffAgainstBranch: vi.fn().mockResolvedValue({
+    diff: 'diff --git a/file.ts b/file.ts\n+added',
+    error: null,
+  }),
+  getChangedFilesAgainstBranch: vi.fn().mockResolvedValue(['src/a.ts']),
+}))
+
 function makeConfig(): Config {
   return {
     version: 1,
@@ -44,6 +52,7 @@ function makeConfig(): Config {
       reviewApprovalKeyword: 'APPROVED',
       reviewNeedsChangesKeyword: 'CHANGES_REQUIRED',
       blockOnAmbiguousReview: true,
+      maxEmptyDiffRetries: 2,
     },
     security: { maxChangedFiles: 50, maxChangedLines: 5000, maxDailyCostUsd: 50, maxCostPerRunUsd: 10 },
     workerProfiles: {
@@ -96,6 +105,8 @@ function makeCtx(): RunContext {
     sessionIds: {},
     stepOutputs: {},
     iterationSnapshots: [],
+    diffError: null,
+    emptyDiffRetries: 0,
   }
 }
 

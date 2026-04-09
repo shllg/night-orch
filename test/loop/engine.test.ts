@@ -29,7 +29,16 @@ vi.mock('../../src/workers/env.js', () => ({
   buildVerifierEnv: vi.fn().mockReturnValue({ PATH: '/usr/bin' }),
 }))
 
+vi.mock('../../src/git/repo.js', () => ({
+  getDiffAgainstBranch: vi.fn().mockResolvedValue({
+    diff: 'diff --git a/file.ts b/file.ts\n+added',
+    error: null,
+  }),
+  getChangedFilesAgainstBranch: vi.fn().mockResolvedValue(['src/a.ts']),
+}))
+
 import { logger } from '../../src/utils/logger.js'
+import { getDiffAgainstBranch } from '../../src/git/repo.js'
 
 function makePlannerResult(objective = 'Fix it'): WorkerTaskResult {
   return {
@@ -116,6 +125,7 @@ function makeConfig(): Config {
       reviewApprovalKeyword: 'APPROVED',
       reviewNeedsChangesKeyword: 'CHANGES_REQUIRED',
       blockOnAmbiguousReview: true,
+      maxEmptyDiffRetries: 2,
     },
     security: { maxChangedFiles: 50, maxChangedLines: 5000, maxDailyCostUsd: 50, maxCostPerRunUsd: 10 },
     workerProfiles: {
@@ -168,6 +178,8 @@ function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
     sessionIds: {},
     stepOutputs: {},
     iterationSnapshots: [],
+    diffError: null,
+    emptyDiffRetries: 0,
     ...overrides,
   }
 }
@@ -767,5 +779,180 @@ describe('executeLoop', () => {
     expect(plannerAdapter.runTask).not.toHaveBeenCalled()
     expect(coderAdapter.runTask).toHaveBeenCalledTimes(1)
     expect(reviewerAdapter.runTask).toHaveBeenCalledTimes(1)
+  })
+
+  describe('empty-diff guard', () => {
+    it('auto-retries coder when diff is empty, then succeeds on second attempt', async () => {
+      const mockGetDiff = vi.mocked(getDiffAgainstBranch)
+      // First verify: empty diff → triggers retry
+      // Second verify: real diff → proceeds to reviewer
+      mockGetDiff
+        .mockResolvedValueOnce({ diff: '', error: null })
+        .mockResolvedValueOnce({ diff: 'diff --git a/file.ts b/file.ts\n+added', error: null })
+
+      const coderAdapter = makeMockAdapter([makeCoderResult(), makeCoderResult()])
+      const reviewerAdapter = makeMockAdapter([makeReviewerResult('APPROVED')])
+
+      const deps: LoopDependencies = {
+        db,
+        config: makeConfig(),
+        adapters: {
+          planner: makeMockAdapter([makePlannerResult()]),
+          coder: coderAdapter,
+          reviewer: reviewerAdapter,
+        },
+        workflow: DEFAULT_WORKFLOW,
+      }
+
+      const result = await executeLoop(makeCtx(), deps)
+
+      expect(result.terminalStatus).toBe('publish')
+      // Coder called twice: initial + retry
+      expect(coderAdapter.runTask).toHaveBeenCalledTimes(2)
+      // Reviewer called once: only after real diff appeared
+      expect(reviewerAdapter.runTask).toHaveBeenCalledTimes(1)
+      // iteration should NOT have been incremented (empty-diff retry doesn't consume review budget)
+      expect(result.iteration).toBe(1)
+      // emptyDiffRetries should be reset to 0 after successful diff
+      expect(result.emptyDiffRetries).toBe(0)
+    })
+
+    it('blocks with empty_diff after exhausting retries', async () => {
+      const mockGetDiff = vi.mocked(getDiffAgainstBranch)
+      // Always return empty diff — coder never produces changes
+      mockGetDiff.mockResolvedValue({ diff: '', error: null })
+
+      const config = makeConfig()
+      config.loop.maxEmptyDiffRetries = 2
+
+      const coderAdapter = makeMockAdapter([makeCoderResult(), makeCoderResult(), makeCoderResult()])
+
+      const deps: LoopDependencies = {
+        db,
+        config,
+        adapters: {
+          planner: makeMockAdapter([makePlannerResult()]),
+          coder: coderAdapter,
+          reviewer: makeMockAdapter([makeReviewerResult('APPROVED')]),
+        },
+        workflow: DEFAULT_WORKFLOW,
+      }
+
+      const result = await executeLoop(makeCtx(), deps)
+
+      expect(result.terminalStatus).toBe('blocked')
+      expect(result.blockReason).toBe('empty_diff')
+      // Coder called 3 times: initial + 2 retries
+      expect(coderAdapter.runTask).toHaveBeenCalledTimes(3)
+      // Reviewer should NEVER have been called (saves money)
+      expect(deps.adapters['reviewer']!.runTask).not.toHaveBeenCalled()
+      // Block message is deterministic
+      expect(result.stepOutputs['blockMessage']).toBe(
+        'Coder produced no file changes after 3 attempt(s).',
+      )
+    })
+
+    it('returns terminal error on git diff failure', async () => {
+      const mockGetDiff = vi.mocked(getDiffAgainstBranch)
+      mockGetDiff.mockResolvedValue({ diff: '', error: 'Failed to compute diff: origin/main not found' })
+
+      const deps: LoopDependencies = {
+        db,
+        config: makeConfig(),
+        adapters: {
+          planner: makeMockAdapter([makePlannerResult()]),
+          coder: makeMockAdapter([makeCoderResult()]),
+          reviewer: makeMockAdapter([makeReviewerResult('APPROVED')]),
+        },
+        workflow: DEFAULT_WORKFLOW,
+      }
+
+      const result = await executeLoop(makeCtx(), deps)
+
+      expect(result.terminalStatus).toBe('error')
+      expect(result.stepOutputs['blockMessage']).toBe(
+        'Git diff failed: Failed to compute diff: origin/main not found',
+      )
+      // Reviewer should NOT have been called
+      expect(deps.adapters['reviewer']!.runTask).not.toHaveBeenCalled()
+    })
+
+    it('does not increment iteration on empty-diff retry', async () => {
+      const mockGetDiff = vi.mocked(getDiffAgainstBranch)
+      // Empty on first, real on second
+      mockGetDiff
+        .mockResolvedValueOnce({ diff: '', error: null })
+        .mockResolvedValueOnce({ diff: 'diff --git a/file.ts b/file.ts\n+added', error: null })
+
+      const deps: LoopDependencies = {
+        db,
+        config: makeConfig(),
+        adapters: {
+          planner: makeMockAdapter([makePlannerResult()]),
+          coder: makeMockAdapter([makeCoderResult(), makeCoderResult()]),
+          reviewer: makeMockAdapter([makeReviewerResult('APPROVED')]),
+        },
+        workflow: DEFAULT_WORKFLOW,
+      }
+
+      const result = await executeLoop(makeCtx(), deps)
+
+      expect(result.terminalStatus).toBe('publish')
+      // iteration stays at 1 — empty-diff retry is NOT a review iteration
+      expect(result.iteration).toBe(1)
+    })
+
+    it('rehydrates emptyDiffRetries from checkpoint on crash recovery', async () => {
+      const mockGetDiff = vi.mocked(getDiffAgainstBranch)
+      // On re-run of verify after crash: empty diff again → 1 prior + 1 more = 2 = max → blocks
+      mockGetDiff.mockResolvedValue({ diff: '', error: null })
+
+      const config = makeConfig()
+      config.loop.maxEmptyDiffRetries = 2
+
+      const persistedPlan = makePlannerResult('Persisted plan').parsed
+      const persistedCode = makeCoderResult().parsed
+      // Simulate crash DURING verify (verify started but NOT completed).
+      // The code step is completed, so resume starts at verify.
+      // emptyDiffRetries=1 is persisted from a prior retry in the same run.
+      db.prepare('UPDATE runs SET current_phase = ?, phase_data = ?, iteration_count = ? WHERE id = ?').run(
+        'verify',
+        JSON.stringify({
+          plan: { plan: persistedPlan },
+          code: { codeResult: persistedCode },
+          // verify is NOT in completed phases — it crashed mid-execution
+          __completed_phases__: ['plan', 'code'],
+          // emptyDiffRetries stored in verify artifacts from prior iteration
+          verify: {
+            emptyDiffRetries: 1,
+          },
+        }),
+        1,
+        'run-test-1',
+      )
+
+      const coderAdapter = makeMockAdapter([makeCoderResult()])
+
+      const deps: LoopDependencies = {
+        db,
+        config,
+        adapters: {
+          planner: makeMockAdapter([makePlannerResult()]),
+          coder: coderAdapter,
+          reviewer: makeMockAdapter([makeReviewerResult('APPROVED')]),
+        },
+        workflow: DEFAULT_WORKFLOW,
+      }
+
+      const result = await executeLoop(makeCtx({ emptyDiffRetries: 1 }), deps)
+
+      // Verify re-runs. Diff is empty. emptyDiffRetries was 1 from checkpoint.
+      // Guard retries coder (emptyDiffRetries → 2). Coder runs, verify runs again.
+      // Diff still empty. emptyDiffRetries(2) >= max(2) → blocked.
+      expect(result.terminalStatus).toBe('blocked')
+      expect(result.blockReason).toBe('empty_diff')
+      // Coder called once for the retry before exhaustion
+      expect(coderAdapter.runTask).toHaveBeenCalledTimes(1)
+    })
   })
 })
