@@ -378,6 +378,7 @@ Issue-specific actions (`retry`, `continue`, `rebase`, `delete entry`) are launc
 
 The web UI includes a **Shell** page for real browser terminal access backed by PTY sessions. Shells start in the current user's home directory (or a home subdirectory you choose), stream output live over websocket, and expose REST routes under `/api/shell/sessions` (create/list/detail/events/close).
 On narrow mobile viewports, the top-line dashboard metric cards render in a compact 2-column layout so the runs list stays the primary focus on the Issues page.
+The Issues page run list now includes history filters (`Active`, `Completed`, `Failed`, `All`) plus a `Load more` control for paginated archive browsing (20 runs per page).
 
 Default bind is `127.0.0.1:3200`. Use `--host` / `--port` to change this (for example when reverse-proxying through Caddy or nginx). Use `--allowed-host` (repeatable) to permit additional Host/Origin values when proxying.
 

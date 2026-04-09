@@ -1,4 +1,5 @@
 export type RunStatus = 'queued' | 'running' | 'blocked' | 'review_ready' | 'error' | 'completed'
+export type RunListView = 'active' | 'completed' | 'failed' | 'all'
 
 export const DASHBOARD_PAGES = ['issues', 'stats', 'projects', 'agent', 'settings'] as const
 export type DashboardPage = (typeof DASHBOARD_PAGES)[number]
@@ -10,6 +11,11 @@ export function isDashboardPage(page: string): page is DashboardPage {
 export interface RunListResult {
   count: number
   runs: RunSummary[]
+  limit?: number
+  offset?: number
+  hasMore?: boolean
+  nextOffset?: number | null
+  view?: RunListView | null
 }
 
 export interface RunSummary {

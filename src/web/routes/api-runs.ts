@@ -48,8 +48,10 @@ export const handleRunRoutes: RouteHandler = async (_req, res, method, pathname,
   if (method === 'GET' && pathname === '/api/runs') {
     const repo = searchParams.get('repo') ?? undefined
     const status = searchParams.get('status') ?? undefined
-    const limit = toBoundedInt(searchParams.get('limit'), 50, 1, 500)
-    const result = await handleToolCall('night-orch-list-runs', { repo, status, limit }, runtimeDeps)
+    const view = searchParams.get('view') ?? undefined
+    const limit = toBoundedInt(searchParams.get('limit'), 20, 1, 500)
+    const offset = toBoundedInt(searchParams.get('offset'), 0, 0, 100_000)
+    const result = await handleToolCall('night-orch-list-runs', { repo, status, view, limit, offset }, runtimeDeps)
     writeJson(res, 200, result)
     return true
   }

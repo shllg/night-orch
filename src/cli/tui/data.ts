@@ -52,6 +52,7 @@ export interface MergeBatchRow {
 
 export interface LoadRunsOptions {
   limit?: number
+  offset?: number
   repo?: string
   status?: string
 }
@@ -247,12 +248,19 @@ export function loadRuns(
         COALESCE(julianday(updated_at), 0) DESC,
         id DESC`
 
-  const limitedQuery = typeof options.limit === 'number'
-    ? `${query}\n       LIMIT ?`
-    : query
-  if (typeof options.limit === 'number') {
-    params.push(options.limit)
+  const hasLimit = typeof options.limit === 'number'
+  const hasOffset = typeof options.offset === 'number' && options.offset > 0
+
+  let limitedQuery = query
+  if (hasLimit) {
+    limitedQuery = `${query}\n       LIMIT ?`
+    params.push(options.limit!)
+    if (hasOffset) {
+      limitedQuery = `${limitedQuery}\n       OFFSET ?`
+      params.push(options.offset!)
+    }
   }
+
   const stmt = db.prepare(limitedQuery)
   return stmt.all(...params) as RunListRow[]
 }

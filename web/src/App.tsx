@@ -34,6 +34,8 @@ import {
   type DashboardPage,
   type DashboardSnapshot,
   type ProjectsSnapshot,
+  type RunListResult,
+  type RunListView,
   type RuntimeSettingValue,
   type RunEvent,
   type RunSummary,
@@ -52,6 +54,7 @@ const WEB_AUTH_TOKEN_HEADER = 'x-night-orch-web-token'
 const FRONTEND_BUILD_VERSION = import.meta.env.VITE_BUILD_VERSION ?? 'unknown'
 
 const AUTO_POLL_COOLDOWN_MS = 60_000
+const RUN_HISTORY_PAGE_SIZE = 20
 
 interface RunOperationOptions {
   refreshAfterSuccess?: boolean
@@ -95,6 +98,12 @@ export function App({
   const [isSettingsLoading, setIsSettingsLoading] = useState(true)
   const [socketConnected, setSocketConnected] = useState(false)
   const [selectedRepo, setSelectedRepo] = useState('all')
+  const [runsView, setRunsView] = useState<RunListView>('active')
+  const [historyRuns, setHistoryRuns] = useState<RunSummary[]>([])
+  const [isHistoryRunsLoading, setIsHistoryRunsLoading] = useState(false)
+  const [isHistoryRunsLoadingMore, setIsHistoryRunsLoadingMore] = useState(false)
+  const [historyRunsOffset, setHistoryRunsOffset] = useState(0)
+  const [historyRunsHasMore, setHistoryRunsHasMore] = useState(false)
   const [selectedRunId, setSelectedRunId] = useState('')
   const [runEvents, setRunEvents] = useState<RunEvent[]>([])
   const [shellSessionsSnapshot, setShellSessionsSnapshot] = useState<ShellSessionsSnapshot | null>(null)
@@ -132,6 +141,7 @@ export function App({
   const operationsEnabledRef = useRef(operationsEnabled)
   const activeOperationRef = useRef(activeOperation)
   const webMutationTokenRef = useRef(webMutationToken)
+  const historyRunsRequestRef = useRef(0)
 
   const repos = snapshot?.config.repos ?? []
   const allRuns = snapshot?.runs.runs ?? []
@@ -143,6 +153,22 @@ export function App({
     if (selectedRepo === 'all') return allRuns
     return allRuns.filter((run) => run.repo === selectedRepo)
   }, [allRuns, selectedRepo])
+  const displayedRuns = useMemo(
+    () => (runsView === 'active' ? filteredRuns : historyRuns),
+    [filteredRuns, historyRuns, runsView],
+  )
+  const runsPanelLoading = runsView === 'active' ? isLoading : isHistoryRunsLoading
+  const runsPanelCanLoadMore = runsView !== 'active' && historyRunsHasMore
+  const knownRunsById = useMemo(() => {
+    const byRunId = new Map<string, RunSummary>()
+    for (const run of allRuns) {
+      byRunId.set(run.runId, run)
+    }
+    for (const run of historyRuns) {
+      byRunId.set(run.runId, run)
+    }
+    return byRunId
+  }, [allRuns, historyRuns])
 
   const decodedIssueDetailRunId = useMemo(
     () => decodeDetailId(issueDetailRunId),
@@ -154,9 +180,9 @@ export function App({
   )
   const selectedIssueDetailRun = useMemo(
     () => decodedIssueDetailRunId
-      ? allRuns.find((run) => run.runId === decodedIssueDetailRunId) ?? null
+      ? knownRunsById.get(decodedIssueDetailRunId) ?? null
       : null,
-    [allRuns, decodedIssueDetailRunId],
+    [decodedIssueDetailRunId, knownRunsById],
   )
   const selectedStreamRunId = selectedIssueDetailRun?.hasRun ? selectedIssueDetailRun.runId : ''
 
@@ -213,6 +239,77 @@ export function App({
     const payload = await response.json() as DashboardSnapshot
     setSnapshot(payload)
   }, [])
+
+  const loadHistoryRunsPage = useCallback(async (options: { append?: boolean; offset?: number } = {}) => {
+    if (runsView === 'active') {
+      return
+    }
+
+    const append = options.append ?? false
+    const requestId = ++historyRunsRequestRef.current
+    const offset = append ? (options.offset ?? 0) : 0
+    if (append) {
+      setIsHistoryRunsLoadingMore(true)
+    } else {
+      setHistoryRuns([])
+      setHistoryRunsOffset(0)
+      setHistoryRunsHasMore(false)
+      setIsHistoryRunsLoading(true)
+      setIsHistoryRunsLoadingMore(false)
+    }
+
+    try {
+      const params = new URLSearchParams()
+      if (selectedRepo !== 'all') {
+        params.set('repo', selectedRepo)
+      }
+      params.set('view', runsView)
+      params.set('limit', String(RUN_HISTORY_PAGE_SIZE))
+      params.set('offset', String(offset))
+
+      const response = await fetch(`/api/runs?${params.toString()}`)
+      if (!response.ok) {
+        throw new Error(`Failed to load runs (${response.status})`)
+      }
+
+      const payload = await response.json() as RunListResult
+      if (requestId !== historyRunsRequestRef.current) {
+        return
+      }
+
+      const hasMore = typeof payload.hasMore === 'boolean'
+        ? payload.hasMore
+        : payload.runs.length >= RUN_HISTORY_PAGE_SIZE
+      const nextOffset = typeof payload.nextOffset === 'number'
+        ? payload.nextOffset
+        : offset + payload.runs.length
+
+      setHistoryRuns((current) => {
+        if (!append) {
+          return payload.runs
+        }
+        const seen = new Set(current.map((run) => run.runId))
+        const merged = [...current]
+        for (const run of payload.runs) {
+          if (seen.has(run.runId)) continue
+          seen.add(run.runId)
+          merged.push(run)
+        }
+        return merged
+      })
+      setHistoryRunsHasMore(hasMore)
+      setHistoryRunsOffset(nextOffset)
+    } catch (err) {
+      if (requestId === historyRunsRequestRef.current) {
+        setErrorMessage((err as Error).message)
+      }
+    } finally {
+      if (requestId === historyRunsRequestRef.current) {
+        setIsHistoryRunsLoading(false)
+        setIsHistoryRunsLoadingMore(false)
+      }
+    }
+  }, [runsView, selectedRepo])
 
   const readUpdateStatus = useCallback(async (): Promise<UpdateStatus | null> => {
     const response = await fetch('/api/update-status')
@@ -349,6 +446,20 @@ export function App({
   useEffect(() => {
     setSelectedRepo((prev) => (prev === 'all' || repos.includes(prev) ? prev : 'all'))
   }, [repos])
+
+  useEffect(() => {
+    if (runsView === 'active') {
+      historyRunsRequestRef.current += 1
+      setHistoryRuns([])
+      setHistoryRunsOffset(0)
+      setHistoryRunsHasMore(false)
+      setIsHistoryRunsLoading(false)
+      setIsHistoryRunsLoadingMore(false)
+      return
+    }
+
+    void loadHistoryRunsPage({ append: false, offset: 0 })
+  }, [loadHistoryRunsPage, runsView])
 
   useEffect(() => {
     operationsEnabledRef.current = operationsEnabled
@@ -696,6 +807,9 @@ export function App({
       setFeedbackMessage(message)
       if (options?.refreshAfterSuccess ?? true) {
         await Promise.all([loadDashboard(), loadSettings()])
+        if (runsView !== 'active') {
+          await loadHistoryRunsPage({ append: false, offset: 0 })
+        }
       }
       return true
     } catch (err) {
@@ -704,7 +818,7 @@ export function App({
     } finally {
       setActiveOperation(null)
     }
-  }, [loadDashboard, loadSettings, operationsEnabled, webMutationToken])
+  }, [loadDashboard, loadHistoryRunsPage, loadSettings, operationsEnabled, runsView, webMutationToken])
 
   const runShellMutation = useCallback(async (
     operationName: string,
@@ -760,6 +874,9 @@ export function App({
       if (activePage === 'agent') {
         refreshTasks.push(loadShellSessions())
       }
+      if (activePage === 'issues' && runsView !== 'active') {
+        refreshTasks.push(loadHistoryRunsPage({ append: false, offset: 0 }))
+      }
       await Promise.all(refreshTasks)
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ type: 'refresh' }))
@@ -769,7 +886,7 @@ export function App({
     } finally {
       setIsHeaderRefreshing(false)
     }
-  }, [activePage, loadDashboard, loadProjects, loadSettings, loadShellSessions])
+  }, [activePage, loadDashboard, loadHistoryRunsPage, loadProjects, loadSettings, loadShellSessions, runsView])
 
   const triggerPoll = useCallback(() => {
     lastPollTriggeredAtRef.current = Date.now()
@@ -803,6 +920,17 @@ export function App({
   const triggerCleanup = useCallback(() => {
     void runOperation('cleanup', '/api/operations/cleanup', {}, 'Cleanup completed')
   }, [runOperation])
+
+  const handleRunsViewChange = useCallback((nextView: RunListView) => {
+    if (nextView === runsView) {
+      return
+    }
+    if (nextView !== 'active') {
+      setIsHistoryRunsLoading(true)
+      setIsHistoryRunsLoadingMore(false)
+    }
+    setRunsView(nextView)
+  }, [runsView])
 
   const navigateToPage = useCallback((page: DashboardPage) => {
     void navigate({ to: '/$page', params: { page } })
@@ -1187,11 +1315,18 @@ export function App({
 
                   <section className="grid gap-5 xl:grid-cols-[1.65fr_1fr]">
                     <RunsPanel
-                      isLoading={isLoading}
+                      isLoading={runsPanelLoading}
+                      isLoadingMore={isHistoryRunsLoadingMore}
                       repos={repos}
                       selectedRepo={selectedRepo}
                       onSelectedRepoChange={setSelectedRepo}
-                      filteredRuns={filteredRuns}
+                      runsView={runsView}
+                      onRunsViewChange={handleRunsViewChange}
+                      filteredRuns={displayedRuns}
+                      canLoadMore={runsPanelCanLoadMore}
+                      onLoadMore={() => {
+                        void loadHistoryRunsPage({ append: true, offset: historyRunsOffset })
+                      }}
                       selectedRunId={selectedRunId}
                       onOpenRun={openIssueDetail}
                       statusTone={STATUS_BADGE_TONE}

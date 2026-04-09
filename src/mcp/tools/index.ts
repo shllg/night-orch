@@ -79,7 +79,9 @@ export function registerTools(): ToolDefinition[] {
         properties: {
           repo: { type: 'string', description: 'Filter by repo (owner/name)' },
           status: { type: 'string', description: 'Filter by status', enum: ['queued', 'running', 'blocked', 'review_ready', 'error', 'completed'] },
+          view: { type: 'string', description: 'Preset list view for web/history browsing', enum: ['active', 'completed', 'failed', 'all'] },
           limit: { type: 'number', description: 'Max results (default: 20)', default: 20 },
+          offset: { type: 'number', description: 'Result offset for pagination (default: 0)', default: 0 },
         },
       },
     },
@@ -332,7 +334,7 @@ export async function handleToolCall(
     case 'night-orch-run-detail':
       return handleRunDetail(args as { runId: string }, runtimeDeps)
     case 'night-orch-list-runs':
-      return handleListRuns(args as { repo?: string; status?: string; limit?: number }, runtimeDeps)
+      return handleListRuns(args as { repo?: string; status?: string; limit?: number; offset?: number; view?: string }, runtimeDeps)
     case 'night-orch-cost-report':
       return handleCostReport(args as { days?: number }, runtimeDeps)
     case 'night-orch-retry':
