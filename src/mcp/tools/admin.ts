@@ -4,6 +4,8 @@ import { homedir } from 'node:os'
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { setIssueCostOverride } from '../../ops/cost-override.js'
 import { setDailyCostCapOverride } from '../../ops/daily-cost-override.js'
+import { resetIssueCost } from '../../ops/cost-reset.js'
+import { resetDailyCostsAndResume } from '../../ops/daily-cost-reset.js'
 import { LabelsInitEngine, formatLabelsInitSummary } from '../../ops/labels-init.js'
 import { DeleteIssueEntryEngine } from '../../ops/delete-entry.js'
 import { nowUtcIso } from '../../utils/time.js'
@@ -32,6 +34,46 @@ export async function handleCostOverride(
       overrideUsd === null
         ? `Cleared cost override for ${args.repo}#${args.issueNumber} (run ${result.runId})`
         : `Set cost override for ${args.repo}#${args.issueNumber} (run ${result.runId}) to $${overrideUsd.toFixed(2)}; daily cap bypassed for this run.`,
+  }
+}
+
+export async function handleCostReset(
+  args: { repo: string; issueNumber: number; authToken?: string },
+  deps: MCPDependencies,
+): Promise<unknown> {
+  assertMcpMutationAuth(args.authToken, deps)
+  const result = resetIssueCost(deps.db, args.repo, args.issueNumber)
+  return {
+    success: true,
+    runId: result.runId,
+    wasUnblocked: result.wasUnblocked,
+    message: result.wasUnblocked
+      ? `Reset accumulated costs for ${args.repo}#${args.issueNumber} (run ${result.runId}) and re-queued the run.`
+      : `Reset accumulated costs for ${args.repo}#${args.issueNumber} (run ${result.runId}).`,
+  }
+}
+
+export async function handleDailyCostReset(
+  args: { authToken?: string },
+  deps: MCPDependencies,
+): Promise<unknown> {
+  assertMcpMutationAuth(args.authToken, deps)
+
+  // Get a forge adapter from the map — daily cost reset operates across all repos
+  // so we just need any valid forge adapter for the scanCostBlockedRuns calls
+  const forge = deps.forgeAdapters.values().next().value
+  if (!forge) {
+    throw new Error('No forge adapter available — cannot resume cost-blocked runs')
+  }
+
+  const result = await resetDailyCostsAndResume(deps.db, deps.config, forge)
+  return {
+    success: true,
+    date: result.date,
+    previousCostUsd: result.previousCostUsd,
+    resumedRuns: result.resumedRuns,
+    stillBlocked: result.stillBlocked,
+    message: `Reset daily costs for ${result.date} (was $${result.previousCostUsd.toFixed(2)}). Resumed ${result.resumedRuns} run(s).`,
   }
 }
 

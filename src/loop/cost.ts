@@ -133,6 +133,16 @@ export class CostTracker {
     this.issueManager.syncFromRunId(runId)
   }
 
+  /**
+   * Record a cost entry for a run. Persists both USD amount and token counts.
+   *
+   * For subscription runs with $0 cost but real tokens, the tokens are still
+   * recorded for analytics. The record is only skipped when both cost and
+   * tokens are zero.
+   *
+   * Also updates daily aggregates and creates the per-run cost entry if stepId
+   * is provided in metadata.
+   */
   recordCost(
     runId: string,
     costUsd: number,
@@ -141,6 +151,7 @@ export class CostTracker {
   ): void {
     const amountUsd = Number(Math.max(0, costUsd).toFixed(6))
     const normalizedTokens = normalizeTokenUsage(tokenUsage)
+    // Persist $0 cost + real tokens (subscription runs) — only skip when both are zero.
     if (amountUsd <= 0 && normalizedTokens.totalTokens <= 0) return
 
     const today = utcDayKey()
@@ -158,6 +169,16 @@ export class CostTracker {
     tx(runId, today, normalizedTokens, amountUsd)
   }
 
+  /**
+   * Record a cost entry and immediately check if the run has exceeded any budget limits.
+   *
+   * This is the primary entry point for worker cost recording during loop execution.
+   * It records the cost (same as recordCost) and then evaluates budget constraints
+   * using the configured security limits and cost policy.
+   *
+   * Returns a BudgetStatus indicating whether the run is over budget and which limit
+   * was tripped (daily or per-run).
+   */
   recordCostAndCheckBudget(
     runId: string,
     costUsd: number,
@@ -191,6 +212,10 @@ export class CostTracker {
     return tx(runId, today, normalizedTokens, amountUsd, limits, costPolicyInput)
   }
 
+  /**
+   * Get the total cost accumulated for today (UTC day) across all runs.
+   * Returns 0 if no costs have been recorded today.
+   */
   getDailyCost(): number {
     const today = utcDayKey()
     const row = this.db
@@ -199,6 +224,10 @@ export class CostTracker {
     return row?.total_cost_usd ?? 0
   }
 
+  /**
+   * Get the accumulated cost for a specific run.
+   * Returns 0 if the run doesn't exist or has no recorded cost.
+   */
   getRunCost(runId: string): number {
     const row = this.db
       .prepare('SELECT estimated_cost_usd FROM runs WHERE id = ?')
@@ -206,6 +235,10 @@ export class CostTracker {
     return row?.estimated_cost_usd ?? 0
   }
 
+  /**
+   * Get the total token usage for today (UTC day) across all runs.
+   * Returns an object with all token counts set to 0 if no data exists.
+   */
   getDailyTokenUsage(): TokenUsageTotals {
     const today = utcDayKey()
     const row = this.db
@@ -548,6 +581,91 @@ export class CostTracker {
          ON CONFLICT(date) DO UPDATE SET daily_cost_cap_override_usd = excluded.daily_cost_cap_override_usd`,
       )
       .run(date, overrideUsd)
+  }
+
+  /**
+   * Reset daily cost counters for a specific UTC day (defaults to today).
+   * Zeros `total_cost_usd`, `total_prompt_tokens`, `total_completion_tokens`,
+   * and `total_cache_read_tokens` while preserving `daily_cost_cap_override_usd`.
+   *
+   * Returns the previous daily cost before resetting.
+   */
+  resetDailyCosts(date: string = utcDayKey()): { previousCostUsd: number } {
+    const row = this.db
+      .prepare('SELECT total_cost_usd FROM daily_costs WHERE date = ?')
+      .get(date) as { total_cost_usd: number } | undefined
+    const previousCostUsd = row?.total_cost_usd ?? 0
+
+    this.db
+      .prepare(
+        `UPDATE daily_costs
+         SET total_cost_usd = 0,
+             total_prompt_tokens = 0,
+             total_completion_tokens = 0,
+             total_cache_read_tokens = 0
+         WHERE date = ?`,
+      )
+      .run(date)
+
+    logger.info({ date, previousCostUsd }, 'Reset daily cost counters')
+
+    return { previousCostUsd }
+  }
+
+  /**
+   * Reset a run's accumulated cost and token counts to zero.
+   * Subtracts the run's cost from the daily total first, then zeros
+   * the run's `estimated_cost_usd`, `prompt_tokens`, `completion_tokens`,
+   * and `cache_read_tokens`.
+   *
+   * If the run was blocked with `block_reason = 'cost_limit'`, transitions
+   * the status back to `queued` so it can be retried.
+   *
+   * Returns true if the run was unblocked (status changed from blocked to queued).
+   */
+  resetRunCost(runId: string, date: string = utcDayKey()): { wasUnblocked: boolean } {
+    const runManager = new RunManager(this.db)
+    const run = runManager.getById(runId)
+    if (!run) {
+      throw new Error(`Run not found: ${runId}`)
+    }
+
+    const wasBlocked = run.status === 'blocked' && run.blockReason === 'cost_limit'
+
+    const tx = this.db.transaction(() => {
+      // First subtract from daily totals
+      this.subtractRunCostFromDaily(runId, date)
+
+      // Zero the run's cost fields
+      this.db
+        .prepare(
+          `UPDATE runs
+           SET estimated_cost_usd = 0,
+               prompt_tokens = 0,
+               completion_tokens = 0,
+               cache_read_tokens = 0
+           WHERE id = ?`,
+        )
+        .run(runId)
+
+      // If cost-blocked, transition back to queued
+      if (wasBlocked) {
+        runManager.update(runId, {
+          status: 'queued',
+          blockReason: null,
+          lastError: null,
+        })
+      }
+    })
+
+    tx()
+
+    logger.info(
+      { runId, wasBlocked, repo: run.repo, issueNumber: run.issueNumber },
+      wasBlocked ? 'Reset run cost and unblocked run' : 'Reset run cost',
+    )
+
+    return { wasUnblocked: wasBlocked }
   }
 
   /**

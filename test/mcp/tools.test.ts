@@ -63,7 +63,9 @@ describe('MCP Tools', () => {
     expect(names).toContain('night-orch-continue')
     expect(names).toContain('night-orch-cost-override')
     expect(names).toContain('night-orch-daily-cost-override')
-    expect(tools.length).toBe(20)
+    expect(names).toContain('night-orch-cost-reset')
+    expect(names).toContain('night-orch-daily-cost-reset')
+    expect(tools.length).toBe(22)
   })
 
   it('settings tools list/set/clear runtime overrides', async () => {

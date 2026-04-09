@@ -246,6 +246,115 @@ describe('CostTracker', () => {
       const status = costTracker.checkBudget(runId, limits)
       expect(status.overBudget).toBe(true)
     })
+
+    it('persists $0 cost with real tokens for subscription runs', () => {
+      costTracker.recordCost(runId, 0, { promptTokens: 1000, completionTokens: 500 })
+      expect(costTracker.getRunCost(runId)).toBe(0)
+      expect(costTracker.getRunTokenUsage(runId)).toEqual({
+        promptTokens: 1000,
+        completionTokens: 500,
+        cacheReadTokens: 0,
+        totalTokens: 1500,
+      })
+    })
+
+    it('persists $0 cost with real tokens for subscription-metered runs', () => {
+      costTracker.recordCost(runId, 0, { promptTokens: 2000, completionTokens: 1000, cacheReadTokens: 500 })
+      expect(costTracker.getRunCost(runId)).toBe(0)
+      expect(costTracker.getRunTokenUsage(runId)).toEqual({
+        promptTokens: 2000,
+        completionTokens: 1000,
+        cacheReadTokens: 500,
+        totalTokens: 3500,
+      })
+    })
+  })
+
+  describe('subscription-metered cost model', () => {
+    const limits = {
+      maxDailyCostUsd: 50,
+      maxCostPerRunUsd: 10,
+      maxChangedFiles: 50,
+      maxChangedLines: 5000,
+    }
+
+    it('enforces per-run limit when enforcePerRunLimit is true', () => {
+      const meteredLimits = {
+        ...limits,
+        maxCostPerRunUsd: 5,
+      }
+      const costConfig = {
+        model: 'subscription-metered' as const,
+        subscriptionMetered: {
+          advisoryThresholdUsd: null,
+          enforcePerRunLimit: true,
+          enforceDailyLimit: false,
+        },
+      }
+      costTracker.recordCost(runId, 6.0)
+      const status = costTracker.checkBudget(runId, meteredLimits, costConfig)
+      expect(status.overBudget).toBe(true)
+      if (status.overBudget) {
+        expect(status.limit).toBe('per-run')
+      }
+    })
+
+    it('does not enforce per-run limit when enforcePerRunLimit is false', () => {
+      const meteredLimits = {
+        ...limits,
+        maxCostPerRunUsd: 5,
+      }
+      const costConfig = {
+        model: 'subscription-metered' as const,
+        subscriptionMetered: {
+          advisoryThresholdUsd: null,
+          enforcePerRunLimit: false,
+          enforceDailyLimit: false,
+        },
+      }
+      costTracker.recordCost(runId, 6.0)
+      const status = costTracker.checkBudget(runId, meteredLimits, costConfig)
+      expect(status.overBudget).toBe(false)
+    })
+
+    it('enforces daily limit when enforceDailyLimit is true', () => {
+      const today = new Date().toISOString().split('T')[0]
+      db.prepare(
+        `INSERT INTO daily_costs (date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens)
+         VALUES (?, ?, 0, 0, 0)`,
+      ).run(today, 60)
+      const costConfig = {
+        model: 'subscription-metered' as const,
+        subscriptionMetered: {
+          advisoryThresholdUsd: null,
+          enforcePerRunLimit: false,
+          enforceDailyLimit: true,
+        },
+      }
+      const status = costTracker.checkBudget(runId, limits, costConfig)
+      expect(status.overBudget).toBe(true)
+      if (status.overBudget) {
+        expect(status.limit).toBe('daily')
+      }
+    })
+
+    it('does not enforce daily limit when enforceDailyLimit is false', () => {
+      const today = new Date().toISOString().split('T')[0]
+      db.prepare(
+        `INSERT INTO daily_costs (date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens)
+         VALUES (?, ?, 0, 0, 0)`,
+      ).run(today, 60)
+      const costConfig = {
+        model: 'subscription-metered' as const,
+        subscriptionMetered: {
+          advisoryThresholdUsd: null,
+          enforcePerRunLimit: false,
+          enforceDailyLimit: false,
+        },
+      }
+      const status = costTracker.checkBudget(runId, limits, costConfig)
+      expect(status.overBudget).toBe(false)
+    })
   })
 
   describe('run cost budget override', () => {

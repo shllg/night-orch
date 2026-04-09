@@ -15,6 +15,10 @@ interface CostConfigInput {
   pricing?: Config['cost']['pricing']
 }
 
+/**
+ * Identifies a worker for pricing lookup. The pricing system uses a cascade:
+ * explicit pricingModel → workerType → role → configured default → builtin fallback.
+ */
 export interface PricingIdentity {
   role: string
   workerType?: string | null
@@ -22,13 +26,23 @@ export interface PricingIdentity {
   fallbackMinuteUsd?: number | null
 }
 
+/**
+ * Input for estimating worker cost. All token counts are optional; when
+ * provided, token-based pricing is used. Otherwise, duration-based pricing
+ * applies.
+ */
 export interface EstimateWorkerCostInput {
   cost: CostConfigInput | undefined
   identity: PricingIdentity
   durationMs: number
   tokenUsage?: TokenUsageInput
+  costModel?: Config['cost']['model']
 }
 
+/**
+ * Result of a cost estimation. Includes the USD amount (zero for subscription
+ * models) and metadata about which pricing configuration was selected.
+ */
 export interface EstimateWorkerCostResult {
   usd: number
   modelKey: string
@@ -46,10 +60,26 @@ const DEFAULT_PAY_PER_USE_PRICING: ModelPricing = {
   minuteUsd: 0.008,
 }
 
+/**
+ * Estimate worker cost and return just the USD amount.
+ * For subscription/subscription-metered models, returns 0.
+ */
 export function estimateWorkerCostUsd(input: EstimateWorkerCostInput): number {
   return estimateWorkerCost(input).usd
 }
 
+/**
+ * Estimate worker cost based on token usage or duration.
+ *
+ * Pricing resolution cascade:
+ * 1. If costModel is 'subscription' or 'subscription-metered' → returns $0 USD
+ * 2. Otherwise, resolve model pricing from identity.pricingModel → identity.workerType → identity.role → default
+ * 3. If tokenUsage provided → token-based calculation using resolved pricing
+ * 4. Otherwise → duration-based calculation using per-minute rate
+ *
+ * The function returns detailed metadata about which pricing configuration was
+ * selected to aid debugging of pricing mismatches.
+ */
 export function estimateWorkerCost(input: EstimateWorkerCostInput): EstimateWorkerCostResult {
   const fallbackPricing = DEFAULT_PAY_PER_USE_PRICING
 
@@ -66,6 +96,20 @@ export function estimateWorkerCost(input: EstimateWorkerCostInput): EstimateWork
 
   const profileMinuteUsd = normalizeMinuteUsd(input.identity.fallbackMinuteUsd)
   const minuteUsd = profileMinuteUsd ?? modelPricing.minuteUsd
+
+  // Subscription models charge no per-token/per-minute fees — return $0 USD
+  // while still tracking token counts for analytics.
+  const costModel = input.costModel ?? input.cost?.model ?? 'pay-per-use'
+  if (costModel === 'subscription' || costModel === 'subscription-metered') {
+    return {
+      usd: 0,
+      modelKey,
+      resolvedModelKey: resolvedPricing.resolvedModelKey,
+      usedDefaultModelFallback: resolvedPricing.usedDefaultModelFallback,
+      usedProfileMinuteFallback: profileMinuteUsd !== null,
+    }
+  }
+
   const usd = input.tokenUsage !== undefined
     ? estimateTokenCost(input.tokenUsage, modelPricing)
     : estimateDurationCost(input.durationMs, minuteUsd)

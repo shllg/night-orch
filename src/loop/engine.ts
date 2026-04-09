@@ -608,6 +608,7 @@ function applyEstimatedWorkerCost(
     },
     durationMs,
     tokenUsage,
+    costModel: costConfig?.model,
   })
   const estimatedCost = estimate.usd
 

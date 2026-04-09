@@ -355,6 +355,43 @@ export const handleOperationRoutes: RouteHandler = async (req, res, method, path
     return true
   }
 
+  if (method === 'POST' && pathname === '/api/operations/cost-reset') {
+    const body = await readJsonBody(req)
+    const repo = toNonEmptyString(body['repo'])
+    const issueNumber = toBoundedInt(body['issueNumber'], NaN, 1, Number.MAX_SAFE_INTEGER)
+
+    if (!repo || Number.isNaN(issueNumber)) {
+      writeJson(res, 400, { error: 'repo and issueNumber are required' })
+      return true
+    }
+
+    try {
+      const result = await handleToolCall(
+        'night-orch-cost-reset',
+        withMcpMutationAuth({ repo, issueNumber }, security),
+        runtimeDeps,
+      )
+      writeJson(res, 200, result)
+    } catch (err) {
+      writeJson(res, 400, { error: (err as Error).message })
+    }
+    return true
+  }
+
+  if (method === 'POST' && pathname === '/api/operations/daily-cost-reset') {
+    try {
+      const result = await handleToolCall(
+        'night-orch-daily-cost-reset',
+        withMcpMutationAuth({}, security),
+        runtimeDeps,
+      )
+      writeJson(res, 200, result)
+    } catch (err) {
+      writeJson(res, 400, { error: (err as Error).message })
+    }
+    return true
+  }
+
   if (method === 'POST' && pathname === '/api/operations/update') {
     if (typeof process.send === 'function') {
       process.send({ type: 'update-requested' })

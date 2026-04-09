@@ -331,7 +331,11 @@ export function App({
         } else {
           updateTransitionRef.current = clearUpdateTransitionState()
         }
-        setUpdateStatus(status)
+        setUpdateStatus((prev) =>
+          prev && !status.installMethod
+            ? { ...status, installMethod: prev.installMethod }
+            : status,
+        )
       } catch {
         // Update status availability is best-effort.
       }
@@ -587,7 +591,11 @@ export function App({
             if (cancelled) return
             consecutiveFailures = 0
             setServerUnreachable(false)
-            setUpdateStatus(status)
+            setUpdateStatus((prev) =>
+              prev && !status.installMethod
+                ? { ...status, installMethod: prev.installMethod }
+                : status,
+            )
           },
           onError: (message) => {
             if (cancelled) return
@@ -940,6 +948,15 @@ export function App({
     })
   }, [runIssueOperation])
 
+  const triggerIssueResetCost = useCallback((run: RunSummary) => {
+    void runIssueOperation(run, {
+      operationName: 'cost-reset',
+      endpoint: '/api/operations/cost-reset',
+      confirmMessage: `Reset accumulated costs for ${run.repo}#${run.issue}? If cost-blocked, it will be re-queued.`,
+      fallbackMessage: `Reset costs for ${run.repo}#${run.issue}`,
+    })
+  }, [runIssueOperation])
+
   const triggerProjectLabelsInit = useCallback((repo: string) => {
     if (!window.confirm(`Bootstrap orchestration labels for ${repo}?`)) {
       return
@@ -1000,6 +1017,18 @@ export function App({
       '/api/operations/daily-cost-override/clear',
       {},
       "Cleared today's daily cap override",
+    )
+  }, [runOperation])
+
+  const submitDailyCostReset = useCallback(async () => {
+    if (!window.confirm("Reset today's accumulated cost counters? Cost-blocked runs will be re-queued.")) {
+      return
+    }
+    await runOperation(
+      'daily-cost-reset',
+      '/api/operations/daily-cost-reset',
+      {},
+      "Reset today's daily costs and resumed cost-blocked runs",
     )
   }, [runOperation])
 
@@ -1148,6 +1177,7 @@ export function App({
                   onRebase={triggerIssueRebase}
                   onContinue={triggerIssueContinue}
                   onDeleteEntry={triggerIssueDeleteEntry}
+                  onResetCost={triggerIssueResetCost}
                   onBack={closeIssueDetail}
                 />
               ) : (
@@ -1244,6 +1274,7 @@ export function App({
                   onDailyDraftChange={setDailyOverrideDraft}
                   onDailySubmit={(event) => { void submitDailyCostOverride(event) }}
                   onDailyClear={() => { void clearDailyCostOverride() }}
+                  onDailyReset={() => { void submitDailyCostReset() }}
                   issueDraft={costOverrideDraft}
                   repos={repos}
                   onIssueDraftChange={(patch) => {

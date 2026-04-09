@@ -13,7 +13,7 @@ describe('estimateWorkerCostUsd', () => {
     expect(usd).toBe(0.0105)
   })
 
-  it('estimates advisory USD in subscription mode using configured/builtin rates', () => {
+  it('returns $0 USD for subscription cost model regardless of token usage', () => {
     const usd = estimateWorkerCostUsd({
       cost: { model: 'subscription' },
       identity: { role: 'coder', workerType: 'codex' },
@@ -21,10 +21,10 @@ describe('estimateWorkerCostUsd', () => {
       tokenUsage: { promptTokens: 25_000, completionTokens: 8_000 },
     })
 
-    expect(usd).toBe(0.195)
+    expect(usd).toBe(0)
   })
 
-  it('uses configured model pricing when pricingModel is set on worker profile', () => {
+  it('returns $0 USD for subscription cost model even with configured pricing', () => {
     const usd = estimateWorkerCostUsd({
       cost: {
         model: 'subscription',
@@ -41,7 +41,7 @@ describe('estimateWorkerCostUsd', () => {
       tokenUsage: { promptTokens: 1_000, completionTokens: 1_000 },
     })
 
-    expect(usd).toBe(0.03)
+    expect(usd).toBe(0)
   })
 
   it('falls back to minute pricing when token usage is unavailable', () => {
@@ -70,5 +70,39 @@ describe('estimateWorkerCostUsd', () => {
     })
 
     expect(usd).toBe(0.5)
+  })
+
+  it('returns $0 USD for subscription cost model regardless of token usage', () => {
+    const usd = estimateWorkerCostUsd({
+      cost: { model: 'subscription' },
+      identity: { role: 'coder', workerType: 'claude' },
+      durationMs: 60_000,
+      tokenUsage: { promptTokens: 1_000_000, completionTokens: 500_000 },
+    })
+
+    expect(usd).toBe(0)
+  })
+
+  it('returns $0 USD for subscription-metered cost model regardless of token usage', () => {
+    const usd = estimateWorkerCostUsd({
+      cost: { model: 'subscription-metered' },
+      identity: { role: 'coder', workerType: 'codex' },
+      durationMs: 60_000,
+      tokenUsage: { promptTokens: 2_000_000, completionTokens: 1_000_000 },
+    })
+
+    expect(usd).toBe(0)
+  })
+
+  it('accepts costModel parameter directly (bypassing cost.model)', () => {
+    const usd = estimateWorkerCostUsd({
+      cost: { model: 'pay-per-use' },
+      costModel: 'subscription',
+      identity: { role: 'planner', workerType: 'claude' },
+      durationMs: 60_000,
+      tokenUsage: { promptTokens: 1_000_000, completionTokens: 500_000 },
+    })
+
+    expect(usd).toBe(0)
   })
 })

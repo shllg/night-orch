@@ -3,7 +3,7 @@ import { resolveConfigWithRuntimeSettings } from '../../settings/runtime.js'
 import { handleListSettings, handleSetSetting, handleClearSetting } from './settings.js'
 import { handleStatus, handleRunDetail, handleListRuns, handleCostReport, handleListIssues, handleStreamEvents } from './status.js'
 import { handleRetry, handleSync, handleCleanup, handlePoll, handleRebase, handleContinue } from './operations.js'
-import { handleCostOverride, handleDailyCostOverride, handleLabelsInit, handleDeleteEntry, handleUpdate } from './admin.js'
+import { handleCostOverride, handleCostReset, handleDailyCostOverride, handleDailyCostReset, handleLabelsInit, handleDeleteEntry, handleUpdate } from './admin.js'
 
 interface ToolDefinition {
   name: string
@@ -151,6 +151,35 @@ export function registerTools(): ToolDefinition[] {
             description: "Remove today's daily cost cap override.",
             default: false,
           },
+          authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
+        },
+      },
+    },
+    {
+      name: 'night-orch-cost-reset',
+      description:
+        'Reset accumulated costs for the latest run of an issue. ' +
+        'Subtracts the run\'s cost from the daily total and zeros the per-run cost accumulator. ' +
+        'If the run was cost-blocked, it will be re-queued.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          repo: { type: 'string', description: 'Repository (owner/name)' },
+          issueNumber: { type: 'number', description: 'Issue number' },
+          authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
+        },
+        required: ['repo', 'issueNumber'],
+      },
+    },
+    {
+      name: 'night-orch-daily-cost-reset',
+      description:
+        "Reset today's accumulated daily cost counters (UTC). " +
+        'Zeros the daily totals while preserving any cap override. ' +
+        'Automatically scans for and resumes any cost-blocked runs.',
+      inputSchema: {
+        type: 'object',
+        properties: {
           authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
         },
       },
@@ -313,9 +342,19 @@ export async function handleToolCall(
         args as { repo: string; issueNumber: number; amountUsd?: number; clear?: boolean; authToken?: string },
         runtimeDeps,
       )
+    case 'night-orch-cost-reset':
+      return handleCostReset(
+        args as { repo: string; issueNumber: number; authToken?: string },
+        runtimeDeps,
+      )
     case 'night-orch-daily-cost-override':
       return handleDailyCostOverride(
         args as { amountUsd?: number; clear?: boolean; authToken?: string },
+        runtimeDeps,
+      )
+    case 'night-orch-daily-cost-reset':
+      return handleDailyCostReset(
+        args as { authToken?: string },
         runtimeDeps,
       )
     case 'night-orch-sync':

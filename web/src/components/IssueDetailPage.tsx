@@ -14,6 +14,7 @@ interface IssueDetailPageProps {
   onRebase: (run: RunSummary) => void
   onContinue: (run: RunSummary) => void
   onDeleteEntry: (run: RunSummary, force: boolean) => void
+  onResetCost: (run: RunSummary) => void
   onBack: () => void
 }
 
@@ -30,6 +31,7 @@ export function IssueDetailPage({
   onRebase,
   onContinue,
   onDeleteEntry,
+  onResetCost,
   onBack,
 }: IssueDetailPageProps): ReactElement {
   const [autoScroll, setAutoScroll] = useState(true)
@@ -135,6 +137,11 @@ export function IssueDetailPage({
                   busy={activeOperation === 'continue'}
                   onClick={() => onContinue(run)}
                   label="Queue Continue Pass"
+                />
+                <ActionButton
+                  busy={activeOperation === 'cost-reset'}
+                  onClick={() => onResetCost(run)}
+                  label="Reset Cost"
                 />
                 <label className="label cursor-pointer justify-start gap-2 py-0 sm:col-span-2">
                   <input

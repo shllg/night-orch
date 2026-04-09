@@ -13,6 +13,7 @@ interface BudgetOverridesPanelProps {
   onDailyDraftChange: (value: string) => void
   onDailySubmit: (event: FormEvent<HTMLFormElement>) => void
   onDailyClear: () => void
+  onDailyReset: () => void
   issueDraft: {
     repo: string
     issueNumber: string
@@ -34,6 +35,7 @@ export function BudgetOverridesPanel({
   onDailyDraftChange,
   onDailySubmit,
   onDailyClear,
+  onDailyReset,
   issueDraft,
   repos,
   onIssueDraftChange,
@@ -107,6 +109,19 @@ export function BudgetOverridesPanel({
             </form>
             <p className="mt-2 text-xs text-base-content/60">
               Scoped to the current UTC day. Blocks every queued run until today&apos;s spend hits the new cap.
+            </p>
+            <ButtonWeb
+              type="button"
+              tone="error"
+              size="xs"
+              className="mt-3"
+              onClick={onDailyReset}
+              disabled={dailyBusy || todayCostUsd <= 0}
+            >
+              Reset Today&apos;s Costs
+            </ButtonWeb>
+            <p className="mt-1 text-xs text-base-content/50">
+              Zero the daily counters and auto-resume cost-blocked runs.
             </p>
           </div>
 
