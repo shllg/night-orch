@@ -1,24 +1,16 @@
-import { type FormEvent, type ReactElement } from 'react'
+import { type ReactElement } from 'react'
 
 import { type UpdateStatus } from '../types/dashboard.js'
 import { ActionButton } from './ActionButton.js'
-
-interface LabelsInitFormState {
-  repo: string
-}
 
 interface OperationsPanelProps {
   operationsEnabled: boolean
   activeOperation: string | null
   updateStatus: UpdateStatus | null
   installMethod?: 'git' | 'npm' | 'unknown'
-  repos: string[]
-  labelsInitForm: LabelsInitFormState
-  onLabelsInitFormChange: (patch: Partial<LabelsInitFormState>) => void
   onPoll: () => void
   onSync: () => void
   onCleanup: () => void
-  onLabelsInitSubmit: (event: FormEvent<HTMLFormElement>) => void
   onUpdate: () => void
 }
 
@@ -27,13 +19,9 @@ export function OperationsPanel({
   activeOperation,
   updateStatus,
   installMethod = 'unknown',
-  repos,
-  labelsInitForm,
-  onLabelsInitFormChange,
   onPoll,
   onSync,
   onCleanup,
-  onLabelsInitSubmit,
   onUpdate,
 }: OperationsPanelProps): ReactElement {
   const updateRunning =
@@ -65,27 +53,6 @@ export function OperationsPanel({
             <ActionButton busy={activeOperation === 'sync'} onClick={onSync} label="Run Sync" />
             <ActionButton busy={activeOperation === 'cleanup'} onClick={onCleanup} label="Run Cleanup" />
           </div>
-
-          <form className="rounded-box border border-base-300/70 bg-base-100/60 p-3" onSubmit={onLabelsInitSubmit}>
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-info">Labels Init</h3>
-            <div className="mt-2 space-y-2">
-              <label className="form-control">
-                <div className="label py-0 pb-1">
-                  <span className="label-text text-xs">Repo</span>
-                </div>
-                <select
-                  className="select select-bordered select-sm w-full bg-base-100/90"
-                  value={labelsInitForm.repo}
-                  onChange={(event) => onLabelsInitFormChange({ repo: event.target.value })}
-                >
-                  {repos.map((repo) => (
-                    <option key={repo} value={repo}>{repo}</option>
-                  ))}
-                </select>
-              </label>
-              <ActionButton busy={activeOperation === 'labels-init'} label="Bootstrap Labels" submit />
-            </div>
-          </form>
         </fieldset>
 
         <div className="mt-4 rounded-box border border-base-300/70 bg-base-100/60 p-3">

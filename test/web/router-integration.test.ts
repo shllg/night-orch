@@ -159,6 +159,65 @@ const PROJECTS_SNAPSHOT: ProjectsSnapshot = {
   repos: [],
 }
 
+const PROJECTS_WITH_REPO_SNAPSHOT: ProjectsSnapshot = {
+  ...PROJECTS_SNAPSHOT,
+  repos: [
+    {
+      repo: 'org/repo',
+      forge: 'github',
+      linkedProjects: [],
+      maxConcurrentRuns: 2,
+      localPath: '/tmp/org-repo',
+      baseBranch: 'main',
+      branchPrefix: 'orch',
+      labels: {
+        ready: ['orch:ready'],
+        running: 'orch:running',
+        blocked: 'orch:blocked',
+        needsHuman: 'orch:needs-human',
+        reviewReady: 'orch:review-ready',
+        error: 'orch:error',
+        retry: 'orch:retry',
+        planning: 'orch:planning',
+        mergeQueued: 'orch:merge-queued',
+        merging: 'orch:merging',
+        mergeFailed: 'orch:merge-failed',
+      },
+      labelConfig: {},
+      defaults: {
+        planner: 'claude',
+        coder: 'codex',
+        reviewer: 'claude',
+        doneMode: 'pr-ready',
+        notifyPriority: 'normal',
+        prMentions: [],
+      },
+      planning: {
+        prdDirectory: 'docs/prd',
+      },
+      selectors: {
+        includeLabelsAny: ['orch:ready'],
+        excludeLabelsAny: ['orch:blocked'],
+      },
+      verify: [],
+      prompts: {
+        plannerSystem: false,
+        coderSystem: false,
+        reviewerSystem: false,
+      },
+      agents: {},
+      mergeQueue: {
+        enabled: false,
+        batchSize: 5,
+        mergeMethod: 'merge',
+        retryFlakyOnce: true,
+        requireApproval: true,
+        stagingBranchPrefix: 'orch/staging',
+      },
+    },
+  ],
+}
+
 const SETTINGS_SNAPSHOT: SettingsSnapshot = {
   generatedAt: '2026-04-06T10:00:00.000Z',
   settings: [],
@@ -211,7 +270,10 @@ function withRuns(runs: RunSummary[]): DashboardSnapshot {
   }
 }
 
-function buildFetchMock(snapshot: DashboardSnapshot = DASHBOARD_SNAPSHOT) {
+function buildFetchMock(
+  snapshot: DashboardSnapshot = DASHBOARD_SNAPSHOT,
+  projectsSnapshot: ProjectsSnapshot = PROJECTS_SNAPSHOT,
+) {
   return vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const rawUrl = typeof input === 'string'
       ? input
@@ -223,7 +285,7 @@ function buildFetchMock(snapshot: DashboardSnapshot = DASHBOARD_SNAPSHOT) {
 
     if (pathname === '/api/dashboard') return createJsonResponse(snapshot)
     if (pathname === '/api/session') return createJsonResponse(SESSION_RESPONSE)
-    if (pathname === '/api/projects') return createJsonResponse(PROJECTS_SNAPSHOT)
+    if (pathname === '/api/projects') return createJsonResponse(projectsSnapshot)
     if (pathname === '/api/settings') return createJsonResponse(SETTINGS_SNAPSHOT)
     if (pathname === '/api/shell/sessions') return createJsonResponse(SHELL_SESSIONS_SNAPSHOT)
     if (pathname === '/api/update-status') return createJsonResponse({}, 404)
@@ -465,5 +527,46 @@ describe('dashboard router integration (real App)', () => {
     await waitFor(() => {
       expect(router.state.location.pathname).toBe('/projects')
     })
+  })
+
+  it('runs project labels init after confirmation', async () => {
+    const fetchMock = buildFetchMock(DASHBOARD_SNAPSHOT, PROJECTS_WITH_REPO_SNAPSHOT)
+    vi.stubGlobal('fetch', fetchMock)
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    const { router } = renderDashboard('/projects/org%2Frepo')
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/projects/org%2Frepo')
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Bootstrap Labels' }))
+
+    await waitFor(() => {
+      expect(listOperationCalls(fetchMock)).toHaveLength(1)
+    })
+
+    expect(listOperationCalls(fetchMock)).toEqual([
+      {
+        pathname: '/api/operations/labels-init',
+        body: { repo: 'org/repo' },
+      },
+    ])
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('skips project labels init when confirmation is declined', async () => {
+    const fetchMock = buildFetchMock(DASHBOARD_SNAPSHOT, PROJECTS_WITH_REPO_SNAPSHOT)
+    vi.stubGlobal('fetch', fetchMock)
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+
+    const { router } = renderDashboard('/projects/org%2Frepo')
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/projects/org%2Frepo')
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Bootstrap Labels' }))
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
+    expect(listOperationCalls(fetchMock)).toHaveLength(0)
   })
 })

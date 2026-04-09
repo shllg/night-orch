@@ -5,6 +5,7 @@ import {
   type ProjectRepoSummary,
   type ProjectsSnapshot,
 } from '../types/dashboard.js'
+import { ActionButton } from './ActionButton.js'
 import {
   collectTags,
   describeRoleSelection,
@@ -23,6 +24,9 @@ interface ProjectDetailPageProps {
   snapshot: ProjectsSnapshot | null
   repo: string
   isLoading: boolean
+  operationsEnabled: boolean
+  activeOperation: string | null
+  onLabelsInit: (repo: string) => void
   onBack: () => void
 }
 
@@ -30,6 +34,9 @@ export function ProjectDetailPage({
   snapshot,
   repo,
   isLoading,
+  operationsEnabled,
+  activeOperation,
+  onLabelsInit,
   onBack,
 }: ProjectDetailPageProps): ReactElement {
   const selectedProject = snapshot?.repos.find((candidate) => candidate.repo === repo) ?? null
@@ -92,6 +99,9 @@ export function ProjectDetailPage({
             selectedProject={selectedProject}
             workerProfiles={snapshot.workerProfiles}
             authDisplay={authDisplay}
+            operationsEnabled={operationsEnabled}
+            activeOperation={activeOperation}
+            onLabelsInit={onLabelsInit}
           />
         )}
       </div>
@@ -103,10 +113,16 @@ function ProjectDetailBody({
   selectedProject,
   workerProfiles,
   authDisplay,
+  operationsEnabled,
+  activeOperation,
+  onLabelsInit,
 }: {
   selectedProject: ProjectRepoSummary
   workerProfiles: ProjectsSnapshot['workerProfiles']
   authDisplay: ReturnType<typeof resolveRepoAuthDisplay> | null
+  operationsEnabled: boolean
+  activeOperation: string | null
+  onLabelsInit: (repo: string) => void
 }): ReactElement {
   if (!authDisplay) {
     return <></>
@@ -180,6 +196,19 @@ function ProjectDetailBody({
               </p>
             )}
           </div>
+          {!operationsEnabled && (
+            <div className="alert alert-warning mt-3 text-xs">
+              <span>Operations are disabled by server policy for this web instance.</span>
+            </div>
+          )}
+          <fieldset disabled={!operationsEnabled} className={`mt-3 ${!operationsEnabled ? 'opacity-60' : ''}`}>
+            <ActionButton
+              busy={activeOperation === 'labels-init'}
+              onClick={() => onLabelsInit(selectedProject.repo)}
+              label="Bootstrap Labels"
+            />
+          </fieldset>
+          <p className="mt-2 text-xs text-base-content/65">This action requires confirmation.</p>
         </div>
 
         <div className="rounded-box border border-base-300/70 bg-base-100/65 px-3 py-3">
