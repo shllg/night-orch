@@ -31,6 +31,7 @@ function buildProps(overrides: Partial<DashboardHeaderProps>): DashboardHeaderPr
     onRefresh: () => {},
     onPoll: () => {},
     onSync: () => {},
+    onCleanup: () => {},
     onGoToSettings: () => {},
     ...overrides,
   }
@@ -90,6 +91,7 @@ describe('DashboardHeader', () => {
     const onRefresh = vi.fn<() => void>()
     const onPoll = vi.fn<() => void>()
     const onSync = vi.fn<() => void>()
+    const onCleanup = vi.fn<() => void>()
     const onGoToSettings = vi.fn<() => void>()
 
     const buttons = collectButtons(
@@ -99,6 +101,7 @@ describe('DashboardHeader', () => {
           onRefresh,
           onPoll,
           onSync,
+          onCleanup,
           onGoToSettings,
         }),
       ),
@@ -107,18 +110,20 @@ describe('DashboardHeader', () => {
     findButton(buttons, 'Refresh data').props.onClick?.()
     findButton(buttons, 'Trigger poll').props.onClick?.()
     findButton(buttons, 'Run sync').props.onClick?.()
+    findButton(buttons, 'Run cleanup').props.onClick?.()
     findButton(buttons, 'Open settings').props.onClick?.()
 
     expect(onRefresh).toHaveBeenCalledTimes(1)
     expect(onPoll).toHaveBeenCalledTimes(1)
     expect(onSync).toHaveBeenCalledTimes(1)
+    expect(onCleanup).toHaveBeenCalledTimes(1)
     expect(onGoToSettings).toHaveBeenCalledTimes(1)
   })
 
   it('shows busy/disabled action states while operations are active', () => {
     const html = renderHeader({
       isRefreshing: true,
-      activeOperation: 'sync',
+      activeOperation: 'cleanup',
     })
     const spinnerCount = (html.match(/loading-spinner/g) ?? []).length
     expect(spinnerCount).toBe(2)
@@ -128,14 +133,15 @@ describe('DashboardHeader', () => {
         DashboardHeader,
         buildProps({
           isRefreshing: true,
-          activeOperation: 'sync',
+          activeOperation: 'cleanup',
         }),
       ),
     )
 
     expect(findButton(buttons, 'Refreshing...').props.disabled).toBe(true)
     expect(findButton(buttons, 'Trigger poll').props.disabled).toBe(true)
-    expect(findButton(buttons, 'Syncing...').props.disabled).toBe(true)
+    expect(findButton(buttons, 'Run sync').props.disabled).toBe(true)
+    expect(findButton(buttons, 'Cleaning up...').props.disabled).toBe(true)
     expect(findButton(buttons, 'Open settings').props.disabled).toBe(false)
   })
 })

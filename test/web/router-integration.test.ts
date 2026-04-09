@@ -427,6 +427,27 @@ describe('dashboard router integration (real App)', () => {
     expectPageActive('stats')
   })
 
+  it('runs header cleanup quick action', async () => {
+    const fetchMock = buildFetchMock()
+    vi.stubGlobal('fetch', fetchMock)
+    const { router } = renderDashboard('/issues')
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/issues')
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run cleanup' }))
+
+    await waitFor(() => {
+      expect(listOperationCalls(fetchMock)).toEqual([
+        {
+          pathname: '/api/operations/cleanup',
+          body: {},
+        },
+      ])
+    })
+  })
+
   it('renders issue detail route and navigates back to issues list', async () => {
     const { router } = renderDashboard('/issues/issue%3Aorg%2Frepo%231')
 

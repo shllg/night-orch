@@ -1144,6 +1144,7 @@ export function App({
         }}
         onPoll={triggerPoll}
         onSync={triggerSync}
+        onCleanup={triggerCleanup}
         onGoToSettings={() => {
           navigateToPage('settings')
         }}
@@ -1201,9 +1202,6 @@ export function App({
                       activeOperation={activeOperation}
                       updateStatus={updateStatus}
                       installMethod={snapshot?.build?.installMethod}
-                      onPoll={triggerPoll}
-                      onSync={triggerSync}
-                      onCleanup={triggerCleanup}
                       onUpdate={() => {
                         void submitUpdate()
                       }}

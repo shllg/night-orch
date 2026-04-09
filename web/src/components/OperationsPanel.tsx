@@ -8,9 +8,6 @@ interface OperationsPanelProps {
   activeOperation: string | null
   updateStatus: UpdateStatus | null
   installMethod?: 'git' | 'npm' | 'unknown'
-  onPoll: () => void
-  onSync: () => void
-  onCleanup: () => void
   onUpdate: () => void
 }
 
@@ -19,9 +16,6 @@ export function OperationsPanel({
   activeOperation,
   updateStatus,
   installMethod = 'unknown',
-  onPoll,
-  onSync,
-  onCleanup,
   onUpdate,
 }: OperationsPanelProps): ReactElement {
   const updateRunning =
@@ -46,14 +40,6 @@ export function OperationsPanel({
             </span>
           </div>
         )}
-
-        <fieldset disabled={!operationsEnabled} className={`space-y-4 ${!operationsEnabled ? 'opacity-60' : ''}`}>
-          <div className="grid grid-cols-1 gap-2">
-            <ActionButton busy={activeOperation === 'poll'} onClick={onPoll} label="Trigger Poll" />
-            <ActionButton busy={activeOperation === 'sync'} onClick={onSync} label="Run Sync" />
-            <ActionButton busy={activeOperation === 'cleanup'} onClick={onCleanup} label="Run Cleanup" />
-          </div>
-        </fieldset>
 
         <div className="mt-4 rounded-box border border-base-300/70 bg-base-100/60 p-3">
           <h3 className="text-sm font-semibold uppercase tracking-wide text-info">Deploy</h3>

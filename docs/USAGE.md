@@ -373,6 +373,7 @@ Start the embedded web control surface. Serves the React/Tailwind frontend, a RE
 
 By default, `web` runs in attach mode: no poll loop, no metrics server, and no embedded MCP server are started in the web process. Manual web operations (`poll`, `sync`, `cleanup`, `retry`, `continue`, `rebase`, `delete entry`, `labels-init`, runtime settings set/clear) remain available and execute in the web process.
 Use `--standalone` to run poller + metrics + embedded MCP in the same process as the web server.
+Dashboard-level quick actions for `refresh`, `poll`, `sync`, and `cleanup` are in the sticky header; the Issues-page Operations panel is reserved for Deploy controls.
 Issue-specific actions (`retry`, `continue`, `rebase`, `delete entry`) are launched from each issue's detail page and require a confirmation dialog before execution. Project labels initialization (`labels-init`) is launched from each project's detail page using the `Bootstrap Labels` action and also requires confirmation. `Delete entry` also supports a force toggle for active/shared-state cleanup scenarios.
 
 The web UI includes a **Shell** page for real browser terminal access backed by PTY sessions. Shells start in the current user's home directory (or a home subdirectory you choose), stream output live over websocket, and expose REST routes under `/api/shell/sessions` (create/list/detail/events/close).
