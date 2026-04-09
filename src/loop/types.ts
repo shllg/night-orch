@@ -15,6 +15,7 @@ export type BlockReason =
   | 'verify_config'
   | 'merge_conflict'
   | 'auth_failure'
+  | 'empty_diff'
 
 /** How this run was initiated: new work, PR feedback follow-up, or rebase after merge conflict. */
 export type RunMode = 'fresh' | 'followup' | 'rebase'
@@ -69,6 +70,12 @@ export interface RunContext {
   readonly runMode: RunMode
   readonly blockReason: BlockReason | null
   readonly prReviewFeedback: unknown | null
+
+  /** Git error from diff computation, null if successful. */
+  readonly diffError: string | null
+
+  /** Counter for empty-diff retries (separate from review-driven iterations). */
+  readonly emptyDiffRetries: number
 
   /** Session IDs from worker adapters, keyed by step/role and optional `::adapterType` scope. */
   readonly sessionIds: Readonly<Record<string, string>>

@@ -257,6 +257,71 @@ export async function executeLoop(
     }
     ctx = recordPhase(ctx, step.id, stepSuccess ? 'success' : 'failure', {}, stepStartedAt)
 
+    // Post-verify empty-diff guard: auto-retry coder, skip expensive reviewer
+    if (step.type === 'verify') {
+      // Git error → terminal error (don't retry, something is broken)
+      if (ctx.diffError) {
+        const blockMessage = `Git diff failed: ${ctx.diffError}`
+        checkpoint.phaseBlocked(ctx.runId, 'empty_diff_guard', blockMessage, ctx.iteration)
+        return recordPhase(
+          updateContext(ctx, {
+            currentPhase: 'error',
+            terminalStatus: 'error',
+            stepOutputs: { ...ctx.stepOutputs, blockMessage },
+          }),
+          'empty_diff_guard',
+          'failure',
+        )
+      }
+
+      // Empty diff → auto-retry coder (skip expensive reviewer)
+      if (!ctx.diff) {
+        const maxRetries = config.loop.maxEmptyDiffRetries
+        if (ctx.emptyDiffRetries >= maxRetries) {
+          const blockMessage = `Coder produced no file changes after ${ctx.emptyDiffRetries + 1} attempt(s).`
+          checkpoint.phaseBlocked(ctx.runId, 'empty_diff_guard', blockMessage, ctx.iteration)
+          return recordPhase(
+            updateContext(ctx, {
+              currentPhase: 'blocked',
+              terminalStatus: 'blocked',
+              blockReason: 'empty_diff',
+              stepOutputs: { ...ctx.stepOutputs, blockMessage },
+            }),
+            'empty_diff_guard',
+            'failure',
+          )
+        }
+
+        // Find the coder step to jump back to
+        const coderIndex = findCoderStepBefore(steps, stepIndex)
+        if (coderIndex === -1) {
+          // No coder step found — can't retry, fall through to reviewer
+          logger.warn({ runId: ctx.runId }, 'Empty diff but no coder step to retry — proceeding to review')
+        } else {
+          ctx = updateContext(ctx, {
+            emptyDiffRetries: ctx.emptyDiffRetries + 1,
+            // Do NOT increment iteration — that's for review-driven cycles
+            verifyResults: [],
+            reviewResult: null,
+            diff: null,
+            diffError: null,
+          })
+          logger.info(
+            { runId: ctx.runId, emptyDiffRetries: ctx.emptyDiffRetries, maxRetries },
+            'Coder produced no diff — auto-retrying',
+          )
+          try { metrics?.incLoopIterations(ctx.repo) } catch { /* best-effort */ }
+          stepIndex = coderIndex
+          continue
+        }
+      }
+
+      // Reset emptyDiffRetries when coder produces a real diff
+      if (ctx.diff && ctx.emptyDiffRetries > 0) {
+        ctx = updateContext(ctx, { emptyDiffRetries: 0 })
+      }
+    }
+
     // Fire onPlanReady after plan step completes with a plan
     if (step.type === 'worker' && step.role === 'planner' && ctx.plan && deps.onPlanReady) {
       try { await deps.onPlanReady(ctx) } catch (err) {
@@ -569,10 +634,27 @@ function buildStepArtifacts(step: WorkflowStep, ctx: RunContext): Record<string,
       // was lost.
       return { stepOutput: ctx.stepOutputs[step.id] ?? null }
     case 'verify':
-      return { verifyResults: ctx.verifyResults }
+      return {
+        verifyResults: ctx.verifyResults,
+        diff: ctx.diff,
+        diffError: ctx.diffError,
+        emptyDiffRetries: ctx.emptyDiffRetries,
+      }
     case 'decide':
       return {}
   }
+}
+
+/**
+ * Scan backward from the verify step to find the nearest coder step.
+ * Returns -1 if no coder step is found.
+ */
+function findCoderStepBefore(steps: WorkflowStep[], verifyIndex: number): number {
+  for (let i = verifyIndex - 1; i >= 0; i--) {
+    const s = steps[i]!
+    if (s.type === 'worker' && s.role === 'coder') return i
+  }
+  return -1
 }
 
 // ---------------------------------------------------------------------------

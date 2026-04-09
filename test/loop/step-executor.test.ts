@@ -34,7 +34,10 @@ vi.mock('../../src/workers/env.js', () => ({
 }))
 
 vi.mock('../../src/git/repo.js', () => ({
-  getDiffAgainstBranch: vi.fn().mockResolvedValue('diff --git a/file.ts b/file.ts\n+added'),
+  getDiffAgainstBranch: vi.fn().mockResolvedValue({
+    diff: 'diff --git a/file.ts b/file.ts\n+added',
+    error: null,
+  }),
   getChangedFilesAgainstBranch: vi.fn().mockResolvedValue(['src/a.ts']),
 }))
 
@@ -174,6 +177,8 @@ function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
     sessionIds: {},
     stepOutputs: {},
     iterationSnapshots: [],
+    diffError: null,
+    emptyDiffRetries: 0,
     ...overrides,
   }
 }

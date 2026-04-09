@@ -129,6 +129,8 @@ export interface PromptContext {
     summary: string | null
     context: string
   } | null
+  /** True when this coder invocation is a retry after producing no diff. */
+  emptyDiffRetry?: boolean
 }
 
 /**

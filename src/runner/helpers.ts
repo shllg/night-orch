@@ -14,7 +14,13 @@ import { logger } from '../utils/logger.js'
 
 export const STATUS_MARKER = markerTag('status')
 
-export const TAINTED_BLOCK_REASONS = new Set(['agent_pass_limit', 'cost_limit', 'merge_conflict', 'auth_failure'])
+export const TAINTED_BLOCK_REASONS = new Set([
+  'agent_pass_limit',
+  'cost_limit',
+  'merge_conflict',
+  'auth_failure',
+  'empty_diff',
+])
 
 const ERROR_COMMENT_MAX_LENGTH = 400
 const TOKEN_REDACTION_PATTERNS: RegExp[] = [
@@ -140,6 +146,8 @@ export function blockReasonSummary(reason: BlockReason, ctx: RunContext): string
       return 'Merge conflict encountered. Use /orch continue (auto-merges from base) or /orch retry to start fresh.'
     case 'auth_failure':
       return 'Worker CLI authentication expired. Re-authenticate the worker CLI, then use /orch retry.'
+    case 'empty_diff':
+      return `Coder produced no file changes after ${ctx.emptyDiffRetries} attempt(s). The task may need clarification. Use /orch retry --fresh to start over.`
     default:
       return `Blocked in phase ${ctx.currentPhase}. Use /orch retry to re-run or /orch continue to resume.`
   }

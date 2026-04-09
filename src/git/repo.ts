@@ -68,6 +68,14 @@ export async function isGitRepo(path: string): Promise<boolean> {
 
 const MAX_DIFF_LENGTH = 50_000
 
+/** Discriminated result for diff computation. */
+export interface DiffResult {
+  /** The diff content (empty string if no changes or error). */
+  diff: string
+  /** Error description if git failed, null on success. */
+  error: string | null
+}
+
 /**
  * Get the full diff of all changes (committed + uncommitted + untracked)
  * relative to origin/<baseBranch>.
@@ -80,7 +88,7 @@ const MAX_DIFF_LENGTH = 50_000
 export async function getDiffAgainstBranch(
   worktreePath: string,
   baseBranch: string,
-): Promise<string> {
+): Promise<DiffResult> {
   try {
     // Stage everything so untracked files appear in the diff
     await runGit(['add', '-A'], { cwd: worktreePath })
@@ -95,16 +103,19 @@ export async function getDiffAgainstBranch(
 
     if (!stdout || stdout.trim() === '') {
       logger.warn({ worktreePath, baseBranch }, 'Diff against base branch is empty')
-      return ''
+      return { diff: '', error: null }
     }
 
-    if (stdout.length <= MAX_DIFF_LENGTH) return stdout
-    return stdout.slice(0, MAX_DIFF_LENGTH) + '\n\n[... diff truncated at 50KB ...]'
+    const diff = stdout.length <= MAX_DIFF_LENGTH
+      ? stdout
+      : stdout.slice(0, MAX_DIFF_LENGTH) + '\n\n[... diff truncated at 50KB ...]'
+    return { diff, error: null }
   } catch (err) {
     // Always unstage on error
     await runGit(['reset', 'HEAD', '--', '.'], { cwd: worktreePath, reject: false })
+    const message = err instanceof Error ? err.message : String(err)
     logger.warn({ worktreePath, baseBranch, err }, 'Failed to get diff against base branch')
-    return ''
+    return { diff: '', error: `Failed to compute diff: ${message}` }
   }
 }
 

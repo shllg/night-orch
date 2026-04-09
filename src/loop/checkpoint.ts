@@ -194,6 +194,13 @@ export class Checkpoint {
     const persistedSessionIds = phaseData[SESSION_IDS_KEY]
     const persistedStepOutputs = phaseData[STEP_OUTPUTS_KEY]
 
+    // Rehydrate diff/diffError/emptyDiffRetries from verify artifacts for crash recovery
+    const verifyDiff = typeof verifyArtifacts?.diff === 'string' ? verifyArtifacts.diff : baseCtx.diff
+    const verifyDiffError = typeof verifyArtifacts?.diffError === 'string' ? verifyArtifacts.diffError : null
+    const verifyEmptyDiffRetries = typeof verifyArtifacts?.emptyDiffRetries === 'number'
+      ? verifyArtifacts.emptyDiffRetries
+      : baseCtx.emptyDiffRetries
+
     return {
       ...baseCtx,
       currentPhase: row.current_phase,
@@ -208,6 +215,9 @@ export class Checkpoint {
       reviewResult: (reviewArtifacts?.reviewResult as ReviewerOutput) ?? baseCtx.reviewResult,
       sessionIds: isStringRecord(persistedSessionIds) ? persistedSessionIds : baseCtx.sessionIds,
       stepOutputs: isRecord(persistedStepOutputs) ? persistedStepOutputs : baseCtx.stepOutputs,
+      diff: verifyDiff,
+      diffError: verifyDiffError,
+      emptyDiffRetries: verifyEmptyDiffRetries,
     }
   }
 

@@ -135,6 +135,13 @@ function buildUserPrompt(ctx: PromptContext): string {
     parts.push('This is a retry. Please address the findings above and try again.')
   }
 
+  if (ctx.emptyDiffRetry) {
+    parts.push('')
+    parts.push('## Previous Attempt Warning')
+    parts.push('Your previous attempt produced no file changes. The issue requires code modifications.')
+    parts.push('Ensure you write files to disk before completing.')
+  }
+
   return parts.join('\n')
 }
 

@@ -374,6 +374,7 @@ export const ConfigSchema = z.object({
     reviewNeedsChangesKeyword: z.string().default('CHANGES_REQUIRED'),
     blockOnAmbiguousReview: z.boolean().default(true),
     maxAutoRetries: z.number().int().min(0).default(3),
+    maxEmptyDiffRetries: z.number().int().min(0).max(5).default(2),
     decompose: z.boolean().default(false),
     maxSubtasks: z.number().int().min(1).max(10).default(5),
     maxConcurrentSubtasks: z.number().int().min(1).max(10).default(3),

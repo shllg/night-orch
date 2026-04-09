@@ -182,10 +182,14 @@ export async function executeVerifyStep(
   // Verify metrics (duration + pass/fail) are recorded by the engine
   // after this step completes — recording here would double-count.
 
-  const diff = await getDiffAgainstBranch(ctx.worktreePath, ctx.repoConfig.baseBranch)
+  const diffResult = await getDiffAgainstBranch(ctx.worktreePath, ctx.repoConfig.baseBranch)
 
   return {
-    ctx: updateContext(ctx, { verifyResults, diff }),
+    ctx: updateContext(ctx, {
+      verifyResults,
+      diff: diffResult.diff,
+      diffError: diffResult.error,
+    }),
   }
 }
 
@@ -257,6 +261,7 @@ export function buildPromptContext(ctx: RunContext, role: string): PromptContext
     },
     triageLevel: ctx.triageResult.level,
     followup,
+    emptyDiffRetry: ctx.emptyDiffRetries > 0,
   }
 }
 

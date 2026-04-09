@@ -215,6 +215,7 @@ Discriminated by `type`:
 | `reviewNeedsChangesKeyword` | string | `CHANGES_REQUIRED` | Expected reviewer verdict keyword. |
 | `blockOnAmbiguousReview` | boolean | `true` | Parse failures in review phase become blocked state. |
 | `maxAutoRetries` | int >= 0 | `3` | Auto-retry count for infrastructure errors. |
+| `maxEmptyDiffRetries` | int 0-5 | `2` | Auto-retry count when coder produces no file changes. |
 | `decompose` | boolean | `false` | Enable automatic issue decomposition into sub-tasks. |
 | `maxSubtasks` | int 1-10 | `5` | Maximum sub-tasks per decomposition. |
 | `maxConcurrentSubtasks` | int 1-10 | `3` | Max parallel sub-task worktrees. |

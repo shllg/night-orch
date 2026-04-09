@@ -535,6 +535,8 @@ export async function pollOnce(
                   sessionIds: {},
                   stepOutputs: {},
                   iterationSnapshots: [],
+                  diffError: null,
+                  emptyDiffRetries: 0,
                 }
 
                 // Check if decomposition is enabled and appropriate

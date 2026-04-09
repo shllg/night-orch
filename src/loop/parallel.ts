@@ -132,6 +132,8 @@ export async function executeParallelSubtasks(
             sessionIds: {},
             stepOutputs: {},
             iterationSnapshots: [],
+            diffError: null,
+            emptyDiffRetries: 0,
             issue: {
               ...parentCtx.issue,
               title: subtask.title,
