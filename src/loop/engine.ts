@@ -205,6 +205,7 @@ export async function executeLoop(
         result.pricingIdentity,
         stepDurationMs,
         result.tokenUsage,
+        metrics,
       )
       ctx = costResult.ctx
       if (costResult.budget?.overBudget) {
@@ -721,6 +722,7 @@ function applyEstimatedWorkerCost(
   } | undefined,
   durationMs: number,
   tokenUsage?: TokenUsage,
+  metrics?: MetricsService,
 ): {
   ctx: RunContext
   budget: BudgetStatus
@@ -758,6 +760,12 @@ function applyEstimatedWorkerCost(
     }
   }
 
+  // R4b: Tag the cost entry with its provenance. When the worker
+  // reported real token usage, use `reported_cli`; when it didn't and
+  // the escape hatch is on (R4a), use `estimated_duration` so reports
+  // can surface degraded-confidence rows. R4a throws before reaching
+  // this path when tokenUsage is missing AND the escape hatch is off.
+  const tokenSource = tokenUsage !== undefined ? 'reported_cli' : 'estimated_duration'
   const budget = costTracker.recordCostAndCheckBudget(
     ctx.runId,
     estimatedCost,
@@ -765,10 +773,15 @@ function applyEstimatedWorkerCost(
     {
       stepId,
       workerType: pricingIdentity?.workerType ?? null,
+      tokenSource,
     },
     securityConfig,
     costConfig,
   )
+  // R4f: increment the provenance counter after the recorder succeeds
+  // so Prometheus scrapes see the distribution of reported-cli vs
+  // fallback rows. Best-effort — metric failures never block a run.
+  try { metrics?.incCostTokenSource(tokenSource) } catch { /* best-effort */ }
   if (estimatedCost <= 0) {
     return { ctx, budget }
   }

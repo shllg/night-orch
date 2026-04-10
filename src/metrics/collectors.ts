@@ -127,6 +127,24 @@ export function createMetricsRegistry() {
     registers: [registry],
   })
 
+  /**
+   * R4f: counts cost-ledger entries by their provenance tag. The
+   * default production configuration should only ever increment the
+   * `reported_cli` and `measured_api` labels; non-zero values on
+   * `estimated_duration` or `fallback_zero` indicate that either a
+   * worker failed to report token usage (and the operator has the
+   * escape hatch on) or a code-path regression is writing untagged
+   * rows. The `/api/cost/health` endpoint surfaces these counts as a
+   * `fallbackRate24h` indicator so the operator sees degraded-
+   * confidence cost data at a glance.
+   */
+  const costTokenSourceTotal = new Counter({
+    name: 'night_orch_cost_token_source_total',
+    help: 'Cost ledger entries by token-source provenance tag (reported_cli / measured_api / estimated_duration / fallback_zero)',
+    labelNames: ['source'] as const,
+    registers: [registry],
+  })
+
   return {
     registry,
     runsTotal,
@@ -147,6 +165,7 @@ export function createMetricsRegistry() {
     agentDuration,
     verifyDuration,
     estimatedCost,
+    costTokenSourceTotal,
   }
 }
 

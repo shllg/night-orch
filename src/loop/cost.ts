@@ -1,3 +1,23 @@
+/**
+ * Cost recording and budget policy.
+ *
+ * **Append-only ledger invariant (post-R0d + R4e):** every cost
+ * observation lands in `run_cost_entries` via `persistCostRecord`,
+ * inside a single SQLite transaction that also upserts the
+ * `daily_costs` aggregate and bumps the per-run columns on `runs`.
+ * No code path mutates `run_cost_entries` or the `daily_costs`
+ * aggregates after an entry has been written — R0d deleted the
+ * `subtractRunCostFromDaily`/`resetRunCost` helpers that were the
+ * previous divergence source, and R0c migrated retry/continue/rebase
+ * to `createFollowupAttempt` which starts a new attempt with a fresh
+ * zeroed ledger rather than mutating the prior one.
+ *
+ * `verifyCostLedgerIntegrity()` is the runtime safety net that
+ * detects any future regression of this invariant by re-summing the
+ * ledger and comparing against the stored aggregate. Should stay
+ * clean in all normal operation; a non-empty result indicates a
+ * production bug.
+ */
 import type Database from 'better-sqlite3'
 import type { Config } from '../config/schema.js'
 import type { TokenUsage } from '../workers/types.js'
@@ -5,6 +25,15 @@ import { IssueManager } from '../state/issues.js'
 import { RunManager } from '../state/runs.js'
 import { utcDayKey } from '../utils/time.js'
 import { logger } from '../utils/logger.js'
+import {
+  resolveCostPolicy,
+  type BudgetStatus,
+} from './cost/budget.js'
+
+// Re-export the extracted budget types + helpers so callers that
+// import from './cost.js' continue to work unchanged after R4d.
+export { describeBudgetBlock, costLimitRecoveryHint } from './cost/budget.js'
+export type { BudgetStatus } from './cost/budget.js'
 
 type TokenUsageInput = TokenUsage
 
@@ -15,20 +44,40 @@ export interface TokenUsageTotals {
   totalTokens: number
 }
 
+/**
+ * Provenance tag for a cost-ledger entry. Each recorder call must
+ * declare where the token counts came from so reports can flag
+ * degraded-confidence rows:
+ *
+ *  - `reported_cli` — extracted from a Claude/Codex/opencode CLI
+ *    response (the normal path for code-editing work).
+ *  - `measured_api` — returned directly by a provider API call (Phase 3
+ *    `OrchestratorAI` hook; same precision as CLI but different code path).
+ *  - `estimated_duration` — explicit opt-in fallback, only legal when
+ *    `cost.allowEstimatedDuration: true`. R4a throws instead of writing
+ *    this tag by default because the duration estimate undercounted by
+ *    10–100× in production.
+ *  - `fallback_zero` — reserved for audit rows when the recorder is
+ *    called with a zero token count that came from somewhere other
+ *    than a real worker (e.g. subscription-mode runs that never
+ *    reported usage but we still want to track the attempt).
+ */
+export type TokenSource =
+  | 'reported_cli'
+  | 'measured_api'
+  | 'estimated_duration'
+  | 'fallback_zero'
+
 interface CostRecordMetadata {
   stepId?: string
   workerType?: string | null
-}
-
-interface SubscriptionMeteredPolicy {
-  advisoryThresholdUsd: number | null
-  enforcePerRunLimit: boolean
-  enforceDailyLimit: boolean
-}
-
-interface ResolvedCostPolicy {
-  model: Config['cost']['model']
-  subscriptionMetered: SubscriptionMeteredPolicy
+  /**
+   * Provenance of the token counts being recorded. Defaults to
+   * `'reported_cli'` for back-compat with existing call sites; engine
+   * code that knows it's recording a duration-estimate or API-measured
+   * row should pass the explicit value.
+   */
+  tokenSource?: TokenSource
 }
 
 export interface StepCostBreakdown {
@@ -64,6 +113,7 @@ export class CostTracker {
     usdAmount: number,
     costStepId: string | null,
     costWorkerType: string | null,
+    tokenSource: TokenSource,
   ): void {
     const runUsageInsert = this.db
       .prepare(
@@ -115,9 +165,10 @@ export class CostTracker {
              cost_usd,
              prompt_tokens,
              completion_tokens,
-             cache_read_tokens
+             cache_read_tokens,
+             token_source
            )
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           runId,
@@ -127,6 +178,7 @@ export class CostTracker {
           usage.promptTokens,
           usage.completionTokens,
           usage.cacheReadTokens,
+          tokenSource,
         )
     }
 
@@ -157,13 +209,14 @@ export class CostTracker {
     const today = utcDayKey()
     const costStepId = metadata.stepId?.trim() ? metadata.stepId : null
     const costWorkerType = metadata.workerType?.trim() ? metadata.workerType : null
+    const tokenSource: TokenSource = metadata.tokenSource ?? 'reported_cli'
     const tx = this.db.transaction((
       id: string,
       date: string,
       usage: TokenUsageTotals,
       usdAmount: number,
     ) => {
-      this.persistCostRecord(id, date, usage, usdAmount, costStepId, costWorkerType)
+      this.persistCostRecord(id, date, usage, usdAmount, costStepId, costWorkerType, tokenSource)
     })
 
     tx(runId, today, normalizedTokens, amountUsd)
@@ -196,6 +249,7 @@ export class CostTracker {
     const today = utcDayKey()
     const costStepId = metadata.stepId?.trim() ? metadata.stepId : null
     const costWorkerType = metadata.workerType?.trim() ? metadata.workerType : null
+    const tokenSource: TokenSource = metadata.tokenSource ?? 'reported_cli'
 
     const tx = this.db.transaction((
       id: string,
@@ -205,11 +259,75 @@ export class CostTracker {
       securityLimits: Config['security'],
       policyInput: Config['cost']['model'] | Config['cost'] | undefined,
     ): BudgetStatus => {
-      this.persistCostRecord(id, date, usage, usdAmount, costStepId, costWorkerType)
+      this.persistCostRecord(id, date, usage, usdAmount, costStepId, costWorkerType, tokenSource)
       return this.checkBudget(id, securityLimits, policyInput)
     })
 
     return tx(runId, today, normalizedTokens, amountUsd, limits, costPolicyInput)
+  }
+
+  /**
+   * R4e: Verify that the `daily_costs` aggregate matches the ledger
+   * sum from `run_cost_entries` for every day that has any entries.
+   *
+   * The two tables are updated transactionally inside
+   * `persistCostRecord`, so they can't drift in normal operation. The
+   * divergence risk that motivated R4e (see plan `Phase 1 — R4.4d`)
+   * came from cost-reset code paths that mutated `daily_costs`
+   * without touching the ledger — all of those are deleted in R0d.
+   * This integrity check is the safety net that catches any future
+   * regression of that work.
+   *
+   * Returns the set of dates where the aggregate diverges from the
+   * ledger sum, with both values so callers can log the drift. An
+   * empty array means the invariant holds.
+   */
+  verifyCostLedgerIntegrity(): Array<{
+    date: string
+    aggregateUsd: number
+    ledgerUsd: number
+    deltaUsd: number
+  }> {
+    // Sum the ledger per-day, left-join with daily_costs, and filter
+    // to rows where the values don't match within a 1e-6 tolerance
+    // (floating-point roundoff from the six-decimal clamp).
+    const rows = this.db
+      .prepare(
+        `SELECT
+           l.date AS date,
+           COALESCE(l.ledger_usd, 0) AS ledger_usd,
+           COALESCE(d.total_cost_usd, 0) AS aggregate_usd
+         FROM (
+           SELECT date(created_at) AS date, SUM(cost_usd) AS ledger_usd
+           FROM run_cost_entries
+           GROUP BY date(created_at)
+         ) l
+         LEFT JOIN daily_costs d ON d.date = l.date`,
+      )
+      .all() as Array<{
+      date: string
+      ledger_usd: number
+      aggregate_usd: number
+    }>
+
+    const divergent: Array<{
+      date: string
+      aggregateUsd: number
+      ledgerUsd: number
+      deltaUsd: number
+    }> = []
+    for (const row of rows) {
+      const delta = row.aggregate_usd - row.ledger_usd
+      if (Math.abs(delta) > 1e-6) {
+        divergent.push({
+          date: row.date,
+          aggregateUsd: row.aggregate_usd,
+          ledgerUsd: row.ledger_usd,
+          deltaUsd: delta,
+        })
+      }
+    }
+    return divergent
   }
 
   /**
@@ -623,37 +741,6 @@ export class CostTracker {
   }
 }
 
-export type BudgetStatus =
-  | { overBudget: false }
-  | {
-      overBudget: true
-      limit: 'daily' | 'per-run'
-      actualUsd: number
-      limitUsd: number
-    }
-
-/** Human-readable message naming the specific limit that tripped. */
-export function describeBudgetBlock(
-  status: Extract<BudgetStatus, { overBudget: true }>,
-): string {
-  const label = status.limit === 'daily' ? 'Daily cost limit' : 'Per-run cost limit'
-  return `${label} exceeded: $${status.actualUsd.toFixed(2)} >= $${status.limitUsd.toFixed(2)}`
-}
-
-/** Actionable recovery hint shown alongside the block reason. */
-export function costLimitRecoveryHint(limit: 'daily' | 'per-run'): string {
-  if (limit === 'daily') {
-    return (
-      'Raise today\'s cap via the web dashboard or Settings (auto-expires at 00:00 UTC), ' +
-      'grant this run a budget override, ' +
-      'or wait until 00:00 UTC for the daily counter to reset.'
-    )
-  }
-  return (
-    'Raise `security.maxCostPerRunUsd` via Settings or grant this run a budget override to continue.'
-  )
-}
-
 function normalizeTokenUsage(tokenUsage: TokenUsageInput | undefined): TokenUsageTotals {
   const promptTokens = normalizeTokenCount(tokenUsage?.promptTokens)
   const completionTokens = normalizeTokenCount(tokenUsage?.completionTokens)
@@ -683,28 +770,3 @@ interface RunTokenRow {
   cache_read_tokens: number | null
 }
 
-function resolveCostPolicy(
-  input: Config['cost']['model'] | Config['cost'] | undefined,
-): ResolvedCostPolicy {
-  if (typeof input === 'string') {
-    return {
-      model: input,
-      subscriptionMetered: {
-        advisoryThresholdUsd: null,
-        enforcePerRunLimit: false,
-        enforceDailyLimit: false,
-      },
-    }
-  }
-
-  const model = input?.model ?? 'pay-per-use'
-  const subscriptionMetered = input?.subscriptionMetered
-  return {
-    model,
-    subscriptionMetered: {
-      advisoryThresholdUsd: subscriptionMetered?.advisoryThresholdUsd ?? null,
-      enforcePerRunLimit: subscriptionMetered?.enforcePerRunLimit ?? false,
-      enforceDailyLimit: subscriptionMetered?.enforceDailyLimit ?? false,
-    },
-  }
-}

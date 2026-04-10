@@ -304,7 +304,15 @@ function tryParseJson(line: string): unknown | null {
   }
 }
 
-function extractClaudeTokenUsage(raw: string): WorkerTaskResult['tokenUsage'] {
+/**
+ * Extract structured token usage from raw Claude Code CLI output.
+ *
+ * Exported so R4c fixture tests can assert the parser's behavior
+ * against representative output shapes directly, without spinning up
+ * a full worker invocation. Production code should prefer the
+ * encapsulated path through `ClaudeAdapter.runTask`.
+ */
+export function extractClaudeTokenUsage(raw: string): WorkerTaskResult['tokenUsage'] {
   const parsed = tryParseJson(raw)
   if (!parsed) return undefined
 

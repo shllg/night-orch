@@ -522,4 +522,129 @@ describe('CostTracker', () => {
       expect(() => costTracker.setDailyCapOverride(Number.POSITIVE_INFINITY)).toThrow(/positive finite/)
     })
   })
+
+  describe('R4b — token_source provenance tagging', () => {
+    it('defaults ledger entries to reported_cli', () => {
+      costTracker.recordCost(runId, 1.0, { promptTokens: 100, completionTokens: 50 }, { stepId: 'plan' })
+      const row = db
+        .prepare(
+          `SELECT token_source FROM run_cost_entries WHERE run_id = ? AND step_id = ?`,
+        )
+        .get(runId, 'plan') as { token_source: string }
+      expect(row.token_source).toBe('reported_cli')
+    })
+
+    it('persists an explicit estimated_duration tag', () => {
+      costTracker.recordCost(
+        runId,
+        0.05,
+        { promptTokens: 0, completionTokens: 0 },
+        { stepId: 'plan', tokenSource: 'estimated_duration' },
+      )
+      const row = db
+        .prepare(
+          `SELECT token_source FROM run_cost_entries WHERE run_id = ? AND step_id = ?`,
+        )
+        .get(runId, 'plan') as { token_source: string }
+      expect(row.token_source).toBe('estimated_duration')
+    })
+
+    it('persists an explicit measured_api tag', () => {
+      costTracker.recordCost(
+        runId,
+        0.5,
+        { promptTokens: 200, completionTokens: 80 },
+        { stepId: 'triage', tokenSource: 'measured_api' },
+      )
+      const row = db
+        .prepare(
+          `SELECT token_source FROM run_cost_entries WHERE run_id = ? AND step_id = ?`,
+        )
+        .get(runId, 'triage') as { token_source: string }
+      expect(row.token_source).toBe('measured_api')
+    })
+
+    it('recordCostAndCheckBudget propagates tokenSource to the ledger', () => {
+      costTracker.recordCostAndCheckBudget(
+        runId,
+        0.1,
+        { promptTokens: 10, completionTokens: 5 },
+        { stepId: 'code', tokenSource: 'reported_cli' },
+        { maxChangedFiles: 50, maxChangedLines: 5000, maxDailyCostUsd: 50, maxCostPerRunUsd: 10 },
+        'pay-per-use',
+      )
+      const row = db
+        .prepare(
+          `SELECT token_source FROM run_cost_entries WHERE run_id = ? AND step_id = ?`,
+        )
+        .get(runId, 'code') as { token_source: string }
+      expect(row.token_source).toBe('reported_cli')
+    })
+  })
+
+  describe('R4e — ledger integrity invariant', () => {
+    it('holds after a single recordCost call', () => {
+      costTracker.recordCost(
+        runId,
+        1.5,
+        { promptTokens: 100, completionTokens: 50 },
+        { stepId: 'plan' },
+      )
+      expect(costTracker.verifyCostLedgerIntegrity()).toEqual([])
+    })
+
+    it('holds after a sequence of recordCost calls across steps', () => {
+      costTracker.recordCost(runId, 0.5, { promptTokens: 100, completionTokens: 30 }, { stepId: 'plan' })
+      costTracker.recordCost(runId, 1.2, { promptTokens: 200, completionTokens: 80 }, { stepId: 'code' })
+      costTracker.recordCost(runId, 0.3, { promptTokens: 50, completionTokens: 20 }, { stepId: 'review' })
+      expect(costTracker.verifyCostLedgerIntegrity()).toEqual([])
+    })
+
+    it('holds after mixed recordCost and recordCostAndCheckBudget', () => {
+      costTracker.recordCost(runId, 0.5, { promptTokens: 100, completionTokens: 50 }, { stepId: 'plan' })
+      costTracker.recordCostAndCheckBudget(
+        runId,
+        1.0,
+        { promptTokens: 200, completionTokens: 100 },
+        { stepId: 'code' },
+        { maxChangedFiles: 50, maxChangedLines: 5000, maxDailyCostUsd: 50, maxCostPerRunUsd: 10 },
+        'pay-per-use',
+      )
+      expect(costTracker.verifyCostLedgerIntegrity()).toEqual([])
+    })
+
+    it('reports the specific date and delta when the aggregate drifts', () => {
+      // Simulate a regression of the R0d cost-reset work by manually
+      // corrupting the daily_costs aggregate. This is the exact
+      // failure mode verifyCostLedgerIntegrity() exists to catch.
+      costTracker.recordCost(
+        runId,
+        2.0,
+        { promptTokens: 100, completionTokens: 50 },
+        { stepId: 'plan' },
+      )
+      const today = new Date().toISOString().slice(0, 10)
+      db.prepare(
+        `UPDATE daily_costs SET total_cost_usd = total_cost_usd - 0.5 WHERE date = ?`,
+      ).run(today)
+
+      const divergent = costTracker.verifyCostLedgerIntegrity()
+      expect(divergent).toHaveLength(1)
+      expect(divergent[0]?.date).toBe(today)
+      expect(divergent[0]?.deltaUsd).toBeCloseTo(-0.5, 6)
+      expect(divergent[0]?.ledgerUsd).toBe(2.0)
+      expect(divergent[0]?.aggregateUsd).toBeCloseTo(1.5, 6)
+    })
+
+    it('tolerates floating-point roundoff within 1e-6 tolerance', () => {
+      costTracker.recordCost(
+        runId,
+        0.1234567,
+        { promptTokens: 1, completionTokens: 1 },
+        { stepId: 'plan' },
+      )
+      // Six-decimal clamp applied at record time; no drift expected.
+      expect(costTracker.verifyCostLedgerIntegrity()).toEqual([])
+    })
+  })
 })

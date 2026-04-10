@@ -274,7 +274,16 @@ function parseCodexEvents(raw: string): unknown[] {
   return events
 }
 
-function extractCodexTokenUsage(raw: string): WorkerTaskResult['tokenUsage'] {
+/**
+ * Extract structured token usage from raw Codex CLI output.
+ *
+ * Exported so R4c fixture tests can assert the parser's behavior
+ * against representative output shapes directly. Handles both the
+ * JSON array format and NDJSON line-delimited stream, and prefers
+ * `response.completed` events over `turn.completed` as the canonical
+ * source of per-turn usage totals.
+ */
+export function extractCodexTokenUsage(raw: string): WorkerTaskResult['tokenUsage'] {
   const events = parseCodexEvents(raw)
   if (events.length === 0) return undefined
 

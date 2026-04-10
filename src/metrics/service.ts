@@ -21,6 +21,7 @@ export interface MetricsService {
   incVerifyRuns(result: 'pass' | 'fail'): void
   incPROperations(type: 'created' | 'updated'): void
   incNotifications(channel: string, result: 'sent' | 'failed'): void
+  incCostTokenSource(source: 'reported_cli' | 'measured_api' | 'estimated_duration' | 'fallback_zero'): void
 
   observeRunDuration(durationSeconds: number): void
   observePhaseDuration(phase: string, durationSeconds: number): void
@@ -51,6 +52,7 @@ class NoopMetricsService implements MetricsService {
   incVerifyRuns(): void { /* no-op */ }
   incPROperations(): void { /* no-op */ }
   incNotifications(): void { /* no-op */ }
+  incCostTokenSource(): void { /* no-op */ }
   observeRunDuration(): void { /* no-op */ }
   observePhaseDuration(): void { /* no-op */ }
   observeAgentDuration(): void { /* no-op */ }
@@ -133,6 +135,12 @@ class LiveMetricsService implements MetricsService {
 
   incNotifications(channel: string, result: 'sent' | 'failed'): void {
     try { this.metrics.notificationsTotal.inc({ channel, result }) } catch { /* best-effort */ }
+  }
+
+  incCostTokenSource(
+    source: 'reported_cli' | 'measured_api' | 'estimated_duration' | 'fallback_zero',
+  ): void {
+    try { this.metrics.costTokenSourceTotal.inc({ source }) } catch { /* best-effort */ }
   }
 
   observeRunDuration(durationSeconds: number): void {
