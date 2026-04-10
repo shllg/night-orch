@@ -98,10 +98,23 @@ export interface RunContext {
  * for DB persistence via `blockedReasonToLegacy()` during the R1
  * incremental rewiring — consumers that care about structured data
  * should switch on `state.reason.type` instead of the legacy string.
+ *
+ * The `iterate` variant may carry an optional `jumpTo` hint telling
+ * the engine which phase to re-enter. When absent, the engine uses
+ * the decide step's configured `onIterate` target (the review-driven
+ * default). When set to `'coder'`, the engine jumps back to the
+ * closest prior coder step without re-running the reviewer — used by
+ * `decideEmptyDiffRetry()` so the expensive reviewer is skipped when
+ * the coder produced no changes.
  */
 export type LoopDecision =
   | { action: 'publish'; reason: string }
-  | { action: 'iterate'; reason: string; findings: ReviewFinding[] }
+  | {
+      action: 'iterate'
+      reason: string
+      findings: ReviewFinding[]
+      jumpTo?: 'coder'
+    }
   | { action: 'block'; reason: string; state: BlockedState }
   | { action: 'error'; reason: string }
 

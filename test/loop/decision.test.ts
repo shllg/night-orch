@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { decide } from '../../src/loop/decision.js'
+import { decide, decideEmptyDiffRetry } from '../../src/loop/decision.js'
 import type { RunContext } from '../../src/loop/types.js'
 import type { Config } from '../../src/config/schema.js'
 
@@ -11,6 +11,7 @@ const loopConfig: Config['loop'] = {
   reviewApprovalKeyword: 'APPROVED',
   reviewNeedsChangesKeyword: 'CHANGES_REQUIRED',
   blockOnAmbiguousReview: true,
+  maxEmptyDiffRetries: 2,
 }
 
 const securityConfig: Config['security'] = {
@@ -406,6 +407,76 @@ describe('decide', () => {
       const d = decide(ctx, loopConfig, securityConfig)
       expect(d.action).toBe('error')
       if (d.action === 'error') expect(d.reason).toContain('Unknown review verdict')
+    })
+  })
+
+  describe('decideEmptyDiffRetry', () => {
+    it('returns null when the diff is non-empty', () => {
+      const ctx = makeCtx({ diff: 'diff --git a/x b/x\n+new line', emptyDiffRetries: 0 })
+      expect(decideEmptyDiffRetry(ctx, loopConfig)).toBeNull()
+    })
+
+    it('returns null when the diff is a whitespace-only string', () => {
+      // Treated as a real diff shape; decideEmptyDiffRetry leaves the
+      // flow alone so reviewer still gets to weigh in.
+      const ctx = makeCtx({ diff: 'something', emptyDiffRetries: 0 })
+      expect(decideEmptyDiffRetry(ctx, loopConfig)).toBeNull()
+    })
+
+    it('returns iterate+jumpTo=coder on the first empty-diff attempt', () => {
+      const ctx = makeCtx({ diff: null, emptyDiffRetries: 0 })
+      const d = decideEmptyDiffRetry(ctx, loopConfig)
+      expect(d).not.toBeNull()
+      expect(d?.action).toBe('iterate')
+      if (d?.action === 'iterate') {
+        expect(d.jumpTo).toBe('coder')
+        expect(d.findings).toEqual([])
+        expect(d.reason).toMatch(/auto-retrying \(1\/3\)/)
+      }
+    })
+
+    it('returns iterate+jumpTo=coder on subsequent attempts under the limit', () => {
+      const ctx = makeCtx({ diff: null, emptyDiffRetries: 1 })
+      const d = decideEmptyDiffRetry(ctx, loopConfig)
+      expect(d?.action).toBe('iterate')
+      if (d?.action === 'iterate') {
+        expect(d.jumpTo).toBe('coder')
+        expect(d.reason).toMatch(/auto-retrying \(2\/3\)/)
+      }
+    })
+
+    it('returns block(emptyDiff) when retries exhausted', () => {
+      // loopConfig.maxEmptyDiffRetries = 2 → the 3rd attempt (already at
+      // count 2) should block rather than retry again.
+      const ctx = makeCtx({ diff: null, emptyDiffRetries: 2 })
+      const d = decideEmptyDiffRetry(ctx, loopConfig)
+      expect(d?.action).toBe('block')
+      if (d?.action === 'block') {
+        expect(d.state.reason.type).toBe('emptyDiff')
+        if (d.state.reason.type === 'emptyDiff') {
+          expect(d.state.reason.retries).toBe(3)
+        }
+        expect(d.reason).toContain('Coder produced no file changes after 3 attempt(s)')
+      }
+    })
+
+    it('respects a lower maxEmptyDiffRetries config', () => {
+      const zeroRetries = { ...loopConfig, maxEmptyDiffRetries: 0 }
+      const ctx = makeCtx({ diff: null, emptyDiffRetries: 0 })
+      const d = decideEmptyDiffRetry(ctx, zeroRetries)
+      // Zero retries allowed → first empty diff blocks immediately.
+      expect(d?.action).toBe('block')
+      if (d?.action === 'block') {
+        expect(d.state.reason.type).toBe('emptyDiff')
+      }
+    })
+
+    it('does not mutate the input context', () => {
+      const ctx = makeCtx({ diff: null, emptyDiffRetries: 0 })
+      const before = { ...ctx }
+      decideEmptyDiffRetry(ctx, loopConfig)
+      expect(ctx.emptyDiffRetries).toBe(before.emptyDiffRetries)
+      expect(ctx.diff).toBe(before.diff)
     })
   })
 })

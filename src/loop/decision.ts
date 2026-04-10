@@ -235,3 +235,63 @@ export function decide(
       return { action: 'error', reason: `Unknown review verdict: ${review.verdict as string}` }
   }
 }
+
+/**
+ * Decide how to handle a post-verify empty-diff condition.
+ *
+ * Pre-R3 this was a hardcoded block at the top of `engine.ts`'s
+ * post-verify handler, with its own counter on `RunContext.emptyDiffRetries`
+ * and its own `stepIndex = coderIndex; continue` jump. Moving the logic
+ * here keeps all routing decisions in one pure, testable module — the
+ * engine becomes a thin dispatcher that acts on the returned decision.
+ *
+ * Returns:
+ *  - `null` when the diff is non-empty (or was a legitimate planning-only
+ *    PRD, handled separately) and nothing needs to happen. The engine
+ *    should continue down the workflow to the reviewer.
+ *  - `{ action: 'iterate', jumpTo: 'coder', ... }` when retries are still
+ *    available. The engine should rewind `stepIndex` to the closest prior
+ *    coder step, increment `emptyDiffRetries`, and re-enter the loop.
+ *  - `{ action: 'block', state: blocked({ type: 'emptyDiff', retries }) }`
+ *    when the retry budget has been exhausted. The engine should terminate
+ *    the attempt with the typed blocked state.
+ *
+ * The function does NOT mutate context — the engine is responsible
+ * for incrementing `emptyDiffRetries` and clearing transient fields
+ * when it acts on an `iterate` return. Counter kept separate from
+ * `ctx.iteration` because the step-executor prompts the worker with
+ * `emptyDiffRetry: ctx.emptyDiffRetries > 0` to warn it off the same
+ * (no-op) output, and collapsing the fields would lose that signal.
+ */
+export function decideEmptyDiffRetry(
+  ctx: RunContext,
+  loopConfig: Config['loop'],
+): LoopDecision | null {
+  // Non-empty diff → nothing to decide; flow continues to reviewer.
+  if (ctx.diff !== null && ctx.diff.trim().length > 0) {
+    return null
+  }
+
+  const maxRetries = loopConfig.maxEmptyDiffRetries
+  const attemptsSoFar = ctx.emptyDiffRetries
+
+  if (attemptsSoFar >= maxRetries) {
+    const attempts = attemptsSoFar + 1
+    const reason = `Coder produced no file changes after ${attempts} attempt(s).`
+    return {
+      action: 'block',
+      reason,
+      state: blocked(
+        { type: 'emptyDiff', retries: attempts },
+        { message: reason },
+      ),
+    }
+  }
+
+  return {
+    action: 'iterate',
+    reason: `Coder produced no diff — auto-retrying (${attemptsSoFar + 1}/${maxRetries + 1})`,
+    findings: [],
+    jumpTo: 'coder',
+  }
+}

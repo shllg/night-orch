@@ -27,6 +27,7 @@ import {
   blockedReasonToLegacy,
   type BlockedReason,
 } from './state.js'
+import { decideEmptyDiffRetry } from './decision.js'
 import { logger } from '../utils/logger.js'
 import { utcIsoFromMs } from '../utils/time.js'
 import type Database from 'better-sqlite3'
@@ -283,9 +284,12 @@ export async function executeLoop(
     }
     ctx = recordPhase(ctx, step.id, stepSuccess ? 'success' : 'failure', {}, stepStartedAt)
 
-    // Post-verify empty-diff guard: auto-retry coder, skip expensive reviewer
+    // Post-verify guard: hand off to the pure decision layer. Git
+    // errors are treated as terminal (infra broken, no point
+    // retrying); empty-diff scenarios route through
+    // decideEmptyDiffRetry() which centralizes the retry-vs-block
+    // policy alongside the rest of the routing rules in decision.ts.
     if (step.type === 'verify') {
-      // Git error → terminal error (don't retry, something is broken)
       if (ctx.diffError) {
         const blockMessage = `Git diff failed: ${ctx.diffError}`
         checkpoint.phaseBlocked(ctx.runId, 'empty_diff_guard', blockMessage, ctx.iteration)
@@ -300,17 +304,16 @@ export async function executeLoop(
         )
       }
 
-      // Empty diff → auto-retry coder (skip expensive reviewer)
-      if (!ctx.diff) {
-        const maxRetries = config.loop.maxEmptyDiffRetries
-        if (ctx.emptyDiffRetries >= maxRetries) {
-          const blockMessage = `Coder produced no file changes after ${ctx.emptyDiffRetries + 1} attempt(s).`
+      const emptyDiffDecision = decideEmptyDiffRetry(ctx, config.loop)
+      if (emptyDiffDecision !== null) {
+        if (emptyDiffDecision.action === 'block') {
+          const blockMessage = emptyDiffDecision.state.message
           checkpoint.phaseBlocked(ctx.runId, 'empty_diff_guard', blockMessage, ctx.iteration)
           return recordPhase(
             updateContext(ctx, {
               currentPhase: 'blocked',
               terminalStatus: 'blocked',
-              blockReason: 'empty_diff',
+              blockReason: blockedReasonToLegacy(emptyDiffDecision.state.reason),
               stepOutputs: { ...ctx.stepOutputs, blockMessage },
             }),
             'empty_diff_guard',
@@ -318,27 +321,36 @@ export async function executeLoop(
           )
         }
 
-        // Find the coder step to jump back to
-        const coderIndex = findCoderStepBefore(steps, stepIndex)
-        if (coderIndex === -1) {
-          // No coder step found — can't retry, fall through to reviewer
-          logger.warn({ runId: ctx.runId }, 'Empty diff but no coder step to retry — proceeding to review')
-        } else {
-          ctx = updateContext(ctx, {
-            emptyDiffRetries: ctx.emptyDiffRetries + 1,
-            // Do NOT increment iteration — that's for review-driven cycles
-            verifyResults: [],
-            reviewResult: null,
-            diff: null,
-            diffError: null,
-          })
-          logger.info(
-            { runId: ctx.runId, emptyDiffRetries: ctx.emptyDiffRetries, maxRetries },
-            'Coder produced no diff — auto-retrying',
-          )
-          try { metrics?.incLoopIterations(ctx.repo) } catch { /* best-effort */ }
-          stepIndex = coderIndex
-          continue
+        if (emptyDiffDecision.action === 'iterate' && emptyDiffDecision.jumpTo === 'coder') {
+          const coderIndex = findCoderStepBefore(steps, stepIndex)
+          if (coderIndex === -1) {
+            // Workflow is missing a prior coder step — can't act on
+            // the jumpTo hint. Fall through to the reviewer.
+            logger.warn(
+              { runId: ctx.runId },
+              'Empty diff but no coder step to retry — proceeding to review',
+            )
+          } else {
+            ctx = updateContext(ctx, {
+              emptyDiffRetries: ctx.emptyDiffRetries + 1,
+              // Do NOT increment iteration — that's for review-driven cycles.
+              verifyResults: [],
+              reviewResult: null,
+              diff: null,
+              diffError: null,
+            })
+            logger.info(
+              {
+                runId: ctx.runId,
+                emptyDiffRetries: ctx.emptyDiffRetries,
+                maxRetries: config.loop.maxEmptyDiffRetries,
+              },
+              emptyDiffDecision.reason,
+            )
+            try { metrics?.incLoopIterations(ctx.repo) } catch { /* best-effort */ }
+            stepIndex = coderIndex
+            continue
+          }
         }
       }
 
