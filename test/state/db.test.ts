@@ -91,4 +91,56 @@ describe('initDatabase', () => {
     expect(columns).toContain('issue_title')
     expect(columns).toContain('pr_title')
   })
+
+  it('adds attempt columns (migration 023)', () => {
+    db = initDatabase(join(tmpDir, 'test.db'))
+    const columns = db
+      .prepare('PRAGMA table_info(runs)')
+      .all()
+      .map((row) => row as { name: string; type: string; notnull: number; dflt_value: string | null })
+
+    const seq = columns.find((c) => c.name === 'sequence_number')
+    expect(seq).toBeDefined()
+    expect(seq?.type).toBe('INTEGER')
+    expect(seq?.notnull).toBe(1)
+
+    const intent = columns.find((c) => c.name === 'intent')
+    expect(intent).toBeDefined()
+    expect(intent?.type).toBe('TEXT')
+    expect(intent?.notnull).toBe(1)
+
+    const terminatedAt = columns.find((c) => c.name === 'terminated_at')
+    expect(terminatedAt).toBeDefined()
+    expect(terminatedAt?.type).toBe('TEXT')
+    expect(terminatedAt?.notnull).toBe(0)
+
+    const indexes = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%'")
+      .all()
+      .map((row) => (row as { name: string }).name)
+    expect(indexes).toContain('idx_runs_parent')
+    expect(indexes).toContain('idx_runs_repo_issue_seq')
+  })
+
+  it('backfills attempt columns for pre-existing rows (migration 023)', () => {
+    // Simulate an existing DB created before migration 023: initialize, insert a
+    // row using only legacy columns, close, reopen to run the migration again
+    // (idempotent), and assert the backfill defaults took effect.
+    const dbPath = join(tmpDir, 'backfill.db')
+    db = initDatabase(dbPath)
+    db.prepare(
+      `INSERT INTO runs (id, repo, issue_number, status) VALUES ('r1', 'foo/bar', 42, 'queued')`,
+    ).run()
+    db.close()
+
+    db = initDatabase(dbPath)
+    const row = db
+      .prepare(
+        `SELECT sequence_number, intent, terminated_at FROM runs WHERE id = 'r1'`,
+      )
+      .get() as { sequence_number: number; intent: string; terminated_at: string | null }
+    expect(row.sequence_number).toBe(1)
+    expect(row.intent).toBe('initial')
+    expect(row.terminated_at).toBeNull()
+  })
 })

@@ -24,6 +24,7 @@ import { up as migration019 } from './migrations/019-runs-active-index-top-level
 import { up as migration020 } from './migrations/020-cost-ledger.js'
 import { up as migration021 } from './migrations/021-run-control-state.js'
 import { up as migration022 } from './migrations/022-run-log-events.js'
+import { up as migration023 } from './migrations/023-attempt-columns.js'
 
 const MIGRATIONS = [
   { version: 1, name: '001-initial', up: migration001 },
@@ -48,6 +49,7 @@ const MIGRATIONS = [
   { version: 20, name: '020-cost-ledger', up: migration020 },
   { version: 21, name: '021-run-control-state', up: migration021 },
   { version: 22, name: '022-run-log-events', up: migration022 },
+  { version: 23, name: '023-attempt-columns', up: migration023 },
 ]
 
 export function initDatabase(dbPath: string): Database.Database {
