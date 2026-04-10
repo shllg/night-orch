@@ -99,6 +99,11 @@ describe('initDatabase', () => {
       .all()
       .map((row) => row as { name: string; type: string; notnull: number; dflt_value: string | null })
 
+    const previousAttempt = columns.find((c) => c.name === 'previous_attempt_id')
+    expect(previousAttempt).toBeDefined()
+    expect(previousAttempt?.type).toBe('TEXT')
+    expect(previousAttempt?.notnull).toBe(0)
+
     const seq = columns.find((c) => c.name === 'sequence_number')
     expect(seq).toBeDefined()
     expect(seq?.type).toBe('INTEGER')
@@ -118,14 +123,14 @@ describe('initDatabase', () => {
       .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%'")
       .all()
       .map((row) => (row as { name: string }).name)
-    expect(indexes).toContain('idx_runs_parent')
+    expect(indexes).toContain('idx_runs_previous_attempt')
     expect(indexes).toContain('idx_runs_repo_issue_seq')
   })
 
   it('backfills attempt columns for pre-existing rows (migration 023)', () => {
-    // Simulate an existing DB created before migration 023: initialize, insert a
-    // row using only legacy columns, close, reopen to run the migration again
-    // (idempotent), and assert the backfill defaults took effect.
+    // Initialize, insert a row, close, reopen (idempotent migration), and
+    // assert the defaults took effect. This proves that rows inserted via
+    // pre-023 code paths still get sane attempt-column values.
     const dbPath = join(tmpDir, 'backfill.db')
     db = initDatabase(dbPath)
     db.prepare(
@@ -136,9 +141,15 @@ describe('initDatabase', () => {
     db = initDatabase(dbPath)
     const row = db
       .prepare(
-        `SELECT sequence_number, intent, terminated_at FROM runs WHERE id = 'r1'`,
+        `SELECT previous_attempt_id, sequence_number, intent, terminated_at FROM runs WHERE id = 'r1'`,
       )
-      .get() as { sequence_number: number; intent: string; terminated_at: string | null }
+      .get() as {
+      previous_attempt_id: string | null
+      sequence_number: number
+      intent: string
+      terminated_at: string | null
+    }
+    expect(row.previous_attempt_id).toBeNull()
     expect(row.sequence_number).toBe(1)
     expect(row.intent).toBe('initial')
     expect(row.terminated_at).toBeNull()
