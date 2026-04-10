@@ -145,6 +145,34 @@ export function createMetricsRegistry() {
     registers: [registry],
   })
 
+  /**
+   * Phase 4 gate metric (R5): number of rows currently in the
+   * `checkpoint_quarantine` table. Should be zero under normal
+   * operation; a non-zero value means phase_data corruption was
+   * detected at crash recovery time and the operator should
+   * inspect the row payloads to understand what went wrong. The
+   * CLI `night-orch status` reads this gauge for its health line.
+   */
+  const checkpointQuarantineRows = new Gauge({
+    name: 'night_orch_checkpoint_quarantine_rows',
+    help: 'Rows currently in the checkpoint_quarantine table (0 = healthy)',
+    registers: [registry],
+  })
+
+  /**
+   * Phase 4 gate metric (R6): number of times the poller's circuit
+   * breaker has tripped, i.e. skipped an issue because consecutive
+   * blocked runs exceeded `loop.maxConsecutiveBlocks`. Should stay
+   * near zero under normal operation; frequent trips mean an issue
+   * is stuck in a loop and needs operator attention.
+   */
+  const circuitBreakerTripsTotal = new Counter({
+    name: 'night_orch_circuit_breaker_trips_total',
+    help: 'Circuit breaker trips by repo (consecutive blocked runs exceeded maxConsecutiveBlocks)',
+    labelNames: ['repo'] as const,
+    registers: [registry],
+  })
+
   return {
     registry,
     runsTotal,
@@ -166,6 +194,8 @@ export function createMetricsRegistry() {
     verifyDuration,
     estimatedCost,
     costTokenSourceTotal,
+    checkpointQuarantineRows,
+    circuitBreakerTripsTotal,
   }
 }
 

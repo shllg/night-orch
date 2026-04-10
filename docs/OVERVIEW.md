@@ -131,7 +131,7 @@ Pushes branches and creates/updates PRs via the forge adapter. Compiles PR title
 `computeLabelMutation()` is a pure function that computes which labels to add/remove for a given status transition. `transitionLabels()` applies mutations via the forge, with best-effort error handling (logs warnings, doesn't throw).
 
 ### Notifications (`src/notify/`)
-Multi-channel dispatcher. Channels (console, webhook, Discord, SMTP, GitHub comment) run in parallel via `Promise.allSettled()`. Event config controls which events trigger notifications. Missing env vars silently skip channels.
+Multi-channel dispatcher. Channels (console, webhook, Discord, SMTP, GitHub comment, Web Push) run in parallel via `Promise.allSettled()`. Event config controls which events trigger notifications. Missing env vars silently skip channels. The `webpush` channel sends VAPID-signed push notifications to any browser that subscribed through the web UI's Settings page and prunes expired endpoints on HTTP `410 Gone`.
 
 ### Mentions (`src/mentions/`)
 Posts configured mentions to PRs. Deduplication is commit-specific (tracked in SQLite). Labels like `pr-mention:slack` configure per-issue mentions.
@@ -140,13 +140,22 @@ Posts configured mentions to PRs. Deduplication is commit-specific (tracked in S
 Prometheus metrics via `prom-client`. `createMetricsService()` returns either a live service or a no-op. All metric calls are wrapped in try-catch — metrics never block or throw. HTTP endpoint serves `/metrics` (Prometheus format) and `/api/stats` (JSON).
 
 ### MCP Server (`src/mcp/`)
-Model Context Protocol interface for external agents. Fourteen tools (status, run detail, list runs, cost report, retry, continue, sync, cleanup, delete entry, poll, list issues, stream events, rebase, update). Three resources (status, config, metrics). Mutation tools require auth token if configured. Run-event streaming exposes one ordered log across system and agent events.
+Model Context Protocol interface for external agents. Eighteen tools — see [USAGE.md → MCP Integration](./USAGE.md#mcp-integration) for the full list. Three resources (status, config, metrics). Mutation tools require the auth token from `mcp.authTokenEnv` when configured. Transport: `stdio` for the standalone `night-orch mcp` command; HTTP/SSE when embedded in the `run` daemon (host/port from `mcp.httpHost` / `mcp.httpPort`). Run-event streaming exposes one ordered log across system and agent events.
+
+### Poller (`src/poller/`)
+The R6 decomposition of the old `src/runner/poller.ts` god object. `discovery-scheduler.ts` picks eligible issues each cycle. `reaction-processor.ts` turns forge events (comment commands, label changes, PR reactions) into typed control commands. `attempt-dispatcher.ts` holds the lease, inserts a new `attempts` row, runs the loop engine, and finalizes. `error-recovery.ts` classifies typed worker errors and decides retry vs. block. `notify-dispatcher.ts` maps attempt events to notification payloads.
+
+### AI (`src/ai/`)
+Phase 3 direct-LLM client layer for night-orch's **own** internal AI tasks — triage refinement, reviewer parse salvage, PR body generation. `anthropic.ts` (Messages API) and `openrouter.ts` (OpenAI-compat) are thin fetch wrappers with Zod-validated structured output. Consumers gate on `ai.internal.enable.*` so the layer is opt-in per feature. Token usage feeds the same cost ledger as CLI workers, tagged `token_source='measured_api'`. Code-editing roles (planner/coder/reviewer) **stay on the CLI path** — they rely on the agentic tool-use loop that direct APIs don't provide.
 
 ### Ops (`src/ops/`)
-Maintenance engines: `sync.ts` reconciles local state with forge (finds orphaned runs, fixes label mismatches), `cleanup.ts` removes stale worktrees and archives old logs, `retry.ts` starts fresh retries from latest base, `continue.ts` gathers fresh PR context and resumes the existing branch, and `rebase-and-check.ts` manages explicit rebase flows plus post-rebase verification.
+Maintenance engines: `sync.ts` reconciles local state with forge (finds orphaned attempts, fixes label mismatches), `cleanup.ts` removes stale worktrees and archives old logs, `retry.ts` starts fresh retries from latest base (inserts a new attempt), `continue.ts` gathers fresh PR context and resumes the existing branch (inserts a new attempt), and `rebase-and-check.ts` manages explicit rebase flows plus post-rebase verification.
 
 ### State (`src/state/`)
-SQLite with WAL mode via `better-sqlite3`. `db.ts` handles init and migrations. `runs.ts` manages run records (create, update, query). `leases.ts` provides atomic lease acquisition via `INSERT OR IGNORE`.
+SQLite with WAL mode via `better-sqlite3`. `db.ts` handles init and migrations. `attempts.ts` manages the **immutable** attempts ledger (see below): every `retry`/`continue`/`rebase` inserts a new row chained to the previous one via `previous_attempt_id`, and terminated attempts are never mutated afterward. `runs.ts` preserves the legacy per-row update surface for callers that still query by run id. `leases.ts` provides atomic lease acquisition via `INSERT OR IGNORE`. `stats.ts` powers the Web/TUI dashboards.
+
+### Web (`src/web/`)
+HTTP/SSE server serving the Web UI and programmatic API for operators. `server.ts` binds the routes (`/api/status`, `/api/operations/*`, `/api/settings`, `/api/stats`, `/api/cost/health`, `/api/events` SSE). `auth.ts` provides stateless HMAC-signed session cookies (`norch_session`) that survive daemon restarts only as long as the signing secret does, plus a `--skip-auth` bypass for deployments behind a trusted reverse proxy (Caddy, Tailscale serve). `webpush.ts` wires the VAPID-signed Web Push delivery used by the `webpush` notification channel. The frontend is in the top-level `web/` package (Vite + React + Tailwind).
 
 ### Utils (`src/utils/`)
 `logger.ts` — pino logger with token redaction. `ids.ts` — nanoid-based run IDs. `command.ts` — shell command parsing with quoting support.
@@ -196,18 +205,21 @@ interface RunContext {
 A **pure function** with no side effects. This is critical for testability and crash recovery:
 
 ```
-decide(ctx: RunContext) → Decision
+decide(ctx: RunContext) → LoopDecision
 ```
 
+Every decision wraps a `RunState` (`src/loop/state.ts`) discriminated union — `running`, `publishing`, `published`, `blocked { reason }`, or `error`. The `blocked.reason` sub-union (`costLimit`, `iterationLimit`, `agentPassLimit`, `reviewerBlocked`, `ambiguousReview`, `verifyConfig`, `mergeConflict`, `authFailure`, `emptyDiff`, `workerTimeout`, `tokenCaptureFailed`) gives compile-time exhaustiveness via `assertNever` at every consumer (status comments, label transitions, finalizer, web snapshot).
+
 Rules (in priority order):
-1. Cost over budget → `block`
-2. Max agent passes exceeded → `block`
-3. `APPROVED` + verify pass → `publish`
-4. `APPROVED` + verify fail → `iterate` (tests broke, try again)
-5. `CHANGES_REQUIRED` under iteration limit → `iterate`
-6. `CHANGES_REQUIRED` at max iterations → `block`
-7. `BLOCKED` verdict → `block`
-8. Parse failure → `block` or `iterate` (configurable)
+1. Cost over budget → `blocked { costLimit }`
+2. Max agent passes exceeded → `blocked { agentPassLimit }`
+3. Empty diff + no review findings → `iterate` (R3, bounded by `loop.maxEmptyDiffRetries`)
+4. `APPROVED` + verify pass → `publish`
+5. `APPROVED` + verify fail → `iterate` (tests broke, try again)
+6. `CHANGES_REQUIRED` under iteration limit → `iterate`
+7. `CHANGES_REQUIRED` at max iterations → `blocked { iterationLimit }`
+8. `BLOCKED` verdict → `blocked { reviewerBlocked }`
+9. Parse failure → `blocked { ambiguousReview }` or `iterate` (configurable)
 
 > **Watch out:** `decide()` must never do I/O, read the DB, or call APIs. If you need new information for a decision, add it to `RunContext` in a prior phase. Putting side effects in `decide()` breaks crash recovery because the function may be re-executed after a checkpoint restore.
 
@@ -245,12 +257,18 @@ All persistent state lives in SQLite (WAL mode). Here's what each table tracks a
 
 | Entity | Written by | Read by | Purpose |
 |--------|-----------|---------|---------|
-| `runs` | Poller, Loop Engine | Poller, Ops, MCP, CLI | Run lifecycle (queued → running → completed/blocked/error) |
-| `checkpoints` | Loop Engine | Loop Engine (resume) | Phase artifacts for crash recovery |
-| `leases` | Poller (acquire/release) | Poller (skip check), Ops (cleanup) | Prevent duplicate processing |
-| `slugs` | Git module (first use) | Git module (subsequent) | Immutable branch name slugs |
-| `mentions` | Mention Tracker | Mention Tracker | Per-commit dedup of PR mentions |
-| `migrations` | DB init | DB init | Track applied schema migrations |
+| `attempts` (formerly `runs`) | AttemptDispatcher, Loop Engine | Poller, Ops, Web, MCP, CLI | **Immutable per-attempt lifecycle** (queued → running → completed/blocked/error). Retry/continue/rebase INSERT new rows chained via `previous_attempt_id`. |
+| `run_cost_entries` | Cost Recorder | Cost Query, Web, MCP | Append-only cost ledger with `token_source` provenance (`reported_cli`, `measured_api`, `estimated_duration`, `fallback_zero`). |
+| `checkpoints` | Loop Engine | Loop Engine (resume) | Phase artifacts for crash recovery, validated by Zod (R5). |
+| `checkpoint_quarantine` | Loop Engine | Operator, metrics | Rows rejected by the Zod validator — non-zero count is a Phase 4 gate alert. |
+| `leases` | AttemptDispatcher | Poller (skip check), Ops (cleanup) | Prevent duplicate processing. |
+| `web_sessions` (deprecated) | — | — | Predecessor to stateless session cookies. New installs leave this empty. |
+| `push_subscriptions` | Web auth | WebPush channel | VAPID push targets for the `webpush` notification channel. |
+| `slugs` | Git module | Git module | Immutable branch-name slugs. |
+| `mentions` | Mention Tracker | Mention Tracker | Per-commit dedup of PR mentions. |
+| `migrations` | DB init | DB init | Track applied schema migrations. |
+
+The single biggest data-model rule: **terminated attempts are read-only**. Setting `terminated_at` is a one-way latch. Retry/continue/rebase never mutate a prior attempt — they insert a new one with a fresh cost ledger and a `previous_attempt_id` pointer. This eliminates the entire "reset-counters" bug class that drove multiple FIX commits pre-Phase-1.
 
 > **Watch out:** All SQL queries use parameterized statements (`?` placeholders). String interpolation in SQL is forbidden — it's a security vulnerability and a linting failure.
 

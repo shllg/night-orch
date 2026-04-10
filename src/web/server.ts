@@ -38,6 +38,11 @@ export interface WebServerOptions {
   frontendDistPath?: string
   snapshotIntervalMs?: number
   operationsEnabled?: boolean
+  /** Phase 2a: when `false`, the mutation auth guard is bypassed
+   * entirely — use only behind a trusted reverse proxy (Caddy with
+   * basic-auth, Tailscale serve, etc.) that handles auth itself.
+   * Defaults to `true`. */
+  requireAuth?: boolean
   rawConfig?: unknown
 }
 
@@ -54,6 +59,10 @@ export interface WebSecurityContext {
   /** Secret used to sign session cookies. Generated at startup and
    * kept in memory — restarts invalidate existing sessions. */
   sessionSecret: Buffer
+  /** Phase 2a: when false, `validateMutationRequest` short-circuits
+   * to success without checking cookies or headers. Intended for
+   * deployments behind a trusted reverse proxy that handles auth. */
+  authRequired: boolean
 }
 
 export type WebSocketCommand =
@@ -515,6 +524,17 @@ export function validateMutationRequest(
     return { statusCode: 415, error: 'Content-Type must be application/json' }
   }
 
+  // Phase 2a: `web --skip-auth` / `requireAuth:false` bypasses the
+  // cookie+header check entirely. The host, origin, intent, and
+  // content-type guards above still apply so trivial drive-by
+  // CSRF is still blocked — but the caller doesn't need to present
+  // a session cookie or bearer token. Intended for deployments
+  // behind a trusted reverse proxy (Caddy, Tailscale) that handles
+  // authentication at its own layer.
+  if (!security.authRequired) {
+    return null
+  }
+
   // Phase 2a: accept either a valid session cookie OR the legacy
   // header token. The cookie path lets mobile browsers authenticate
   // once via POST /api/auth/session and then present credentials
@@ -593,6 +613,7 @@ function createWebSecurityContext(deps: MCPDependencies, options: WebServerOptio
     mcpMutationAuthToken: resolveMcpMutationAuthToken(deps),
     operatorAuthMode,
     sessionSecret: randomBytes(32),
+    authRequired: options.requireAuth !== false,
   }
 }
 

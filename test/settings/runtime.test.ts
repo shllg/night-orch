@@ -158,7 +158,7 @@ describe('runtime settings', () => {
 
   it('lists non-project runtime settings with base values by default', () => {
     const settings = listRuntimeSettings(baseConfig, db)
-    expect(settings).toHaveLength(54)
+    expect(settings).toHaveLength(56)
     expect(settings.map((s) => s.key)).toContain('security.maxCostPerRunUsd')
     expect(settings.map((s) => s.key)).toContain('github.tokenEnv')
     expect(settings.map((s) => s.key)).toContain('cost.subscriptionMetered')

@@ -22,6 +22,8 @@ export interface MetricsService {
   incPROperations(type: 'created' | 'updated'): void
   incNotifications(channel: string, result: 'sent' | 'failed'): void
   incCostTokenSource(source: 'reported_cli' | 'measured_api' | 'estimated_duration' | 'fallback_zero'): void
+  setCheckpointQuarantineRows(count: number): void
+  incCircuitBreakerTrip(repo: string): void
 
   observeRunDuration(durationSeconds: number): void
   observePhaseDuration(phase: string, durationSeconds: number): void
@@ -53,6 +55,8 @@ class NoopMetricsService implements MetricsService {
   incPROperations(): void { /* no-op */ }
   incNotifications(): void { /* no-op */ }
   incCostTokenSource(): void { /* no-op */ }
+  setCheckpointQuarantineRows(): void { /* no-op */ }
+  incCircuitBreakerTrip(): void { /* no-op */ }
   observeRunDuration(): void { /* no-op */ }
   observePhaseDuration(): void { /* no-op */ }
   observeAgentDuration(): void { /* no-op */ }
@@ -141,6 +145,14 @@ class LiveMetricsService implements MetricsService {
     source: 'reported_cli' | 'measured_api' | 'estimated_duration' | 'fallback_zero',
   ): void {
     try { this.metrics.costTokenSourceTotal.inc({ source }) } catch { /* best-effort */ }
+  }
+
+  setCheckpointQuarantineRows(count: number): void {
+    try { this.metrics.checkpointQuarantineRows.set(count) } catch { /* best-effort */ }
+  }
+
+  incCircuitBreakerTrip(repo: string): void {
+    try { this.metrics.circuitBreakerTripsTotal.inc({ repo }) } catch { /* best-effort */ }
   }
 
   observeRunDuration(durationSeconds: number): void {

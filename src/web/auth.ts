@@ -27,10 +27,15 @@ import type { IncomingMessage } from 'node:http'
 
 export const SESSION_COOKIE_NAME = 'norch_session'
 
-/** Session cookie TTL: 7 days. Short enough that a stolen cookie
- * stops working quickly, long enough that mobile users don't have
- * to re-auth daily. */
-const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
+/** Session cookie TTL: 1 year. The signing secret is regenerated
+ * on every daemon restart, which is the real security boundary —
+ * a stolen cookie stops working the next time night-orch recycles
+ * regardless of the exposed Max-Age. The long Max-Age exists so
+ * mobile browsers on the same daemon uptime don't have to re-enter
+ * the operator token every week. Operators who rely on
+ * reverse-proxy auth (Caddy, Tailscale) can skip night-orch auth
+ * entirely via `web.requireAuth: false` instead. */
+const SESSION_TTL_SECONDS = 365 * 24 * 60 * 60
 
 /** Version byte on the payload so we can rotate the cookie format
  * without having to read the old signature. */

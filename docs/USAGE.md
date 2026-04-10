@@ -59,9 +59,43 @@ The daemon polls each configured repo for issues labeled `orch:ready`, processes
 
 ### Remote web access + mobile
 
-The web UI at `127.0.0.1:3200` is loopback-only by default. To use it
-from a phone or another machine, bind it to a non-loopback interface
-and set an operator token:
+The web UI at `127.0.0.1:3200` is loopback-only by default. There
+are three deployment shapes for remote access, in increasing order
+of operator auth involvement:
+
+**Option 1 — Trust the reverse proxy (simplest; Caddy, Tailscale serve, nginx)**
+
+If you're already running a trusted proxy in front of night-orch
+(Caddy with basic-auth, Cloudflare Tunnel, Tailscale serve,
+authenticated nginx), let it handle authentication and bypass
+night-orch's own auth entirely:
+
+```bash
+# night-orch binds loopback only, the proxy reaches it locally.
+night-orch web --host 127.0.0.1 --port 3200 --skip-auth
+```
+
+Then configure Caddy / Tailscale / nginx to forward to
+`http://127.0.0.1:3200` with whatever auth model you already trust.
+The `--skip-auth` flag disables the cookie+token check on the
+mutation guard but keeps the intent-header and content-type guards
+in place, so drive-by CSRF is still blocked.
+
+**Option 2 — Tailscale only (trust the tailnet)**
+
+Bind loopback, run `tailscale serve` as the forwarder, and every
+device on your tailnet can reach the UI without any additional
+auth:
+
+```bash
+tailscale serve --bg https / http://127.0.0.1:3200
+night-orch web --host 127.0.0.1 --port 3200 --skip-auth
+```
+
+**Option 3 — Direct exposure with the built-in operator token**
+
+If you don't have a proxy, bind to a non-loopback interface and
+set an operator token:
 
 ```bash
 export NIGHT_ORCH_WEB_AUTH_TOKEN=$(openssl rand -base64 24)
@@ -69,14 +103,18 @@ night-orch web --host 0.0.0.0 --port 3200 \
   --allowed-host myhost.example
 ```
 
-On first visit the browser shows a sign-in dialog; paste the same
-token and the server replies with an `HttpOnly SameSite=Lax` session
-cookie that lasts 7 days. The cookie is rotated on every restart
-since the signing secret lives in memory — a stolen cookie stops
-working as soon as the daemon recycles.
+On first visit the browser shows a sign-in dialog; paste the token
+and the server replies with an `HttpOnly SameSite=Lax` session
+cookie that lasts 1 year. **The signing secret is regenerated on
+every restart**, so a stolen cookie stops working as soon as the
+daemon recycles — the 1-year Max-Age exists so mobile users on the
+same daemon uptime aren't re-prompted every week, not as an
+infinite grant.
 
-For **push notifications** to phones that have installed the web UI
-as a PWA, add a `webpush` notification channel:
+### Web Push notifications (overnight alerts to your phone)
+
+For push notifications to phones that installed the web UI as a
+PWA, add a `webpush` notification channel:
 
 ```yaml
 notifications:
@@ -92,6 +130,101 @@ export the three env vars on the daemon host, then open Settings in
 the web UI and click **Enable notifications**. Subsequent `blocked`,
 `pr_ready`, `error`, and `retry_exhausted` events deliver as
 background notifications even when the tab is closed.
+
+### Running as a systemd service
+
+A minimal service unit + environment file for a system-wide install:
+
+**`/etc/systemd/system/night-orch.service`**
+
+```ini
+[Unit]
+Description=night-orch autonomous agent orchestrator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=orch
+Group=orch
+WorkingDirectory=/home/orch
+EnvironmentFile=/etc/night-orch/env
+ExecStart=/usr/local/bin/night-orch serve \
+  --web-host 127.0.0.1 --web-port 3200 \
+  --skip-auth
+Restart=on-failure
+RestartSec=10
+
+# Basic hardening — the daemon only needs to read config and
+# write to its state/worktree directories.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/orch/.config/night-orch /home/orch/code/.night-orch
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**`/etc/night-orch/env`** — mode `0600`, owned by `orch:orch`.
+Keeps secrets out of the service unit and out of `ps`.
+
+```ini
+# Forge auth (pick the one you use)
+GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# FORGEJO_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# Web UI operator token (only needed when NOT using --skip-auth)
+# NIGHT_ORCH_WEB_AUTH_TOKEN=base64url-random-24-bytes
+
+# Phase 2c — Web Push VAPID keys (only when webpush channel is configured)
+# NIGHT_ORCH_VAPID_PUBLIC=BN...
+# NIGHT_ORCH_VAPID_PRIVATE=dW...
+# NIGHT_ORCH_VAPID_SUBJECT=mailto:you@example.com
+
+# Phase 3 — Direct-LLM API keys (only when ai.internal.provider is set)
+# ANTHROPIC_API_KEY=sk-ant-api03-...
+# OPENROUTER_API_KEY=sk-or-v1-...
+
+# MCP HTTP server token (only when mcp.enabled: true AND bound non-loopback)
+# NIGHT_ORCH_MCP_AUTH=xxxxxxxxxxxxxxxxxx
+
+# Optional: tune log level
+# LOG_LEVEL=info
+```
+
+**Commands**:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now night-orch
+sudo systemctl status night-orch
+journalctl -u night-orch -f
+```
+
+### Environment variables reference
+
+All env vars night-orch reads, grouped by feature area:
+
+| Var | Required when | Effect |
+|---|---|---|
+| `GITHUB_TOKEN` (or custom `tokenEnv`) | using GitHub forge | Forge auth. Blacklisted from CLI worker subprocesses. |
+| `FORGEJO_TOKEN` (or custom) | using Forgejo forge | Forge auth. Blacklisted from CLI worker subprocesses. |
+| `NIGHT_ORCH_WEB_AUTH_TOKEN` | binding web UI non-loopback without `--skip-auth` | Operator token for the login dialog. |
+| `NIGHT_ORCH_MCP_AUTH` | `mcp.authTokenEnv` set | MCP HTTP server auth. |
+| `NIGHT_ORCH_VAPID_PUBLIC` | `webpush` notification channel | Web Push VAPID public key. |
+| `NIGHT_ORCH_VAPID_PRIVATE` | `webpush` notification channel | Web Push VAPID private key. Blacklisted from worker envs. |
+| `NIGHT_ORCH_VAPID_SUBJECT` | `webpush` notification channel | `mailto:` URL for VAPID subject. |
+| `ANTHROPIC_API_KEY` (or custom `apiKeyEnv`) | `ai.internal.provider: anthropic` with any `enable.*` flag on | Direct-LLM API key. Blacklisted from worker envs. |
+| `OPENROUTER_API_KEY` (or custom) | `ai.internal.provider: openrouter` | Same. Blacklisted. |
+| `NIGHT_ORCH_WEBHOOK_URL` (or custom `urlEnv`) | generic webhook notification channel | Blacklisted. |
+| `LOG_LEVEL` | optional | pino log level (default `info`). |
+
+**Security guarantees** (see `src/workers/env.ts`):
+
+- Every variable matching `*TOKEN*`, `*SECRET*`, `*KEY*`, `*API_KEY*`, `*PASSWORD*`, `*AUTH*`, `*CREDENTIAL*` is blocked from reaching CLI worker subprocesses.
+- Every variable prefixed `GITHUB_`, `FORGEJO_`, `GH_`, `ANTHROPIC_`, `OPENAI_`, `OPENROUTER_`, `NIGHT_ORCH_VAPID_` is blocked by prefix match.
+- The worker env starts from an empty whitelist (`PATH`, `HOME`, `LANG`, `NODE_ENV`, `USER`, `TZ`, tool locations) and only adds explicit `workerProfile.env` overrides that survive the blacklist check.
 
 ### Monitoring
 
@@ -569,19 +702,44 @@ View costs/usage:
 
 ## Prometheus Metrics
 
-When `metrics.enabled: true`, night-orch exposes metrics at `http://<host>:<port>/metrics`.
+When `metrics.enabled: true`, night-orch exposes metrics at `http://<host>:<port>/metrics`. A ready-to-import Grafana dashboard lives at [`grafana/dashboard.json`](../grafana/dashboard.json) — it includes a dedicated "Architecture health — Phase 4 gate" row for the operator-health counters below.
 
-Key metrics:
+Core run metrics:
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `night_orch_runs_total` | counter | Total runs by outcome |
+| `night_orch_runs_total` | counter | Total runs by outcome (`completed` / `blocked` / `error`) |
 | `night_orch_active_runs` | gauge | Currently active runs |
-| `night_orch_daily_cost_usd` | gauge | Today's spend |
+| `night_orch_eligible_issues` | gauge | Eligible issues per repo |
+| `night_orch_queued_issues` | gauge | Issues queued but not yet dispatched |
+| `night_orch_blocked_issues` | gauge | Blocked issues per repo |
 | `night_orch_run_duration_seconds` | histogram | Run duration distribution |
+| `night_orch_phase_duration_seconds` | histogram | Duration per loop phase |
+| `night_orch_loop_iterations_total` | counter | Loop iterations per repo |
 | `night_orch_agent_invocations_total` | counter | Agent calls by role and adapter |
+| `night_orch_agent_duration_seconds` | histogram | Agent call duration (labels: role, adapter) |
 | `night_orch_verify_runs_total` | counter | Verification pass/fail counts |
+| `night_orch_verify_duration_seconds` | histogram | Verify command duration |
 | `night_orch_pr_operations_total` | counter | PRs created/updated |
+| `night_orch_notifications_total` | counter | Notification deliveries by channel + result |
+| `night_orch_errors_total` | counter | Errors by repo + error_type |
+| `night_orch_daily_cost_usd` | gauge | Today's spend |
+| `night_orch_estimated_cost_dollars` | counter | Estimated cost rate per repo/agent |
+
+Architecture health (Phase 4 gate) metrics — expose the stability
+invariants from the immutable-attempts refactor. Alert if any of
+these leave their healthy range:
+
+| Metric | Type | Healthy | Description |
+|--------|------|---------|-------------|
+| `night_orch_cost_token_source_total{source}` | counter | `reported_cli` / `measured_api` dominate | Cost ledger rows grouped by provenance. Any `estimated_duration` or `fallback_zero` means cost figures are degraded-confidence — operator flipped `cost.allowEstimatedDuration` or a worker failed to report token usage. |
+| `night_orch_checkpoint_quarantine_rows` | gauge | `0` | Count of rows in the `checkpoint_quarantine` table. Non-zero = phase_data corruption detected at crash recovery; inspect the row before clearing. |
+| `night_orch_circuit_breaker_trips_total{repo}` | counter | `< 1/week` | Poller skipped an issue that hit `loop.maxConsecutiveBlocks` consecutive blocked runs. Rising rate = an issue is stuck in a retry loop. |
+
+The web UI's Stats page also renders a "Architecture health" card with
+the same four counters aggregated over the standard windows (14d for
+cost fallbacks, 7d for consecutive blocks) so operators can check
+the Phase 4 gate without Prometheus access.
 
 ---
 

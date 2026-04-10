@@ -64,7 +64,7 @@ Registered keys are visible via `night-orch settings list` (or Web/TUI Settings/
 - `github`: `tokenEnv`, `apiBaseUrl`, `pollIntervalSeconds`, `appMentions`
 - `storage`: `dbPath` (read-only), `worktreeRoot`, `logsRoot`, `autoCleanup.enabled`, `autoCleanup.intervalMinutes`, `retention.worktreeAgeDays`, `retention.detailDays`, `retention.archiveDays`
 - `notifications`: `channels`, `events.onRunStarted`, `events.onBlocked`, `events.onPrReady`, `events.onPrUpdated`, `events.onError`, `events.onRetryExhausted`
-- `loop`: `maxReviewIterations`, `maxTotalAgentPasses`, `stopOnPlannerFailure`, `requireVerificationPass`, `reviewApprovalKeyword`, `reviewNeedsChangesKeyword`, `blockOnAmbiguousReview`, `maxAutoRetries`, `maxConsecutiveBlocks`, `decompose`, `maxSubtasks`, `maxConcurrentSubtasks`
+- `loop`: `maxReviewIterations`, `maxTotalAgentPasses`, `stopOnPlannerFailure`, `requireVerificationPass`, `reviewApprovalKeyword`, `reviewNeedsChangesKeyword`, `blockOnAmbiguousReview`, `maxAutoRetries`, `maxEmptyDiffRetries`, `maxConsecutiveBlocks`, `decompose`, `maxSubtasks`, `maxConcurrentSubtasks`
 - `security`: `maxChangedFiles`, `maxChangedLines`, `maxDailyCostUsd`, `maxCostPerRunUsd`
 - `cost`: `model`, `subscriptionMetered`, `pricing.defaultModel`, `pricing.models`
 - `workerProfiles`
@@ -73,6 +73,8 @@ Registered keys are visible via `night-orch settings list` (or Web/TUI Settings/
 - `mcp`: `enabled`, `transport`, `authTokenEnv`, `httpPort`, `httpHost`
 - `commentCommands`: `enabled`, `requireCollaborator`
 - `workflows`
+
+Keys **not** in the runtime registry — edit YAML and restart the daemon: `ai.*`, `cost.allowEstimatedDuration`, all `repos[]` settings, `github.tokenEnv` environment values (the registry exposes the env var *name*, not the token itself). Use `night-orch daily-cost-override` / `night-orch cost-override` for budget headroom rather than mutating `security.maxDailyCostUsd` at runtime.
 
 Update surfaces:
 

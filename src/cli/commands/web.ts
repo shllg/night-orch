@@ -26,6 +26,10 @@ interface WebCommandOpts {
   port?: string | number
   snapshotIntervalMs?: string | number
   standalone?: boolean
+  /** Phase 2a: bypass the mutation auth guard entirely. Only safe
+   * when the daemon is behind a trusted reverse proxy (Caddy with
+   * basic-auth, Tailscale serve, etc.) that handles its own auth. */
+  skipAuth?: boolean
 }
 
 export async function webCommand(
@@ -133,6 +137,7 @@ export async function webCommand(
         port,
         snapshotIntervalMs,
         operationsEnabled: true,
+        requireAuth: commandOpts.skipAuth !== true,
         rawConfig,
       },
     )

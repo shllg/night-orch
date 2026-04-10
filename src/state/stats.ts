@@ -160,6 +160,26 @@ export interface TuiStatsSnapshot {
     roleBreakdown7d: AgentRoleAggregate[]
   }
   readonly topRepos30d: RepoAggregate[]
+  /**
+   * Phase 4 gate signals: four numbers that should all stay at 0
+   * in a healthy deployment. Surfaced in the StatsPage so operators
+   * have a single pane of glass for "is the upgraded architecture
+   * behaving as expected?" without needing to query Prometheus.
+   */
+  readonly healthGate: {
+    /** Rows where the token counts came from the duration-based
+     * fallback instead of a real worker response (last 14 days). */
+    fallbackRows14d: number
+    /** Rows where the token counts were a catastrophic-zero audit
+     * entry (last 14 days). Same tolerance as the fallback. */
+    fallbackZeroRows14d: number
+    /** Corrupt phase_data rows currently sitting in the quarantine
+     * table. 0 = healthy. */
+    checkpointQuarantineRows: number
+    /** Consecutive-block runs seen in the 7-day window. A high
+     * number here means the circuit breaker is tripping often. */
+    consecutiveBlockRuns7d: number
+  }
 }
 
 export function loadTuiStats(
@@ -632,6 +652,57 @@ export function loadTuiStats(
       totalCostUsd: toNumber(row.total_cost_usd),
       avgIterations: toNumber(row.avg_iterations),
     })),
+    healthGate: loadHealthGate(db),
+  }
+}
+
+function loadHealthGate(db: Database.Database): TuiStatsSnapshot['healthGate'] {
+  const fallbackRows14d = toNumber(
+    (db
+      .prepare(
+        `SELECT COUNT(*) AS c FROM run_cost_entries
+         WHERE token_source = 'estimated_duration'
+           AND datetime(created_at) >= datetime('now', '-14 days')`,
+      )
+      .get() as { c: number | null } | undefined)?.c ?? 0,
+  )
+  const fallbackZeroRows14d = toNumber(
+    (db
+      .prepare(
+        `SELECT COUNT(*) AS c FROM run_cost_entries
+         WHERE token_source = 'fallback_zero'
+           AND datetime(created_at) >= datetime('now', '-14 days')`,
+      )
+      .get() as { c: number | null } | undefined)?.c ?? 0,
+  )
+  const checkpointQuarantineRows = toNumber(
+    (db
+      .prepare('SELECT COUNT(*) AS c FROM checkpoint_quarantine')
+      .get() as { c: number | null } | undefined)?.c ?? 0,
+  )
+  // Heuristic: count runs in the last 7 days whose block_reason
+  // was set and whose previous attempt (if any) was also blocked.
+  // This is a proxy for "circuit breaker pressure" — a precise
+  // count of trips would need the prom counter's persisted state.
+  const consecutiveBlockRuns7d = toNumber(
+    (db
+      .prepare(
+        `SELECT COUNT(*) AS c FROM runs r
+         WHERE r.status = 'blocked'
+           AND r.previous_attempt_id IS NOT NULL
+           AND EXISTS (
+             SELECT 1 FROM runs p
+             WHERE p.id = r.previous_attempt_id AND p.status = 'blocked'
+           )
+           AND datetime(r.created_at) >= datetime('now', '-7 days')`,
+      )
+      .get() as { c: number | null } | undefined)?.c ?? 0,
+  )
+  return {
+    fallbackRows14d,
+    fallbackZeroRows14d,
+    checkpointQuarantineRows,
+    consecutiveBlockRuns7d,
   }
 }
 

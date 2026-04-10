@@ -7,9 +7,111 @@
   "links": [],
   "panels": [
     {
+      "title": "Architecture health — Phase 4 gate",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "panels": []
+    },
+    {
+      "title": "Cost token source (by provenance)",
+      "description": "Rows in the cost ledger grouped by their token_source tag. In a healthy deployment, reported_cli + measured_api account for ~100% of entries. Any time spent on estimated_duration or fallback_zero means cost figures are degraded-confidence — either the operator flipped cost.allowEstimatedDuration or a worker is failing to report token usage.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "targets": [
+        { "expr": "rate(night_orch_cost_token_source_total[1h])", "legendFormat": "{{source}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 15, "stacking": { "mode": "normal" } }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "reported_cli" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] },
+          { "matcher": { "id": "byName", "options": "measured_api" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }] },
+          { "matcher": { "id": "byName", "options": "estimated_duration" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] },
+          { "matcher": { "id": "byName", "options": "fallback_zero" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] }
+        ]
+      }
+    },
+    {
+      "title": "Checkpoint quarantine rows",
+      "description": "Rows currently in the checkpoint_quarantine table. Should be zero in a healthy deployment — any non-zero value means phase_data corruption was detected at crash recovery and the operator should inspect what failed.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "targets": [{ "expr": "night_orch_checkpoint_quarantine_rows" }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Circuit breaker trips (rate)",
+      "description": "Rate of poller circuit-breaker trips per repo. Each trip means an issue had more than loop.maxConsecutiveBlocks consecutive blocked runs and the poller skipped it. Low/zero is healthy; a rising rate means an issue is stuck in a loop and needs operator attention.",
+      "type": "timeseries",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "targets": [
+        { "expr": "rate(night_orch_circuit_breaker_trips_total[1h])", "legendFormat": "{{repo}}" }
+      ]
+    },
+    {
+      "title": "Fallback-rows 14d (count)",
+      "description": "Total cost entries over the last 14 days tagged estimated_duration or fallback_zero. Phase 4 gate target: 0.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 5 },
+      "targets": [
+        { "expr": "sum(increase(night_orch_cost_token_source_total{source=\"estimated_duration\"}[14d])) + sum(increase(night_orch_cost_token_source_total{source=\"fallback_zero\"}[14d]))" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Circuit breaker trips 7d (count)",
+      "description": "Total circuit breaker trips over the last 7 days. Phase 4 gate target: < 1/week.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 5 },
+      "targets": [
+        { "expr": "sum(increase(night_orch_circuit_breaker_trips_total[7d]))" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Core metrics",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
+      "panels": []
+    },
+    {
       "title": "Active Runs",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 10 },
       "targets": [{ "expr": "night_orch_active_runs", "legendFormat": "{{repo}}" }],
       "fieldConfig": { "defaults": { "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 3 }, { "color": "red", "value": 5 }] } } }
     },
@@ -119,12 +221,12 @@
     }
   ],
   "schemaVersion": 39,
-  "tags": ["night-orch", "orchestrator"],
+  "tags": ["night-orch", "orchestrator", "phase-4-gate"],
   "templating": { "list": [] },
-  "time": { "from": "now-1h", "to": "now" },
+  "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
   "title": "Night-Orch Dashboard",
   "uid": "night-orch",
-  "version": 1
+  "version": 2
 }

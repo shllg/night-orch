@@ -150,6 +150,12 @@ const FULL_SNAPSHOT: DashboardSnapshot = {
         avgIterations: 1.6,
       },
     ],
+    healthGate: {
+      fallbackRows14d: 0,
+      fallbackZeroRows14d: 0,
+      checkpointQuarantineRows: 0,
+      consecutiveBlockRuns7d: 0,
+    },
   },
 }
 

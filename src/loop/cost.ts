@@ -1,102 +1,72 @@
 /**
- * Cost recording and budget policy.
+ * Cost recording and budget policy — thin facade class.
+ *
+ * R4d split the original 800-line `cost.ts` into four modules:
+ *   - `cost/recorder.ts` — append-only ledger writes + token normalization
+ *   - `cost/query.ts`    — read-side totals, breakdowns, integrity check
+ *   - `cost/overrides.ts`— per-run and daily cap overrides
+ *   - `cost/budget.ts`   — budget policy types and pure helpers
+ *
+ * This file keeps the `CostTracker` class as a stable public surface.
+ * It holds the shared `db` handle, `IssueManager`, and the one-shot
+ * warning dedup set for subscription-metered advisories, delegating
+ * all real work to the four modules above.
  *
  * **Append-only ledger invariant (post-R0d + R4e):** every cost
  * observation lands in `run_cost_entries` via `persistCostRecord`,
  * inside a single SQLite transaction that also upserts the
  * `daily_costs` aggregate and bumps the per-run columns on `runs`.
- * No code path mutates `run_cost_entries` or the `daily_costs`
- * aggregates after an entry has been written — R0d deleted the
- * `subtractRunCostFromDaily`/`resetRunCost` helpers that were the
- * previous divergence source, and R0c migrated retry/continue/rebase
- * to `createFollowupAttempt` which starts a new attempt with a fresh
- * zeroed ledger rather than mutating the prior one.
- *
  * `verifyCostLedgerIntegrity()` is the runtime safety net that
- * detects any future regression of this invariant by re-summing the
- * ledger and comparing against the stored aggregate. Should stay
- * clean in all normal operation; a non-empty result indicates a
- * production bug.
+ * detects any future regression of this invariant.
  */
 import type Database from 'better-sqlite3'
 import type { Config } from '../config/schema.js'
-import type { TokenUsage } from '../workers/types.js'
 import { IssueManager } from '../state/issues.js'
-import { RunManager } from '../state/runs.js'
 import { utcDayKey } from '../utils/time.js'
 import { logger } from '../utils/logger.js'
 import {
   resolveCostPolicy,
   type BudgetStatus,
 } from './cost/budget.js'
+import {
+  normalizeTokenUsage,
+  persistCostRecord,
+  type CostRecordMetadata,
+  type TokenSource,
+  type TokenUsageInput,
+  type TokenUsageTotals,
+} from './cost/recorder.js'
+import {
+  getDailyCost,
+  getDailyCostBreakdownByStep,
+  getDailyCostBreakdownByWorker,
+  getDailyTokenUsage,
+  getRunCost,
+  getRunCostBreakdownByStep,
+  getRunTokenUsage,
+  verifyCostLedgerIntegrity,
+  type StepCostBreakdown,
+  type WorkerCostBreakdown,
+} from './cost/query.js'
+import {
+  getDailyCapOverride,
+  getRunBudgetOverride,
+  resetDailyCosts,
+  setDailyCapOverride,
+  setRunBudgetOverride,
+} from './cost/overrides.js'
 
-// Re-export the extracted budget types + helpers so callers that
-// import from './cost.js' continue to work unchanged after R4d.
+// Re-export the extracted types + helpers so callers that import from
+// './cost.js' continue to work unchanged after R4d.
 export { describeBudgetBlock, costLimitRecoveryHint } from './cost/budget.js'
 export type { BudgetStatus } from './cost/budget.js'
-
-type TokenUsageInput = TokenUsage
-
-export interface TokenUsageTotals {
-  promptTokens: number
-  completionTokens: number
-  cacheReadTokens: number
-  totalTokens: number
-}
-
-/**
- * Provenance tag for a cost-ledger entry. Each recorder call must
- * declare where the token counts came from so reports can flag
- * degraded-confidence rows:
- *
- *  - `reported_cli` — extracted from a Claude/Codex/opencode CLI
- *    response (the normal path for code-editing work).
- *  - `measured_api` — returned directly by a provider API call (Phase 3
- *    `OrchestratorAI` hook; same precision as CLI but different code path).
- *  - `estimated_duration` — explicit opt-in fallback, only legal when
- *    `cost.allowEstimatedDuration: true`. R4a throws instead of writing
- *    this tag by default because the duration estimate undercounted by
- *    10–100× in production.
- *  - `fallback_zero` — reserved for audit rows when the recorder is
- *    called with a zero token count that came from somewhere other
- *    than a real worker (e.g. subscription-mode runs that never
- *    reported usage but we still want to track the attempt).
- */
-export type TokenSource =
-  | 'reported_cli'
-  | 'measured_api'
-  | 'estimated_duration'
-  | 'fallback_zero'
-
-interface CostRecordMetadata {
-  stepId?: string
-  workerType?: string | null
-  /**
-   * Provenance of the token counts being recorded. Defaults to
-   * `'reported_cli'` for back-compat with existing call sites; engine
-   * code that knows it's recording a duration-estimate or API-measured
-   * row should pass the explicit value.
-   */
-  tokenSource?: TokenSource
-}
-
-export interface StepCostBreakdown {
-  stepId: string
-  costUsd: number
-  promptTokens: number
-  completionTokens: number
-  cacheReadTokens: number
-  totalTokens: number
-}
-
-export interface WorkerCostBreakdown {
-  workerType: string
-  costUsd: number
-  promptTokens: number
-  completionTokens: number
-  cacheReadTokens: number
-  totalTokens: number
-}
+export type {
+  CostRecordMetadata,
+  TokenSource,
+  TokenUsageInput,
+  TokenUsageTotals,
+} from './cost/recorder.js'
+export type { StepCostBreakdown, WorkerCostBreakdown } from './cost/query.js'
 
 export class CostTracker {
   private issueManager: IssueManager
@@ -106,94 +76,10 @@ export class CostTracker {
     this.issueManager = new IssueManager(db)
   }
 
-  private persistCostRecord(
-    runId: string,
-    date: string,
-    usage: TokenUsageTotals,
-    usdAmount: number,
-    costStepId: string | null,
-    costWorkerType: string | null,
-    tokenSource: TokenSource,
-  ): void {
-    const runUsageInsert = this.db
-      .prepare(
-        `INSERT INTO daily_run_usage (date, run_id)
-         VALUES (?, ?)
-         ON CONFLICT(date, run_id) DO NOTHING`,
-      )
-      .run(date, runId)
-    const dailyRunCountIncrement = runUsageInsert.changes > 0 ? 1 : 0
-
-    this.db
-      .prepare(
-        `INSERT INTO daily_costs (date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens, total_cache_read_tokens)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(date) DO UPDATE SET
-           total_cost_usd = total_cost_usd + excluded.total_cost_usd,
-           run_count = run_count + excluded.run_count,
-           total_prompt_tokens = total_prompt_tokens + excluded.total_prompt_tokens,
-           total_completion_tokens = total_completion_tokens + excluded.total_completion_tokens,
-           total_cache_read_tokens = total_cache_read_tokens + excluded.total_cache_read_tokens`,
-      )
-      .run(
-        date,
-        usdAmount,
-        dailyRunCountIncrement,
-        usage.promptTokens,
-        usage.completionTokens,
-        usage.cacheReadTokens,
-      )
-
-    this.db
-      .prepare(
-        `UPDATE runs
-         SET estimated_cost_usd = estimated_cost_usd + ?,
-             prompt_tokens = prompt_tokens + ?,
-             completion_tokens = completion_tokens + ?,
-             cache_read_tokens = cache_read_tokens + ?
-         WHERE id = ?`,
-      )
-      .run(usdAmount, usage.promptTokens, usage.completionTokens, usage.cacheReadTokens, runId)
-
-    if (costStepId !== null) {
-      this.db
-        .prepare(
-          `INSERT INTO run_cost_entries (
-             run_id,
-             step_id,
-             worker_type,
-             cost_usd,
-             prompt_tokens,
-             completion_tokens,
-             cache_read_tokens,
-             token_source
-           )
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          runId,
-          costStepId,
-          costWorkerType,
-          usdAmount,
-          usage.promptTokens,
-          usage.completionTokens,
-          usage.cacheReadTokens,
-          tokenSource,
-        )
-    }
-
-    this.issueManager.syncFromRunId(runId)
-  }
-
   /**
-   * Record a cost entry for a run. Persists both USD amount and token counts.
-   *
-   * For subscription runs with $0 cost but real tokens, the tokens are still
-   * recorded for analytics. The record is only skipped when both cost and
-   * tokens are zero.
-   *
-   * Also updates daily aggregates and creates the per-run cost entry if stepId
-   * is provided in metadata.
+   * Record a cost entry for a run. Persists both USD amount and token
+   * counts. Subscription runs with $0 cost but real tokens still
+   * record tokens for analytics — only skipped when both are zero.
    */
   recordCost(
     runId: string,
@@ -203,7 +89,6 @@ export class CostTracker {
   ): void {
     const amountUsd = Number(Math.max(0, costUsd).toFixed(6))
     const normalizedTokens = normalizeTokenUsage(tokenUsage)
-    // Persist $0 cost + real tokens (subscription runs) — only skip when both are zero.
     if (amountUsd <= 0 && normalizedTokens.totalTokens <= 0) return
 
     const today = utcDayKey()
@@ -216,21 +101,26 @@ export class CostTracker {
       usage: TokenUsageTotals,
       usdAmount: number,
     ) => {
-      this.persistCostRecord(id, date, usage, usdAmount, costStepId, costWorkerType, tokenSource)
+      persistCostRecord(
+        this.db,
+        this.issueManager,
+        id,
+        date,
+        usage,
+        usdAmount,
+        costStepId,
+        costWorkerType,
+        tokenSource,
+      )
     })
 
     tx(runId, today, normalizedTokens, amountUsd)
   }
 
   /**
-   * Record a cost entry and immediately check if the run has exceeded any budget limits.
-   *
-   * This is the primary entry point for worker cost recording during loop execution.
-   * It records the cost (same as recordCost) and then evaluates budget constraints
-   * using the configured security limits and cost policy.
-   *
-   * Returns a BudgetStatus indicating whether the run is over budget and which limit
-   * was tripped (daily or per-run).
+   * Record a cost entry and immediately check budget limits. Primary
+   * entry point for worker cost recording during loop execution.
+   * Returns a `BudgetStatus` indicating whether the run is over budget.
    */
   recordCostAndCheckBudget(
     runId: string,
@@ -259,265 +149,68 @@ export class CostTracker {
       securityLimits: Config['security'],
       policyInput: Config['cost']['model'] | Config['cost'] | undefined,
     ): BudgetStatus => {
-      this.persistCostRecord(id, date, usage, usdAmount, costStepId, costWorkerType, tokenSource)
+      persistCostRecord(
+        this.db,
+        this.issueManager,
+        id,
+        date,
+        usage,
+        usdAmount,
+        costStepId,
+        costWorkerType,
+        tokenSource,
+      )
       return this.checkBudget(id, securityLimits, policyInput)
     })
 
     return tx(runId, today, normalizedTokens, amountUsd, limits, costPolicyInput)
   }
 
-  /**
-   * R4e: Verify that the `daily_costs` aggregate matches the ledger
-   * sum from `run_cost_entries` for every day that has any entries.
-   *
-   * The two tables are updated transactionally inside
-   * `persistCostRecord`, so they can't drift in normal operation. The
-   * divergence risk that motivated R4e (see plan `Phase 1 — R4.4d`)
-   * came from cost-reset code paths that mutated `daily_costs`
-   * without touching the ledger — all of those are deleted in R0d.
-   * This integrity check is the safety net that catches any future
-   * regression of that work.
-   *
-   * Returns the set of dates where the aggregate diverges from the
-   * ledger sum, with both values so callers can log the drift. An
-   * empty array means the invariant holds.
-   */
-  verifyCostLedgerIntegrity(): Array<{
-    date: string
-    aggregateUsd: number
-    ledgerUsd: number
-    deltaUsd: number
-  }> {
-    // Sum the ledger per-day, left-join with daily_costs, and filter
-    // to rows where the values don't match within a 1e-6 tolerance
-    // (floating-point roundoff from the six-decimal clamp).
-    const rows = this.db
-      .prepare(
-        `SELECT
-           l.date AS date,
-           COALESCE(l.ledger_usd, 0) AS ledger_usd,
-           COALESCE(d.total_cost_usd, 0) AS aggregate_usd
-         FROM (
-           SELECT date(created_at) AS date, SUM(cost_usd) AS ledger_usd
-           FROM run_cost_entries
-           GROUP BY date(created_at)
-         ) l
-         LEFT JOIN daily_costs d ON d.date = l.date`,
-      )
-      .all() as Array<{
-      date: string
-      ledger_usd: number
-      aggregate_usd: number
-    }>
-
-    const divergent: Array<{
-      date: string
-      aggregateUsd: number
-      ledgerUsd: number
-      deltaUsd: number
-    }> = []
-    for (const row of rows) {
-      const delta = row.aggregate_usd - row.ledger_usd
-      if (Math.abs(delta) > 1e-6) {
-        divergent.push({
-          date: row.date,
-          aggregateUsd: row.aggregate_usd,
-          ledgerUsd: row.ledger_usd,
-          deltaUsd: delta,
-        })
-      }
-    }
-    return divergent
+  verifyCostLedgerIntegrity(): ReturnType<typeof verifyCostLedgerIntegrity> {
+    return verifyCostLedgerIntegrity(this.db)
   }
 
-  /**
-   * Get the total cost accumulated for today (UTC day) across all runs.
-   * Returns 0 if no costs have been recorded today.
-   */
   getDailyCost(): number {
-    const today = utcDayKey()
-    const row = this.db
-      .prepare('SELECT total_cost_usd FROM daily_costs WHERE date = ?')
-      .get(today) as { total_cost_usd: number } | undefined
-    return row?.total_cost_usd ?? 0
+    return getDailyCost(this.db)
   }
 
-  /**
-   * Get the accumulated cost for a specific run.
-   * Returns 0 if the run doesn't exist or has no recorded cost.
-   */
   getRunCost(runId: string): number {
-    const row = this.db
-      .prepare('SELECT estimated_cost_usd FROM runs WHERE id = ?')
-      .get(runId) as { estimated_cost_usd: number } | undefined
-    return row?.estimated_cost_usd ?? 0
+    return getRunCost(this.db, runId)
   }
 
-  /**
-   * Get the total token usage for today (UTC day) across all runs.
-   * Returns an object with all token counts set to 0 if no data exists.
-   */
   getDailyTokenUsage(): TokenUsageTotals {
-    const today = utcDayKey()
-    const row = this.db
-      .prepare('SELECT total_prompt_tokens, total_completion_tokens, total_cache_read_tokens FROM daily_costs WHERE date = ?')
-      .get(today) as DailyTokenRow | undefined
-
-    const promptTokens = row?.total_prompt_tokens ?? 0
-    const completionTokens = row?.total_completion_tokens ?? 0
-    const cacheReadTokens = row?.total_cache_read_tokens ?? 0
-    return {
-      promptTokens,
-      completionTokens,
-      cacheReadTokens,
-      totalTokens: promptTokens + completionTokens + cacheReadTokens,
-    }
+    return getDailyTokenUsage(this.db)
   }
 
   getRunTokenUsage(runId: string): TokenUsageTotals {
-    const row = this.db
-      .prepare('SELECT prompt_tokens, completion_tokens, cache_read_tokens FROM runs WHERE id = ?')
-      .get(runId) as RunTokenRow | undefined
-
-    const promptTokens = row?.prompt_tokens ?? 0
-    const completionTokens = row?.completion_tokens ?? 0
-    const cacheReadTokens = row?.cache_read_tokens ?? 0
-    return {
-      promptTokens,
-      completionTokens,
-      cacheReadTokens,
-      totalTokens: promptTokens + completionTokens + cacheReadTokens,
-    }
+    return getRunTokenUsage(this.db, runId)
   }
 
   getRunCostBreakdownByStep(runId: string): StepCostBreakdown[] {
-    const rows = this.db
-      .prepare(
-        `SELECT
-           step_id,
-           SUM(cost_usd) AS cost_usd,
-           SUM(prompt_tokens) AS prompt_tokens,
-           SUM(completion_tokens) AS completion_tokens,
-           SUM(cache_read_tokens) AS cache_read_tokens
-         FROM run_cost_entries
-         WHERE run_id = ?
-         GROUP BY step_id
-         ORDER BY cost_usd DESC, step_id ASC`,
-      )
-      .all(runId) as Array<{
-        step_id: string
-        cost_usd: number | null
-        prompt_tokens: number | null
-        completion_tokens: number | null
-        cache_read_tokens: number | null
-      }>
-
-    return rows.map((row) => {
-      const promptTokens = row.prompt_tokens ?? 0
-      const completionTokens = row.completion_tokens ?? 0
-      const cacheReadTokens = row.cache_read_tokens ?? 0
-      return {
-        stepId: row.step_id,
-        costUsd: row.cost_usd ?? 0,
-        promptTokens,
-        completionTokens,
-        cacheReadTokens,
-        totalTokens: promptTokens + completionTokens + cacheReadTokens,
-      }
-    })
+    return getRunCostBreakdownByStep(this.db, runId)
   }
 
   getDailyCostBreakdownByStep(date: string = utcDayKey()): StepCostBreakdown[] {
-    const rows = this.db
-      .prepare(
-        `SELECT
-           step_id,
-           SUM(cost_usd) AS cost_usd,
-           SUM(prompt_tokens) AS prompt_tokens,
-           SUM(completion_tokens) AS completion_tokens,
-           SUM(cache_read_tokens) AS cache_read_tokens
-         FROM run_cost_entries
-         WHERE date(created_at) = ?
-         GROUP BY step_id
-         ORDER BY cost_usd DESC, step_id ASC`,
-      )
-      .all(date) as Array<{
-        step_id: string
-        cost_usd: number | null
-        prompt_tokens: number | null
-        completion_tokens: number | null
-        cache_read_tokens: number | null
-      }>
-
-    return rows.map((row) => {
-      const promptTokens = row.prompt_tokens ?? 0
-      const completionTokens = row.completion_tokens ?? 0
-      const cacheReadTokens = row.cache_read_tokens ?? 0
-      return {
-        stepId: row.step_id,
-        costUsd: row.cost_usd ?? 0,
-        promptTokens,
-        completionTokens,
-        cacheReadTokens,
-        totalTokens: promptTokens + completionTokens + cacheReadTokens,
-      }
-    })
+    return getDailyCostBreakdownByStep(this.db, date)
   }
 
   getDailyCostBreakdownByWorker(date: string = utcDayKey()): WorkerCostBreakdown[] {
-    const rows = this.db
-      .prepare(
-        `SELECT
-           COALESCE(worker_type, 'unknown') AS worker_type,
-           SUM(cost_usd) AS cost_usd,
-           SUM(prompt_tokens) AS prompt_tokens,
-           SUM(completion_tokens) AS completion_tokens,
-           SUM(cache_read_tokens) AS cache_read_tokens
-         FROM run_cost_entries
-         WHERE date(created_at) = ?
-         GROUP BY worker_type
-         ORDER BY cost_usd DESC, worker_type ASC`,
-      )
-      .all(date) as Array<{
-        worker_type: string
-        cost_usd: number | null
-        prompt_tokens: number | null
-        completion_tokens: number | null
-        cache_read_tokens: number | null
-      }>
-
-    return rows.map((row) => {
-      const promptTokens = row.prompt_tokens ?? 0
-      const completionTokens = row.completion_tokens ?? 0
-      const cacheReadTokens = row.cache_read_tokens ?? 0
-      return {
-        workerType: row.worker_type,
-        costUsd: row.cost_usd ?? 0,
-        promptTokens,
-        completionTokens,
-        cacheReadTokens,
-        totalTokens: promptTokens + completionTokens + cacheReadTokens,
-      }
-    })
+    return getDailyCostBreakdownByWorker(this.db, date)
   }
 
   /**
-   * Evaluate whether a run has crossed any spend limit.
-   * Returns a discriminated status so callers can build messages that name
-   * the specific limit that tripped (daily vs per-run) instead of guessing.
+   * Evaluate whether a run has crossed any spend limit. Returns a
+   * discriminated status so callers can build messages that name the
+   * specific limit that tripped (daily vs per-run) instead of guessing.
    *
-   * In `subscription` mode, enforcement is always skipped.
-   * In `subscription-metered` mode, warnings can be emitted while enforcement
-   * is optional per configured knob.
+   * - `subscription` mode: enforcement always skipped.
+   * - `subscription-metered`: warnings emitted; enforcement optional
+   *   per configured knob.
    *
    * A non-null `cost_budget_override_usd` on the run row overrides the
-   * per-run cap with the stored value AND exempts the run from the daily
-   * cap. Operators grant this override to push a specific run through when
-   * they accept the extra spend.
-   *
-   * A non-null `daily_cost_cap_override_usd` on today's `daily_costs` row
-   * replaces `limits.maxDailyCostUsd` for today only. It auto-expires when
-   * the UTC day rolls over (next day's row starts NULL).
+   * per-run cap AND exempts the run from the daily cap. A non-null
+   * `daily_cost_cap_override_usd` on today's `daily_costs` row replaces
+   * `limits.maxDailyCostUsd` for today only; it auto-expires at 00:00 UTC.
    */
   checkBudget(
     runId: string,
@@ -625,8 +318,9 @@ export class CostTracker {
       }
     }
 
-    // Override grants a one-time bypass of the daily cap so a stuck run can
-    // make forward progress even if the day has already blown past the limit.
+    // Override grants a one-time bypass of the daily cap so a stuck
+    // run can make forward progress even if the day has already blown
+    // past the limit.
     if (override !== null) {
       return { overBudget: false }
     }
@@ -643,91 +337,24 @@ export class CostTracker {
     return { overBudget: false }
   }
 
-  /**
-   * Read the cost budget override for a run, or null if no override is set.
-   */
   getRunBudgetOverride(runId: string): number | null {
-    const row = this.db
-      .prepare('SELECT cost_budget_override_usd FROM runs WHERE id = ?')
-      .get(runId) as { cost_budget_override_usd: number | null } | undefined
-    if (!row) return null
-    return row.cost_budget_override_usd ?? null
+    return getRunBudgetOverride(this.db, runId)
   }
 
-  /**
-   * Grant a per-run cost override. Pass null to clear it.
-   * When set, the value becomes the run's per-run cap and the daily cap
-   * is bypassed for this run.
-   */
   setRunBudgetOverride(runId: string, overrideUsd: number | null): void {
-    if (overrideUsd !== null) {
-      if (!Number.isFinite(overrideUsd) || overrideUsd <= 0) {
-        throw new Error(`cost budget override must be a positive finite number, got ${overrideUsd}`)
-      }
-    }
-    new RunManager(this.db).setCostBudgetOverride(runId, overrideUsd)
+    setRunBudgetOverride(this.db, runId, overrideUsd)
   }
 
-  /**
-   * Read the daily cost cap override for a UTC day (defaults to today).
-   * Returns null when no override is set.
-   */
   getDailyCapOverride(date: string = utcDayKey()): number | null {
-    const row = this.db
-      .prepare('SELECT daily_cost_cap_override_usd FROM daily_costs WHERE date = ?')
-      .get(date) as { daily_cost_cap_override_usd: number | null } | undefined
-    if (!row) return null
-    return row.daily_cost_cap_override_usd ?? null
+    return getDailyCapOverride(this.db, date)
   }
 
-  /**
-   * Set or clear the daily cost cap override for a UTC day (defaults to
-   * today). Upserts the `daily_costs` row so the override works even on a
-   * day with no recorded spend yet. The override auto-expires when the UTC
-   * day rolls over — operators do not need to clear it manually.
-   */
   setDailyCapOverride(overrideUsd: number | null, date: string = utcDayKey()): void {
-    if (overrideUsd !== null) {
-      if (!Number.isFinite(overrideUsd) || overrideUsd <= 0) {
-        throw new Error(`daily cap override must be a positive finite number, got ${overrideUsd}`)
-      }
-    }
-    this.db
-      .prepare(
-        `INSERT INTO daily_costs (date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens, total_cache_read_tokens, daily_cost_cap_override_usd)
-         VALUES (?, 0, 0, 0, 0, 0, ?)
-         ON CONFLICT(date) DO UPDATE SET daily_cost_cap_override_usd = excluded.daily_cost_cap_override_usd`,
-      )
-      .run(date, overrideUsd)
+    setDailyCapOverride(this.db, overrideUsd, date)
   }
 
-  /**
-   * Reset daily cost counters for a specific UTC day (defaults to today).
-   * Zeros `total_cost_usd`, `total_prompt_tokens`, `total_completion_tokens`,
-   * and `total_cache_read_tokens` while preserving `daily_cost_cap_override_usd`.
-   *
-   * Returns the previous daily cost before resetting.
-   */
   resetDailyCosts(date: string = utcDayKey()): { previousCostUsd: number } {
-    const row = this.db
-      .prepare('SELECT total_cost_usd FROM daily_costs WHERE date = ?')
-      .get(date) as { total_cost_usd: number } | undefined
-    const previousCostUsd = row?.total_cost_usd ?? 0
-
-    this.db
-      .prepare(
-        `UPDATE daily_costs
-         SET total_cost_usd = 0,
-             total_prompt_tokens = 0,
-             total_completion_tokens = 0,
-             total_cache_read_tokens = 0
-         WHERE date = ?`,
-      )
-      .run(date)
-
-    logger.info({ date, previousCostUsd }, 'Reset daily cost counters')
-
-    return { previousCostUsd }
+    return resetDailyCosts(this.db, date)
   }
 
   private logSubscriptionMeteredWarningOnce(
@@ -740,33 +367,3 @@ export class CostTracker {
     logger.warn(data, message)
   }
 }
-
-function normalizeTokenUsage(tokenUsage: TokenUsageInput | undefined): TokenUsageTotals {
-  const promptTokens = normalizeTokenCount(tokenUsage?.promptTokens)
-  const completionTokens = normalizeTokenCount(tokenUsage?.completionTokens)
-  const cacheReadTokens = normalizeTokenCount(tokenUsage?.cacheReadTokens)
-  return {
-    promptTokens,
-    completionTokens,
-    cacheReadTokens,
-    totalTokens: promptTokens + completionTokens + cacheReadTokens,
-  }
-}
-
-function normalizeTokenCount(value: number | undefined): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return 0
-  return Math.max(0, Math.floor(value))
-}
-
-interface DailyTokenRow {
-  total_prompt_tokens: number | null
-  total_completion_tokens: number | null
-  total_cache_read_tokens: number | null
-}
-
-interface RunTokenRow {
-  prompt_tokens: number | null
-  completion_tokens: number | null
-  cache_read_tokens: number | null
-}
-

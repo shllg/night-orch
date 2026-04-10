@@ -16,6 +16,7 @@ interface ServeCommandOpts {
   webHost?: string
   webPort?: string
   allowedHost?: string[]
+  skipAuth?: boolean
 }
 
 export async function serveCommand(
@@ -58,6 +59,9 @@ export async function serveCommand(
     for (const host of commandOpts.allowedHost) {
       webArgs.push('--allowed-host', host)
     }
+  }
+  if (commandOpts.skipAuth) {
+    webArgs.push('--skip-auth')
   }
 
   // Data directory for status files

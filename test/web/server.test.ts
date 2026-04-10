@@ -1432,6 +1432,58 @@ describe('startWebServer', () => {
     expect(triggerPollCycle).toHaveBeenCalledTimes(1)
   })
 
+  it('Phase 2a — requireAuth:false bypasses the mutation guard entirely', async () => {
+    const triggerPollCycle = vi.fn().mockReturnValue({
+      accepted: true as const,
+      state: 'woke-sleeper' as const,
+    })
+    deps.poller = { triggerPollCycle }
+
+    server = await startWebServer(deps, {
+      host: '127.0.0.1',
+      port: 0,
+      frontendDistPath: frontendDir,
+      requireAuth: false,
+    })
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('Unexpected address type')
+    baseUrl = `http://127.0.0.1:${address.port}`
+
+    // No cookie, no token header — should still succeed because
+    // authRequired:false short-circuits the guard.
+    const poll = await fetch(`${baseUrl}/api/operations/poll`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+      },
+      body: '{}',
+    })
+    expect(poll.status).toBe(200)
+    expect(triggerPollCycle).toHaveBeenCalledTimes(1)
+  })
+
+  it('Phase 2a — requireAuth:false still enforces the intent header (CSRF)', async () => {
+    server = await startWebServer(deps, {
+      host: '127.0.0.1',
+      port: 0,
+      frontendDistPath: frontendDir,
+      requireAuth: false,
+    })
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('Unexpected address type')
+    baseUrl = `http://127.0.0.1:${address.port}`
+
+    // Without the intent header the guard still rejects — this
+    // blocks drive-by form submission CSRF even when auth is off.
+    const missing = await fetch(`${baseUrl}/api/operations/poll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    })
+    expect(missing.status).toBe(403)
+  })
+
   it('Phase 2a — POST /api/auth/logout clears the session cookie', async () => {
     server = await startWebServer(deps, { host: '127.0.0.1', port: 0, frontendDistPath: frontendDir })
     const address = server.address()

@@ -129,6 +129,12 @@ const DASHBOARD_SNAPSHOT: DashboardSnapshot = {
       roleBreakdown7d: [],
     },
     topRepos30d: [],
+    healthGate: {
+      fallbackRows14d: 0,
+      fallbackZeroRows14d: 0,
+      checkpointQuarantineRows: 0,
+      consecutiveBlockRuns7d: 0,
+    },
   },
 }
 

@@ -218,12 +218,17 @@ program
   .option('--port <port>', 'Web server port', '3200')
   .option('--snapshot-interval-ms <ms>', 'WebSocket snapshot interval in milliseconds', '3000')
   .option('--standalone', 'Run poller + metrics + embedded MCP in this process')
-  .action((opts: { host?: string; allowedHost?: string[]; port?: string; snapshotIntervalMs?: string; standalone?: boolean }, cmd) => webCommand({
+  .option(
+    '--skip-auth',
+    'Bypass cookie/token auth on the mutation guard. Only safe behind a trusted reverse proxy (Caddy basic-auth, Tailscale serve) that handles auth itself.',
+  )
+  .action((opts: { host?: string; allowedHost?: string[]; port?: string; snapshotIntervalMs?: string; standalone?: boolean; skipAuth?: boolean }, cmd) => webCommand({
     host: opts.host,
     allowedHost: opts.allowedHost,
     port: opts.port,
     snapshotIntervalMs: opts.snapshotIntervalMs,
     standalone: opts.standalone,
+    skipAuth: opts.skipAuth,
   }, cmd.parent?.opts()))
 
 program
@@ -237,9 +242,13 @@ program
     collectOptionValue,
     [] as string[],
   )
-  .action((opts: { webHost?: string; webPort?: string; allowedHost?: string[] }, cmd) =>
+  .option(
+    '--skip-auth',
+    'Bypass cookie/token auth on the mutation guard. Only safe behind a trusted reverse proxy that handles auth itself.',
+  )
+  .action((opts: { webHost?: string; webPort?: string; allowedHost?: string[]; skipAuth?: boolean }, cmd) =>
     serveCommand(
-      { webHost: opts.webHost, webPort: opts.webPort, allowedHost: opts.allowedHost },
+      { webHost: opts.webHost, webPort: opts.webPort, allowedHost: opts.allowedHost, skipAuth: opts.skipAuth },
       cmd.parent?.opts(),
     ),
   )

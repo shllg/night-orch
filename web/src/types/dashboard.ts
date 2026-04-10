@@ -166,6 +166,12 @@ export interface TuiStatsSnapshot {
     roleBreakdown7d: AgentRoleAggregate[]
   }
   topRepos30d: RepoAggregate[]
+  healthGate: {
+    fallbackRows14d: number
+    fallbackZeroRows14d: number
+    checkpointQuarantineRows: number
+    consecutiveBlockRuns7d: number
+  }
 }
 
 export interface DashboardSnapshot {

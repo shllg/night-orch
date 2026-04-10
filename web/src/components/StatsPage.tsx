@@ -58,9 +58,60 @@ export function StatsPage({ snapshot, socketConnected }: StatsPageProps): ReactE
   const costTrend = buildAsciiSparkline(stats.cost.dailyHistory.slice().reverse().map((row) => row.totalCostUsd))
   const usageTrend = buildAsciiSparkline(stats.usage.dailyHistory.slice().reverse().map((row) => row.totalTokens))
 
+  const health = stats.healthGate
+  const healthAllGreen =
+    health.fallbackRows14d === 0 &&
+    health.fallbackZeroRows14d === 0 &&
+    health.checkpointQuarantineRows === 0
+
   return (
     <div className="flex flex-col gap-5">
       <DashboardMetrics snapshot={snapshot} />
+
+      <section
+        className={`card border shadow-panel backdrop-blur ${
+          healthAllGreen
+            ? 'border-success/40 bg-base-200/60'
+            : 'border-warning/60 bg-warning/10'
+        }`}
+        aria-live="polite"
+      >
+        <div className="card-body p-4 sm:p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="card-title text-lg">
+              Architecture health{' '}
+              <span className={`badge badge-sm ${healthAllGreen ? 'badge-success' : 'badge-warning'}`}>
+                {healthAllGreen ? 'healthy' : 'drift detected'}
+              </span>
+            </h2>
+            <span className="text-xs text-base-content/60">
+              Phase 4 gate signals — all four should stay at 0 in a healthy deployment.
+            </span>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-3 text-sm lg:grid-cols-4">
+            <HealthMetric
+              label="Duration-est rows (14d)"
+              value={health.fallbackRows14d}
+              hint="Cost entries where tokens came from the duration fallback. Turn off cost.allowEstimatedDuration or fix the worker that's failing to report usage."
+            />
+            <HealthMetric
+              label="Fallback-zero rows (14d)"
+              value={health.fallbackZeroRows14d}
+              hint="Catastrophic audit rows — indicates a code-path regression."
+            />
+            <HealthMetric
+              label="Quarantine rows"
+              value={health.checkpointQuarantineRows}
+              hint="Corrupt phase_data rows detected at resume. Inspect the checkpoint_quarantine table."
+            />
+            <HealthMetric
+              label="Consecutive-block runs (7d)"
+              value={health.consecutiveBlockRuns7d}
+              hint="Runs whose previous attempt was also blocked. High values mean circuit-breaker pressure."
+            />
+          </div>
+        </div>
+      </section>
 
       <section className="grid gap-5 xl:grid-cols-2">
         <article className="card border border-base-300/60 bg-base-200/60 shadow-panel backdrop-blur">
@@ -388,6 +439,31 @@ interface OverviewStatProps {
   label: string
   value: number
   toneClass?: string
+}
+
+interface HealthMetricProps {
+  label: string
+  value: number
+  hint: string
+}
+
+function HealthMetric({ label, value, hint }: HealthMetricProps): ReactElement {
+  const healthy = value === 0
+  return (
+    <div
+      className={`rounded-box border px-3 py-2 ${
+        healthy ? 'border-base-300/70 bg-base-100/70' : 'border-warning/50 bg-warning/10'
+      }`}
+      title={hint}
+    >
+      <p className="text-[10px] uppercase tracking-wide text-base-content/60">{label}</p>
+      <p
+        className={`mt-1 text-2xl font-semibold ${healthy ? 'text-success' : 'text-warning'}`}
+      >
+        {value}
+      </p>
+    </div>
+  )
 }
 
 function OverviewStat({ label, value, toneClass }: OverviewStatProps): ReactElement {

@@ -4,70 +4,38 @@ import type { MetricsService } from '../metrics/service.js'
 import { createForgeAdapter } from '../forge/factory.js'
 import { LeaseManager } from '../state/leases.js'
 import { RunManager } from '../state/runs.js'
-import { blocked } from '../loop/state.js'
-import { applyRecoveryPlan, classifyInfraError } from '../poller/error-recovery.js'
 import { IssueManager } from '../state/issues.js'
-import { discoverEligibleIssues } from '../discovery/discover.js'
-import { resolveRoles } from '../discovery/roles.js'
-import { adjustLimitsForTriage } from '../discovery/triage.js'
-import { getOrPinSlug, buildWorktreePath } from '../git/slug.js'
 import { createWorktreeManager } from '../git/worktree.js'
-import {
-  resolveEnvironmentMode,
-  setupEnvironment,
-  teardownEnvironment,
-  type EnvSetupResult,
-} from '../environment/manager.js'
-import { createWorkerAdapter } from '../workers/factory.js'
-import { executeLoop } from '../loop/engine.js'
-import { resolveWorkflow } from '../loop/workflow.js'
-import { transitionLabels } from '../labels/manager.js'
-import { buildLabelConfig } from '../labels/config.js'
 import { NotificationDispatcher } from '../notify/dispatcher.js'
 import { createChannels } from '../notify/factory.js'
 import { CostTracker } from '../loop/cost.js'
-import { branchName } from '../utils/ids.js'
 import { logger } from '../utils/logger.js'
-import { nowUtcIso } from '../utils/time.js'
-import type { RunContext } from '../loop/types.js'
-import { postPlanSummaryComment } from '../loop/plan-summary-comment.js'
-import { executeRebase } from '../ops/rebase-and-check.js'
-import { markerTag, upsertBotComment } from '../forge/bot-comment.js'
-import { formatStatusComment } from '../forge/status-comment.js'
-import { processMergeQueue } from '../merge-queue/runner.js'
-import { scanCostBlockedRuns } from '../ops/cost-resume.js'
-import { decomposeIssue, shouldAttemptDecompose } from '../discovery/decomposer.js'
-import { executeParallelSubtasks } from '../loop/parallel.js'
-import { buildWorkerEnv } from '../workers/env.js'
-import { isPlanningIssue } from '../planning/mode.js'
-import type { AgentEvent } from '../events/types.js'
 import {
   AgentObservability,
   setActiveAgentObservability,
   clearActiveAgentObservability,
 } from '../events/observability.js'
+import { dispatchAttempt } from '../poller/attempt-dispatcher.js'
+import { discoverIssuesForRepo } from '../poller/discovery-scheduler.js'
+import { processRepoReactions } from '../poller/reaction-processor.js'
 
-// Extracted modules
-import { finalizeRunOutcome } from './run-finalizer.js'
-import { processCommentCommands, missingCommentCommandIssues } from './comment-commands.js'
-import { scanAndHandleReactions, reactionCursors } from './reaction-scan.js'
-import {
-  coerceAgentName,
-  isImmediateFollowupStatus,
-  applyWorkflowAgentOverrides,
-  applyWorkflowRoleDefaults,
-  resolveWorkerProfileForAgent,
-  extractFollowupPromptFeedback,
-  resolveControlPayload,
-  resolveOperationIntent,
-  prioritizeDiscoveredIssues,
-  selectReplayableRun,
-  shouldResetBranch,
-  makePayload,
-  postStatusComment,
-} from './helpers.js'
-
-const STATUS_MARKER = markerTag('status')
+/**
+ * R6 wiring-only poller.
+ *
+ * This file used to be an 800-line god object that mixed discovery,
+ * reaction processing, lease management, attempt lifecycle, error
+ * recovery, and notification routing. The R6 decomposition split
+ * those concerns into `src/poller/*`:
+ *
+ *   - `discovery-scheduler.ts`   — issue discovery + prioritization
+ *   - `reaction-processor.ts`    — comment commands + reactions + merge queue
+ *   - `attempt-dispatcher.ts`    — per-issue lifecycle (lease → loop → finalize)
+ *   - `notify-dispatcher.ts`     — typed facade over NotificationDispatcher
+ *   - `error-recovery.ts`        — typed worker-error classification (R2)
+ *
+ * What remains here is the top-level poll cycle: set up shared state,
+ * fan out over repos, and aggregate results.
+ */
 
 export interface PollResult {
   processed: number
@@ -78,17 +46,6 @@ export interface PollResult {
 export interface PollTargetIssue {
   repo: string
   issueNumber: number
-}
-
-/**
- * Evict entries from process-global caches that are keyed by repo+issue.
- * Called when a run reaches a terminal state so the caches don't grow
- * unbounded over the daemon's lifetime.
- */
-function cleanupRunCaches(repo: string, issueNumber: number): void {
-  const key = `${repo}#${issueNumber}`
-  missingCommentCommandIssues.delete(key)
-  reactionCursors.delete(key)
 }
 
 /**
@@ -116,14 +73,19 @@ export async function pollOnce(
   setActiveAgentObservability(observability)
 
   try {
-    // Update active runs gauge
+    // Phase 4 gate: refresh the operator-health metrics at every poll.
     try {
       const activeRuns = runManager.getActive()
       metrics?.setActiveRuns(activeRuns.length)
       metrics?.setDailyCost(costTracker.getDailyCost())
+      try {
+        const quarantineCount = db
+          .prepare('SELECT COUNT(*) AS c FROM checkpoint_quarantine')
+          .get() as { c: number }
+        metrics?.setCheckpointQuarantineRows(quarantineCount.c)
+      } catch { /* best-effort */ }
     } catch { /* best-effort */ }
 
-    // Clean expired leases
     leaseManager.cleanExpired()
 
     const reposToProcess = targetIssue
@@ -135,671 +97,23 @@ export async function pollOnce(
     const usedPortsInPass: number[] = []
 
     const repoResults = await Promise.all(
-      reposToProcess.map(async (repoConfig): Promise<PollResult> => {
-        let repoProcessed = 0
-        let repoErrors = 0
-        const repoImmediateFollowupRepos = new Set<string>()
-        try {
-          const forge = createForgeAdapter(repoConfig, config)
-          const channels = createChannels(config.notifications, forge, db)
-          const notifier = new NotificationDispatcher(channels, config.notifications.events)
-
-          // Resolve bot user for comment upserts (best-effort, fallback to empty string)
-          let botUser = ''
-          try {
-            const authInfo = await forge.validateAuth()
-            botUser = authInfo.user
-          } catch {
-            logger.debug({ repo: repoConfig.repo }, 'Could not resolve bot user for comment upserts')
-          }
-
-          // --- Reaction scan: check review_ready PRs for CI failures or human reviews ---
-          try {
-            await scanAndHandleReactions({
-              db, forge, runManager, repoConfig, botUser,
-            })
-          } catch (err) {
-            logger.warn({ repo: repoConfig.repo, err }, 'Reaction scan failed — continuing with issue discovery')
-          }
-
-          // --- Merge queue: process pending merges before discovering new work ---
-          try {
-            await processMergeQueue(db, forge, repoConfig)
-          } catch (err) {
-            logger.warn({ repo: repoConfig.repo, err }, 'Merge queue processing failed — continuing')
-          }
-
-          // --- Cost-blocked run resume: auto-resume when budget clears ---
-          try {
-            await scanCostBlockedRuns(db, config, forge, repoConfig, botUser)
-          } catch (err) {
-            logger.warn({ repo: repoConfig.repo, err }, 'Cost-resume scan failed — continuing')
-          }
-
-          // --- Comment commands: /orch retry|rebase|continue|cancel ---
-          try {
-            await processCommentCommands({
-              config,
-              db,
-              forge,
-              runManager,
-              leaseManager,
-              repoConfig,
-              botUser,
-            })
-          } catch (err) {
-            logger.warn({ repo: repoConfig.repo, err }, 'Comment command processing failed — continuing')
-          }
-
-          const discoveredAll = await discoverEligibleIssues(repoConfig, forge, leaseManager)
-          const discovered = targetIssue
-            ? discoveredAll.filter((d) => {
-                const issueRepo = d.issueRepo || d.issue.repo || repoConfig.repo
-                return d.issue.number === targetIssue.issueNumber && issueRepo === targetIssue.repo
-              })
-            : prioritizeDiscoveredIssues(runManager, repoConfig.repo, discoveredAll)
-
-          issueManager.upsertDiscovered(
-            discovered.map((d) => ({
-              repo: d.issueRepo || d.issue.repo || repoConfig.repo,
-              issueNumber: d.issue.number,
-              issueNodeId: d.issue.nodeId,
-              issueTitle: d.issue.title,
-            })),
-          )
-          try { metrics?.setEligibleIssues(repoConfig.repo, discovered.length) } catch { /* best-effort */ }
-
-          if (discovered.length === 0) {
-            logger.debug({ repo: repoConfig.repo }, 'No eligible issues')
-            return {
-              processed: repoProcessed,
-              errors: repoErrors,
-              immediateFollowupRepos: [],
-            }
-          }
-
-          if (dryRun) {
-            for (const d of discovered) {
-              logger.info({ issue: d.issue.number, triage: d.triage.level, title: d.issue.title }, '[dry-run] Discovered issue')
-            }
-            return {
-              processed: repoProcessed,
-              errors: repoErrors,
-              immediateFollowupRepos: [],
-            }
-          }
-
-          const maxConcurrentRuns = targetIssue ? 1 : (repoConfig.maxConcurrentRuns ?? 1)
-          const discoveredQueue = [...discovered]
-          const workerCount = Math.min(maxConcurrentRuns, discoveredQueue.length)
-
-          await Promise.all(
-            Array.from({ length: workerCount }, async () => {
-              while (true) {
-                const discoveredIssue = discoveredQueue.shift()
-                if (!discoveredIssue) {
-                  break
-                }
-                const issueRepo = discoveredIssue.issueRepo || discoveredIssue.issue.repo || repoConfig.repo
-
-                if (discoveredIssue.triage.level === 'architectural') {
-                  const labelConfig = buildLabelConfig(repoConfig, discoveredIssue.issue.labels)
-                  await forge.addLabels(issueRepo, discoveredIssue.issue.number, [labelConfig.needsHuman])
-                  const archBody = formatStatusComment({ blockReason: 'This issue is classified as architectural and requires human guidance.' })
-                  if (botUser) {
-                    await upsertBotComment(forge, issueRepo, discoveredIssue.issue.number, STATUS_MARKER, archBody, botUser)
-                  } else {
-                    await forge.commentOnIssue(issueRepo, discoveredIssue.issue.number, `🏗️ **night-orch**: This issue is classified as architectural and requires human guidance.`)
-                  }
-                  continue
-                }
-
-                if (!leaseManager.acquire(issueRepo, discoveredIssue.issue.number, 'poller', 1800)) {
-                  continue
-                }
-
-                let runId: string | null = null
-                let envSetup: EnvSetupResult | null = null
-                let activeWorktreePath: string | null = null
-
-                try {
-                  const workflow = resolveWorkflow(
-                    repoConfig,
-                    config,
-                    discoveredIssue.issue.labels,
-                    discoveredIssue.triage.level,
-                  )
-                  const repoConfigForRun = applyWorkflowAgentOverrides(repoConfig, workflow)
-                  const roleDefaults = applyWorkflowRoleDefaults(
-                    repoConfigForRun.defaults,
-                    workflow,
-                    repoConfigForRun,
-                    config,
-                  )
-                  const resolvedRoles = resolveRoles(discoveredIssue.issue.labels, roleDefaults)
-                  const queuedRun = runManager.getLatestQueuedByIssue(repoConfig.repo, discoveredIssue.issue.number)
-                  const replayableRun = queuedRun
-                    ? null
-                    : selectReplayableRun(runManager.getByRepoAndIssue(repoConfig.repo, discoveredIssue.issue.number))
-                  // Circuit breaker: stop retrying after N consecutive blocks
-                  if (replayableRun && !queuedRun) {
-                    const consecutiveBlocks = runManager.countConsecutiveBlocks(repoConfig.repo, discoveredIssue.issue.number)
-                    const maxBlocks = config.loop.maxConsecutiveBlocks
-                    if (consecutiveBlocks >= maxBlocks) {
-                      logger.warn(
-                        { repo: repoConfig.repo, issue: discoveredIssue.issue.number, consecutiveBlocks, maxBlocks },
-                        'Circuit breaker: too many consecutive blocks — skipping issue',
-                      )
-                      const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
-                      await transitionLabels(
-                        forge,
-                        issueRepo,
-                        discoveredIssue.issue.number,
-                        latestIssue.labels,
-                        replayableRun.status,
-                        'blocked',
-                        buildLabelConfig(repoConfig, latestIssue.labels),
-                      )
-                      await postStatusComment({
-                        forge,
-                        issueRepo,
-                        issueNumber: discoveredIssue.issue.number,
-                        botUser,
-                        body: formatStatusComment({
-                          blockReason: `Circuit breaker: ${consecutiveBlocks} consecutive blocked runs. This issue needs human intervention — the task may be too large, ambiguous, or hitting a systematic failure. Use /orch retry after addressing the root cause.`,
-                        }),
-                        warnMessage: 'Failed to post circuit breaker status comment',
-                      })
-                      continue
-                    }
-                  }
-
-                  const activeRun = queuedRun ?? replayableRun
-                  const roles = activeRun
-                    ? {
-                        planner: coerceAgentName(activeRun.planner, resolvedRoles.planner),
-                        coder: coerceAgentName(activeRun.coder, resolvedRoles.coder),
-                        reviewer: coerceAgentName(activeRun.reviewer, resolvedRoles.reviewer),
-                      }
-                    : resolvedRoles
-                  const slug = getOrPinSlug(db, repoConfig.repo, discoveredIssue.issue.number, discoveredIssue.issue.title)
-                  const branch = branchName(repoConfig.branchPrefix, discoveredIssue.issue.number, slug)
-                  const worktreePath = buildWorktreePath(config.storage.worktreeRoot, repoConfig.repo, discoveredIssue.issue.number)
-                  activeWorktreePath = worktreePath
-
-                  const run = activeRun ?? runManager.create({
-                    repo: repoConfig.repo,
-                    issueNumber: discoveredIssue.issue.number,
-                    issueTitle: discoveredIssue.issue.title,
-                    issueNodeId: discoveredIssue.issue.nodeId,
-                    planner: roles.planner,
-                    coder: roles.coder,
-                    reviewer: roles.reviewer,
-                  })
-                  const startingIteration = activeRun ? Math.max(activeRun.iterationCount, 1) : 1
-                  const previousRunStatus = run.status
-                  if (replayableRun) {
-                    logger.info(
-                      { repo: repoConfig.repo, issue: discoveredIssue.issue.number, runId: run.id, status: replayableRun.status },
-                      'Re-queuing active run for rediscovered ready issue',
-                    )
-                  }
-                  runId = run.id
-                  runManager.update(run.id, {
-                    status: 'running',
-                    iterationCount: startingIteration,
-                    issueTitle: discoveredIssue.issue.title,
-                    branchName: branch,
-                    branchSlug: slug,
-                    worktreePath,
-                    phaseData: {
-                      ...(run.phaseData ?? {}),
-                      issueRepo,
-                    },
-                    endedAt: null,
-                    lastError: null,
-                    blockReason: null,
-                  })
-
-                  // Label transition
-                  await transitionLabels(
-                    forge,
-                    issueRepo,
-                    discoveredIssue.issue.number,
-                    discoveredIssue.issue.labels,
-                    previousRunStatus,
-                    'running',
-                    buildLabelConfig(repoConfig, discoveredIssue.issue.labels),
-                  )
-
-                  // Notify
-                  await notifier.dispatch(makePayload('run_started', repoConfig.repo, discoveredIssue.issue))
-
-                  const operationIntent = resolveOperationIntent(activeRun)
-                  const controlPayload = resolveControlPayload(activeRun)
-                  const isRebaseRun = operationIntent === 'rebase'
-                  const isContinueRun = operationIntent === 'continue'
-                  const isFreshRetry = operationIntent === 'retry'
-                  const followupPromptFeedback = extractFollowupPromptFeedback(activeRun?.phaseData)
-
-                  // Check if prior run left tainted work that should be discarded
-                  const planningMode = isPlanningIssue(discoveredIssue.issue.labels, repoConfigForRun)
-                  const preserveBranchState = Boolean(controlPayload?.preserveBranchState) || isContinueRun || isRebaseRun
-                  const resetToBase = isFreshRetry
-                    || (operationIntent === 'auto'
-                      && !isRebaseRun
-                      && (planningMode || shouldResetBranch(runManager, repoConfig.repo, discoveredIssue.issue.number, run.id)))
-
-                  // Create worktree
-                  await worktreeManager.ensure({
-                    repoLocalPath: repoConfig.localPath,
-                    baseBranch: repoConfig.baseBranch,
-                    branchName: branch,
-                    worktreePath,
-                    resetToBase,
-                    preserveBranchState,
-                    updateStrategy: repoConfig.updateStrategy,
-                  })
-
-                // Execute rebase if this is a rebase-queued run
-                if (isRebaseRun) {
-                  logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, runId: run.id }, 'Executing rebase for queued rebase run')
-                  const verifyCommands = repoConfig.verify ?? []
-                  const rebaseResult = await executeRebase(
-                    repoConfig.localPath,
-                    worktreePath,
-                    branch,
-                    repoConfig.baseBranch,
-                    issueRepo,
-                    discoveredIssue.issue.number,
-                    verifyCommands,
-                    controlPayload?.checkAfter !== false,
-                  )
-
-                  if (rebaseResult.conflict) {
-                    runManager.update(run.id, {
-                      status: 'blocked',
-                      blockReason: 'merge_conflict',
-                      operationIntent: 'rebase',
-                      manualState: 'awaiting_rebase_resolution',
-                      controlPayload: {
-                        issueRepo,
-                        preserveBranchState: true,
-                        conflictSummary: rebaseResult.conflictAnalysis?.summary ?? 'Rebase conflicted with the latest base branch changes.',
-                        conflictFiles: rebaseResult.conflictAnalysis?.files ?? [],
-                        conflictExcerpts: rebaseResult.conflictAnalysis?.excerpts ?? [],
-                        requestedAt: nowUtcIso(),
-                      },
-                      lastError: rebaseResult.conflictAnalysis?.summary
-                        ?? 'Rebase failed due to merge conflicts. Continue will keep the branch and resolve them; retry will reset to base and re-implement.',
-                      endedAt: nowUtcIso(),
-                    })
-                    const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
-                    await transitionLabels(
-                      forge,
-                      issueRepo,
-                      discoveredIssue.issue.number,
-                      latestIssue.labels,
-                      'running',
-                      'blocked',
-                      buildLabelConfig(repoConfig, latestIssue.labels),
-                      blocked({
-                        type: 'mergeConflict',
-                        files: rebaseResult.conflictAnalysis?.files ?? [],
-                        summary: rebaseResult.conflictAnalysis?.summary
-                          ?? 'Rebase failed due to merge conflicts',
-                      }).reason,
-                    )
-                    await postStatusComment({
-                      forge,
-                      issueRepo,
-                      issueNumber: discoveredIssue.issue.number,
-                      botUser,
-                      body: formatStatusComment({
-                        blockReason: rebaseResult.conflictAnalysis?.summary
-                          ?? 'Rebase failed due to merge conflicts while replaying the branch onto the latest base.',
-                        nextStep: 'Use /orch continue to keep the existing branch and resolve the conflicts, or /orch retry to reset the branch and re-implement from scratch.',
-                      }),
-                      warnMessage: 'Failed to post rebase merge-conflict status comment',
-                    })
-                    await notifier.dispatch(makePayload('blocked', repoConfig.repo, discoveredIssue.issue, {
-                      summary: 'Rebase failed due to merge conflicts',
-                      blockingReason: 'merge_conflict',
-                    }))
-                    leaseManager.release(issueRepo, discoveredIssue.issue.number)
-                    repoErrors++
-                    continue
-                  }
-
-                  if (rebaseResult.rebased && rebaseResult.verifyPassed) {
-                    logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number }, 'Rebase succeeded, verify passed — returning to review_ready')
-                    runManager.update(run.id, {
-                      status: 'review_ready',
-                      endedAt: nowUtcIso(),
-                      lastError: null,
-                    })
-                    const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
-                    await transitionLabels(
-                      forge,
-                      issueRepo,
-                      discoveredIssue.issue.number,
-                      latestIssue.labels,
-                      'running',
-                      'review_ready',
-                      buildLabelConfig(repoConfig, latestIssue.labels),
-                    )
-                    await notifier.dispatch(makePayload('pr_ready', repoConfig.repo, discoveredIssue.issue, {
-                      summary: 'Rebased successfully, verify passed',
-                    }))
-                    leaseManager.release(issueRepo, discoveredIssue.issue.number)
-                    repoProcessed++
-                    continue
-                  }
-
-                  if (!rebaseResult.rebased && rebaseResult.verifyPassed) {
-                    logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number }, 'Branch already up to date — returning to review_ready')
-                    runManager.update(run.id, {
-                      status: 'review_ready',
-                      endedAt: nowUtcIso(),
-                      lastError: null,
-                    })
-                    const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
-                    await transitionLabels(
-                      forge,
-                      issueRepo,
-                      discoveredIssue.issue.number,
-                      latestIssue.labels,
-                      'running',
-                      'review_ready',
-                      buildLabelConfig(repoConfig, latestIssue.labels),
-                    )
-                    leaseManager.release(issueRepo, discoveredIssue.issue.number)
-                    repoProcessed++
-                    continue
-                  }
-
-                  logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number }, 'Rebase done but verify failed — entering code loop to fix')
-                }
-
-                if (repoConfigForRun.environment) {
-                  const mode = resolveEnvironmentMode(discoveredIssue.issue.labels, repoConfigForRun)
-                  envSetup = await setupEnvironment({
-                    worktreePath,
-                    issueNumber: discoveredIssue.issue.number,
-                    repoConfig: repoConfigForRun,
-                    mode,
-                    usedPorts: usedPortsInPass,
-                  })
-                }
-
-                // Get worker adapters
-                const plannerProfile = resolveWorkerProfileForAgent(
-                  roles.planner,
-                  repoConfigForRun,
-                  config,
-                )
-                const coderProfile = resolveWorkerProfileForAgent(
-                  roles.coder,
-                  repoConfigForRun,
-                  config,
-                )
-                const reviewerProfile = resolveWorkerProfileForAgent(
-                  roles.reviewer,
-                  repoConfigForRun,
-                  config,
-                )
-
-                const adjustedLimits = adjustLimitsForTriage(
-                  config.loop,
-                  plannerProfile?.workerTimeoutSeconds ?? 1800,
-                  discoveredIssue.triage,
-                )
-
-                if (!plannerProfile || !coderProfile || !reviewerProfile) {
-                  throw new Error('Missing worker profiles for resolved roles')
-                }
-
-                  const initialCtx: RunContext = {
-                  runId: run.id,
-                  repo: repoConfig.repo,
-                  issueRepo,
-                  issueNumber: discoveredIssue.issue.number,
-                  issue: discoveredIssue.issue,
-                  repoConfig: repoConfigForRun,
-                  roles,
-                  triageResult: discoveredIssue.triage,
-                  adjustedLimits,
-                  branchName: branch,
-                  worktreePath,
-                  plan: null,
-                  codeResult: null,
-                  diff: null,
-                  verifyResults: [],
-                  reviewResult: null,
-                  reviewFindings: [],
-                  iteration: startingIteration,
-                  totalAgentPasses: 0,
-                  estimatedCostUsd: 0,
-                  currentPhase: workflow.steps[0]?.id ?? 'plan',
-                  terminalStatus: 'running',
-                  phaseHistory: [],
-                  dryRun: false,
-                  runMode: isRebaseRun ? 'rebase' : isContinueRun || followupPromptFeedback ? 'followup' : 'fresh',
-                  blockReason: null,
-                  prReviewFeedback: followupPromptFeedback,
-                  sessionIds: {},
-                  stepOutputs: {},
-                  iterationSnapshots: [],
-                  diffError: null,
-                  emptyDiffRetries: 0,
-                }
-
-                // Check if decomposition is enabled and appropriate
-                const shouldDecompose = config.loop.decompose
-                  && discoveredIssue.triage.level === 'standard'
-                  && !planningMode
-                  && shouldAttemptDecompose(discoveredIssue.issue)
-
-                if (shouldDecompose) {
-                  logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number }, 'Attempting issue decomposition')
-                  const decomposition = await decomposeIssue(
-                    discoveredIssue.issue,
-                    createWorkerAdapter(plannerProfile),
-                    plannerProfile,
-                    buildWorkerEnv(plannerProfile, envSetup?.envOverrides ?? {}),
-                    worktreePath,
-                    config.loop.maxSubtasks,
-                  )
-
-                  if (decomposition.shouldDecompose && decomposition.subtasks.length > 1) {
-                    logger.info(
-                      { repo: repoConfig.repo, issue: discoveredIssue.issue.number, subtasks: decomposition.subtasks.length },
-                      'Decomposed issue into sub-tasks — executing in parallel',
-                    )
-
-                    const loopDeps = {
-                      db, config,
-                      adapters: {
-                        planner: createWorkerAdapter(plannerProfile),
-                        coder: createWorkerAdapter(coderProfile),
-                        reviewer: createWorkerAdapter(reviewerProfile),
-                      },
-                      workflow,
-                      envOverrides: envSetup?.envOverrides ?? {},
-                      metrics,
-                      onAgentEvent: (event: AgentEvent) => observability.record(event),
-                    }
-
-                    const subResults = await executeParallelSubtasks(
-                      initialCtx,
-                      decomposition.subtasks,
-                      loopDeps,
-                      config.loop.maxConcurrentSubtasks,
-                    )
-
-                    const allSucceeded = subResults.every((r) => r.success)
-                    if (allSucceeded) {
-                      runManager.update(run.id, { status: 'review_ready', endedAt: nowUtcIso() })
-                      const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
-                      await transitionLabels(
-                        forge,
-                        issueRepo,
-                        discoveredIssue.issue.number,
-                        latestIssue.labels,
-                        'running',
-                        'review_ready',
-                        buildLabelConfig(repoConfig, latestIssue.labels),
-                      )
-                      await notifier.dispatch(makePayload('pr_ready', repoConfig.repo, discoveredIssue.issue, {
-                        summary: `Decomposed into ${decomposition.subtasks.length} sub-tasks, all completed`,
-                      }))
-                      repoProcessed++
-                    } else {
-                      const failed = subResults.filter((r) => !r.success).length
-                      runManager.update(run.id, {
-                        status: 'blocked',
-                        lastError: `${failed}/${decomposition.subtasks.length} sub-tasks failed`,
-                        endedAt: nowUtcIso(),
-                      })
-                      const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
-                      await transitionLabels(
-                        forge,
-                        issueRepo,
-                        discoveredIssue.issue.number,
-                        latestIssue.labels,
-                        'running',
-                        'blocked',
-                        buildLabelConfig(repoConfig, latestIssue.labels),
-                      )
-                      repoErrors++
-                    }
-                    continue
-                  }
-                }
-
-                // Execute loop (single-issue path)
-                const loopStart = Date.now()
-                const finalCtx = await executeLoop(initialCtx, {
-                  db,
-                  config,
-                  adapters: {
-                    planner: createWorkerAdapter(plannerProfile),
-                    coder: createWorkerAdapter(coderProfile),
-                    reviewer: createWorkerAdapter(reviewerProfile),
-                  },
-                  workflow,
-                  envOverrides: envSetup?.envOverrides ?? {},
-                  metrics,
-                  onAgentEvent: (event) => observability.record(event),
-                  onPlanReady: async (ctx) => {
-                    await postPlanSummaryComment(forge, ctx.issueRepo ?? ctx.repo, ctx.issueNumber, ctx.plan, botUser)
-                  },
-                  leaseHeartbeat: () =>
-                    leaseManager.heartbeat(
-                      issueRepo,
-                      discoveredIssue.issue.number,
-                      'poller',
-                      1800,
-                    ),
-                })
-
-                const runDurationSec = (Date.now() - loopStart) / 1000
-                const outcome = await finalizeRunOutcome({
-                  finalCtx,
-                  runId: run.id,
-                  issue: discoveredIssue.issue,
-                  runDurationSec,
-                  repo: repoConfig.repo,
-                  repoConfig,
-                  issueRepo,
-                  issueNumber: discoveredIssue.issue.number,
-                  db,
-                  forge,
-                  runManager,
-                  notifier,
-                  metrics,
-                  maxAutoRetries: config.loop.maxAutoRetries,
-                  botUser,
-                })
-
-                if (outcome === 'processed') repoProcessed++
-                else repoErrors++
-
-                try {
-                  await observability.closeRun(run.id)
-                } catch (closeErr) {
-                  logger.debug({ runId: run.id, err: closeErr }, 'closeRun failed (best-effort)')
-                }
-                cleanupRunCaches(repoConfig.repo, discoveredIssue.issue.number)
-                } catch (err) {
-                  logger.error({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err }, 'Failed to process issue')
-                  if (runId) {
-                    // R6: delegate the classify-and-act logic to the
-                    // dedicated error-recovery module so the decision
-                    // is pure-function testable and the poller stays
-                    // focused on loop orchestration.
-                    const existing = runManager.getById(runId)
-                    const plan = classifyInfraError({
-                      runId,
-                      currentRetryCount: existing?.retryCount ?? 0,
-                      err,
-                      maxAutoRetries: config.loop.maxAutoRetries,
-                    })
-                    await applyRecoveryPlan({
-                      plan,
-                      config,
-                      repoConfig,
-                      issueRepo,
-                      issue: discoveredIssue.issue,
-                      runId,
-                      botUser,
-                      forge,
-                      runManager,
-                      notifier,
-                    })
-                  }
-                  repoErrors++
-                } finally {
-                  if (runId) {
-                    const finalRun = runManager.getById(runId)
-                    if (finalRun && isImmediateFollowupStatus(finalRun.status)) {
-                      repoImmediateFollowupRepos.add(finalRun.repo)
-                    }
-                  }
-
-                  if (envSetup && activeWorktreePath) {
-                    try {
-                      await teardownEnvironment({
-                        worktreePath: activeWorktreePath,
-                        issueNumber: discoveredIssue.issue.number,
-                        repoConfig,
-                        mode: envSetup.mode,
-                        composeProjectName: envSetup.composeProjectName,
-                      })
-                    } catch (envErr) {
-                      logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: envErr }, 'Failed to tear down environment')
-                    }
-                  }
-                  leaseManager.release(issueRepo, discoveredIssue.issue.number)
-                }
-              }
-            }),
-          )
-
-          return {
-            processed: repoProcessed,
-            errors: repoErrors,
-            immediateFollowupRepos: [...repoImmediateFollowupRepos],
-          }
-        } catch (err) {
-          logger.error({ repo: repoConfig.repo, err }, 'Repository poll failed')
-          return {
-            processed: repoProcessed,
-            errors: repoErrors + 1,
-            immediateFollowupRepos: [...repoImmediateFollowupRepos],
-          }
-        }
-      }),
+      reposToProcess.map((repoConfig): Promise<PollResult> =>
+        pollRepo({
+          config,
+          db,
+          repoConfig,
+          runManager,
+          leaseManager,
+          issueManager,
+          worktreeManager,
+          costTracker,
+          observability,
+          metrics,
+          dryRun,
+          targetIssue,
+          usedPortsInPass,
+        }),
+      ),
     )
 
     for (const repoResult of repoResults) {
@@ -814,5 +128,137 @@ export async function pollOnce(
   } finally {
     clearActiveAgentObservability(observability)
     await observability.close()
+  }
+}
+
+interface PollRepoParams {
+  config: Config
+  db: Database.Database
+  repoConfig: Config['repos'][number]
+  runManager: RunManager
+  leaseManager: LeaseManager
+  issueManager: IssueManager
+  worktreeManager: ReturnType<typeof createWorktreeManager>
+  costTracker: CostTracker
+  observability: AgentObservability
+  metrics?: MetricsService
+  dryRun: boolean
+  targetIssue?: PollTargetIssue
+  usedPortsInPass: number[]
+}
+
+async function pollRepo(params: PollRepoParams): Promise<PollResult> {
+  const {
+    config,
+    db,
+    repoConfig,
+    runManager,
+    leaseManager,
+    issueManager,
+    worktreeManager,
+    observability,
+    metrics,
+    dryRun,
+    targetIssue,
+    usedPortsInPass,
+  } = params
+
+  let repoProcessed = 0
+  let repoErrors = 0
+  const repoImmediateFollowupRepos = new Set<string>()
+
+  try {
+    const forge = createForgeAdapter(repoConfig, config)
+    const channels = createChannels(config.notifications, forge, db)
+    const notifier = new NotificationDispatcher(channels, config.notifications.events)
+
+    let botUser = ''
+    try {
+      const authInfo = await forge.validateAuth()
+      botUser = authInfo.user
+    } catch {
+      logger.debug({ repo: repoConfig.repo }, 'Could not resolve bot user for comment upserts')
+    }
+
+    await processRepoReactions({
+      config, db, forge, repoConfig, runManager, leaseManager, botUser,
+    })
+
+    const discovered = await discoverIssuesForRepo({
+      repoConfig,
+      forge,
+      leaseManager,
+      runManager,
+      issueManager,
+      metrics,
+      targetIssue,
+    })
+
+    if (discovered.length === 0) {
+      return {
+        processed: repoProcessed,
+        errors: repoErrors,
+        immediateFollowupRepos: [],
+      }
+    }
+
+    if (dryRun) {
+      for (const d of discovered) {
+        logger.info({ issue: d.issue.number, triage: d.triage.level, title: d.issue.title }, '[dry-run] Discovered issue')
+      }
+      return {
+        processed: repoProcessed,
+        errors: repoErrors,
+        immediateFollowupRepos: [],
+      }
+    }
+
+    const maxConcurrentRuns = targetIssue ? 1 : (repoConfig.maxConcurrentRuns ?? 1)
+    const discoveredQueue = [...discovered]
+    const workerCount = Math.min(maxConcurrentRuns, discoveredQueue.length)
+
+    await Promise.all(
+      Array.from({ length: workerCount }, async () => {
+        while (true) {
+          const discoveredIssue = discoveredQueue.shift()
+          if (!discoveredIssue) break
+
+          const result = await dispatchAttempt({
+            config,
+            db,
+            forge,
+            repoConfig,
+            discoveredIssue,
+            runManager,
+            leaseManager,
+            worktreeManager,
+            notifier,
+            observability,
+            botUser,
+            usedPortsInPass,
+            metrics,
+          })
+
+          if (result.outcome === 'processed') repoProcessed++
+          else if (result.outcome === 'errored') repoErrors++
+          if (result.immediateFollowupRepo) {
+            repoImmediateFollowupRepos.add(result.immediateFollowupRepo)
+          }
+        }
+      }),
+    )
+
+    return {
+      processed: repoProcessed,
+      errors: repoErrors,
+      immediateFollowupRepos: [...repoImmediateFollowupRepos],
+    }
+  } catch (err) {
+    logger.error({ repo: repoConfig.repo, err }, 'Repository poll failed')
+    return {
+      processed: repoProcessed,
+      errors: repoErrors + 1,
+      immediateFollowupRepos: [...repoImmediateFollowupRepos],
+    }
   }
 }
