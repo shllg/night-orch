@@ -348,10 +348,16 @@ describe('executeWorkerStep', () => {
     const step: WorkerStep = { type: 'worker', id: 'plan', role: 'planner' }
     const deps = makeDeps({ planner: makeMockAdapter(timedOutResult) })
 
-    await expect(executeWorkerStep(makeCtx(), step, deps)).rejects.toThrow('planner worker timed out')
+    // Post-R2: timeouts surface as a typed WorkerTimeoutError so the
+    // engine can convert them to a typed blocked state instead of
+    // bubbling to the poller as an infra error.
+    await expect(executeWorkerStep(makeCtx(), step, deps)).rejects.toMatchObject({
+      code: 'WORKER_TIMEOUT',
+      step: 'plan',
+    })
   })
 
-  it('throws when worker exits non-zero', async () => {
+  it('throws WorkerTransientError when worker exits non-zero (and not auth)', async () => {
     const failedResult: WorkerTaskResult = {
       rawOutput: 'error output',
       exitCode: 1,
@@ -364,7 +370,13 @@ describe('executeWorkerStep', () => {
     const step: WorkerStep = { type: 'worker', id: 'code', role: 'coder' }
     const deps = makeDeps({ coder: makeMockAdapter(failedResult) })
 
-    await expect(executeWorkerStep(makeCtx(), step, deps)).rejects.toThrow('coder worker exited with code 1')
+    // Non-auth, non-timeout exits are classified as transient so the
+    // poller's auto-retry path can take over (R6 will refine the
+    // recovery policy).
+    await expect(executeWorkerStep(makeCtx(), step, deps)).rejects.toMatchObject({
+      code: 'WORKER_TRANSIENT_FAILURE',
+      step: 'code',
+    })
   })
 
   it('throws when no adapter found for role', async () => {

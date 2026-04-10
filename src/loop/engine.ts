@@ -10,9 +10,23 @@ import { commitChanges } from './commit.js'
 import { executeStep, type StepDependencies } from './step-executor.js'
 import { Checkpoint } from './checkpoint.js'
 import { CostTracker, describeBudgetBlock, costLimitRecoveryHint, type BudgetStatus } from './cost.js'
-import { blockedReasonToLegacy } from './state.js'
 import { estimateWorkerCost } from './pricing.js'
-import { WorkerAuthError } from '../workers/errors.js'
+import {
+  WorkerAuthError,
+  WorkerError,
+  WorkerParseError,
+  WorkerRateLimitError,
+  WorkerTimeoutError,
+  WorkerTokenCaptureError,
+  WorkerTransientError,
+  isTransientWorkerError,
+} from '../workers/errors.js'
+import {
+  assertNever,
+  blocked,
+  blockedReasonToLegacy,
+  type BlockedReason,
+} from './state.js'
 import { logger } from '../utils/logger.js'
 import { utcIsoFromMs } from '../utils/time.js'
 import type Database from 'better-sqlite3'
@@ -139,21 +153,32 @@ export async function executeLoop(
     try {
       result = await executeStep(ctx, step, stepDeps)
     } catch (err) {
-      if (err instanceof WorkerAuthError) {
-        const blockMessage = `Worker authentication failure (${err.adapterType}). ${err.remediation}`
+      // Transient worker failures bubble to the poller's infra-retry
+      // path; everything else (auth, timeout, parse, token-capture,
+      // rate-limit) becomes a typed blocked state so the attempt
+      // doesn't silently fall into an expensive full-run retry loop.
+      if (err instanceof WorkerError && !isTransientWorkerError(err)) {
+        const reason = workerErrorToBlockedReason(err)
+        const blockedState = blocked(reason)
         logger.error(
-          { runId: ctx.runId, phase: step.id, adapterType: err.adapterType },
-          blockMessage,
+          {
+            runId: ctx.runId,
+            phase: step.id,
+            adapter: err.adapter,
+            code: err.code,
+            message: err.message,
+          },
+          `${step.id} worker error → blocking attempt`,
         )
-        checkpoint.phaseBlocked(ctx.runId, step.id, blockMessage, ctx.iteration)
+        checkpoint.phaseBlocked(ctx.runId, step.id, blockedState.message, ctx.iteration)
         return recordPhase(
           updateContext(ctx, {
             currentPhase: 'blocked',
             terminalStatus: 'blocked',
-            blockReason: 'auth_failure',
+            blockReason: blockedReasonToLegacy(reason),
             stepOutputs: {
               ...ctx.stepOutputs,
-              blockMessage,
+              blockMessage: blockedState.message,
             },
           }),
           step.id,
@@ -742,4 +767,47 @@ function applyEstimatedWorkerCost(
     }),
     budget,
   }
+}
+
+/**
+ * Map a non-transient `WorkerError` to the appropriate typed
+ * `BlockedReason`. Exhaustive over the hierarchy: adding a new
+ * `WorkerError` subclass without updating this switch is a compile
+ * error on the `assertNever` default.
+ */
+function workerErrorToBlockedReason(err: WorkerError): BlockedReason {
+  if (err instanceof WorkerAuthError) {
+    // The legacy BlockedReason.authFailure only supports the three CLI
+    // adapters; fall back to 'claude' if the adapter string is
+    // unexpected (e.g. opencode before R1 expanded the union).
+    const adapter: 'claude' | 'codex' | 'opencode' =
+      err.adapterType === 'codex' || err.adapterType === 'opencode' ? err.adapterType : 'claude'
+    return { type: 'authFailure', adapter }
+  }
+  if (err instanceof WorkerTimeoutError) {
+    return {
+      type: 'workerTimeout',
+      adapter: err.adapter,
+      step: err.step,
+      timeoutMs: err.timeoutMs,
+    }
+  }
+  if (err instanceof WorkerTokenCaptureError) {
+    return { type: 'tokenCaptureFailed', adapter: err.adapter, step: err.step }
+  }
+  if (err instanceof WorkerParseError) {
+    return { type: 'ambiguousReview', excerpt: err.message }
+  }
+  if (err instanceof WorkerRateLimitError) {
+    // No first-class rate-limit reason yet; rate limits surface as an
+    // ambiguous-review style excerpt so operators see the adapter + detail.
+    return { type: 'ambiguousReview', excerpt: err.message }
+  }
+  if (err instanceof WorkerTransientError) {
+    // Should never reach here — the caller filters transient errors
+    // out before invoking this mapper. Included for exhaustiveness so
+    // a future subclass addition fails at compile time.
+    throw new Error(`workerErrorToBlockedReason called with transient error: ${err.message}`)
+  }
+  return assertNever(err as never, 'workerErrorToBlockedReason')
 }

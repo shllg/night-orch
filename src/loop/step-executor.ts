@@ -12,7 +12,11 @@ import { getDefaultTemplate, buildPlanningOnlyCoderTemplate } from '../workers/p
 import { buildWorkerEnv, buildVerifierEnv } from '../workers/env.js'
 import { getDiffAgainstBranch, getChangedFilesAgainstBranch } from '../git/repo.js'
 import { superviseWorker } from './supervisor.js'
-import { WorkerAuthError } from '../workers/errors.js'
+import {
+  WorkerAuthError,
+  WorkerTimeoutError,
+  WorkerTransientError,
+} from '../workers/errors.js'
 import { getRemediation } from '../workers/auth-check.js'
 import { logger } from '../utils/logger.js'
 import { buildPlanningPrdPath, isPlanningIssue } from '../planning/mode.js'
@@ -114,11 +118,16 @@ export async function executeWorkerStep(
     deps.metrics?.observeAgentDuration(step.role, adapterType, (Date.now() - start) / 1000)
   } catch { /* best-effort */ }
 
+  const adapterType = profile.type === 'codex' ? 'codex' : 'claude'
   if (result.timedOut) {
-    throw new Error(`${step.role} worker timed out after ${ctx.adjustedLimits.workerTimeoutSeconds}s`)
+    const timeoutMs = ctx.adjustedLimits.workerTimeoutSeconds * 1000
+    logger.error(
+      { role: step.role, adapterType, timeoutMs },
+      `${step.role} worker timed out`,
+    )
+    throw new WorkerTimeoutError(adapterType, step.id, timeoutMs)
   }
   if (result.exitCode !== 0) {
-    const adapterType = profile.type === 'codex' ? 'codex' : 'claude'
     if (result.authFailure) {
       logger.error(
         { role: step.role, exitCode: result.exitCode, adapterType },
@@ -128,13 +137,23 @@ export async function executeWorkerStep(
         adapterType,
         getRemediation(adapterType),
         `${step.role} worker exited with code ${result.exitCode} (authentication failure)`,
+        step.id,
       )
     }
     logger.error(
-      { role: step.role, exitCode: result.exitCode, rawLength: result.rawOutput.length, rawTail: result.rawOutput.slice(-500) },
+      {
+        role: step.role,
+        exitCode: result.exitCode,
+        rawLength: result.rawOutput.length,
+        rawTail: result.rawOutput.slice(-500),
+      },
       `${step.role} worker exited with non-zero code`,
     )
-    throw new Error(`${step.role} worker exited with code ${result.exitCode}`)
+    throw new WorkerTransientError(
+      adapterType,
+      step.id,
+      `worker exited with code ${result.exitCode}`,
+    )
   }
   if (result.parseError) {
     logger.warn(

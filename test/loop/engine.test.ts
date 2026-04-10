@@ -348,7 +348,7 @@ describe('executeLoop', () => {
     expect(lastPhase.result).toBe('failure')
   })
 
-  it('hard-fails when worker exits non-zero', async () => {
+  it('non-zero worker exit bubbles as transient error for poller auto-retry', async () => {
     const failedPlannerResult: WorkerTaskResult = {
       rawOutput: 'error',
       exitCode: 1,
@@ -369,10 +369,15 @@ describe('executeLoop', () => {
       workflow: DEFAULT_WORKFLOW,
     }
 
-    await expect(executeLoop(makeCtx(), deps)).rejects.toThrow('planner worker exited with code 1')
+    // Post-R2: non-auth, non-timeout exits surface as WorkerTransientError
+    // and bubble out of executeLoop so the poller's infra-retry path can
+    // take over.
+    await expect(executeLoop(makeCtx(), deps)).rejects.toMatchObject({
+      code: 'WORKER_TRANSIENT_FAILURE',
+    })
   })
 
-  it('hard-fails when worker times out', async () => {
+  it('worker timeout produces a typed blocked state instead of bubbling', async () => {
     const timedOutPlannerResult: WorkerTaskResult = {
       rawOutput: '',
       exitCode: 0,
@@ -393,7 +398,16 @@ describe('executeLoop', () => {
       workflow: DEFAULT_WORKFLOW,
     }
 
-    await expect(executeLoop(makeCtx(), deps)).rejects.toThrow('planner worker timed out')
+    // Post-R2: worker timeouts are NOT transient — retrying the same
+    // worker with the same input is almost guaranteed to time out
+    // again. The engine catches the typed WorkerTimeoutError, converts
+    // it to a blocked state with reason=workerTimeout (which round-trips
+    // through the legacy column as 'auth_failure' for now — see
+    // blockedReasonToLegacy doc).
+    const result = await executeLoop(makeCtx(), deps)
+    expect(result.terminalStatus).toBe('blocked')
+    expect(result.blockReason).toBe('auth_failure')
+    expect((result.stepOutputs?.['blockMessage'] ?? '') as string).toMatch(/timed out/)
   })
 
   it('trivial issue skips planning', async () => {
