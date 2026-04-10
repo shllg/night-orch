@@ -1,6 +1,8 @@
-import { describe, it, expect } from 'vitest'
-import { triageIssue } from '../../src/discovery/triage.js'
+import { describe, it, expect, vi } from 'vitest'
+import { triageIssue, triageIssueWithAi } from '../../src/discovery/triage.js'
 import type { ForgeIssue } from '../../src/forge/types.js'
+import type { AiClient } from '../../src/ai/types.js'
+import { AiTransientError } from '../../src/ai/errors.js'
 
 function makeIssue(overrides: Partial<ForgeIssue> = {}): ForgeIssue {
   return {
@@ -99,6 +101,56 @@ import { corge } from './config/defaults.ts'
   it('long body with bug label is standard, not trivial', () => {
     const longBody = 'A'.repeat(300)
     const result = triageIssue(makeIssue({ labels: ['bug'], body: longBody }))
+    expect(result.level).toBe('standard')
+  })
+})
+
+describe('triageIssueWithAi (Phase 3)', () => {
+  function makeAiClient(
+    completeStructured: AiClient['completeStructured'],
+  ): AiClient {
+    return {
+      provider: 'anthropic',
+      model: 'claude-3-5-sonnet',
+      complete: vi.fn(),
+      completeStructured,
+    }
+  }
+
+  it('returns the rule-based result when ai is null', async () => {
+    const result = await triageIssueWithAi(makeIssue({ labels: ['bug'], body: 'typo' }), null)
+    expect(result.level).toBe('trivial')
+    expect(result.reason).not.toContain('LLM:')
+  })
+
+  it('overrides the rule-based result with the LLM classification', async () => {
+    const ai = makeAiClient(
+      vi.fn().mockResolvedValue({
+        level: 'architectural',
+        reason: 'touches multiple subsystems',
+      }),
+    )
+    const result = await triageIssueWithAi(
+      makeIssue({ labels: ['bug'], body: 'typo' }),
+      ai,
+    )
+    expect(result.level).toBe('architectural')
+    expect(result.reason).toContain('LLM:')
+    expect(result.reason).toContain('touches multiple subsystems')
+  })
+
+  it('falls back to rule-based result on AiTransientError', async () => {
+    const ai = makeAiClient(
+      vi.fn().mockRejectedValue(new AiTransientError('anthropic', 'claude-3-5-sonnet', 'network')),
+    )
+    const result = await triageIssueWithAi(makeIssue({ labels: ['bug'], body: 'typo' }), ai)
+    expect(result.level).toBe('trivial') // heuristic
+    expect(result.reason).not.toContain('LLM:')
+  })
+
+  it('falls back to rule-based result on unexpected errors', async () => {
+    const ai = makeAiClient(vi.fn().mockRejectedValue(new Error('boom')))
+    const result = await triageIssueWithAi(makeIssue({ body: 'A'.repeat(200) }), ai)
     expect(result.level).toBe('standard')
   })
 })

@@ -363,6 +363,52 @@ const ObservabilitySchema = z.object({
   sessionLogRetention: z.number().int().positive().default(7),
 })
 
+// --- AI (Phase 3 direct-LLM) schema ---
+//
+// Configures a direct LLM API client for night-orch's INTERNAL AI
+// tasks — triage classification, PR description generation,
+// reviewer parse-failure salvage. Does NOT replace the Claude Code
+// / Codex / opencode CLIs used for code-editing work; those stay
+// on the CLI path because they rely on the agentic tool-use loop.
+//
+// All per-feature consumers gate on a flag under `ai.internal.enable.*`
+// so operators can adopt gradually. When `provider` is unset the
+// entire layer is no-op and every consumer falls through to its
+// pre-Phase-3 behavior (rule-based triage, raw parser output,
+// templated PR body).
+const AiEnableSchema = z.object({
+  /** Use the LLM to refine rule-based triage decisions. Falls
+   * back to the heuristic classifier on any error. */
+  triage: z.boolean().default(false),
+  /** When the primary reviewer parser fails and this flag is true,
+   * ask the LLM to salvage the structured output instead of
+   * blocking with ambiguousReview. */
+  reviewerParseFallback: z.boolean().default(false),
+  /** Generate richer PR descriptions from the run context
+   * (objective, code summary, test strategy). */
+  prBody: z.boolean().default(false),
+}).default({})
+
+const AiInternalSchema = z.object({
+  provider: z.enum(['anthropic', 'openrouter']).nullable().default(null),
+  model: z.string().nullable().default(null),
+  /** Env var name that holds the API key. Refuses literal keys in
+   * YAML to keep secrets out of committed config files. */
+  apiKeyEnv: z.string().nullable().default(null).refine(
+    (val) => val === null || !/^(sk-|claude-|cl-)/i.test(val),
+    { message: 'apiKeyEnv must be an environment variable name, not a literal API key' },
+  ),
+  /** Default request timeout for all internal AI calls (ms). */
+  timeoutMs: z.number().int().positive().default(30_000),
+  /** Default max tokens per call. */
+  maxTokens: z.number().int().positive().default(1024),
+  enable: AiEnableSchema,
+}).default({})
+
+const AiSchema = z.object({
+  internal: AiInternalSchema,
+}).default({})
+
 // --- Top-level config schema ---
 
 export const ConfigSchema = z.object({
@@ -418,6 +464,8 @@ export const ConfigSchema = z.object({
 
   cost: CostSchema.default({}),
 
+  ai: AiSchema,
+
   workerProfiles: z.record(WorkerProfileSchema).default({}),
 
   metrics: MetricsSchema.default({}),
@@ -465,6 +513,39 @@ export const ConfigSchema = z.object({
         code: z.ZodIssueCode.custom,
         path: ['workerProfiles', profileName, 'pricingModel'],
         message: `workerProfiles.${profileName}.pricingModel "${pricingModel}" is not defined in cost.pricing.models.`,
+      })
+    }
+  }
+
+  // Phase 3: if any ai.internal.enable.* feature is on, require
+  // the provider/model/apiKeyEnv triple so the factory can build a
+  // client. Otherwise the feature flag silently no-ops and callers
+  // get misleading fall-through behavior.
+  const aiInternal = config.ai.internal
+  const anyEnabled =
+    aiInternal.enable.triage ||
+    aiInternal.enable.reviewerParseFallback ||
+    aiInternal.enable.prBody
+  if (anyEnabled) {
+    if (!aiInternal.provider) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['ai', 'internal', 'provider'],
+        message: 'ai.internal.provider is required when any ai.internal.enable.* flag is set',
+      })
+    }
+    if (!aiInternal.model) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['ai', 'internal', 'model'],
+        message: 'ai.internal.model is required when any ai.internal.enable.* flag is set',
+      })
+    }
+    if (!aiInternal.apiKeyEnv) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['ai', 'internal', 'apiKeyEnv'],
+        message: 'ai.internal.apiKeyEnv is required when any ai.internal.enable.* flag is set',
       })
     }
   }

@@ -15,6 +15,15 @@ export const ENV_WHITELIST = [
 export const ENV_BLACKLIST_EXACT = new Set([
   'GITHUB_TOKEN', 'GH_TOKEN', 'FORGEJO_TOKEN',
   'NIGHT_ORCH_WEBHOOK_URL',
+  // Phase 3: direct-LLM API keys must never reach CLI workers.
+  // The pattern rules below already catch `*_API_KEY` but explicit
+  // entries document intent and survive pattern reshuffling.
+  'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
+  'OPENROUTER_API_KEY',
+  'AI_API_KEY',
+  // Phase 2c: VAPID private key for Web Push signing.
+  'NIGHT_ORCH_VAPID_PRIVATE',
 ])
 
 // Use word-boundary matches so legitimate vars with these substrings
@@ -32,6 +41,15 @@ export const ENV_BLACKLIST_PATTERNS = [
   /^GITHUB_/i,
   /^FORGEJO_/i,
   /^GH_/i,
+  // Phase 3: prefix-block every env var that starts with a
+  // provider name so `ANTHROPIC_FOO`, `OPENAI_BAR`,
+  // `OPENROUTER_X` all get filtered even if a new variant ships.
+  /^ANTHROPIC_/i,
+  /^OPENAI_/i,
+  /^OPENROUTER_/i,
+  // Phase 2c: every VAPID env var — public key is harmless but the
+  // pattern keeps private/subject/public out uniformly.
+  /^NIGHT_ORCH_VAPID_/i,
 ]
 
 const PATH_FALLBACK_DIRS = [

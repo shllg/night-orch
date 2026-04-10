@@ -32,6 +32,11 @@ const REDACT_PATHS = [
   '**.Authorization',
   '**.headers.authorization',
   '**.headers.Authorization',
+  // Phase 3: Anthropic uses a non-standard auth header; pino is
+  // case-sensitive so both casings need to be listed.
+  '**.headers["x-api-key"]',
+  '**.headers["X-Api-Key"]',
+  '**["x-api-key"]',
   // Environment blobs: if a caller logs a full env snapshot, scrub it.
   'env',
   '*.env',

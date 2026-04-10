@@ -1,6 +1,9 @@
 import type { PlannerOutput, CoderOutput, ReviewerOutput, VerifyResult } from '../workers/types.js'
 import type { ResolvedRoles } from '../discovery/roles.js'
 import type { TriageLevel } from '../discovery/triage.js'
+import type { AiClient } from '../ai/types.js'
+import { isAiError } from '../ai/errors.js'
+import { logger } from '../utils/logger.js'
 
 export interface PRBodyContext {
   issue: { number: number; title: string; url: string }
@@ -123,6 +126,113 @@ export function compilePRBody(ctx: PRBodyContext): string {
   const body = sections.join('\n')
   if (body.length <= MAX_PR_BODY_CHARS) return body
   return `${body.slice(0, MAX_PR_BODY_CHARS)}\n\n[... truncated by night-orch due to size ...]`
+}
+
+/**
+ * Phase 3b: generate a plain-English tl;dr summary for the top of
+ * a PR body using an `AiClient`.
+ *
+ * Returns either the summary text or `null` on any failure (no AI
+ * available, API error, schema violation). Callers prepend the
+ * returned text to the structured body when present and fall
+ * through unchanged when absent — so the template-only body
+ * remains the baseline, and the summary is pure enrichment.
+ *
+ * The summary exists because the structured body is precise but
+ * hard to skim on a mobile PR notification. A 2-3 sentence human
+ * summary at the top gives reviewers enough context to decide
+ * whether to open the PR without parsing the plan/code/review
+ * sections.
+ */
+export async function generatePrBodySummary(
+  ctx: PRBodyContext,
+  ai: AiClient,
+): Promise<string | null> {
+  if (!ctx.plan && !ctx.codeResult) {
+    // Nothing interesting to summarize — the template handles
+    // empty runs (draft PRs, dry runs) without an LLM.
+    return null
+  }
+
+  try {
+    const prompt = buildSummaryPrompt(ctx)
+    const response = await ai.complete({
+      system: [
+        'You write concise pull-request summaries for software engineers.',
+        'Given the structured plan / code / review artifacts from an autonomous run, write 2-3 sentences in plain English explaining what the PR changes and why.',
+        'Focus on observable behavior, not implementation details. No markdown, no bullet lists, no greeting, no sign-off.',
+      ].join('\n'),
+      user: prompt,
+      maxTokens: 300,
+      temperature: 0.2,
+      timeoutMs: 15_000,
+    })
+
+    const summary = response.text.trim()
+    if (summary.length === 0) return null
+    // Hard cap to keep the PR body bounded.
+    return summary.length > 600 ? `${summary.slice(0, 600).trimEnd()}…` : summary
+  } catch (err) {
+    if (isAiError(err)) {
+      logger.debug(
+        { code: err.code, err: err.message },
+        'PR body summary generation failed — using template-only body',
+      )
+    } else {
+      logger.warn({ err }, 'Unexpected error during PR body summary generation')
+    }
+    return null
+  }
+}
+
+function buildSummaryPrompt(ctx: PRBodyContext): string {
+  const parts: string[] = []
+  parts.push(`Issue: #${ctx.issue.number} — ${ctx.issue.title}`)
+  if (ctx.plan) {
+    parts.push('')
+    parts.push(`Plan objective: ${ctx.plan.objective}`)
+    if (ctx.plan.steps.length > 0) {
+      parts.push('Plan steps:')
+      for (const step of ctx.plan.steps.slice(0, 6)) {
+        parts.push(`  ${step.order}. ${step.description}`)
+      }
+    }
+  }
+  if (ctx.codeResult) {
+    parts.push('')
+    parts.push(`Code summary: ${ctx.codeResult.summary}`)
+    if (ctx.codeResult.changedFiles.length > 0) {
+      const files = ctx.codeResult.changedFiles.slice(0, 10).join(', ')
+      parts.push(`Changed files: ${files}${ctx.codeResult.changedFiles.length > 10 ? ', …' : ''}`)
+    }
+  }
+  if (ctx.reviewResult) {
+    parts.push('')
+    parts.push(`Review verdict: ${ctx.reviewResult.verdict}`)
+    parts.push(`Review summary: ${ctx.reviewResult.summary}`)
+  }
+  parts.push('')
+  parts.push('Write a 2-3 sentence plain-English summary a reviewer can scan on a phone notification.')
+  return parts.join('\n')
+}
+
+/**
+ * Combines `compilePRBody` with `generatePrBodySummary`. When the
+ * AI client is null or the summary generation fails, returns the
+ * existing template body unchanged. When it succeeds, prepends a
+ * `## Summary` section at the top.
+ */
+export async function compilePRBodyWithAi(
+  ctx: PRBodyContext,
+  ai: AiClient | null,
+): Promise<string> {
+  const base = compilePRBody(ctx)
+  if (!ai) return base
+
+  const summary = await generatePrBodySummary(ctx, ai)
+  if (!summary) return base
+
+  return `## Summary\n\n${summary}\n\n${base}`
 }
 
 function sanitizeTitle(title: string): string {

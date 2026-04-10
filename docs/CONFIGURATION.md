@@ -316,6 +316,69 @@ Validation notes:
 - `cost.pricing.defaultModel` must reference a key present under `cost.pricing.models` when models are provided.
 - `workerProfiles.<name>.pricingModel` must reference a key present under `cost.pricing.models`.
 
+## `ai`
+
+Phase 3: direct-LLM API layer for night-orch's **internal** AI
+tasks — triage refinement, PR body summaries, reviewer parse
+salvage. This does NOT replace the Claude Code / Codex / opencode
+CLIs used for actual code-editing (planner, coder, reviewer); those
+keep running on the CLI path because they rely on the agentic
+tool-use loop that the direct API doesn't have.
+
+When no `ai.internal.enable.*` flag is set the entire layer is a
+no-op and every consumer falls back to its pre-Phase-3 behavior
+(rule-based triage, template-only PR body, fail-closed reviewer
+parser).
+
+### `ai.internal`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `provider` | `"anthropic"` \| `"openrouter"` \| `null` | `null` | Which direct-LLM backend to use. `null` disables the layer. |
+| `model` | string \| `null` | `null` | Model id passed to the provider (e.g. `"claude-3-5-sonnet-20241022"` for Anthropic, `"anthropic/claude-3.5-sonnet"` for OpenRouter). |
+| `apiKeyEnv` | string \| `null` | `null` | Env var name holding the API key. Refuses literal keys in YAML. |
+| `timeoutMs` | positive int | `30000` | Per-request timeout. |
+| `maxTokens` | positive int | `1024` | Default max tokens per call. Each consumer may override. |
+| `enable.triage` | boolean | `false` | LLM refines rule-based triage classification. |
+| `enable.reviewerParseFallback` | boolean | `false` | When the primary reviewer JSON parser fails, ask the LLM to salvage a structured verdict (CHANGES_REQUIRED or BLOCKED only — APPROVED is never inferred from free text). |
+| `enable.prBody` | boolean | `false` | Prepends a 2-3 sentence plain-English summary to PR body bodies. The structured template still renders below. |
+
+Validation:
+
+- When any `enable.*` flag is `true`, all three of `provider`,
+  `model`, and `apiKeyEnv` must be set. The schema rejects the
+  config otherwise at load time.
+- `apiKeyEnv` must be an environment variable name, not a
+  literal API key — the schema rejects values that look like
+  inline secrets (`sk-…`, `claude-…`).
+
+**Security**: AI API keys are added to the worker environment
+blacklist, so `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+`OPENROUTER_API_KEY`, and any `ANTHROPIC_*` / `OPENAI_*` /
+`OPENROUTER_*` env var are blocked from reaching CLI worker
+subprocesses. Pino redaction also scrubs `apiKey` and `x-api-key`
+fields from every log record.
+
+**Cost tracking**: every AI call records through the same R4 cost
+ledger as CLI workers, tagged `tokenSource='measured_api'` and
+`workerType='internal-ai'`. The `/api/cost/health` endpoint surfaces
+these as a distinct funding source so operators can see direct-API
+spend alongside CLI spend.
+
+Example:
+
+```yaml
+ai:
+  internal:
+    provider: anthropic
+    model: claude-3-5-sonnet-20241022
+    apiKeyEnv: ANTHROPIC_API_KEY
+    enable:
+      triage: true
+      reviewerParseFallback: true
+      prBody: true
+```
+
 ## `workerProfiles`
 
 `workerProfiles` is a map of profile name to profile config.
