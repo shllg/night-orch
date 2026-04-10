@@ -9,6 +9,7 @@ import {
   AttemptNotFoundError,
   AttemptTerminatedError,
   assertMutable,
+  createFollowupAttempt,
   finalizeAttempt,
   getAttemptChain,
   getHeadAttempt,
@@ -120,19 +121,19 @@ describe('attempts immutability invariant', () => {
     })
 
     it('returns attempts ordered by sequence_number ascending', () => {
-      // Simulate a chain manually via direct INSERTs. Earlier attempts use
-      // status='completed' so the existing one-active-top-level-per-issue
-      // index (migration 019) tolerates multiple rows per (repo, issue);
-      // R0c will teach that index about the attempts model explicitly.
+      // Historical attempts must be terminated (terminated_at set) so the
+      // one-live-head unique index (migration 024) permits their coexistence
+      // with the current live head.
       const insert = db.prepare(
         `INSERT INTO runs
          (id, repo, issue_number, status, planner, coder, reviewer,
-          previous_attempt_id, sequence_number, intent, created_at, updated_at)
-         VALUES (?, ?, ?, ?, 'claude', 'claude', 'claude', ?, ?, ?, ?, ?)`,
+          previous_attempt_id, sequence_number, intent, terminated_at,
+          created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'claude', 'claude', 'claude', ?, ?, ?, ?, ?, ?)`,
       )
-      insert.run('a1', 'foo/bar', 7, 'completed', null, 1, 'initial', '2026-04-10T10:00:00.000Z', '2026-04-10T10:00:00.000Z')
-      insert.run('a2', 'foo/bar', 7, 'completed', 'a1', 2, 'retry', '2026-04-10T10:10:00.000Z', '2026-04-10T10:10:00.000Z')
-      insert.run('a3', 'foo/bar', 7, 'queued', 'a2', 3, 'continue', '2026-04-10T10:20:00.000Z', '2026-04-10T10:20:00.000Z')
+      insert.run('a1', 'foo/bar', 7, 'blocked', null, 1, 'initial', '2026-04-10T10:05:00.000Z', '2026-04-10T10:00:00.000Z', '2026-04-10T10:05:00.000Z')
+      insert.run('a2', 'foo/bar', 7, 'blocked', 'a1', 2, 'retry', '2026-04-10T10:15:00.000Z', '2026-04-10T10:10:00.000Z', '2026-04-10T10:15:00.000Z')
+      insert.run('a3', 'foo/bar', 7, 'queued', 'a2', 3, 'continue', null, '2026-04-10T10:20:00.000Z', '2026-04-10T10:20:00.000Z')
 
       const chain = getAttemptChain(db, 'foo/bar', 7)
       expect(chain.map((a) => a.id)).toEqual(['a1', 'a2', 'a3'])
@@ -162,6 +163,182 @@ describe('attempts immutability invariant', () => {
     })
   })
 
+  describe('createFollowupAttempt', () => {
+    function seedAttempt(issue: number, opts: Partial<{ branch: string; pr: number; cost: number }> = {}) {
+      const row = runs.create({
+        repo: 'foo/bar',
+        issueNumber: issue,
+        issueNodeId: `node-${issue}`,
+        planner: 'claude',
+        coder: 'claude',
+        reviewer: 'claude',
+      })
+      runs.update(row.id, {
+        status: 'blocked',
+        branchName: opts.branch ?? 'feat/x',
+        branchSlug: opts.branch ?? 'feat-x',
+        worktreePath: `/tmp/wt/${row.id}`,
+        prNumber: opts.pr ?? 42,
+        prTitle: '#X PR title',
+        estimatedCostUsd: opts.cost ?? 1.5,
+        promptTokens: 1000,
+        completionTokens: 500,
+        cacheReadTokens: 0,
+        iterationCount: 3,
+        blockReason: 'cost_limit',
+      })
+      return row
+    }
+
+    it('finalizes the previous attempt and inserts a successor with sequence+1', () => {
+      const first = seedAttempt(101)
+      const result = createFollowupAttempt(db, {
+        previousAttemptId: first.id,
+        intent: 'retry',
+        phaseData: { issueRepo: 'foo/bar', reactionType: 'retry' },
+        controlPayload: { source: 'test' },
+      })
+
+      expect(result.sequenceNumber).toBe(2)
+
+      const prev = runs.getById(first.id)!
+      expect(prev.status).toBe('blocked') // status preserved as historical
+      // terminated_at is not exposed on RunRecord directly; check column:
+      const prevTerminated = db
+        .prepare('SELECT terminated_at FROM runs WHERE id = ?')
+        .get(first.id) as { terminated_at: string | null }
+      expect(prevTerminated.terminated_at).not.toBeNull()
+
+      const newRow = runs.getById(result.attemptId)!
+      expect(newRow.status).toBe('queued')
+      expect(newRow.repo).toBe('foo/bar')
+      expect(newRow.issueNumber).toBe(101)
+      expect(newRow.planner).toBe('claude')
+      expect(newRow.iterationCount).toBe(0)
+      expect(newRow.estimatedCostUsd).toBe(0)
+      expect(newRow.promptTokens).toBe(0)
+      expect(newRow.completionTokens).toBe(0)
+      expect(newRow.cacheReadTokens).toBe(0)
+      expect(newRow.blockReason).toBeNull()
+      expect(newRow.operationIntent).toBe('retry')
+      expect(newRow.manualState).toBe('none')
+      expect(newRow.lastError).toBeNull()
+      expect(newRow.currentPhase).toBeNull()
+      expect(newRow.retryCount).toBe(0)
+
+      const chain = getAttemptChain(db, 'foo/bar', 101)
+      expect(chain.map((a) => a.id)).toEqual([first.id, result.attemptId])
+      expect(chain[1]!.previousAttemptId).toBe(first.id)
+      expect(chain[1]!.intent).toBe('retry')
+      expect(chain[1]!.sequenceNumber).toBe(2)
+    })
+
+    it('retry clears branch/worktree/PR fields', () => {
+      const first = seedAttempt(102, { branch: 'feat/y', pr: 99 })
+      const result = createFollowupAttempt(db, {
+        previousAttemptId: first.id,
+        intent: 'retry',
+        phaseData: null,
+        controlPayload: null,
+      })
+      const newRow = runs.getById(result.attemptId)!
+      expect(newRow.branchName).toBeNull()
+      expect(newRow.branchSlug).toBeNull()
+      expect(newRow.worktreePath).toBeNull()
+      expect(newRow.prNumber).toBeNull()
+      expect(newRow.prTitle).toBeNull()
+    })
+
+    it('continue preserves branch/worktree/PR fields', () => {
+      const first = seedAttempt(103, { branch: 'feat/z', pr: 77 })
+      const result = createFollowupAttempt(db, {
+        previousAttemptId: first.id,
+        intent: 'continue',
+        phaseData: null,
+        controlPayload: null,
+      })
+      const newRow = runs.getById(result.attemptId)!
+      expect(newRow.branchName).toBe('feat/z')
+      expect(newRow.branchSlug).toBe('feat/z')
+      expect(newRow.worktreePath).toBe(`/tmp/wt/${first.id}`)
+      expect(newRow.prNumber).toBe(77)
+      expect(newRow.operationIntent).toBe('continue')
+    })
+
+    it('rebase preserves branch and uses rebase intent', () => {
+      const first = seedAttempt(104)
+      const result = createFollowupAttempt(db, {
+        previousAttemptId: first.id,
+        intent: 'rebase',
+        phaseData: null,
+        controlPayload: null,
+      })
+      const newRow = runs.getById(result.attemptId)!
+      expect(newRow.branchName).toBe('feat/x')
+      expect(newRow.operationIntent).toBe('rebase')
+    })
+
+    it('stores phaseData and controlPayload as JSON on the new row', () => {
+      const first = seedAttempt(105)
+      const result = createFollowupAttempt(db, {
+        previousAttemptId: first.id,
+        intent: 'retry',
+        phaseData: { issueRepo: 'foo/bar', marker: 'p' },
+        controlPayload: { source: 'comment', marker: 'c' },
+      })
+      const newRow = runs.getById(result.attemptId)!
+      expect(newRow.phaseData).toEqual({ issueRepo: 'foo/bar', marker: 'p' })
+      expect(newRow.controlPayload).toEqual({ source: 'comment', marker: 'c' })
+    })
+
+    it('throws AttemptNotFoundError when previous attempt is unknown', () => {
+      expect(() =>
+        createFollowupAttempt(db, {
+          previousAttemptId: 'ghost',
+          intent: 'retry',
+          phaseData: null,
+          controlPayload: null,
+        }),
+      ).toThrow(AttemptNotFoundError)
+    })
+
+    it('throws AttemptTerminatedError when previous attempt is already frozen', () => {
+      const first = seedAttempt(106)
+      finalizeAttempt(db, { attemptId: first.id })
+      expect(() =>
+        createFollowupAttempt(db, {
+          previousAttemptId: first.id,
+          intent: 'retry',
+          phaseData: null,
+          controlPayload: null,
+        }),
+      ).toThrow(AttemptTerminatedError)
+    })
+
+    it('chaining retry -> retry builds a sequence of attempts', () => {
+      const first = seedAttempt(107)
+      const second = createFollowupAttempt(db, {
+        previousAttemptId: first.id,
+        intent: 'retry',
+        phaseData: null,
+        controlPayload: null,
+      })
+      // Mark the second as blocked so we can retry it again.
+      runs.update(second.attemptId, { status: 'blocked' })
+      const third = createFollowupAttempt(db, {
+        previousAttemptId: second.attemptId,
+        intent: 'retry',
+        phaseData: null,
+        controlPayload: null,
+      })
+      expect(third.sequenceNumber).toBe(3)
+      const chain = getAttemptChain(db, 'foo/bar', 107)
+      expect(chain.map((a) => a.sequenceNumber)).toEqual([1, 2, 3])
+      expect(chain[2]!.previousAttemptId).toBe(second.attemptId)
+      expect(chain[1]!.previousAttemptId).toBe(first.id)
+    })
+  })
+
   describe('getHeadAttempt', () => {
     it('returns null when no attempts exist', () => {
       expect(getHeadAttempt(db, 'foo/bar', 100)).toBeNull()
@@ -171,11 +348,12 @@ describe('attempts immutability invariant', () => {
       const insert = db.prepare(
         `INSERT INTO runs
          (id, repo, issue_number, status, planner, coder, reviewer,
-          previous_attempt_id, sequence_number, intent, created_at, updated_at)
-         VALUES (?, ?, ?, ?, 'claude', 'claude', 'claude', ?, ?, ?, ?, ?)`,
+          previous_attempt_id, sequence_number, intent, terminated_at,
+          created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'claude', 'claude', 'claude', ?, ?, ?, ?, ?, ?)`,
       )
-      insert.run('h1', 'foo/bar', 9, 'completed', null, 1, 'initial', '2026-04-10T10:00:00.000Z', '2026-04-10T10:00:00.000Z')
-      insert.run('h2', 'foo/bar', 9, 'queued', 'h1', 2, 'retry', '2026-04-10T10:10:00.000Z', '2026-04-10T10:10:00.000Z')
+      insert.run('h1', 'foo/bar', 9, 'blocked', null, 1, 'initial', '2026-04-10T10:05:00.000Z', '2026-04-10T10:00:00.000Z', '2026-04-10T10:05:00.000Z')
+      insert.run('h2', 'foo/bar', 9, 'queued', 'h1', 2, 'retry', null, '2026-04-10T10:10:00.000Z', '2026-04-10T10:10:00.000Z')
 
       const head = getHeadAttempt(db, 'foo/bar', 9)
       expect(head?.id).toBe('h2')

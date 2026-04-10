@@ -550,8 +550,25 @@ describe('pollOnce', () => {
     config.commentCommands = { enabled: true, requireCollaborator: true }
     await pollOnce(config, db, false)
 
-    const row = db.prepare("SELECT status FROM runs WHERE id = ?").get(run.id) as { status: string }
-    expect(row.status).toBe('queued')
+    // Post-R0c retry creates a new attempt; the previous row stays blocked
+    // and frozen, and the new head is queued.
+    const prev = db
+      .prepare('SELECT status, terminated_at FROM runs WHERE id = ?')
+      .get(run.id) as { status: string; terminated_at: string | null }
+    expect(prev.status).toBe('blocked')
+    expect(prev.terminated_at).not.toBeNull()
+
+    const head = db
+      .prepare(
+        `SELECT status, previous_attempt_id FROM runs
+         WHERE repo = ? AND issue_number = ?
+         ORDER BY sequence_number DESC, created_at DESC
+         LIMIT 1`,
+      )
+      .get('org/repo', 2) as { status: string; previous_attempt_id: string | null }
+    expect(head.status).toBe('queued')
+    expect(head.previous_attempt_id).toBe(run.id)
+
     expect(mockIsCollaborator).toHaveBeenCalledWith('org/repo', 'collaborator-user')
 
     const commandRow = db
@@ -613,9 +630,26 @@ describe('pollOnce', () => {
     await pollOnce(config, db, false)
 
     const staleRow = db.prepare("SELECT status FROM runs WHERE id = ?").get(staleRun.id) as { status: string }
-    const retryRow = db.prepare("SELECT status FROM runs WHERE id = ?").get(retryRun.id) as { status: string }
     expect(staleRow.status).toBe('blocked')
-    expect(retryRow.status).toBe('queued')
+
+    // Post-R0c retry inserts a new attempt row; the previous one is frozen.
+    const retryPrev = db
+      .prepare('SELECT status, terminated_at FROM runs WHERE id = ?')
+      .get(retryRun.id) as { status: string; terminated_at: string | null }
+    expect(retryPrev.status).toBe('blocked')
+    expect(retryPrev.terminated_at).not.toBeNull()
+
+    const retryHead = db
+      .prepare(
+        `SELECT status, previous_attempt_id FROM runs
+         WHERE repo = ? AND issue_number = ?
+         ORDER BY sequence_number DESC, created_at DESC
+         LIMIT 1`,
+      )
+      .get('org/repo', 2) as { status: string; previous_attempt_id: string | null }
+    expect(retryHead.status).toBe('queued')
+    expect(retryHead.previous_attempt_id).toBe(retryRun.id)
+
     expect(mockListIssueComments).toHaveBeenCalledWith('org/repo', 1)
     expect(mockListIssueComments).toHaveBeenCalledWith('org/repo', 2)
 

@@ -2,10 +2,10 @@ import type Database from 'better-sqlite3'
 import type { ForgeAdapter, ForgeComment } from '../forge/types.js'
 import type { RepoConfig } from '../config/schema.js'
 import type { Reaction, ReactionCursor, ReactionType } from '../reactions/types.js'
-import { CostTracker } from '../loop/cost.js'
 import { clearResumeDecisionArtifacts } from '../loop/checkpoint.js'
 import { RunManager } from '../state/runs.js'
 import { LeaseManager } from '../state/leases.js'
+import { createFollowupAttempt } from '../state/attempts.js'
 import { transitionLabels } from '../labels/manager.js'
 import { buildLabelConfig } from '../labels/config.js'
 import { scanForReactions } from '../reactions/scanner.js'
@@ -74,54 +74,54 @@ export async function queueContinue(
   const existingPhaseData = clearResumeDecisionArtifacts(run.phaseData)
   const resumePhase = resolveResumePhase(run.currentPhase, existingPhaseData, run.manualState)
 
-  // Atomic state transition: update run + release leases in a single
-  // DB transaction so a crash in between cannot leave the issue
-  // queued-but-leased.
-  const costTracker = new CostTracker(db)
-  let transitioned = false
-  const transition = db.transaction(() => {
-    // Subtract the run's cost from the daily total BEFORE zeroing
-    // the per-run accumulators — otherwise the daily budget check
-    // still sees the old accumulated total and re-blocks immediately.
-    costTracker.subtractRunCostFromDaily(run.id)
-
-    transitioned = runManager.updateIfStatus(run.id, ['blocked', 'review_ready', 'error'], {
-      status: 'queued',
-      currentPhase: resumePhase,
-      iterationCount: 0,
-      endedAt: null,
-      lastError: null,
-      blockReason: null,
-      operationIntent: 'continue',
-      manualState: 'none',
-      controlPayload: {
-        source: run.manualState === 'awaiting_rebase_resolution' ? 'rebase_conflict' : 'manual_continue',
-        issueRepo,
-        preserveBranchState: true,
-        requestedAt: nowUtcIso(),
-      },
-      // Reset cost accumulators so continue doesn't immediately re-block on per-run limit
-      estimatedCostUsd: 0,
-      promptTokens: 0,
-      completionTokens: 0,
-      cacheReadTokens: 0,
-      phaseData: {
-        ...existingPhaseData,
-        issueRepo,
-        reactionType: followup.primaryType,
-        reactionSummary: followup.summary,
-        reactionContext: followup.context,
-        continueRequestedAt: nowUtcIso(),
-      },
-    })
-    leaseManager.release(issueRepo, issueNumber)
-    if (issueRepo !== repoConfig.repo) {
-      leaseManager.release(repoConfig.repo, issueNumber)
+  // Atomic state transition: finalize the previous attempt + INSERT a
+  // new one + release leases in a single DB transaction. Previously this
+  // called subtractRunCostFromDaily to avoid the per-run cost check
+  // re-blocking the same mutated row — under the attempts model, the new
+  // row starts with a zero cost ledger and the old row's costs remain
+  // attributed to it, so the subtract-and-zero dance is unnecessary.
+  const newAttemptId = (() => {
+    try {
+      const tx = db.transaction((): string => {
+        const result = createFollowupAttempt(db, {
+          previousAttemptId: run.id,
+          intent: 'continue',
+          resetBranch: false,
+          phaseData: {
+            ...existingPhaseData,
+            issueRepo,
+            reactionType: followup.primaryType,
+            reactionSummary: followup.summary,
+            reactionContext: followup.context,
+            continueRequestedAt: nowUtcIso(),
+          },
+          controlPayload: {
+            source: run.manualState === 'awaiting_rebase_resolution' ? 'rebase_conflict' : 'manual_continue',
+            issueRepo,
+            preserveBranchState: true,
+            requestedAt: nowUtcIso(),
+          },
+        })
+        // Seed the resume phase on the new attempt so the engine picks up
+        // where the previous one left off. createFollowupAttempt starts
+        // with current_phase=NULL and iteration=0 by design.
+        if (resumePhase) {
+          runManager.updatePhaseCheckpoint(result.attemptId, resumePhase, null, 0)
+        }
+        leaseManager.release(issueRepo, issueNumber)
+        if (issueRepo !== repoConfig.repo) {
+          leaseManager.release(repoConfig.repo, issueNumber)
+        }
+        return result.attemptId
+      })
+      return tx()
+    } catch (err) {
+      logger.warn({ runId: run.id, err }, 'Failed to queue continue attempt')
+      return null
     }
-  })
-  transition()
+  })()
 
-  if (!transitioned) {
+  if (newAttemptId === null) {
     return { queued: false, reason: 'Run state changed while queuing continue' }
   }
 

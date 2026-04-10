@@ -83,6 +83,51 @@ function insertRun(db: Database.Database, overrides: Record<string, unknown> = {
   return id
 }
 
+/**
+ * Return the head attempt row for a given issue (highest sequence_number,
+ * broken by created_at). Post-R0c, retry inserts a new row instead of
+ * mutating the previous one, so tests assert against the new head.
+ */
+function fetchHead(db: Database.Database, repo: string, issueNumber: number): {
+  id: string
+  status: string
+  last_error: string | null
+  ended_at: string | null
+  phase_data: string | null
+  previous_attempt_id: string | null
+  sequence_number: number
+  intent: string
+  estimated_cost_usd: number
+  prompt_tokens: number
+  completion_tokens: number
+  cache_read_tokens: number
+} {
+  return db
+    .prepare(
+      `SELECT id, status, last_error, ended_at, phase_data, previous_attempt_id,
+              sequence_number, intent, estimated_cost_usd, prompt_tokens,
+              completion_tokens, cache_read_tokens
+       FROM runs
+       WHERE repo = ? AND issue_number = ?
+       ORDER BY sequence_number DESC, created_at DESC, rowid DESC
+       LIMIT 1`,
+    )
+    .get(repo, issueNumber) as {
+    id: string
+    status: string
+    last_error: string | null
+    ended_at: string | null
+    phase_data: string | null
+    previous_attempt_id: string | null
+    sequence_number: number
+    intent: string
+    estimated_cost_usd: number
+    prompt_tokens: number
+    completion_tokens: number
+    cache_read_tokens: number
+  }
+}
+
 describe('RetryEngine', () => {
   let tmpDir: string
   let db: Database.Database
@@ -98,7 +143,7 @@ describe('RetryEngine', () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  it('blocked run → reset to queued, labels updated', async () => {
+  it('blocked run → new attempt queued, previous frozen, labels updated', async () => {
     const forge = makeMockForge()
     vi.mocked(forge.getIssue).mockResolvedValue({
       number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:blocked'],
@@ -109,10 +154,23 @@ describe('RetryEngine', () => {
     const engine = new RetryEngine(db, makeConfig(), () => forge)
     await engine.retry('org/repo', 1)
 
-    const row = db.prepare('SELECT status, last_error, ended_at FROM runs WHERE id = ?').get(runId) as { status: string; last_error: string | null; ended_at: string | null }
-    expect(row.status).toBe('queued')
-    expect(row.last_error).toBeNull()
-    expect(row.ended_at).toBeNull()
+    // Previous attempt stays at its historical state and becomes frozen.
+    const prev = db
+      .prepare('SELECT status, terminated_at FROM runs WHERE id = ?')
+      .get(runId) as { status: string; terminated_at: string | null }
+    expect(prev.status).toBe('blocked')
+    expect(prev.terminated_at).not.toBeNull()
+
+    // New head is a fresh queued attempt linked to the previous one.
+    const head = fetchHead(db, 'org/repo', 1)
+    expect(head.id).not.toBe(runId)
+    expect(head.status).toBe('queued')
+    expect(head.last_error).toBeNull()
+    expect(head.ended_at).toBeNull()
+    expect(head.previous_attempt_id).toBe(runId)
+    expect(head.sequence_number).toBe(2)
+    expect(head.intent).toBe('retry')
+
     expect(transitionLabels).toHaveBeenCalledWith(
       forge,
       'org/repo',
@@ -124,15 +182,24 @@ describe('RetryEngine', () => {
     )
   })
 
-  it('error run → reset to queued, labels updated', async () => {
+  it('error run → new attempt queued, previous frozen, labels updated', async () => {
     const forge = makeMockForge()
     const runId = insertRun(db, { status: 'error' })
 
     const engine = new RetryEngine(db, makeConfig(), () => forge)
     await engine.retry('org/repo', 1)
 
-    const row = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as { status: string }
-    expect(row.status).toBe('queued')
+    const prev = db
+      .prepare('SELECT status, terminated_at FROM runs WHERE id = ?')
+      .get(runId) as { status: string; terminated_at: string | null }
+    expect(prev.status).toBe('error')
+    expect(prev.terminated_at).not.toBeNull()
+
+    const head = fetchHead(db, 'org/repo', 1)
+    expect(head.id).not.toBe(runId)
+    expect(head.status).toBe('queued')
+    expect(head.previous_attempt_id).toBe(runId)
+
     expect(transitionLabels).toHaveBeenCalledWith(
       forge,
       'org/repo',
@@ -144,7 +211,7 @@ describe('RetryEngine', () => {
     )
   })
 
-  it('review_ready run → reset to queued (for another pass)', async () => {
+  it('review_ready run → new attempt queued for another pass', async () => {
     const forge = makeMockForge()
     vi.mocked(forge.getIssue).mockResolvedValue({
       number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:review-ready'],
@@ -155,28 +222,30 @@ describe('RetryEngine', () => {
     const engine = new RetryEngine(db, makeConfig(), () => forge)
     await engine.retry('org/repo', 1)
 
-    const row = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as { status: string }
-    expect(row.status).toBe('queued')
+    const head = fetchHead(db, 'org/repo', 1)
+    expect(head.id).not.toBe(runId)
+    expect(head.status).toBe('queued')
+    expect(head.previous_attempt_id).toBe(runId)
   })
 
-  it('--reset-plan clears stored plan', async () => {
+  it('--reset-plan seeds the new attempt phase_data with the retry marker', async () => {
     const forge = makeMockForge()
-    const runId = insertRun(db, { status: 'error', phase_data: JSON.stringify({ plan: 'old plan' }) })
+    insertRun(db, { status: 'error', phase_data: JSON.stringify({ plan: 'old plan' }) })
 
     const engine = new RetryEngine(db, makeConfig(), () => forge)
     await engine.retry('org/repo', 1, { resetPlan: true })
 
-    const row = db.prepare('SELECT phase_data FROM runs WHERE id = ?').get(runId) as { phase_data: string | null }
-    expect(row.phase_data).not.toBeNull()
-    expect(JSON.parse(row.phase_data ?? '{}')).toMatchObject({
+    const head = fetchHead(db, 'org/repo', 1)
+    expect(head.phase_data).not.toBeNull()
+    expect(JSON.parse(head.phase_data ?? '{}')).toMatchObject({
       reactionType: 'retry',
       reactionSummary: 'Fresh retry requested',
     })
   })
 
-  it('resets cost fields on retry', async () => {
+  it('new attempt starts with zero cost/token accumulators', async () => {
     const forge = makeMockForge()
-    const runId = insertRun(db, {
+    insertRun(db, {
       status: 'error',
       estimated_cost_usd: 15.5,
       prompt_tokens: 1000,
@@ -187,18 +256,11 @@ describe('RetryEngine', () => {
     const engine = new RetryEngine(db, makeConfig(), () => forge)
     await engine.retry('org/repo', 1)
 
-    const row = db.prepare(
-      'SELECT estimated_cost_usd, prompt_tokens, completion_tokens, cache_read_tokens FROM runs WHERE id = ?'
-    ).get(runId) as {
-      estimated_cost_usd: number
-      prompt_tokens: number
-      completion_tokens: number
-      cache_read_tokens: number
-    }
-    expect(row.estimated_cost_usd).toBe(0)
-    expect(row.prompt_tokens).toBe(0)
-    expect(row.completion_tokens).toBe(0)
-    expect(row.cache_read_tokens).toBe(0)
+    const head = fetchHead(db, 'org/repo', 1)
+    expect(head.estimated_cost_usd).toBe(0)
+    expect(head.prompt_tokens).toBe(0)
+    expect(head.completion_tokens).toBe(0)
+    expect(head.cache_read_tokens).toBe(0)
   })
 
   it('--immediate starts loop directly', async () => {

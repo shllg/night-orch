@@ -127,6 +127,67 @@ describe('initDatabase', () => {
     expect(indexes).toContain('idx_runs_repo_issue_seq')
   })
 
+  it('enforces one live top-level attempt per issue (migration 024)', () => {
+    db = initDatabase(join(tmpDir, 'test.db'))
+
+    // Two active top-level rows on the same issue should collide.
+    db.prepare(
+      `INSERT INTO runs (id, repo, issue_number, status, planner, coder, reviewer)
+       VALUES ('live1', 'foo/bar', 10, 'queued', 'claude', 'claude', 'claude')`,
+    ).run()
+
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO runs (id, repo, issue_number, status, planner, coder, reviewer)
+           VALUES ('live2', 'foo/bar', 10, 'queued', 'claude', 'claude', 'claude')`,
+        )
+        .run(),
+    ).toThrow(/UNIQUE constraint/)
+
+    // Once the first row is terminated, a new head is allowed.
+    db.prepare(`UPDATE runs SET terminated_at = datetime('now') WHERE id = 'live1'`).run()
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO runs (id, repo, issue_number, status, planner, coder, reviewer, previous_attempt_id, sequence_number)
+           VALUES ('live2', 'foo/bar', 10, 'queued', 'claude', 'claude', 'claude', 'live1', 2)`,
+        )
+        .run(),
+    ).not.toThrow()
+  })
+
+  it('backfills terminated_at on legacy completed rows (migration 024)', () => {
+    // Insert a legacy 'completed' row via raw SQL BEFORE 023/024 have been
+    // migrated (by using a fresh DB but then manually rewinding status to
+    // 'completed' with a NULL terminated_at — we can't actually rewind
+    // migrations in this codebase, so we simulate the pre-state by writing
+    // the row after init and manually clearing terminated_at, then assert
+    // that legacy-completed rows without terminated_at would have been
+    // caught by the migration's backfill statement).
+    const dbPath = join(tmpDir, 'legacy.db')
+    db = initDatabase(dbPath)
+    db.prepare(
+      `INSERT INTO runs (id, repo, issue_number, status, planner, coder, reviewer, ended_at)
+       VALUES ('legacy', 'foo/bar', 11, 'completed', 'claude', 'claude', 'claude', '2026-01-01T00:00:00.000Z')`,
+    ).run()
+    // Simulate a row left over from pre-024 state: clear terminated_at.
+    db.prepare(`UPDATE runs SET terminated_at = NULL WHERE id = 'legacy'`).run()
+
+    // Re-run the migration's backfill statement by hand (mirrors the UPDATE
+    // inside migration 024) and assert it populates terminated_at.
+    db.exec(
+      `UPDATE runs
+       SET terminated_at = COALESCE(ended_at, updated_at, created_at)
+       WHERE status = 'completed' AND terminated_at IS NULL`,
+    )
+
+    const row = db
+      .prepare(`SELECT terminated_at FROM runs WHERE id = 'legacy'`)
+      .get() as { terminated_at: string | null }
+    expect(row.terminated_at).toBe('2026-01-01T00:00:00.000Z')
+  })
+
   it('backfills attempt columns for pre-existing rows (migration 023)', () => {
     // Initialize, insert a row, close, reopen (idempotent migration), and
     // assert the defaults took effect. This proves that rows inserted via

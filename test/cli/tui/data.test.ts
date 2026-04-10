@@ -24,8 +24,8 @@ describe('loadRuns', () => {
     const insertRun = db.prepare(
       `INSERT INTO runs (
         id, repo, issue_number, issue_title, status, current_phase, iteration_count, estimated_cost_usd,
-        pr_number, pr_title, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        pr_number, pr_title, terminated_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
 
     insertRun.run(
@@ -41,6 +41,7 @@ describe('loadRuns', () => {
       '[night-orch] #42 Fix retries in queue handling',
       '2026-03-30T10:00:00.000Z',
       '2026-03-30T10:00:00.000Z',
+      '2026-03-30T10:00:00.000Z',
     )
 
     insertRun.run(
@@ -53,6 +54,7 @@ describe('loadRuns', () => {
       1,
       0.6,
       501,
+      null,
       null,
       '2026-03-31T10:00:00.000Z',
       '2026-03-31T10:00:00.000Z',
@@ -67,6 +69,7 @@ describe('loadRuns', () => {
       'plan',
       0,
       0,
+      null,
       null,
       null,
       '2026-03-31T11:00:00.000Z',
@@ -88,8 +91,8 @@ describe('loadRuns', () => {
     const insertRun = db.prepare(
       `INSERT INTO runs (
         id, repo, issue_number, issue_title, status, current_phase, iteration_count, estimated_cost_usd,
-        pr_number, pr_title, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        pr_number, pr_title, terminated_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
 
     // Resolved issue (latest run completed): should be excluded entirely.
@@ -104,6 +107,7 @@ describe('loadRuns', () => {
       0,
       null,
       null,
+      '2026-03-30T09:30:00.000Z',
       '2026-03-30T09:00:00.000Z',
       '2026-03-30T09:00:00.000Z',
     )
@@ -118,6 +122,7 @@ describe('loadRuns', () => {
       0,
       null,
       null,
+      '2026-03-31T09:00:00.000Z',
       '2026-03-31T09:00:00.000Z',
       '2026-03-31T09:00:00.000Z',
     )
@@ -136,6 +141,7 @@ describe('loadRuns', () => {
       null,
       '2026-03-30T10:00:00.000Z',
       '2026-03-30T10:00:00.000Z',
+      '2026-03-30T10:00:00.000Z',
     )
     insertRun.run(
       'issue-20-latest-blocked',
@@ -146,6 +152,7 @@ describe('loadRuns', () => {
       'verify',
       2,
       0,
+      null,
       null,
       null,
       '2026-03-31T10:00:00.000Z',
@@ -227,8 +234,8 @@ describe('loadRuns', () => {
     const insertRun = db.prepare(
       `INSERT INTO runs (
         id, repo, issue_number, issue_title, status, current_phase, iteration_count, estimated_cost_usd,
-        pr_number, pr_title, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        pr_number, pr_title, terminated_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
 
     insertRun.run(
@@ -242,6 +249,7 @@ describe('loadRuns', () => {
       0.2,
       null,
       null,
+      '2026-04-01T10:30:00.000Z',
       '2026-04-01T09:00:00.000Z',
       '2026-04-01T12:00:00.000Z',
     )
@@ -255,6 +263,7 @@ describe('loadRuns', () => {
       'review',
       2,
       0.4,
+      null,
       null,
       null,
       '2026-04-01T11:00:00.000Z',

@@ -5,6 +5,7 @@ import { autoRebase, type RebaseConflictAnalysis, type RebaseTarget } from './re
 import { runVerifyCommands, allVerifyPassed } from '../loop/verifier.js'
 import { buildVerifierEnv } from '../workers/env.js'
 import { RunManager } from '../state/runs.js'
+import { createFollowupAttempt } from '../state/attempts.js'
 import { transitionLabels } from '../labels/manager.js'
 import { buildLabelConfig } from '../labels/config.js'
 import { upsertBotComment, markerTag } from '../forge/bot-comment.js'
@@ -48,31 +49,32 @@ export async function queueRebase(
 
   const issueRepo = resolveIssueRepo(run.phaseData, repoConfig.repo)
 
-  // Store rebase context and transition to queued
+  // Finalize the previous attempt and INSERT a new one that preserves the
+  // branch/PR context (resetBranch=false). Prior implementation mutated
+  // the same row back to queued, which conflated history with live state.
   const existingPhaseData = run.phaseData ?? {}
-  const transitioned = runManager.updateIfStatus(run.id, ['blocked', 'review_ready', 'error'], {
-    status: 'queued',
-    currentPhase: null,
-    lastError: null,
-    endedAt: null,
-    blockReason: null,
-    operationIntent: 'rebase',
-    manualState: 'none',
-    controlPayload: {
-      issueRepo,
-      checkAfter: options.check ?? true,
-      requestedAt: new Date().toISOString(),
-      preserveBranchState: true,
-    },
-    phaseData: {
-      ...existingPhaseData,
-      issueRepo,
-      reactionContext: 'Rebase requested. Rebase onto latest base branch, run verify, and fix any issues introduced by upstream changes.',
-      reactionType: 'rebase',
-      reactionSummary: 'Rebase and re-evaluate',
-    },
-  })
-  if (!transitioned) {
+  try {
+    createFollowupAttempt(db, {
+      previousAttemptId: run.id,
+      intent: 'rebase',
+      resetBranch: false,
+      phaseData: {
+        ...existingPhaseData,
+        issueRepo,
+        reactionContext:
+          'Rebase requested. Rebase onto latest base branch, run verify, and fix any issues introduced by upstream changes.',
+        reactionType: 'rebase',
+        reactionSummary: 'Rebase and re-evaluate',
+      },
+      controlPayload: {
+        issueRepo,
+        checkAfter: options.check ?? true,
+        requestedAt: new Date().toISOString(),
+        preserveBranchState: true,
+      },
+    })
+  } catch (err) {
+    logger.warn({ runId: run.id, err }, 'Failed to queue rebase attempt')
     return { queued: false, reason: 'Run state changed while queuing rebase' }
   }
 

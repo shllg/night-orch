@@ -190,8 +190,21 @@ export class RunManager {
 
     if (setClauses.length === 0) return
 
+    const now = nowUtcIso()
     setClauses.push('updated_at = ?')
-    values.push(nowUtcIso())
+    values.push(now)
+
+    // Bridge to the immutable-attempts invariant: when a row transitions to
+    // the terminal 'completed' status, also stamp `terminated_at` so the
+    // one-live-top-level-per-issue unique index (migration 024) permits a
+    // successor attempt to be inserted. retry/continue/rebase finalize
+    // earlier states (blocked/error/review_ready) explicitly via
+    // AttemptController in R0c.
+    if (fields.status === 'completed') {
+      setClauses.push('terminated_at = COALESCE(terminated_at, ?)')
+      values.push(now)
+    }
+
     values.push(id)
 
     const updateTx = this.db.transaction(() => {
@@ -274,8 +287,17 @@ export class RunManager {
 
     if (setClauses.length === 0) return false
 
+    const now = nowUtcIso()
     setClauses.push('updated_at = ?')
-    values.push(nowUtcIso())
+    values.push(now)
+
+    // Mirror of update(): auto-stamp terminated_at on transition to
+    // 'completed' to satisfy the one-live-head invariant.
+    if (fields.status === 'completed') {
+      setClauses.push('terminated_at = COALESCE(terminated_at, ?)')
+      values.push(now)
+    }
+
     values.push(id, ...allowedStatuses)
 
     const placeholders = allowedStatuses.map(() => '?').join(', ')

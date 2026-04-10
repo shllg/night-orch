@@ -134,8 +134,24 @@ describe('Full ops integration', () => {
     const retryEngine = new RetryEngine(db, config, () => forge)
     await retryEngine.retry('org/repo', 1)
 
-    const afterRetry = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as { status: string }
-    expect(afterRetry.status).toBe('queued')
+    // Previous attempt is frozen; new head attempt is queued.
+    const prev = db
+      .prepare('SELECT status, terminated_at FROM runs WHERE id = ?')
+      .get(runId) as { status: string; terminated_at: string | null }
+    expect(prev.status).toBe('error')
+    expect(prev.terminated_at).not.toBeNull()
+
+    const head = db
+      .prepare(
+        `SELECT status, previous_attempt_id, intent FROM runs
+         WHERE repo = ? AND issue_number = ?
+         ORDER BY sequence_number DESC, created_at DESC
+         LIMIT 1`,
+      )
+      .get('org/repo', 1) as { status: string; previous_attempt_id: string | null; intent: string }
+    expect(head.status).toBe('queued')
+    expect(head.previous_attempt_id).toBe(runId)
+    expect(head.intent).toBe('retry')
   })
 
   it('cleanup after completed run', async () => {

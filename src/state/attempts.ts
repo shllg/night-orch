@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import { generateRunId } from '../utils/ids.js'
 import { nowUtcIso } from '../utils/time.js'
 
 /**
@@ -149,4 +150,165 @@ export function getHeadAttempt(
 ): AttemptChainEntry | null {
   const chain = getAttemptChain(db, repo, issueNumber)
   return chain.length > 0 ? chain[chain.length - 1]! : null
+}
+
+export type FollowupIntent = Exclude<AttemptIntent, 'initial'>
+
+export interface CreateFollowupAttemptInput {
+  /** ID of the attempt being superseded. Must be non-terminated. */
+  previousAttemptId: string
+  /** Reason this new attempt is being created. */
+  intent: FollowupIntent
+  /**
+   * When true, branch-related fields (branch_name, branch_slug,
+   * worktree_path, pr_number, pr_title) are cleared on the new attempt so
+   * the poller starts a fresh checkout from the base branch. Defaults:
+   *  - retry: true  (retry starts from base branch)
+   *  - continue: false (continue reuses the prior branch + PR)
+   *  - rebase: false (rebase reuses the prior branch)
+   *  - rediscover: true (treated like a fresh discovery pass)
+   */
+  resetBranch?: boolean
+  /** phaseData to seed on the new attempt. Pass null to write SQL NULL. */
+  phaseData: Record<string, unknown> | null
+  /** controlPayload to seed on the new attempt. Pass null to write SQL NULL. */
+  controlPayload: Record<string, unknown> | null
+  /** Optional override timestamp for deterministic tests. */
+  now?: string
+}
+
+export interface CreateFollowupAttemptResult {
+  attemptId: string
+  sequenceNumber: number
+}
+
+interface PreviousAttemptSnapshot {
+  id: string
+  repo: string
+  issue_number: number
+  issue_node_id: string | null
+  issue_title: string | null
+  planner: string
+  coder: string
+  reviewer: string
+  parent_run_id: string | null
+  branch_name: string | null
+  branch_slug: string | null
+  worktree_path: string | null
+  pr_number: number | null
+  pr_title: string | null
+  sequence_number: number
+  terminated_at: string | null
+}
+
+function defaultResetBranch(intent: FollowupIntent): boolean {
+  switch (intent) {
+    case 'retry':
+    case 'rediscover':
+      return true
+    case 'continue':
+    case 'rebase':
+      return false
+  }
+}
+
+/**
+ * Finalize `previousAttemptId` and INSERT a new attempt row linked to it.
+ *
+ * This is the **only** supported path for retry/continue/rebase. It
+ * eliminates the previous mutable-row pattern that reset cost accumulators,
+ * overwrote block_reason, and rewound iteration counters on the same row —
+ * each of which produced a distinct FIX commit in the project history.
+ *
+ * The insert preserves identity (repo, issue, role assignments, parent
+ * sub-run id) and, when `resetBranch === false`, also the branch/PR
+ * pointers. Cost columns start at zero. sequence_number = previous + 1.
+ */
+export function createFollowupAttempt(
+  db: Database.Database,
+  input: CreateFollowupAttemptInput,
+): CreateFollowupAttemptResult {
+  const now = input.now ?? nowUtcIso()
+  const resetBranch = input.resetBranch ?? defaultResetBranch(input.intent)
+
+  const tx = db.transaction((): CreateFollowupAttemptResult => {
+    const prev = db
+      .prepare(
+        `SELECT id, repo, issue_number, issue_node_id, issue_title,
+                planner, coder, reviewer, parent_run_id,
+                branch_name, branch_slug, worktree_path, pr_number, pr_title,
+                sequence_number, terminated_at
+         FROM runs WHERE id = ?`,
+      )
+      .get(input.previousAttemptId) as PreviousAttemptSnapshot | undefined
+
+    if (!prev) {
+      throw new AttemptNotFoundError(input.previousAttemptId)
+    }
+    if (prev.terminated_at !== null) {
+      throw new AttemptTerminatedError(input.previousAttemptId)
+    }
+
+    db.prepare('UPDATE runs SET terminated_at = ?, updated_at = ? WHERE id = ?').run(
+      now,
+      now,
+      prev.id,
+    )
+
+    const newId = generateRunId()
+    const newSequence = prev.sequence_number + 1
+
+    db.prepare(
+      `INSERT INTO runs (
+         id, repo, issue_number, issue_node_id, issue_title, status,
+         planner, coder, reviewer,
+         iteration_count, current_phase, phase_data,
+         started_at, ended_at, last_error,
+         pr_number, pr_title, branch_name, branch_slug, worktree_path,
+         estimated_cost_usd, prompt_tokens, completion_tokens, cache_read_tokens,
+         block_reason, operation_intent, manual_state, control_payload,
+         parent_run_id, retry_count,
+         previous_attempt_id, sequence_number, intent, terminated_at,
+         created_at, updated_at
+       ) VALUES (
+         ?, ?, ?, ?, ?, 'queued',
+         ?, ?, ?,
+         0, NULL, ?,
+         NULL, NULL, NULL,
+         ?, ?, ?, ?, ?,
+         0, 0, 0, 0,
+         NULL, ?, 'none', ?,
+         ?, 0,
+         ?, ?, ?, NULL,
+         ?, ?
+       )`,
+    ).run(
+      newId,
+      prev.repo,
+      prev.issue_number,
+      prev.issue_node_id,
+      prev.issue_title,
+      prev.planner,
+      prev.coder,
+      prev.reviewer,
+      input.phaseData === null ? null : JSON.stringify(input.phaseData),
+      resetBranch ? null : prev.pr_number,
+      resetBranch ? null : prev.pr_title,
+      resetBranch ? null : prev.branch_name,
+      resetBranch ? null : prev.branch_slug,
+      resetBranch ? null : prev.worktree_path,
+      input.intent,
+      input.controlPayload === null ? null : JSON.stringify(input.controlPayload),
+      prev.parent_run_id,
+      prev.id,
+      newSequence,
+      input.intent,
+      now,
+      now,
+    )
+
+    return { attemptId: newId, sequenceNumber: newSequence }
+  })
+
+  return tx()
 }

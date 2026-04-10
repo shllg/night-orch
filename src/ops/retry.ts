@@ -6,6 +6,7 @@ import { buildLabelConfig } from '../labels/config.js'
 import { transitionLabels } from '../labels/manager.js'
 import { LeaseManager } from '../state/leases.js'
 import { RunManager, type RunStatus } from '../state/runs.js'
+import { createFollowupAttempt } from '../state/attempts.js'
 import { pollOnce } from '../runner/poller.js'
 import { resolveIssueRepo } from '../utils/issue-repo.js'
 import { logger } from '../utils/logger.js'
@@ -66,60 +67,54 @@ export class RetryEngine {
     }
 
     // Retry is always a fresh start from the latest base branch tip.
+    const requestedAt = new Date().toISOString()
     const nextPhaseData = {
       issueRepo,
       reactionType: 'retry',
       reactionSummary: 'Fresh retry requested',
       reactionContext: 'Retry requested. Start fresh from the latest base branch and re-implement the solution.',
-      retryRequestedAt: new Date().toISOString(),
+      retryRequestedAt: requestedAt,
     } satisfies Record<string, unknown>
 
-    // Reset run to queued
-    const resetFields: Parameters<RunManager['update']>[1] = {
-      status: 'queued',
-      iterationCount: 0,
-      currentPhase: null,
-      lastError: null,
-      endedAt: null,
-      blockReason: null,
-      operationIntent: 'retry',
-      manualState: 'none',
-      controlPayload: {
-        issueRepo,
-        preserveBranchState: false,
-        resetPlan: true,
-        resetBranch: true,
-        retryRequestedAt: new Date().toISOString(),
-      },
-      phaseData: nextPhaseData,
-      // Reset cost accumulators so retry doesn't immediately re-block on per-run limit
-      estimatedCostUsd: 0,
-      promptTokens: 0,
-      completionTokens: 0,
-      cacheReadTokens: 0,
+    // Atomic state transition: finalize the previous attempt + INSERT a
+    // new one + release leases in a single DB transaction. Previous
+    // implementation mutated the same row and had to manually reset
+    // iteration/cost/branch fields; createFollowupAttempt starts a fresh
+    // row with zeroed counters by construction.
+    let newAttemptId: string
+    try {
+      const transition = this.db.transaction(() => {
+        const result = createFollowupAttempt(this.db, {
+          previousAttemptId: run.id,
+          intent: 'retry',
+          resetBranch: true,
+          phaseData: nextPhaseData,
+          controlPayload: {
+            issueRepo,
+            preserveBranchState: false,
+            resetPlan: true,
+            resetBranch: true,
+            retryRequestedAt: requestedAt,
+          },
+        })
+        this.leaseManager.release(repo, issueNumber)
+        if (issueRepo !== repo) {
+          this.leaseManager.release(issueRepo, issueNumber)
+        }
+        return result.attemptId
+      })
+      newAttemptId = transition()
+    } catch (err) {
+      throw new Error(`Failed to queue retry for run ${run.id}: ${String(err)}`)
     }
 
-    // Atomic state transition: release leases AND reset the run in a
-    // single DB transaction. Without this, a crash between the two steps
-    // leaves the issue queued-but-leased until stale cleanup runs.
-    let transitioned = false
-    const transition = this.db.transaction(() => {
-      transitioned = runManager.updateIfStatus(run.id, RETRYABLE_STATUSES, resetFields)
-      this.leaseManager.release(repo, issueNumber)
-      if (issueRepo !== repo) {
-        this.leaseManager.release(issueRepo, issueNumber)
-      }
-    })
-    transition()
-
-    if (!transitioned) {
-      throw new Error(`Run ${run.id} changed state while retry was being queued`)
-    }
+    logger.info(
+      { previousRunId: run.id, newRunId: newAttemptId, repo, issue: issueNumber },
+      'Queued retry as new attempt',
+    )
 
     // Apply label mutations
     await this.updateLabels(repo, issueRepo, issueNumber, run.status)
-
-    logger.info({ runId: run.id, repo, issue: issueNumber }, 'Run reset to queued for retry')
 
       // If --immediate, start processing right away
     if (opts.immediate) {
