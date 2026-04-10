@@ -4,6 +4,7 @@ import type { ResolvedRoles } from '../discovery/roles.js'
 import type { TriageResult, TriageAdjustedLimits } from '../discovery/triage.js'
 import type { PlannerOutput, CoderOutput, ReviewerOutput, ReviewFinding, VerifyResult } from '../workers/types.js'
 import type { IterationSnapshot } from './progress.js'
+import type { BlockedState } from './state.js'
 
 /** Why a run was blocked — used for reporting and retry eligibility. */
 export type BlockReason =
@@ -90,11 +91,18 @@ export interface RunContext {
 /**
  * Discriminated union returned by `decide()` to route the loop engine.
  * `publish` and `block`/`error` are terminal; `iterate` jumps back to the coder step.
+ *
+ * The `block` variant carries a typed `BlockedState` (from `./state.js`)
+ * as the source of truth for the blocked reason. The legacy
+ * `src/loop/types.ts:BlockReason` string enum is preserved as a bridge
+ * for DB persistence via `blockedReasonToLegacy()` during the R1
+ * incremental rewiring — consumers that care about structured data
+ * should switch on `state.reason.type` instead of the legacy string.
  */
 export type LoopDecision =
   | { action: 'publish'; reason: string }
   | { action: 'iterate'; reason: string; findings: ReviewFinding[] }
-  | { action: 'block'; reason: string; blockReason: BlockReason }
+  | { action: 'block'; reason: string; state: BlockedState }
   | { action: 'error'; reason: string }
 
 /** Final disposition of a run. `running` is the initial value; the others are terminal. */

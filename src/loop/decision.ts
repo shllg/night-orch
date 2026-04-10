@@ -2,6 +2,7 @@ import type { RunContext, LoopDecision } from './types.js'
 import type { Config } from '../config/schema.js'
 import { isPlanningIssue } from '../planning/mode.js'
 import { costLimitRecoveryHint } from './cost.js'
+import { blocked } from './state.js'
 
 /**
  * Determine next action based on review verdict, verify results,
@@ -39,19 +40,47 @@ export function decide(
     const reason =
       `Per-run cost limit exceeded: $${ctx.estimatedCostUsd.toFixed(2)} >= ` +
       `$${securityConfig.maxCostPerRunUsd.toFixed(2)}. ${costLimitRecoveryHint('per-run')}`
-    return { action: 'block', reason, blockReason: 'cost_limit' }
+    return {
+      action: 'block',
+      reason,
+      state: blocked(
+        {
+          type: 'costLimit',
+          limit: 'per-run',
+          actualUsd: ctx.estimatedCostUsd,
+          limitUsd: securityConfig.maxCostPerRunUsd,
+        },
+        { message: reason },
+      ),
+    }
   }
 
   // Rule 2: Max total passes
   if (ctx.totalAgentPasses >= maxTotalPasses) {
-    return { action: 'block', reason: `Max total agent passes reached: ${ctx.totalAgentPasses}/${maxTotalPasses}`, blockReason: 'agent_pass_limit' }
+    const reason = `Max total agent passes reached: ${ctx.totalAgentPasses}/${maxTotalPasses}`
+    return {
+      action: 'block',
+      reason,
+      state: blocked(
+        { type: 'agentPassLimit', passes: ctx.totalAgentPasses, max: maxTotalPasses },
+        { message: reason },
+      ),
+    }
   }
 
   // Planning-only mode bypasses verify/review gates. The commit guard enforces
   // that only the configured PRD markdown file is committed.
   if (isPlanningIssue(ctx.issue.labels, ctx.repoConfig)) {
     if (!ctx.codeResult) {
-      return { action: 'block', reason: 'Planning-only mode requires a PRD output from the coder', blockReason: 'ambiguous_review' }
+      const reason = 'Planning-only mode requires a PRD output from the coder'
+      return {
+        action: 'block',
+        reason,
+        state: blocked(
+          { type: 'ambiguousReview', excerpt: reason },
+          { message: reason },
+        ),
+      }
     }
     return { action: 'publish', reason: 'Planning-only mode: PRD ready for publishing' }
   }
@@ -69,16 +98,40 @@ export function decide(
     // Lightweight workflows may intentionally omit reviewer phases.
     if (!requireReview) {
       if (loopConfig.requireVerificationPass && !verifyCommandsConfigured) {
-        return { action: 'block', reason: 'Verification required but no verify commands are configured', blockReason: 'verify_config' }
+        const reason = 'Verification required but no verify commands are configured'
+        return {
+          action: 'block',
+          reason,
+          state: blocked(
+            { type: 'verifyConfig', detail: 'no verify commands configured' },
+            { message: reason },
+          ),
+        }
       }
       if (loopConfig.requireVerificationPass && !verifyResultsAvailable) {
-        return { action: 'block', reason: 'Verification required but no verify results are available', blockReason: 'verify_config' }
+        const reason = 'Verification required but no verify results are available'
+        return {
+          action: 'block',
+          reason,
+          state: blocked(
+            { type: 'verifyConfig', detail: 'no verify results available' },
+            { message: reason },
+          ),
+        }
       }
       if (verificationSatisfied) {
         return { action: 'publish', reason: 'Verification passed in no-review workflow' }
       }
       if (ctx.iteration >= maxReviewIter) {
-        return { action: 'block', reason: `Max review iterations reached: ${ctx.iteration}/${maxReviewIter}`, blockReason: 'iteration_limit' }
+        const reason = `Max review iterations reached: ${ctx.iteration}/${maxReviewIter}`
+        return {
+          action: 'block',
+          reason,
+          state: blocked(
+            { type: 'iterationLimit', iterations: ctx.iteration, max: maxReviewIter },
+            { message: reason },
+          ),
+        }
       }
       return {
         action: 'iterate',
@@ -89,22 +142,54 @@ export function decide(
 
     // Rules 8, 9
     if (loopConfig.blockOnAmbiguousReview) {
-      return { action: 'block', reason: 'Review output not parseable and blockOnAmbiguousReview is true', blockReason: 'ambiguous_review' }
+      const reason = 'Review output not parseable and blockOnAmbiguousReview is true'
+      return {
+        action: 'block',
+        reason,
+        state: blocked(
+          { type: 'ambiguousReview', excerpt: 'review output could not be parsed' },
+          { message: reason },
+        ),
+      }
     }
     if (ctx.iteration >= maxReviewIter) {
-      return { action: 'block', reason: 'Review parse failure at max iterations', blockReason: 'iteration_limit' }
+      const reason = 'Review parse failure at max iterations'
+      return {
+        action: 'block',
+        reason,
+        state: blocked(
+          { type: 'iterationLimit', iterations: ctx.iteration, max: maxReviewIter },
+          { message: reason },
+        ),
+      }
     }
     return { action: 'iterate', reason: 'Review output not parseable — retrying', findings: [] }
   }
 
   switch (review.verdict) {
-    case 'APPROVED':
+    case 'APPROVED': {
       // Rules 3, 4
       if (loopConfig.requireVerificationPass && !verifyCommandsConfigured) {
-        return { action: 'block', reason: 'Verification required but no verify commands are configured', blockReason: 'verify_config' }
+        const reason = 'Verification required but no verify commands are configured'
+        return {
+          action: 'block',
+          reason,
+          state: blocked(
+            { type: 'verifyConfig', detail: 'no verify commands configured' },
+            { message: reason },
+          ),
+        }
       }
       if (loopConfig.requireVerificationPass && !verifyResultsAvailable) {
-        return { action: 'block', reason: 'Verification required but no verify results are available', blockReason: 'verify_config' }
+        const reason = 'Verification required but no verify results are available'
+        return {
+          action: 'block',
+          reason,
+          state: blocked(
+            { type: 'verifyConfig', detail: 'no verify results available' },
+            { message: reason },
+          ),
+        }
       }
       if (verificationSatisfied) {
         return { action: 'publish', reason: 'Review approved, all verification passed' }
@@ -114,21 +199,37 @@ export function decide(
         reason: 'Review approved but verification failed — fixing',
         findings: [],
       }
+    }
 
-    case 'CHANGES_REQUIRED':
+    case 'CHANGES_REQUIRED': {
       // Rules 5, 6
       if (ctx.iteration >= maxReviewIter) {
-        return { action: 'block', reason: `Max review iterations reached: ${ctx.iteration}/${maxReviewIter}`, blockReason: 'iteration_limit' }
+        const reason = `Max review iterations reached: ${ctx.iteration}/${maxReviewIter}`
+        return {
+          action: 'block',
+          reason,
+          state: blocked(
+            { type: 'iterationLimit', iterations: ctx.iteration, max: maxReviewIter },
+            { message: reason },
+          ),
+        }
       }
       return {
         action: 'iterate',
         reason: `Review requested changes (iteration ${ctx.iteration}/${maxReviewIter})`,
         findings: review.findings,
       }
+    }
 
-    case 'BLOCKED':
+    case 'BLOCKED': {
       // Rule 7
-      return { action: 'block', reason: `Reviewer blocked: ${review.summary}`, blockReason: 'reviewer_blocked' }
+      const reason = `Reviewer blocked: ${review.summary}`
+      return {
+        action: 'block',
+        reason,
+        state: blocked({ type: 'reviewerBlocked', summary: review.summary }, { message: reason }),
+      }
+    }
 
     default:
       return { action: 'error', reason: `Unknown review verdict: ${review.verdict as string}` }

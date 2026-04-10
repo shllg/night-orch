@@ -10,6 +10,7 @@ import { commitChanges } from './commit.js'
 import { executeStep, type StepDependencies } from './step-executor.js'
 import { Checkpoint } from './checkpoint.js'
 import { CostTracker, describeBudgetBlock, costLimitRecoveryHint, type BudgetStatus } from './cost.js'
+import { blockedReasonToLegacy } from './state.js'
 import { estimateWorkerCost } from './pricing.js'
 import { WorkerAuthError } from '../workers/errors.js'
 import { logger } from '../utils/logger.js'
@@ -337,10 +338,17 @@ export async function executeLoop(
       // Persist decision outcome BEFORE taking action. If a crash happens
       // between the decision and the terminal state write, resume will
       // replay the outcome rather than re-routing to iterate.
+      //
+      // The persisted shape uses the legacy BlockReason string during
+      // the R1 bridge — `PersistedDecisionOutcome` isn't retyped yet.
+      // R5 (phase_data zod schema) will migrate this storage layer.
       checkpoint.recordDecisionOutcome(ctx.runId, step.id, {
         action: decision.action,
         reason: decision.reason,
-        blockReason: decision.action === 'block' ? decision.blockReason : null,
+        blockReason:
+          decision.action === 'block'
+            ? blockedReasonToLegacy(decision.state.reason)
+            : null,
       })
 
       switch (decision.action) {
@@ -440,7 +448,7 @@ export async function executeLoop(
             updateContext(ctx, {
               currentPhase: 'blocked',
               terminalStatus: 'blocked',
-              blockReason: decision.blockReason,
+              blockReason: blockedReasonToLegacy(decision.state.reason),
               stepOutputs: {
                 ...ctx.stepOutputs,
                 blockMessage: decision.reason,

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { RunManager } from '../../src/state/runs.js'
+import { RunManager, hydrateState, serializeState } from '../../src/state/runs.js'
 import { initDatabase } from '../../src/state/db.js'
+import { blocked, type RunState } from '../../src/loop/state.js'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -361,6 +362,142 @@ describe('RunManager', () => {
 
       runManager.incrementRetryCount(run.id)
       expect(runManager.countRecentErrors('org/repo', 302)).toBe(3)
+    })
+  })
+})
+
+describe('serializeState / hydrateState', () => {
+  describe('serializeState', () => {
+    it('projects running to status=running', () => {
+      expect(serializeState({ kind: 'running', phase: 'plan' })).toEqual({
+        status: 'running',
+        blockReason: null,
+      })
+    })
+
+    it('projects publishing to status=running (no separate column today)', () => {
+      expect(serializeState({ kind: 'publishing', prUrl: 'https://x' })).toEqual({
+        status: 'running',
+        blockReason: null,
+      })
+    })
+
+    it('projects published to status=completed', () => {
+      expect(
+        serializeState({ kind: 'published', prUrl: 'https://x', mergedAt: '2026-04-10T00:00:00Z' }),
+      ).toEqual({ status: 'completed', blockReason: null })
+    })
+
+    it('projects error to status=error', () => {
+      expect(serializeState({ kind: 'error', message: 'boom', cause: 'fatal' })).toEqual({
+        status: 'error',
+        blockReason: null,
+      })
+    })
+
+    it('projects blocked to status=blocked with the legacy block_reason string', () => {
+      expect(
+        serializeState(
+          blocked({ type: 'costLimit', limit: 'per-run', actualUsd: 12, limitUsd: 10 }),
+        ),
+      ).toEqual({ status: 'blocked', blockReason: 'cost_limit' })
+
+      expect(serializeState(blocked({ type: 'reviewerBlocked', summary: 'no' }))).toEqual({
+        status: 'blocked',
+        blockReason: 'reviewer_blocked',
+      })
+
+      expect(
+        serializeState(
+          blocked({ type: 'workerTimeout', adapter: 'claude', step: 'coder', timeoutMs: 30000 }),
+        ),
+      ).toEqual({ status: 'blocked', blockReason: 'auth_failure' })
+    })
+  })
+
+  describe('hydrateState', () => {
+    it('lifts queued/running/review_ready/completed/error rows', () => {
+      expect(hydrateState({ status: 'queued', blockReason: null })).toEqual({
+        kind: 'running',
+        phase: 'running',
+      })
+      expect(hydrateState({ status: 'running', blockReason: null })).toEqual({
+        kind: 'running',
+        phase: 'running',
+      })
+      expect(hydrateState({ status: 'review_ready', blockReason: null })).toEqual({
+        kind: 'publishing',
+      })
+      expect(hydrateState({ status: 'completed', blockReason: null })).toEqual({
+        kind: 'published',
+        prUrl: '',
+      })
+      expect(hydrateState({ status: 'error', blockReason: null })).toEqual({
+        kind: 'error',
+        message: '',
+        cause: 'fatal',
+      })
+    })
+
+    it('lifts each legacy block_reason into a typed BlockedReason', () => {
+      const cases: Array<[string, string]> = [
+        ['cost_limit', 'costLimit'],
+        ['iteration_limit', 'iterationLimit'],
+        ['agent_pass_limit', 'agentPassLimit'],
+        ['reviewer_blocked', 'reviewerBlocked'],
+        ['ambiguous_review', 'ambiguousReview'],
+        ['verify_config', 'verifyConfig'],
+        ['merge_conflict', 'mergeConflict'],
+        ['auth_failure', 'authFailure'],
+        ['empty_diff', 'emptyDiff'],
+      ]
+      for (const [legacy, typed] of cases) {
+        const state = hydrateState({ status: 'blocked', blockReason: legacy })
+        expect(state?.kind).toBe('blocked')
+        if (state?.kind === 'blocked') {
+          expect(state.reason.type).toBe(typed)
+        }
+      }
+    })
+
+    it('returns an ambiguousReview placeholder for unknown block reasons', () => {
+      const state = hydrateState({ status: 'blocked', blockReason: 'something_new' })
+      expect(state?.kind).toBe('blocked')
+      if (state?.kind === 'blocked') {
+        expect(state.reason.type).toBe('ambiguousReview')
+      }
+    })
+
+    it('returns null for unknown statuses', () => {
+      expect(hydrateState({ status: 'unknown', blockReason: null })).toBeNull()
+    })
+  })
+
+  describe('round-trip', () => {
+    // serializeState followed by hydrateState should preserve the kind
+    // and (for blocked) the reason type. Field-level info loss inside
+    // each reason is documented and expected — only the type is pinned.
+    it('preserves kind/reason.type for every legacy-mappable state', () => {
+      const samples: RunState[] = [
+        { kind: 'running', phase: 'code' },
+        { kind: 'error', message: '', cause: 'fatal' },
+        blocked({ type: 'costLimit', limit: 'per-run', actualUsd: 1, limitUsd: 0.5 }),
+        blocked({ type: 'iterationLimit', iterations: 4, max: 4 }),
+        blocked({ type: 'agentPassLimit', passes: 10, max: 10 }),
+        blocked({ type: 'reviewerBlocked', summary: 'no' }),
+        blocked({ type: 'ambiguousReview', excerpt: 'mangled' }),
+        blocked({ type: 'verifyConfig', detail: 'no commands' }),
+        blocked({ type: 'mergeConflict', files: ['a.ts'], summary: 'conflict' }),
+        blocked({ type: 'authFailure', adapter: 'claude' }),
+        blocked({ type: 'emptyDiff', retries: 2 }),
+      ]
+      for (const original of samples) {
+        const round = hydrateState(serializeState(original))
+        expect(round?.kind).toBe(original.kind)
+        if (original.kind === 'blocked' && round?.kind === 'blocked') {
+          expect(round.reason.type).toBe(original.reason.type)
+        }
+      }
     })
   })
 })

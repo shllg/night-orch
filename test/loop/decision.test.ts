@@ -280,14 +280,14 @@ describe('decide', () => {
       })
       const d = decide(ctx, loopConfig, securityConfig)
       expect(d.action).toBe('block')
-      if (d.action === 'block') expect(d.blockReason).toBe('cost_limit')
+      if (d.action === 'block') expect(d.state.reason.type).toBe('costLimit')
     })
 
     it('agent pass limit block carries blockReason=agent_pass_limit', () => {
       const ctx = makeCtx({ totalAgentPasses: 10 })
       const d = decide(ctx, loopConfig, securityConfig)
       expect(d.action).toBe('block')
-      if (d.action === 'block') expect(d.blockReason).toBe('agent_pass_limit')
+      if (d.action === 'block') expect(d.state.reason.type).toBe('agentPassLimit')
     })
 
     it('CHANGES_REQUIRED at max iterations carries blockReason=iteration_limit', () => {
@@ -302,7 +302,7 @@ describe('decide', () => {
       })
       const d = decide(ctx, loopConfig, securityConfig)
       expect(d.action).toBe('block')
-      if (d.action === 'block') expect(d.blockReason).toBe('iteration_limit')
+      if (d.action === 'block') expect(d.state.reason.type).toBe('iterationLimit')
     })
 
     it('BLOCKED verdict carries blockReason=reviewer_blocked', () => {
@@ -316,14 +316,14 @@ describe('decide', () => {
       })
       const d = decide(ctx, loopConfig, securityConfig)
       expect(d.action).toBe('block')
-      if (d.action === 'block') expect(d.blockReason).toBe('reviewer_blocked')
+      if (d.action === 'block') expect(d.state.reason.type).toBe('reviewerBlocked')
     })
 
     it('ambiguous review with blockOnAmbiguousReview carries blockReason=ambiguous_review', () => {
       const ctx = makeCtx({ reviewResult: null })
       const d = decide(ctx, loopConfig, securityConfig)
       expect(d.action).toBe('block')
-      if (d.action === 'block') expect(d.blockReason).toBe('ambiguous_review')
+      if (d.action === 'block') expect(d.state.reason.type).toBe('ambiguousReview')
     })
 
     it('APPROVED + requireVerificationPass but no verify commands → blockReason=verify_config', () => {
@@ -339,7 +339,7 @@ describe('decide', () => {
       })
       const d = decide(ctx, loopConfig, securityConfig)
       expect(d.action).toBe('block')
-      if (d.action === 'block') expect(d.blockReason).toBe('verify_config')
+      if (d.action === 'block') expect(d.state.reason.type).toBe('verifyConfig')
     })
   })
 
@@ -354,14 +354,14 @@ describe('decide', () => {
       })
       const d = decide(ctx, loopConfig, securityConfig, { requireReview: false })
       expect(d.action).toBe('block')
-      if (d.action === 'block') expect(d.blockReason).toBe('verify_config')
+      if (d.action === 'block') expect(d.state.reason.type).toBe('verifyConfig')
     })
 
     it('blocks with verify_config when verify commands configured but no results yet', () => {
       const ctx = noReviewCtx({ verifyResults: [] })
       const d = decide(ctx, loopConfig, securityConfig, { requireReview: false })
       expect(d.action).toBe('block')
-      if (d.action === 'block') expect(d.blockReason).toBe('verify_config')
+      if (d.action === 'block') expect(d.state.reason.type).toBe('verifyConfig')
     })
 
     it('iterates when verify failed but iteration is under the limit', () => {
@@ -380,7 +380,7 @@ describe('decide', () => {
       })
       const d = decide(ctx, loopConfig, securityConfig, { requireReview: false })
       expect(d.action).toBe('block')
-      if (d.action === 'block') expect(d.blockReason).toBe('iteration_limit')
+      if (d.action === 'block') expect(d.state.reason.type).toBe('iterationLimit')
     })
 
     it('publishes when verify passes', () => {

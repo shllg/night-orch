@@ -3,6 +3,14 @@ import { generateRunId } from '../utils/ids.js'
 import { nowUtcIso } from '../utils/time.js'
 import { IssueManager } from './issues.js'
 import { logger } from '../utils/logger.js'
+import {
+  assertNever,
+  blocked,
+  blockedReasonFromLegacy,
+  blockedReasonToLegacy,
+  type BlockedReason,
+  type RunState,
+} from '../loop/state.js'
 
 export type RunStatus = 'queued' | 'running' | 'blocked' | 'review_ready' | 'error' | 'completed'
 export type RunOperationIntent = 'auto' | 'continue' | 'retry' | 'rebase'
@@ -628,3 +636,103 @@ interface RawRunRow {
   parent_run_id: string | null
   retry_count: number | null
 }
+
+/**
+ * Single source of truth for projecting a `RunState` (the unified domain
+ * type from `loop/state.ts`) onto the legacy `(status, block_reason)`
+ * column pair on the `runs` table.
+ *
+ * The mapping intentionally collapses several `RunState.kind` values
+ * onto the same legacy status — `running` and `publishing` both project
+ * to `'running'` because the existing schema doesn't distinguish "engine
+ * actively working" from "PR posted, awaiting merge". R1c will wire
+ * call sites through this helper; until then it's a standalone utility
+ * with its own unit tests so the projection rules are pinned down.
+ */
+export function serializeState(state: RunState): {
+  status: RunStatus
+  blockReason: string | null
+} {
+  switch (state.kind) {
+    case 'running':
+      return { status: 'running', blockReason: null }
+    case 'publishing':
+      return { status: 'running', blockReason: null }
+    case 'published':
+      return { status: 'completed', blockReason: null }
+    case 'blocked':
+      return {
+        status: 'blocked',
+        blockReason: blockedReasonToLegacy(state.reason),
+      }
+    case 'error':
+      return { status: 'error', blockReason: null }
+    default:
+      return assertNever(state, 'serializeState')
+  }
+}
+
+/**
+ * Inverse of `serializeState`: best-effort lift of a stored
+ * `(status, block_reason)` row into a `RunState`. Fields that the
+ * legacy schema can't carry — cost amounts, iteration counters,
+ * adapter ids — default to zero/empty placeholders. Callers that need
+ * accurate structured data should source it from the live engine
+ * decision rather than rehydrating from disk.
+ *
+ * Returns `null` for unknown statuses so callers can decide whether
+ * to treat the row as corrupt or fall back to a default.
+ */
+export function hydrateState(row: {
+  status: string
+  blockReason: string | null
+}): RunState | null {
+  switch (row.status) {
+    case 'queued':
+    case 'running':
+      return { kind: 'running', phase: 'running' }
+    case 'review_ready':
+      return { kind: 'publishing' }
+    case 'completed':
+      return { kind: 'published', prUrl: '' }
+    case 'error':
+      return { kind: 'error', message: '', cause: 'fatal' }
+    case 'blocked': {
+      const legacy = row.blockReason
+      if (!legacy || !LEGACY_BLOCK_REASONS.has(legacy)) {
+        return blocked({ type: 'ambiguousReview', excerpt: legacy ?? 'unknown' })
+      }
+      const reason = blockedReasonFromLegacy(legacy as LegacyBlockReason)
+      return blocked(reason)
+    }
+    default:
+      return null
+  }
+}
+
+type LegacyBlockReason =
+  | 'cost_limit'
+  | 'iteration_limit'
+  | 'agent_pass_limit'
+  | 'reviewer_blocked'
+  | 'ambiguous_review'
+  | 'verify_config'
+  | 'merge_conflict'
+  | 'auth_failure'
+  | 'empty_diff'
+
+const LEGACY_BLOCK_REASONS: ReadonlySet<string> = new Set<LegacyBlockReason>([
+  'cost_limit',
+  'iteration_limit',
+  'agent_pass_limit',
+  'reviewer_blocked',
+  'ambiguous_review',
+  'verify_config',
+  'merge_conflict',
+  'auth_failure',
+  'empty_diff',
+])
+
+// Re-export for callers that need the typed reason without importing
+// from `../loop/state.js` directly.
+export type { BlockedReason }
