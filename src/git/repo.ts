@@ -81,9 +81,9 @@ export interface DiffResult {
  * relative to origin/<baseBranch>.
  *
  * The coder writes files to disk but doesn't commit. To capture everything
- * (including new untracked files), we temporarily stage all changes, diff
- * the staged tree against the base, then unstage. The later commit step
- * does its own `git add -A` so unstaging here is safe.
+ * (including new untracked files), we stage all changes and diff the staged
+ * tree against the base. Files are left staged so that subsequent steps
+ * (reviewer, commit) see them via standard git operations.
  */
 export async function getDiffAgainstBranch(
   worktreePath: string,
@@ -98,9 +98,6 @@ export async function getDiffAgainstBranch(
       { cwd: worktreePath },
     )
 
-    // Unstage — the commit step will re-stage later
-    await runGit(['reset', 'HEAD', '--', '.'], { cwd: worktreePath, reject: false })
-
     if (!stdout || stdout.trim() === '') {
       logger.warn({ worktreePath, baseBranch }, 'Diff against base branch is empty')
       return { diff: '', error: null }
@@ -111,8 +108,6 @@ export async function getDiffAgainstBranch(
       : stdout.slice(0, MAX_DIFF_LENGTH) + '\n\n[... diff truncated at 50KB ...]'
     return { diff, error: null }
   } catch (err) {
-    // Always unstage on error
-    await runGit(['reset', 'HEAD', '--', '.'], { cwd: worktreePath, reject: false })
     const message = err instanceof Error ? err.message : String(err)
     logger.warn({ worktreePath, baseBranch, err }, 'Failed to get diff against base branch')
     return { diff: '', error: `Failed to compute diff: ${message}` }
