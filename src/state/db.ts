@@ -22,6 +22,8 @@ import { up as migration017 } from './migrations/017-merge-batch-merged-prs.js'
 import { up as migration018 } from './migrations/018-run-retry-count.js'
 import { up as migration019 } from './migrations/019-runs-active-index-top-level.js'
 import { up as migration020 } from './migrations/020-cost-ledger.js'
+import { up as migration021 } from './migrations/021-run-control-state.js'
+import { up as migration022 } from './migrations/022-run-log-events.js'
 
 const MIGRATIONS = [
   { version: 1, name: '001-initial', up: migration001 },
@@ -44,6 +46,8 @@ const MIGRATIONS = [
   { version: 18, name: '018-run-retry-count', up: migration018 },
   { version: 19, name: '019-runs-active-index-top-level', up: migration019 },
   { version: 20, name: '020-cost-ledger', up: migration020 },
+  { version: 21, name: '021-run-control-state', up: migration021 },
+  { version: 22, name: '022-run-log-events', up: migration022 },
 ]
 
 export function initDatabase(dbPath: string): Database.Database {

@@ -93,7 +93,7 @@ Metrics (best-effort Prometheus) ◄──────────────�
 ## Subsystems
 
 ### CLI (`src/cli/`)
-Core commands built with `commander`: `run` (long-running poller), `run-once` (single cycle), `doctor` (validate setup), `sync` (reconcile state with forge), `retry` (requeue an issue), `continue` (queue a context-aware second pass), `rebase` (rebase and re-evaluate), `cleanup` (remove stale artifacts), `notify-test` (test channels), and `mcp` (start MCP server). Global flags: `--config`, `--trust-workspace`, `--dry-run`, `--log-level`.
+Core commands built with `commander`: `run` (long-running poller), `run-once` (single cycle), `doctor` (validate setup), `sync` (reconcile state with forge), `retry` (fresh restart from latest base), `continue` (resume existing branch with fresh PR context), `rebase` (explicit rebase and re-evaluate), `cleanup` (remove stale artifacts), `notify-test` (test channels), and `mcp` (start MCP server). Global flags: `--config`, `--trust-workspace`, `--dry-run`, `--log-level`.
 
 ### Config (`src/config/`)
 YAML config validated by Zod schemas (`schema.ts`). The loader (`loader.ts`) reads central config, merges optional per-repo `.night-orch.yml/.yaml` overrides from each `repos[].localPath` (project wins), validates the merged result, and expands paths (`~` → home dir, `{auto:3000-4000}` → allocated port). Key files: `schema.ts` (types + validation), `loader.ts` (load + merge + expand).
@@ -109,9 +109,9 @@ Abstraction layer over GitHub and Forgejo APIs. `types.ts` defines the `ForgeAda
 Three responsibilities: fetch eligible issues from the forge (`discover.ts`), classify complexity via triage (`triage.ts`), and resolve per-issue worker roles from labels (`roles.ts`). Triage adjusts loop limits — trivial issues get half the iterations and timeout.
 
 ### Git (`src/git/`)
-All git operations use `execa` (not `simple-git`). `worktree.ts` provides `ensure()` (create or reuse worktree, merge base branch), `remove()`, and `list()`. `slug.ts` generates and pins branch slugs in the DB so they survive issue title changes. `repo.ts` handles branch operations.
+All git operations use `execa` (not `simple-git`). `worktree.ts` provides `ensure()` (create or reuse worktree with either fresh-reset or preserve-branch semantics), `remove()`, and `list()`. `slug.ts` generates and pins branch slugs in the DB so they survive issue title changes. `repo.ts` handles branch operations.
 
-> **Watch out:** Worktree creation always merges the base branch. If there are merge conflicts, the operation throws. The merge abort is best-effort — if it fails, the worktree may be in a dirty state and will be detected as corrupt on the next attempt.
+> **Watch out:** automatic base updates and explicit `/orch rebase` are separate flows. Normal retries rebuild from the latest base branch, continues preserve the existing branch state, and explicit rebase captures conflict context for a later continue/retry decision.
 
 ### Environment (`src/environment/`)
 Two modes: **shared** (validate existing services are running) and **dedicated** (spin up a Docker Compose stack per issue). `port.ts` allocates ports from configured ranges. `env-file.ts` generates `.env` files with marked override sections. `bootstrap.ts` runs setup commands.
@@ -140,10 +140,10 @@ Posts configured mentions to PRs. Deduplication is commit-specific (tracked in S
 Prometheus metrics via `prom-client`. `createMetricsService()` returns either a live service or a no-op. All metric calls are wrapped in try-catch — metrics never block or throw. HTTP endpoint serves `/metrics` (Prometheus format) and `/api/stats` (JSON).
 
 ### MCP Server (`src/mcp/`)
-Model Context Protocol interface for external agents. Fourteen tools (status, run detail, list runs, cost report, retry, continue, sync, cleanup, delete entry, poll, list issues, stream events, rebase, update). Three resources (status, config, metrics). Mutation tools require auth token if configured.
+Model Context Protocol interface for external agents. Fourteen tools (status, run detail, list runs, cost report, retry, continue, sync, cleanup, delete entry, poll, list issues, stream events, rebase, update). Three resources (status, config, metrics). Mutation tools require auth token if configured. Run-event streaming exposes one ordered log across system and agent events.
 
 ### Ops (`src/ops/`)
-Maintenance engines: `sync.ts` reconciles local state with forge (finds orphaned runs, fixes label mismatches), `cleanup.ts` removes stale worktrees and archives old logs, `retry.ts` requeues failed/blocked runs, `continue.ts` gathers fresh PR context and queues a second pass.
+Maintenance engines: `sync.ts` reconciles local state with forge (finds orphaned runs, fixes label mismatches), `cleanup.ts` removes stale worktrees and archives old logs, `retry.ts` starts fresh retries from latest base, `continue.ts` gathers fresh PR context and resumes the existing branch, and `rebase-and-check.ts` manages explicit rebase flows plus post-rebase verification.
 
 ### State (`src/state/`)
 SQLite with WAL mode via `better-sqlite3`. `db.ts` handles init and migrations. `runs.ts` manages run records (create, update, query). `leases.ts` provides atomic lease acquisition via `INSERT OR IGNORE`.

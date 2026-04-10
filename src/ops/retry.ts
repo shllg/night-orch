@@ -37,8 +37,8 @@ export class RetryEngine {
   async retry(repo: string, issueNumber: number, options: Partial<RetryOptions> = {}): Promise<void> {
     const opts: RetryOptions = {
       immediate: options.immediate ?? false,
-      resetPlan: options.resetPlan ?? false,
-      resetBranch: options.resetBranch ?? false,
+      resetPlan: options.resetPlan ?? true,
+      resetBranch: options.resetBranch ?? true,
       dryRun: options.dryRun ?? false,
     }
 
@@ -65,12 +65,33 @@ export class RetryEngine {
       return
     }
 
+    // Retry is always a fresh start from the latest base branch tip.
+    const nextPhaseData = {
+      issueRepo,
+      reactionType: 'retry',
+      reactionSummary: 'Fresh retry requested',
+      reactionContext: 'Retry requested. Start fresh from the latest base branch and re-implement the solution.',
+      retryRequestedAt: new Date().toISOString(),
+    } satisfies Record<string, unknown>
+
     // Reset run to queued
     const resetFields: Parameters<RunManager['update']>[1] = {
       status: 'queued',
+      iterationCount: 0,
       currentPhase: null,
       lastError: null,
       endedAt: null,
+      blockReason: null,
+      operationIntent: 'retry',
+      manualState: 'none',
+      controlPayload: {
+        issueRepo,
+        preserveBranchState: false,
+        resetPlan: true,
+        resetBranch: true,
+        retryRequestedAt: new Date().toISOString(),
+      },
+      phaseData: nextPhaseData,
       // Reset cost accumulators so retry doesn't immediately re-block on per-run limit
       estimatedCostUsd: 0,
       promptTokens: 0,
@@ -78,26 +99,22 @@ export class RetryEngine {
       cacheReadTokens: 0,
     }
 
-    if (opts.resetPlan || opts.resetBranch) {
-      resetFields.phaseData = null
-    }
-
-    if (opts.resetBranch) {
-      // Signal the poller to hard-reset the branch to base on next pickup
-      resetFields.blockReason = 'merge_conflict'
-    }
-
     // Atomic state transition: release leases AND reset the run in a
     // single DB transaction. Without this, a crash between the two steps
     // leaves the issue queued-but-leased until stale cleanup runs.
+    let transitioned = false
     const transition = this.db.transaction(() => {
-      runManager.update(run.id, resetFields)
+      transitioned = runManager.updateIfStatus(run.id, RETRYABLE_STATUSES, resetFields)
       this.leaseManager.release(repo, issueNumber)
       if (issueRepo !== repo) {
         this.leaseManager.release(issueRepo, issueNumber)
       }
     })
     transition()
+
+    if (!transitioned) {
+      throw new Error(`Run ${run.id} changed state while retry was being queued`)
+    }
 
     // Apply label mutations
     await this.updateLabels(repo, issueRepo, issueNumber, run.status)

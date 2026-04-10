@@ -7,6 +7,7 @@ import { transitionLabels } from '../labels/manager.js'
 import { buildLabelConfig } from '../labels/config.js'
 import { queueRebase } from '../ops/rebase-and-check.js'
 import { queueContinue } from '../ops/continue.js'
+import { RetryEngine } from '../ops/retry.js'
 import {
   isCommandProcessed,
   markCommandProcessed,
@@ -122,6 +123,7 @@ export async function processCommentCommands(params: ProcessCommentCommandsParam
 
         const result = await executeCommentCommand({
           command: item.command,
+          config,
           db,
           forge,
           runManager,
@@ -202,6 +204,7 @@ async function canExecuteCommentCommand(params: CanExecuteCommentCommandParams):
 
 interface ExecuteCommentCommandParams {
   command: OrchCommand
+  config: Config
   db: Database.Database
   forge: ForgeAdapter
   runManager: RunManager
@@ -218,6 +221,7 @@ type CommandExecutionResult = { ok: true } | { ok: false; reason: string }
 async function executeCommentCommand(params: ExecuteCommentCommandParams): Promise<CommandExecutionResult> {
   const {
     command,
+    config,
     db,
     forge,
     runManager,
@@ -232,13 +236,11 @@ async function executeCommentCommand(params: ExecuteCommentCommandParams): Promi
   switch (command.type) {
     case 'retry':
       return queueRetryFromComment({
+        config,
+        db,
         runManager,
-        leaseManager,
-        forge,
         repoConfig,
-        issueRepo,
         issueNumber,
-        resetPlan: command.resetPlan,
       })
     case 'continue':
       {
@@ -267,17 +269,15 @@ async function executeCommentCommand(params: ExecuteCommentCommandParams): Promi
 }
 
 interface QueueRetryFromCommentParams {
+  config: Config
+  db: Database.Database
   runManager: RunManager
-  leaseManager: LeaseManager
-  forge: ForgeAdapter
   repoConfig: Config['repos'][0]
-  issueRepo: string
   issueNumber: number
-  resetPlan: boolean
 }
 
 async function queueRetryFromComment(params: QueueRetryFromCommentParams): Promise<CommandExecutionResult> {
-  const { runManager, leaseManager, forge, repoConfig, issueRepo, issueNumber, resetPlan } = params
+  const { config, db, runManager, repoConfig, issueNumber } = params
   const run = runManager.getByRepoAndIssue(repoConfig.repo, issueNumber)
   if (!run) return { ok: false, reason: 'No run found for issue' }
   if (run.status === 'running') return { ok: false, reason: 'Run is currently running' }
@@ -285,29 +285,14 @@ async function queueRetryFromComment(params: QueueRetryFromCommentParams): Promi
     return { ok: false, reason: `Retry not allowed from status ${run.status}` }
   }
 
-  runManager.update(run.id, {
-    status: 'queued',
-    currentPhase: null,
-    endedAt: null,
-    lastError: null,
-    phaseData: resetPlan ? null : run.phaseData,
-    blockReason: null,
+  const engine = new RetryEngine(db, config)
+  await engine.retry(repoConfig.repo, issueNumber, {
+    immediate: false,
+    dryRun: false,
+    resetPlan: true,
+    resetBranch: true,
   })
-  leaseManager.release(issueRepo, issueNumber)
-  if (issueRepo !== repoConfig.repo) {
-    leaseManager.release(repoConfig.repo, issueNumber)
-  }
 
-  const issue = await forge.getIssue(issueRepo, issueNumber)
-  await transitionLabels(
-    forge,
-    issueRepo,
-    issueNumber,
-    issue.labels,
-    run.status,
-    'queued',
-    buildLabelConfig(repoConfig, issue.labels),
-  )
   return { ok: true }
 }
 

@@ -43,6 +43,8 @@ night-orch tui
 night-orch web
 ```
 
+For mobile or server-hosted setups, use an external terminal client such as Terminus. The web UI no longer embeds a browser shell.
+
 ### 5. Queue work
 
 Add the ready label (default: `orch:ready`) to an issue in a configured repository. Night-orch will pick it up on the next poll cycle and run the Plan -> Code -> Verify -> Review loop.
@@ -55,8 +57,9 @@ night-orch run-once                 # execute one poll cycle
 night-orch status                   # current runs and recent activity
 night-orch tui                      # terminal dashboard
 night-orch web                      # browser UI + API
-night-orch retry <repo> <issue>     # requeue blocked or errored issue
-night-orch continue <repo> <issue>  # queue context-aware second pass
+night-orch retry <repo> <issue>     # start fresh from the latest base branch
+night-orch continue <repo> <issue>  # resume the existing branch with fresh PR context
+night-orch rebase <repo> <issue>    # queue an explicit rebase + verify pass
 night-orch labels-init              # create/update required labels
 ```
 

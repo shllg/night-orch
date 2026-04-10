@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { runGit } from '../git/process.js'
 import { mergeFromBranch } from '../git/repo.js'
 import { logger } from '../utils/logger.js'
@@ -14,6 +16,26 @@ export interface RebaseTarget {
 
 export type RebaseResult = 'up_to_date' | 'rebased' | 'conflict' | 'error'
 
+export interface RebaseConflictExcerpt {
+  path: string
+  preview: string
+  base?: string
+  ours?: string
+  theirs?: string
+}
+
+export interface RebaseConflictAnalysis {
+  files: string[]
+  summary: string
+  excerpts: RebaseConflictExcerpt[]
+}
+
+export interface AutoRebaseResult {
+  result: RebaseResult
+  conflictAnalysis?: RebaseConflictAnalysis
+  error?: string
+}
+
 /**
  * Update a branch to incorporate latest base branch changes and push.
  * Supports both merge and rebase strategies. Uses --force-with-lease for
@@ -27,7 +49,7 @@ export async function autoRebase(
   target: RebaseTarget,
   repoLocalPath: string,
   strategy: UpdateStrategy = 'merge',
-): Promise<RebaseResult> {
+): Promise<AutoRebaseResult> {
   const { branchName, baseBranch, worktreePath } = target
   const log = logger.child({ repo: target.repo, issue: target.issueNumber, branch: branchName })
 
@@ -44,7 +66,7 @@ export async function autoRebase(
         cwd: worktreePath,
         timeout: 30_000,
       })
-      return 'up_to_date'
+      return { result: 'up_to_date' }
     } catch {
       // Non-zero exit = base is NOT an ancestor → update needed
     }
@@ -57,9 +79,9 @@ export async function autoRebase(
       if (!result.success) {
         if (result.conflict) {
           log.warn({ baseBranch }, 'Merge conflict with base branch — aborting')
-          return 'conflict'
+          return { result: 'conflict' }
         }
-        return 'error'
+        return { result: 'error' }
       }
     } else {
       // Rebase strategy
@@ -71,13 +93,14 @@ export async function autoRebase(
       } catch (rebaseErr) {
         const stderr = (rebaseErr as { stderr?: string }).stderr ?? ''
         if (stderr.includes('CONFLICT') || stderr.includes('could not apply')) {
-          log.warn({ baseBranch }, 'Rebase conflict — aborting')
+          log.warn({ baseBranch }, 'Rebase conflict — collecting conflict analysis before abort')
+          const conflictAnalysis = await collectConflictAnalysis(worktreePath, baseBranch)
           try {
             await runGit(['rebase', '--abort'], { cwd: worktreePath, timeout: 30_000 })
           } catch {
             log.error('Failed to abort rebase')
           }
-          return 'conflict'
+          return { result: 'conflict', conflictAnalysis }
         }
         throw rebaseErr
       }
@@ -90,9 +113,74 @@ export async function autoRebase(
     })
 
     log.info({ baseBranch, strategy }, 'Updated and pushed successfully')
-    return 'rebased'
+    return { result: 'rebased' }
   } catch (err) {
     log.error({ err }, 'Auto-update failed')
-    return 'error'
+    return { result: 'error', error: err instanceof Error ? err.message : String(err) }
   }
+}
+
+async function collectConflictAnalysis(
+  worktreePath: string,
+  baseBranch: string,
+): Promise<RebaseConflictAnalysis> {
+  const files = await listUnmergedFiles(worktreePath)
+  const excerpts: RebaseConflictExcerpt[] = []
+
+  for (const filePath of files.slice(0, 5)) {
+    excerpts.push({
+      path: filePath,
+      preview: await readConflictPreview(worktreePath, filePath),
+      base: await readConflictStage(worktreePath, 1, filePath),
+      ours: await readConflictStage(worktreePath, 2, filePath),
+      theirs: await readConflictStage(worktreePath, 3, filePath),
+    })
+  }
+
+  return {
+    files,
+    summary: `Rebase onto origin/${baseBranch} conflicted in ${files.length} file(s). Resolve by combining the existing branch changes with the latest base branch changes where necessary.`,
+    excerpts,
+  }
+}
+
+async function listUnmergedFiles(worktreePath: string): Promise<string[]> {
+  try {
+    const { stdout } = await runGit(['diff', '--name-only', '--diff-filter=U'], { cwd: worktreePath })
+    return stdout.split('\n').map((value) => value.trim()).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+async function readConflictPreview(worktreePath: string, filePath: string): Promise<string> {
+  try {
+    const raw = await readFile(join(worktreePath, filePath), 'utf-8')
+    return truncateConflictText(raw)
+  } catch {
+    return ''
+  }
+}
+
+async function readConflictStage(
+  worktreePath: string,
+  stage: 1 | 2 | 3,
+  filePath: string,
+): Promise<string | undefined> {
+  try {
+    const { stdout } = await runGit(['show', `:${stage}:${filePath}`], {
+      cwd: worktreePath,
+      reject: false,
+    })
+    const trimmed = stdout.trim()
+    return trimmed ? truncateConflictText(trimmed) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function truncateConflictText(value: string): string {
+  const trimmed = value.trim()
+  if (trimmed.length <= 1200) return trimmed
+  return `${trimmed.slice(0, 1200)}\n[... truncated ...]`
 }

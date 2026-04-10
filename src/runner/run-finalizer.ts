@@ -134,7 +134,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
           botUser,
           body: formatStatusComment({
             blockReason: 'Publish failed due to merge conflicts while pushing branch updates.',
-            nextStep: 'Use /orch retry to reset the branch and re-implement, or /orch continue to auto-merge and fix.',
+            nextStep: 'Use /orch retry to reset the branch and re-implement, or /orch continue to keep the existing branch and resolve the conflicts.',
           }),
           warnMessage: 'Failed to post publish merge-conflict status comment',
         })

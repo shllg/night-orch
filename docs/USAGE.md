@@ -72,7 +72,7 @@ The `watch` command shows:
 - Merge queue batches in progress
 - Daily cost bar against budget
 - Recent completed/errored/blocked runs
-- Issue actions on selected runs: retry, retry fresh, continue, rebase, and delete entry
+- Issue actions on selected runs: retry, continue, rebase, and delete entry
 
 ### Multi-repo setup
 
@@ -375,10 +375,11 @@ By default, `web` runs in attach mode: no poll loop, no metrics server, and no e
 Use `--standalone` to run poller + metrics + embedded MCP in the same process as the web server.
 Dashboard-level quick actions for `refresh`, `poll`, `sync`, and `cleanup` are in the sticky header; the Issues-page Operations panel is reserved for Deploy controls.
 Issue-specific actions (`retry`, `continue`, `rebase`, `delete entry`) are launched from each issue's detail page and require a confirmation dialog before execution. Project labels initialization (`labels-init`) is launched from each project's detail page using the `Bootstrap Labels` action and also requires confirmation. `Delete entry` also supports a force toggle for active/shared-state cleanup scenarios.
-
-The web UI includes a **Shell** page for real browser terminal access backed by PTY sessions. Shells start in the current user's home directory (or a home subdirectory you choose), stream output live over websocket, and expose REST routes under `/api/shell/sessions` (create/list/detail/events/close).
+Run detail pages render line-oriented run logs that combine system and agent events in one ordered stream.
 On narrow mobile viewports, the top-line dashboard metric cards render in a compact 2-column layout so the runs list stays the primary focus on the Issues page.
 The Issues page run list now includes history filters (`Active`, `Completed`, `Failed`, `All`) plus a `Load more` control for paginated archive browsing (20 runs per page).
+
+For mobile or server-hosted setups, use an external terminal client such as Terminus instead of expecting shell access through the browser UI.
 
 Default bind is `127.0.0.1:3200`. Use `--host` / `--port` to change this (for example when reverse-proxying through Caddy or nginx). Use `--allowed-host` (repeatable) to permit additional Host/Origin values when proxying.
 
@@ -406,7 +407,7 @@ Show current state: active runs, active leases, daily cost against budget, recen
 
 ### `night-orch tui`
 
-Live-updating terminal dashboard. Refreshes every 2 seconds. Shows active runs, merge queue, cost bar, recent history, issue actions (`poll`, `sync`, `cleanup`, `retry`, `retry fresh`, `continue`, `rebase`, `delete entry`), and a Settings tab (`5`) for runtime overrides (read-only keys are listed but cannot be changed). Press Ctrl+C to exit.
+Live-updating terminal dashboard. Refreshes every 2 seconds. Shows active runs, merge queue, cost bar, recent history, issue actions (`poll`, `sync`, `cleanup`, `retry`, `continue`, `rebase`, `delete entry`), and a Settings tab (`5`) for runtime overrides (read-only keys are listed but cannot be changed). Press Ctrl+C to exit.
 
 ### `night-orch settings`
 
@@ -424,11 +425,13 @@ Reconcile database state with GitHub: mark runs for merged PRs as completed, det
 
 ### `night-orch retry <repo> <issue>`
 
-Force re-run of a blocked or errored issue. Options: `--immediate` (process now instead of queuing), `--reset-plan` (discard prior plan and start fresh).
+Start a fresh retry of a blocked or errored issue from the latest base branch. The existing worktree/branch state is discarded and night-orch rebuilds from the source branch tip.
+
+Options: `--immediate` (process now instead of queuing). The legacy `--fresh` and `--reset-plan` flags are accepted for compatibility but have no additional effect.
 
 ### `night-orch rebase <repo> <issue>`
 
-Rebase a PR's branch onto the latest base branch, then run verify commands to check if code adjustments are needed. If verify fails after rebase, the issue is automatically re-queued for the coder to fix.
+Queue an explicit git rebase of the PR branch onto the latest base branch, then run verify commands to check if code adjustments are needed. If verify fails after a successful rebase, the issue is automatically re-queued for the coder to fix. If the rebase conflicts, the run blocks and waits for either `continue` or `retry`.
 
 Options: `--no-check` (skip verify commands after rebase — just rebase and push).
 
@@ -436,9 +439,9 @@ Also available as a comment command: `/orch rebase` (with `--check` by default).
 
 ### `night-orch continue <repo> <issue>`
 
-Queue a context-aware second pass for blocked/review-ready/errored work. Night-orch collects the latest PR context (review comments, CI failures, mergeability state) and re-queues the run with that context.
+Queue a context-aware second pass for blocked/review-ready/errored work. Night-orch collects the latest PR context (review comments, CI failures, mergeability state) and resumes the existing branch with that context.
 
-If the PR has merge conflicts, `/orch continue` automatically merges from the base branch (using the repo's `updateStrategy`) before entering the code loop. This means you don't need to choose between `/orch rebase` and `/orch continue` — continue handles both scenarios.
+After an explicit rebase conflicts, `/orch continue` keeps the current branch state and asks the agent to resolve the conflict. Use `/orch retry` instead when you want to discard the current branch state and restart from the latest base branch.
 
 Also available as a comment command: `/orch continue`.
 

@@ -97,14 +97,14 @@ export function registerTools(): ToolDefinition[] {
     },
     {
       name: 'night-orch-retry',
-      description: 'Force a re-run of a blocked or errored issue. Resets state and re-queues for processing.',
+      description: 'Start a fresh retry of a blocked or errored issue from the latest base branch.',
       inputSchema: {
         type: 'object',
         properties: {
           repo: { type: 'string', description: 'Repository (owner/name)' },
           issueNumber: { type: 'number', description: 'Issue number to retry' },
-          resetPlan: { type: 'boolean', description: 'Re-run planner instead of reusing existing plan', default: false },
-          fresh: { type: 'boolean', description: 'Reset branch to base and re-implement from scratch (use after merge conflicts)', default: false },
+          resetPlan: { type: 'boolean', description: 'Deprecated compatibility field. Retry already starts fresh.', default: false },
+          fresh: { type: 'boolean', description: 'Deprecated compatibility field. Retry already starts fresh.', default: false },
           authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
         },
         required: ['repo', 'issueNumber'],
@@ -261,7 +261,7 @@ export function registerTools(): ToolDefinition[] {
     },
     {
       name: 'night-orch-stream-events',
-      description: 'Get recent in-flight agent events for a run.',
+      description: 'Get recent run log events for a run, including system and agent messages.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -274,7 +274,7 @@ export function registerTools(): ToolDefinition[] {
     },
     {
       name: 'night-orch-rebase',
-      description: 'Rebase a PR branch onto latest base and verify. Re-queues issue if verify fails post-rebase.',
+      description: 'Queue an explicit git rebase onto the latest base branch and verify afterward. If conflicts occur, the run blocks for continue or retry.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -288,7 +288,7 @@ export function registerTools(): ToolDefinition[] {
     },
     {
       name: 'night-orch-continue',
-      description: 'Queue a second-pass continuation for a blocked/review_ready/error issue using fresh PR context (comments, CI, mergeability).',
+      description: 'Resume the existing branch for a blocked/review_ready/error issue using fresh PR context. After a rebase conflict, continue keeps the branch and resolves it instead of starting over.',
       inputSchema: {
         type: 'object',
         properties: {

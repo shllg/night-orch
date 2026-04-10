@@ -1,6 +1,7 @@
 import type { Config } from '../config/schema.js'
 import type { RunRecord } from '../state/runs.js'
 import type { RunManager } from '../state/runs.js'
+import type { RunManualState, RunOperationIntent } from '../state/runs.js'
 import type { ResolvedRoles } from '../discovery/roles.js'
 import type { DiscoveredIssue } from '../discovery/discover.js'
 import type { ResolvedWorkflow } from '../loop/workflow.js'
@@ -142,11 +143,11 @@ export function blockReasonSummary(reason: BlockReason, ctx: RunContext): string
     case 'verify_config':
       return 'Verification is required but verify commands or results are unavailable. Check repo verify config.'
     case 'merge_conflict':
-      return 'Merge conflict encountered. Use /orch continue (auto-merges from base) or /orch retry to start fresh.'
+      return 'Rebase or merge conflict encountered. Use /orch continue to keep the existing branch and resolve the conflict, or /orch retry to start fresh from the latest base branch.'
     case 'auth_failure':
       return 'Worker CLI authentication expired. Re-authenticate the worker CLI, then use /orch retry.'
     case 'empty_diff':
-      return `Coder produced no file changes after ${ctx.emptyDiffRetries} attempt(s). The task may need clarification. Use /orch retry --fresh to start over.`
+      return `Coder produced no file changes after ${ctx.emptyDiffRetries} attempt(s). The task may need clarification. Use /orch retry to start fresh from the latest base branch.`
     default:
       return `Blocked in phase ${ctx.currentPhase}. Use /orch retry to re-run or /orch continue to resume.`
   }
@@ -302,6 +303,32 @@ export function extractFollowupPromptFeedback(
   return { type, summary, context }
 }
 
+export function resolveOperationIntent(run: RunRecord | null | undefined): RunOperationIntent {
+  if (!run) return 'auto'
+  if (run.operationIntent !== 'auto') return run.operationIntent
+
+  if (run.status === 'queued') {
+    if (run.blockReason === 'merge_conflict') return 'retry'
+    const reactionType = run.phaseData?.reactionType
+    if (reactionType === 'rebase' || reactionType === 'merge_conflict') return 'rebase'
+    if (typeof reactionType === 'string' && reactionType.trim().length > 0) return 'continue'
+  }
+
+  return 'auto'
+}
+
+export function resolveManualState(run: RunRecord | null | undefined): RunManualState {
+  if (!run) return 'none'
+  return run.manualState
+}
+
+export function resolveControlPayload(
+  run: RunRecord | null | undefined,
+): Record<string, unknown> | null {
+  if (!run?.controlPayload) return null
+  return run.controlPayload
+}
+
 export function prioritizeDiscoveredIssues(
   runManager: RunManager,
   repo: string,
@@ -322,9 +349,9 @@ function getIssueQueuePriority(
 ): number {
   const queuedRun = runManager.getLatestQueuedByIssue(repo, issueNumber)
   if (!queuedRun) return 3
-  const reactionType = queuedRun.phaseData?.reactionType
-  if (reactionType === 'merge_conflict' || reactionType === 'rebase') return 0
-  if (typeof reactionType === 'string' && reactionType.length > 0) return 1
+  const operationIntent = resolveOperationIntent(queuedRun)
+  if (operationIntent === 'rebase') return 0
+  if (operationIntent === 'continue' || operationIntent === 'retry') return 1
   return 2
 }
 

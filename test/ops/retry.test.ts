@@ -167,7 +167,11 @@ describe('RetryEngine', () => {
     await engine.retry('org/repo', 1, { resetPlan: true })
 
     const row = db.prepare('SELECT phase_data FROM runs WHERE id = ?').get(runId) as { phase_data: string | null }
-    expect(row.phase_data).toBeNull()
+    expect(row.phase_data).not.toBeNull()
+    expect(JSON.parse(row.phase_data ?? '{}')).toMatchObject({
+      reactionType: 'retry',
+      reactionSummary: 'Fresh retry requested',
+    })
   })
 
   it('resets cost fields on retry', async () => {

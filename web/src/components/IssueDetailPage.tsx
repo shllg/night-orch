@@ -1,6 +1,6 @@
 import { type ReactElement, useEffect, useMemo, useRef, useState } from 'react'
 
-import { describeEventData, formatTimestamp, truncate } from '../lib/format.js'
+import { describeRunEvent, formatTimestamp, truncate } from '../lib/format.js'
 import { type RunEvent, type RunSummary } from '../types/dashboard.js'
 import { ActionButton } from './ActionButton.js'
 
@@ -185,18 +185,17 @@ export function IssueDetailPage({
                     const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight
                     setAutoScroll(distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX)
                   }}
-                  className="mt-3 max-h-[70vh] min-w-0 space-y-2 overflow-x-hidden overflow-y-auto pr-1"
+                  className="mt-3 max-h-[70vh] min-w-0 overflow-x-hidden overflow-y-auto rounded-box border border-base-300/60 bg-base-200/50 p-3 pr-1 font-mono text-xs"
                 >
                   {visibleEvents.map((event) => (
-                    <div key={event.id} className="min-w-0 rounded-box border border-base-300/70 bg-base-200/70 px-3 py-2">
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-base-content/70">
-                        <span>{formatTimestamp(event.timestamp)}</span>
-                        <span className="break-all">{event.phase} / {event.role}</span>
-                      </div>
-                      <p className="mt-1 break-words text-sm font-semibold text-info">{event.type}</p>
-                      <p className="mt-1 whitespace-pre-wrap break-words text-xs text-base-content/85">
-                        {describeEventData(event.data)}
-                      </p>
+                    <div key={event.id} className="grid min-w-0 grid-cols-[auto_auto_1fr] gap-x-3 gap-y-1 border-b border-base-300/30 py-1 last:border-b-0">
+                      <span className="text-base-content/55">{formatTimestamp(event.timestamp)}</span>
+                      <span className={`break-all ${event.source === 'system' ? 'text-secondary' : 'text-info'}`}>
+                        {event.source === 'system' ? 'system' : event.role ?? 'agent'}
+                      </span>
+                      <span className="whitespace-pre-wrap break-words text-base-content/85">
+                        {describeRunEvent(event)}
+                      </span>
                     </div>
                   ))}
                 </div>

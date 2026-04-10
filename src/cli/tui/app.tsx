@@ -173,7 +173,6 @@ export type TuiActionCommand =
   | 'sync'
   | 'labelsInit'
   | 'retry'
-  | 'retryFresh'
   | 'continue'
   | 'rebase'
   | 'deleteEntry'
@@ -228,8 +227,7 @@ export function resolveActionCommand(args: ResolveActionCommandInput): TuiAction
     return 'none'
   }
 
-  if (args.input === 't') return 'retry'
-  if (args.input === 'T') return 'retryFresh'
+  if (args.input === 't' || args.input === 'T') return 'retry'
   if (args.input === 'c') return 'continue'
   if (args.input === '_') return 'rebase'
   if (args.input === 'X') return 'deleteEntry'
@@ -650,20 +648,18 @@ export function App({
     }
   }, [actionState.busy, appendLog])
 
-  const runRetry = useCallback(async (fresh = false) => {
-    const label = fresh ? 'retry-fresh' : 'retry'
-    await runAction(label, async () => {
+  const runRetry = useCallback(async () => {
+    await runAction('retry', async () => {
       if (!selectedIssue) throw new Error('No issue selected')
       const currentRuntimeConfig = resolveConfigWithRuntimeSettings(config, db)
       const engine = new RetryEngine(db, currentRuntimeConfig)
       await engine.retry(selectedIssue.repo, selectedIssue.issue_number, {
         immediate: false,
-        resetPlan: fresh,
-        resetBranch: fresh,
+        resetPlan: true,
+        resetBranch: true,
         dryRun,
       })
-      const suffix = fresh ? ' (fresh start)' : ''
-      return `queued ${selectedIssue.repo}#${selectedIssue.issue_number}${suffix}${dryRun ? ' (dry-run)' : ''}`
+      return `queued fresh retry for ${selectedIssue.repo}#${selectedIssue.issue_number}${dryRun ? ' (dry-run)' : ''}`
     })
   }, [config, db, dryRun, runAction, selectedIssue])
 
@@ -1177,10 +1173,6 @@ export function App({
     }
     if (actionCommand === 'retry') {
       void runRetry()
-      return
-    }
-    if (actionCommand === 'retryFresh') {
-      void runRetry(true)
       return
     }
     if (actionCommand === 'continue') {

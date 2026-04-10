@@ -145,7 +145,7 @@ describe('tui action key dispatch', () => {
     expect(resolveActionCommand({
       ...baseArgs,
       input: 'T',
-    })).toBe('retryFresh')
+    })).toBe('retry')
     expect(resolveActionCommand({
       ...baseArgs,
       input: 'c',
@@ -304,7 +304,7 @@ describe('tui action key dispatch', () => {
       ...baseArgs,
       controlsEnabled: false,
       input: 'T',
-    })).toBe('retryFresh')
+    })).toBe('retry')
     expect(resolveActionCommand({
       ...baseArgs,
       controlsEnabled: false,

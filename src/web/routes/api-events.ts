@@ -5,10 +5,6 @@ import type {
   InteractiveAgentSessionManager,
   InteractiveAgentSessionEventList,
 } from '../agent-session.js'
-import type {
-  ShellSessionManager,
-  ShellSessionEventList,
-} from '../shell-session.js'
 import type { WsClientState, WebSocketCommand } from '../server.js'
 import { sendWebsocket } from '../server.js'
 import { buildDashboardSnapshot } from '../snapshots.js'
@@ -19,17 +15,12 @@ export async function handleWsMessage(
   rawMessage: string,
   deps: MCPDependencies,
   agentSessionManager: InteractiveAgentSessionManager,
-  shellSessionManager: ShellSessionManager,
 ): Promise<void> {
   let command: WebSocketCommand
   try {
     command = JSON.parse(rawMessage) as WebSocketCommand
   } catch {
     sendWebsocket(ws, { type: 'error', error: 'Invalid JSON message' })
-    return
-  }
-
-  if (!ensureWebSocketShellAuthorized(ws, state, command.type)) {
     return
   }
 
@@ -81,78 +72,6 @@ export async function handleWsMessage(
 
     state.agentSessionSubscriptions.delete(sessionId)
     sendWebsocket(ws, { type: 'unsubscribed', payload: { sessionId } })
-    return
-  }
-
-  if (command.type === 'subscribe-shell-session-events') {
-    const sessionId = typeof command.sessionId === 'string' ? command.sessionId : ''
-    if (!sessionId) {
-      sendWebsocket(ws, { type: 'error', error: 'sessionId is required for subscribe-shell-session-events' })
-      return
-    }
-
-    const cursor = Number.isFinite(command.since) ? Math.max(0, Math.floor(command.since ?? 0)) : 0
-    state.shellSessionSubscriptions.set(sessionId, cursor)
-    sendWebsocket(ws, { type: 'subscribed', payload: { sessionId, since: cursor } })
-    publishShellSessionSubscriptions(ws, state, shellSessionManager)
-    return
-  }
-
-  if (command.type === 'unsubscribe-shell-session-events') {
-    const sessionId = typeof command.sessionId === 'string' ? command.sessionId : ''
-    if (!sessionId) {
-      sendWebsocket(ws, { type: 'error', error: 'sessionId is required for unsubscribe-shell-session-events' })
-      return
-    }
-
-    state.shellSessionSubscriptions.delete(sessionId)
-    sendWebsocket(ws, { type: 'unsubscribed', payload: { sessionId } })
-    return
-  }
-
-  if (command.type === 'shell-input') {
-    const sessionId = typeof command.sessionId === 'string' ? command.sessionId : ''
-    const data = typeof command.data === 'string' ? command.data : ''
-    if (!sessionId) {
-      sendWebsocket(ws, { type: 'error', error: 'sessionId is required for shell-input' })
-      return
-    }
-    if (!data) {
-      sendWebsocket(ws, { type: 'error', error: 'data is required for shell-input' })
-      return
-    }
-    try {
-      shellSessionManager.writeInput(sessionId, data)
-    } catch (err) {
-      sendWebsocket(ws, {
-        type: 'error',
-        error: `Failed to write shell input for ${sessionId}: ${(err as Error).message}`,
-      })
-    }
-    return
-  }
-
-  if (command.type === 'shell-resize') {
-    const sessionId = typeof command.sessionId === 'string' ? command.sessionId : ''
-    if (!sessionId) {
-      sendWebsocket(ws, { type: 'error', error: 'sessionId is required for shell-resize' })
-      return
-    }
-
-    const cols = typeof command.cols === 'number' ? command.cols : NaN
-    const rows = typeof command.rows === 'number' ? command.rows : NaN
-    if (!Number.isFinite(cols) || !Number.isFinite(rows)) {
-      sendWebsocket(ws, { type: 'error', error: 'cols and rows are required for shell-resize' })
-      return
-    }
-    try {
-      shellSessionManager.resize(sessionId, cols, rows)
-    } catch (err) {
-      sendWebsocket(ws, {
-        type: 'error',
-        error: `Failed to resize shell session ${sessionId}: ${(err as Error).message}`,
-      })
-    }
     return
   }
 
@@ -239,68 +158,6 @@ export function publishAgentSessionSubscriptions(
       },
     })
   }
-}
-
-export function publishShellSessionSubscriptions(
-  ws: WebSocket,
-  state: WsClientState,
-  manager: ShellSessionManager,
-): void {
-  for (const [sessionId, since] of state.shellSessionSubscriptions.entries()) {
-    let result: ShellSessionEventList
-    try {
-      result = manager.getEvents(sessionId, since, 500)
-    } catch (err) {
-      sendWebsocket(ws, {
-        type: 'error',
-        error: `Failed to stream shell-session events for ${sessionId}: ${(err as Error).message}`,
-      })
-      continue
-    }
-
-    state.shellSessionSubscriptions.set(sessionId, result.lastEventId)
-
-    if (result.events.length === 0) {
-      continue
-    }
-
-    sendWebsocket(ws, {
-      type: 'shell-session-events',
-      payload: {
-        sessionId,
-        status: result.status,
-        events: result.events,
-        lastEventId: result.lastEventId,
-      },
-    })
-  }
-}
-
-function requiresWebSocketShellAuth(commandType: WebSocketCommand['type']): boolean {
-  return commandType === 'subscribe-shell-session-events'
-    || commandType === 'unsubscribe-shell-session-events'
-    || commandType === 'shell-input'
-    || commandType === 'shell-resize'
-}
-
-function ensureWebSocketShellAuthorized(
-  ws: WebSocket,
-  state: WsClientState,
-  commandType: WebSocketCommand['type'],
-): boolean {
-  if (!requiresWebSocketShellAuth(commandType)) {
-    return true
-  }
-
-  if (state.isAuthenticated) {
-    return true
-  }
-
-  sendWebsocket(ws, {
-    type: 'error',
-    error: `Unauthorized websocket command: ${commandType}`,
-  })
-  return false
 }
 
 function toRunEventPayload(input: unknown): { events: unknown[]; lastEventId: number } | null {

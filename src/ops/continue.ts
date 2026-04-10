@@ -3,6 +3,7 @@ import type { ForgeAdapter, ForgeComment } from '../forge/types.js'
 import type { RepoConfig } from '../config/schema.js'
 import type { Reaction, ReactionCursor, ReactionType } from '../reactions/types.js'
 import { CostTracker } from '../loop/cost.js'
+import { clearResumeDecisionArtifacts } from '../loop/checkpoint.js'
 import { RunManager } from '../state/runs.js'
 import { LeaseManager } from '../state/leases.js'
 import { transitionLabels } from '../labels/manager.js'
@@ -66,27 +67,39 @@ export async function queueContinue(
     runEndedAt: run.endedAt,
     previousError: run.lastError,
     botUser,
+    manualState: run.manualState,
+    controlPayload: run.controlPayload,
   })
 
-  const existingPhaseData = run.phaseData ?? {}
-  const resumePhase = resolveResumePhase(run.currentPhase, existingPhaseData)
+  const existingPhaseData = clearResumeDecisionArtifacts(run.phaseData)
+  const resumePhase = resolveResumePhase(run.currentPhase, existingPhaseData, run.manualState)
 
   // Atomic state transition: update run + release leases in a single
   // DB transaction so a crash in between cannot leave the issue
   // queued-but-leased.
   const costTracker = new CostTracker(db)
+  let transitioned = false
   const transition = db.transaction(() => {
     // Subtract the run's cost from the daily total BEFORE zeroing
     // the per-run accumulators — otherwise the daily budget check
     // still sees the old accumulated total and re-blocks immediately.
     costTracker.subtractRunCostFromDaily(run.id)
 
-    runManager.update(run.id, {
+    transitioned = runManager.updateIfStatus(run.id, ['blocked', 'review_ready', 'error'], {
       status: 'queued',
       currentPhase: resumePhase,
+      iterationCount: 0,
       endedAt: null,
       lastError: null,
       blockReason: null,
+      operationIntent: 'continue',
+      manualState: 'none',
+      controlPayload: {
+        source: run.manualState === 'awaiting_rebase_resolution' ? 'rebase_conflict' : 'manual_continue',
+        issueRepo,
+        preserveBranchState: true,
+        requestedAt: nowUtcIso(),
+      },
       // Reset cost accumulators so continue doesn't immediately re-block on per-run limit
       estimatedCostUsd: 0,
       promptTokens: 0,
@@ -107,6 +120,10 @@ export async function queueContinue(
     }
   })
   transition()
+
+  if (!transitioned) {
+    return { queued: false, reason: 'Run state changed while queuing continue' }
+  }
 
   try {
     const issue = await forge.getIssue(issueRepo, issueNumber)
@@ -147,8 +164,18 @@ export async function queueContinue(
 function resolveResumePhase(
   currentPhase: string | null,
   phaseData: Record<string, unknown>,
+  manualState: 'none' | 'awaiting_rebase_resolution',
 ): string | null {
-  if (typeof currentPhase === 'string' && currentPhase.trim().length > 0) {
+  if (manualState === 'awaiting_rebase_resolution') {
+    return isCheckpointArtifact(phaseData['plan']) ? 'code' : 'plan'
+  }
+
+  if (
+    typeof currentPhase === 'string'
+    && currentPhase.trim().length > 0
+    && currentPhase !== 'blocked'
+    && currentPhase !== 'completed'
+  ) {
     return currentPhase
   }
 
@@ -173,10 +200,12 @@ interface BuildFollowupContextParams {
   runEndedAt: string | null
   previousError: string | null
   botUser: string
+  manualState: 'none' | 'awaiting_rebase_resolution'
+  controlPayload: Record<string, unknown> | null
 }
 
 interface FollowupContextPayload {
-  primaryType: 'continue' | 'merge_conflict'
+  primaryType: string
   summary: string
   context: string
 }
@@ -190,6 +219,8 @@ async function buildFollowupContext(params: BuildFollowupContextParams): Promise
     runEndedAt,
     previousError,
     botUser,
+    manualState,
+    controlPayload,
   } = params
 
   const sections: string[] = []
@@ -197,6 +228,12 @@ async function buildFollowupContext(params: BuildFollowupContextParams): Promise
 
   if (previousError?.trim()) {
     sections.push(`## Previous Run State\n\n${previousError.trim()}`)
+  }
+
+  if (manualState === 'awaiting_rebase_resolution') {
+    const rebaseContext = formatRebaseResolutionContext(controlPayload)
+    sections.push(rebaseContext)
+    summaryParts.push('rebase conflict resolution')
   }
 
   const reactions = await collectReactions({
@@ -229,22 +266,57 @@ async function buildFollowupContext(params: BuildFollowupContextParams): Promise
     )
   }
 
-  // If merge conflicts were detected, signal the poller to auto-merge from
-  // base before entering the code loop. This unifies rebase/continue so
-  // users don't need to choose which command to run.
-  const hasMergeConflict = reactions.some((r) => r.type === 'merge_conflict')
-  const primaryType = hasMergeConflict ? 'merge_conflict' as const : 'continue' as const
-
   const dedupedSummaryParts = [...new Set(summaryParts)]
   const summary = dedupedSummaryParts.length > 0
     ? `Continue requested with ${dedupedSummaryParts.join(', ')}`
     : 'Continue requested — re-evaluate and complete the PR'
 
   return {
-    primaryType,
+    primaryType: manualState === 'awaiting_rebase_resolution' ? 'rebase_conflict_resolution' : 'continue',
     summary,
     context: sections.join('\n\n'),
   }
+}
+
+function formatRebaseResolutionContext(controlPayload: Record<string, unknown> | null): string {
+  const lines = [
+    '## Rebase Conflict Analysis',
+    '',
+    'A prior explicit rebase attempt hit conflicts. Continue should keep the existing branch and resolve the upstream changes manually instead of starting fresh.',
+  ]
+
+  const summary = typeof controlPayload?.conflictSummary === 'string' ? controlPayload.conflictSummary.trim() : ''
+  if (summary) {
+    lines.push('', summary)
+  }
+
+  const files = Array.isArray(controlPayload?.conflictFiles) ? controlPayload.conflictFiles : []
+  if (files.length > 0) {
+    lines.push('', 'Conflicting files:')
+    for (const value of files.slice(0, 12)) {
+      if (typeof value === 'string' && value.trim().length > 0) {
+        lines.push(`- ${value}`)
+      }
+    }
+  }
+
+  const excerpts = Array.isArray(controlPayload?.conflictExcerpts) ? controlPayload.conflictExcerpts : []
+  if (excerpts.length > 0) {
+    lines.push('', 'Conflict excerpts:')
+    for (const entry of excerpts.slice(0, 3)) {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue
+      const path = typeof entry['path'] === 'string' ? entry['path'] : '(unknown)'
+      const preview = typeof entry['preview'] === 'string' ? entry['preview'] : ''
+      lines.push(`- ${path}`)
+      if (preview.trim()) {
+        lines.push('```text')
+        lines.push(preview.trim())
+        lines.push('```')
+      }
+    }
+  }
+
+  return lines.join('\n')
 }
 
 interface CollectReactionsParams {

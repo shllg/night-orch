@@ -47,15 +47,17 @@ export async function retryCommand(
 
   try {
     const engine = new RetryEngine(db, config)
-    const fresh = globalOpts?.fresh ?? false
     await engine.retry(repo, num, {
       immediate: globalOpts?.immediate ?? false,
-      resetPlan: globalOpts?.resetPlan ?? fresh,
-      resetBranch: fresh,
+      resetPlan: true,
+      resetBranch: true,
       dryRun: globalOpts?.dryRun ?? false,
     })
 
-    console.log(`Retry queued for ${repo}#${num}`)
+    console.log(`Fresh retry queued for ${repo}#${num}`)
+    if (globalOpts?.fresh || globalOpts?.resetPlan) {
+      console.log('Note: retry is always fresh now; --fresh and --reset-plan are accepted for compatibility only.')
+    }
     if (globalOpts?.immediate) console.log('Immediate processing started')
     if (globalOpts?.dryRun) console.log('(dry run — no changes applied)')
   } catch (err) {

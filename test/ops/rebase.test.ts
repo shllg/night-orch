@@ -45,7 +45,7 @@ describe('autoRebase', () => {
     mockExeca.mockResolvedValueOnce({ exitCode: 0 } as never)
 
     const result = await autoRebase(target, '/tmp/repo')
-    expect(result).toBe('up_to_date')
+    expect(result.result).toBe('up_to_date')
     expect(mockExeca).toHaveBeenCalledTimes(2)
   })
 
@@ -61,7 +61,7 @@ describe('autoRebase', () => {
       mockExeca.mockResolvedValueOnce({ exitCode: 0 } as never)
 
       const result = await autoRebase(target, '/tmp/repo', 'merge')
-      expect(result).toBe('rebased')
+      expect(result.result).toBe('rebased')
       expect(mockExeca).toHaveBeenCalledTimes(4)
       // Check merge command
       expect(mockExeca).toHaveBeenNthCalledWith(3,
@@ -88,7 +88,7 @@ describe('autoRebase', () => {
       mockExeca.mockResolvedValueOnce({ exitCode: 0 } as never)
 
       const result = await autoRebase(target, '/tmp/repo', 'merge')
-      expect(result).toBe('conflict')
+      expect(result.result).toBe('conflict')
       expect(mockExeca).toHaveBeenCalledTimes(4)
       expect(mockExeca).toHaveBeenNthCalledWith(4,
         'git',
@@ -110,7 +110,7 @@ describe('autoRebase', () => {
       mockExeca.mockResolvedValueOnce({ exitCode: 0 } as never)
 
       const result = await autoRebase(target, '/tmp/repo', 'rebase')
-      expect(result).toBe('rebased')
+      expect(result.result).toBe('rebased')
       expect(mockExeca).toHaveBeenCalledTimes(4)
       // Check push uses --force-with-lease
       expect(mockExeca).toHaveBeenNthCalledWith(4,
@@ -127,13 +127,16 @@ describe('autoRebase', () => {
       mockExeca.mockRejectedValueOnce(new Error('exit code 1'))
       // rebase fails with conflict
       mockExeca.mockRejectedValueOnce({ stderr: 'CONFLICT (content): Merge conflict in src/main.ts' })
+      // list conflicted files
+      mockExeca.mockResolvedValueOnce({ stdout: '' } as never)
       // rebase --abort succeeds
       mockExeca.mockResolvedValueOnce({ exitCode: 0 } as never)
 
       const result = await autoRebase(target, '/tmp/repo', 'rebase')
-      expect(result).toBe('conflict')
-      expect(mockExeca).toHaveBeenCalledTimes(4)
-      expect(mockExeca).toHaveBeenNthCalledWith(4,
+      expect(result.result).toBe('conflict')
+      expect(result.conflictAnalysis?.files).toEqual([])
+      expect(mockExeca).toHaveBeenCalledTimes(5)
+      expect(mockExeca).toHaveBeenNthCalledWith(5,
         'git',
         ['rebase', '--abort'],
         expect.any(Object),
@@ -145,6 +148,6 @@ describe('autoRebase', () => {
     mockExeca.mockRejectedValueOnce(new Error('network error'))
 
     const result = await autoRebase(target, '/tmp/repo')
-    expect(result).toBe('error')
+    expect(result.result).toBe('error')
   })
 })

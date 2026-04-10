@@ -424,12 +424,12 @@ describe('MCP Tools', () => {
     const run = runManager.create({ repo: 'org/repo', issueNumber: 5, issueNodeId: '', planner: 'claude', coder: 'claude', reviewer: 'claude' })
 
     db.prepare(
-      `INSERT INTO agent_events (run_id, phase, role, event_type, data, created_at)
-       VALUES (?, 'code', 'coder', 'tool_call', '{"toolName":"Read"}', datetime('now'))`,
+      `INSERT INTO run_log_events (run_id, source, phase, role, event_type, data, created_at)
+       VALUES (?, 'agent', 'code', 'coder', 'tool_call', '{"toolName":"Read"}', datetime('now'))`,
     ).run(run.id)
     db.prepare(
-      `INSERT INTO agent_events (run_id, phase, role, event_type, data, created_at)
-       VALUES (?, 'code', 'coder', 'text', '{"text":"Working"}', datetime('now'))`,
+      `INSERT INTO run_log_events (run_id, source, phase, role, event_type, data, created_at)
+       VALUES (?, 'agent', 'code', 'coder', 'text', '{"text":"Working"}', datetime('now'))`,
     ).run(run.id)
 
     const first = await handleToolCall('night-orch-stream-events', { runId: run.id, limit: 1 }, deps) as {

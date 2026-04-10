@@ -1,8 +1,7 @@
 import type Database from 'better-sqlite3'
 import type { ForgeAdapter } from '../forge/types.js'
 import type { RepoConfig } from '../config/schema.js'
-import { autoRebase, type RebaseTarget } from './rebase.js'
-import type { UpdateStrategy } from '../git/worktree.js'
+import { autoRebase, type RebaseConflictAnalysis, type RebaseTarget } from './rebase.js'
 import { runVerifyCommands, allVerifyPassed } from '../loop/verifier.js'
 import { buildVerifierEnv } from '../workers/env.js'
 import { RunManager } from '../state/runs.js'
@@ -33,6 +32,7 @@ export async function queueRebase(
   repoConfig: RepoConfig,
   issueNumber: number,
   botUser: string,
+  options: { check?: boolean } = {},
 ): Promise<{ queued: boolean; reason: string }> {
   const runManager = new RunManager(db)
 
@@ -50,10 +50,20 @@ export async function queueRebase(
 
   // Store rebase context and transition to queued
   const existingPhaseData = run.phaseData ?? {}
-  runManager.update(run.id, {
+  const transitioned = runManager.updateIfStatus(run.id, ['blocked', 'review_ready', 'error'], {
     status: 'queued',
+    currentPhase: null,
     lastError: null,
     endedAt: null,
+    blockReason: null,
+    operationIntent: 'rebase',
+    manualState: 'none',
+    controlPayload: {
+      issueRepo,
+      checkAfter: options.check ?? true,
+      requestedAt: new Date().toISOString(),
+      preserveBranchState: true,
+    },
     phaseData: {
       ...existingPhaseData,
       issueRepo,
@@ -62,6 +72,9 @@ export async function queueRebase(
       reactionSummary: 'Rebase and re-evaluate',
     },
   })
+  if (!transitioned) {
+    return { queued: false, reason: 'Run state changed while queuing rebase' }
+  }
 
   // Transition labels
   try {
@@ -99,8 +112,8 @@ export async function executeRebase(
   repo: string,
   issueNumber: number,
   verifyCommands: Array<string | string[]>,
-  strategy: UpdateStrategy = 'merge',
-): Promise<{ rebased: boolean; verifyPassed: boolean; conflict: boolean }> {
+  checkAfter = true,
+): Promise<{ rebased: boolean; verifyPassed: boolean; conflict: boolean; conflictAnalysis?: RebaseConflictAnalysis; error?: string }> {
   const target: RebaseTarget = {
     repo,
     issueNumber,
@@ -110,22 +123,27 @@ export async function executeRebase(
     worktreePath,
   }
 
-  const rebaseResult = await autoRebase(target, repoLocalPath, strategy)
+  const rebaseResult = await autoRebase(target, repoLocalPath, 'rebase')
 
-  if (rebaseResult === 'up_to_date') {
+  if (rebaseResult.result === 'up_to_date') {
     return { rebased: false, verifyPassed: true, conflict: false }
   }
 
-  if (rebaseResult === 'conflict') {
-    return { rebased: false, verifyPassed: false, conflict: true }
+  if (rebaseResult.result === 'conflict') {
+    return {
+      rebased: false,
+      verifyPassed: false,
+      conflict: true,
+      conflictAnalysis: rebaseResult.conflictAnalysis,
+    }
   }
 
-  if (rebaseResult === 'error') {
-    return { rebased: false, verifyPassed: false, conflict: false }
+  if (rebaseResult.result === 'error') {
+    return { rebased: false, verifyPassed: false, conflict: false, error: rebaseResult.error }
   }
 
   // Rebased successfully — run verify
-  if (verifyCommands.length === 0) {
+  if (!checkAfter || verifyCommands.length === 0) {
     return { rebased: true, verifyPassed: true, conflict: false }
   }
 

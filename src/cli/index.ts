@@ -111,9 +111,9 @@ program
   .argument('<repo>', 'Repository (owner/name)')
   .argument('<issue-number>', 'Issue number')
   .option('--immediate', 'Process immediately instead of queuing for next poll')
-  .option('--reset-plan', 'Discard prior plan and start fresh')
-  .option('--fresh', 'Reset branch to base and re-implement from scratch (use after merge conflicts)')
-  .description('Force a re-run of one task')
+  .option('--reset-plan', 'Deprecated compatibility flag. Retry already starts fresh from the latest base.')
+  .option('--fresh', 'Deprecated compatibility flag. Retry already starts fresh from the latest base.')
+  .description('Start a fresh retry of one task from the latest base branch')
   .action((repo, issueNumber, opts, cmd) => retryCommand(repo, issueNumber, { ...cmd.parent?.opts(), ...opts }))
 
 program

@@ -56,6 +56,13 @@ export function describeEventData(data: RunEvent['data']): string {
   }
 }
 
+export function describeRunEvent(event: RunEvent): string {
+  const phase = event.phase ?? '-'
+  const role = event.role ?? event.source
+  const detail = describeEventData(event.data)
+  return `${phase}/${role} ${event.type} ${detail}`.trim()
+}
+
 export function truncate(value: string, maxLength: number): string {
   if (value.length <= maxLength) return value
   return `${value.slice(0, maxLength - 3)}...`

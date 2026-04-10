@@ -12,16 +12,14 @@ export async function handleRetry(
   deps: MCPDependencies,
 ): Promise<unknown> {
   assertMcpMutationAuth(args.authToken, deps)
-  const fresh = args.fresh ?? false
   const engine = new RetryEngine(deps.db, deps.config)
   await engine.retry(args.repo, args.issueNumber, {
-    resetPlan: args.resetPlan ?? fresh,
-    resetBranch: fresh,
+    resetPlan: true,
+    resetBranch: true,
     dryRun: false,
     immediate: false,
   })
-  const suffix = fresh ? ' (fresh start — branch will be reset)' : ''
-  return { success: true, message: `Retry queued for ${args.repo}#${args.issueNumber}${suffix}` }
+  return { success: true, message: `Fresh retry queued for ${args.repo}#${args.issueNumber}` }
 }
 
 export async function handleSync(args: { dryRun?: boolean; authToken?: string }, deps: MCPDependencies): Promise<unknown> {
@@ -85,7 +83,9 @@ export async function handleRebase(
   } catch { /* best effort */ }
 
   const { queueRebase } = await import('../../ops/rebase-and-check.js')
-  const result = await queueRebase(deps.db, forge, repoConfig, args.issueNumber, botUser)
+  const result = await queueRebase(deps.db, forge, repoConfig, args.issueNumber, botUser, {
+    check: args.check,
+  })
 
   return {
     queued: result.queued,

@@ -1,7 +1,7 @@
 export type RunStatus = 'queued' | 'running' | 'blocked' | 'review_ready' | 'error' | 'completed'
 export type RunListView = 'active' | 'completed' | 'failed' | 'all'
 
-export const DASHBOARD_PAGES = ['issues', 'stats', 'projects', 'agent', 'settings'] as const
+export const DASHBOARD_PAGES = ['issues', 'stats', 'projects', 'settings'] as const
 export type DashboardPage = (typeof DASHBOARD_PAGES)[number]
 
 export function isDashboardPage(page: string): page is DashboardPage {
@@ -195,8 +195,9 @@ export interface DashboardSnapshot {
 export interface RunEvent {
   id: number
   runId: string
-  phase: string
-  role: string
+  source: 'system' | 'agent'
+  phase: string | null
+  role: string | null
   type: string
   timestamp: string
   data: Record<string, unknown> | null
@@ -255,45 +256,6 @@ export interface InteractiveAgentSessionEventsPayload {
   sessionId: string
   status: InteractiveAgentSessionStatus
   events: InteractiveAgentSessionEvent[]
-  lastEventId: number
-}
-
-export type ShellSessionStatus = 'running' | 'closed'
-export type ShellSessionEventType = 'status' | 'output' | 'exit'
-
-export interface ShellSessionSummary {
-  id: string
-  status: ShellSessionStatus
-  shell: string
-  cwd: string
-  cols: number
-  rows: number
-  createdAt: string
-  updatedAt: string
-  exitCode: number | null
-  exitSignal: number | null
-}
-
-export type ShellSessionDetail = ShellSessionSummary
-
-export interface ShellSessionEvent {
-  id: number
-  sessionId: string
-  timestamp: string
-  type: ShellSessionEventType
-  data: Record<string, unknown>
-}
-
-export interface ShellSessionsSnapshot {
-  generatedAt: string
-  homePath: string
-  sessions: ShellSessionSummary[]
-}
-
-export interface ShellSessionEventsPayload {
-  sessionId: string
-  status: ShellSessionStatus
-  events: ShellSessionEvent[]
   lastEventId: number
 }
 

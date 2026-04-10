@@ -56,6 +56,8 @@ import {
   applyWorkflowRoleDefaults,
   resolveWorkerProfileForAgent,
   extractFollowupPromptFeedback,
+  resolveControlPayload,
+  resolveOperationIntent,
   prioritizeDiscoveredIssues,
   selectReplayableRun,
   shouldResetBranch,
@@ -305,7 +307,7 @@ export async function pollOnce(
                         issueNumber: discoveredIssue.issue.number,
                         botUser,
                         body: formatStatusComment({
-                          blockReason: `Circuit breaker: ${consecutiveBlocks} consecutive blocked runs. This issue needs human intervention — the task may be too large, ambiguous, or hitting a systematic failure. Use /orch retry --fresh after addressing the root cause.`,
+                          blockReason: `Circuit breaker: ${consecutiveBlocks} consecutive blocked runs. This issue needs human intervention — the task may be too large, ambiguous, or hitting a systematic failure. Use /orch retry after addressing the root cause.`,
                         }),
                         warnMessage: 'Failed to post circuit breaker status comment',
                       })
@@ -374,17 +376,20 @@ export async function pollOnce(
                   // Notify
                   await notifier.dispatch(makePayload('run_started', repoConfig.repo, discoveredIssue.issue))
 
-                  // Detect if this queued run needs a forced branch reset (e.g., after merge conflict)
-                  const forceReset = activeRun?.blockReason === 'merge_conflict'
-
-                  // Detect rebase mode from queued run's phaseData
-                  const reactionType = activeRun?.phaseData?.reactionType
-                  const isRebaseRun = !forceReset && (reactionType === 'rebase' || reactionType === 'merge_conflict')
+                  const operationIntent = resolveOperationIntent(activeRun)
+                  const controlPayload = resolveControlPayload(activeRun)
+                  const isRebaseRun = operationIntent === 'rebase'
+                  const isContinueRun = operationIntent === 'continue'
+                  const isFreshRetry = operationIntent === 'retry'
                   const followupPromptFeedback = extractFollowupPromptFeedback(activeRun?.phaseData)
 
                   // Check if prior run left tainted work that should be discarded
                   const planningMode = isPlanningIssue(discoveredIssue.issue.labels, repoConfigForRun)
-                  const resetToBase = forceReset || (!isRebaseRun && (planningMode || shouldResetBranch(runManager, repoConfig.repo, discoveredIssue.issue.number, run.id)))
+                  const preserveBranchState = Boolean(controlPayload?.preserveBranchState) || isContinueRun || isRebaseRun
+                  const resetToBase = isFreshRetry
+                    || (operationIntent === 'auto'
+                      && !isRebaseRun
+                      && (planningMode || shouldResetBranch(runManager, repoConfig.repo, discoveredIssue.issue.number, run.id)))
 
                   // Create worktree
                   await worktreeManager.ensure({
@@ -393,6 +398,7 @@ export async function pollOnce(
                     branchName: branch,
                     worktreePath,
                     resetToBase,
+                    preserveBranchState,
                     updateStrategy: repoConfig.updateStrategy,
                   })
 
@@ -408,14 +414,25 @@ export async function pollOnce(
                     issueRepo,
                     discoveredIssue.issue.number,
                     verifyCommands,
-                    repoConfig.updateStrategy,
+                    controlPayload?.checkAfter !== false,
                   )
 
                   if (rebaseResult.conflict) {
                     runManager.update(run.id, {
                       status: 'blocked',
                       blockReason: 'merge_conflict',
-                      lastError: 'Rebase failed due to merge conflicts — retry will reset the branch and re-implement from scratch',
+                      operationIntent: 'rebase',
+                      manualState: 'awaiting_rebase_resolution',
+                      controlPayload: {
+                        issueRepo,
+                        preserveBranchState: true,
+                        conflictSummary: rebaseResult.conflictAnalysis?.summary ?? 'Rebase conflicted with the latest base branch changes.',
+                        conflictFiles: rebaseResult.conflictAnalysis?.files ?? [],
+                        conflictExcerpts: rebaseResult.conflictAnalysis?.excerpts ?? [],
+                        requestedAt: nowUtcIso(),
+                      },
+                      lastError: rebaseResult.conflictAnalysis?.summary
+                        ?? 'Rebase failed due to merge conflicts. Continue will keep the branch and resolve them; retry will reset to base and re-implement.',
                       endedAt: nowUtcIso(),
                     })
                     const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
@@ -435,8 +452,9 @@ export async function pollOnce(
                       issueNumber: discoveredIssue.issue.number,
                       botUser,
                       body: formatStatusComment({
-                        blockReason: 'Rebase failed due to merge conflicts while replaying the branch onto the latest base.',
-                        nextStep: 'Use /orch retry to reset the branch and re-implement, or /orch continue to auto-merge and fix.',
+                        blockReason: rebaseResult.conflictAnalysis?.summary
+                          ?? 'Rebase failed due to merge conflicts while replaying the branch onto the latest base.',
+                        nextStep: 'Use /orch continue to keep the existing branch and resolve the conflicts, or /orch retry to reset the branch and re-implement from scratch.',
                       }),
                       warnMessage: 'Failed to post rebase merge-conflict status comment',
                     })
@@ -537,7 +555,7 @@ export async function pollOnce(
                   throw new Error('Missing worker profiles for resolved roles')
                 }
 
-                const initialCtx: RunContext = {
+                  const initialCtx: RunContext = {
                   runId: run.id,
                   repo: repoConfig.repo,
                   issueRepo,
@@ -562,7 +580,7 @@ export async function pollOnce(
                   terminalStatus: 'running',
                   phaseHistory: [],
                   dryRun: false,
-                  runMode: isRebaseRun ? 'rebase' : followupPromptFeedback ? 'followup' : 'fresh',
+                  runMode: isRebaseRun ? 'rebase' : isContinueRun || followupPromptFeedback ? 'followup' : 'fresh',
                   blockReason: null,
                   prReviewFeedback: followupPromptFeedback,
                   sessionIds: {},

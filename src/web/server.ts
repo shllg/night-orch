@@ -9,9 +9,6 @@ import type { MCPDependencies } from '../mcp/server.js'
 import {
   InteractiveAgentSessionManager,
 } from './agent-session.js'
-import {
-  ShellSessionManager,
-} from './shell-session.js'
 import { logger } from '../utils/logger.js'
 import { sanitizeError } from '../utils/sanitize-error.js'
 import { nowUtcIso } from '../utils/time.js'
@@ -26,7 +23,6 @@ import {
   handleWsMessage,
   publishRunSubscriptions,
   publishAgentSessionSubscriptions,
-  publishShellSessionSubscriptions,
 } from './routes/api-events.js'
 
 export interface WebServerOptions {
@@ -40,10 +36,8 @@ export interface WebServerOptions {
 }
 
 export interface WsClientState {
-  isAuthenticated: boolean
   runSubscriptions: Map<string, number>
   agentSessionSubscriptions: Map<string, number>
-  shellSessionSubscriptions: Map<string, number>
 }
 
 export interface WebSecurityContext {
@@ -58,10 +52,6 @@ export type WebSocketCommand =
   | { type: 'unsubscribe-run-events'; runId: string }
   | { type: 'subscribe-agent-session-events'; sessionId: string; since?: number }
   | { type: 'unsubscribe-agent-session-events'; sessionId: string }
-  | { type: 'subscribe-shell-session-events'; sessionId: string; since?: number }
-  | { type: 'unsubscribe-shell-session-events'; sessionId: string }
-  | { type: 'shell-input'; sessionId: string; data: string }
-  | { type: 'shell-resize'; sessionId: string; cols: number; rows: number }
   | { type: 'refresh' }
 
 const ONE_MEGABYTE = 1024 * 1024
@@ -115,7 +105,6 @@ export async function startWebServer(
   const agentSessionManager = new InteractiveAgentSessionManager(deps.config, {
     workspacePath: resolveAgentSessionWorkspacePath(deps),
   })
-  const shellSessionManager = new ShellSessionManager()
   const frontendDistPath = resolveWebFrontendDistPath(options.frontendDistPath)
   const hasFrontendAssets = existsSync(resolve(frontendDistPath, 'index.html'))
 
@@ -135,7 +124,6 @@ export async function startWebServer(
     operationsEnabled,
     rawConfig: options.rawConfig,
     agentSessionManager,
-    shellSessionManager,
   }
 
   const httpServer = createServer(async (req, res) => {
@@ -204,13 +192,10 @@ export async function startWebServer(
     })
   })
 
-  wsServer.on('connection', (ws, req) => {
-    const isAuthenticated = resolveWebSocketAuthenticationState(req, security)
+  wsServer.on('connection', (ws) => {
     const state: WsClientState = {
-      isAuthenticated,
       runSubscriptions: new Map(),
       agentSessionSubscriptions: new Map(),
-      shellSessionSubscriptions: new Map(),
     }
     clients.set(ws, state)
 
@@ -225,7 +210,7 @@ export async function startWebServer(
         sendWebsocket(ws, { type: 'error', error: 'Unsupported websocket payload type' })
         return
       }
-      void handleWsMessage(ws, state, decoded, deps, agentSessionManager, shellSessionManager)
+      void handleWsMessage(ws, state, decoded, deps, agentSessionManager)
     })
 
     ws.on('close', () => {
@@ -252,7 +237,6 @@ export async function startWebServer(
         if (ws.readyState !== WebSocket.OPEN) continue
         await publishRunSubscriptions(ws, state, deps)
         publishAgentSessionSubscriptions(ws, state, agentSessionManager)
-        publishShellSessionSubscriptions(ws, state, shellSessionManager)
       }
     } catch (err) {
       logger.warn({ err }, 'Failed to publish websocket snapshot tick')
@@ -273,18 +257,8 @@ export async function startWebServer(
       publishAgentSessionSubscriptions(ws, state, agentSessionManager)
     }
   })
-  const stopShellSessionStreaming = shellSessionManager.onSessionEvent((sessionId) => {
-    for (const [ws, state] of clients.entries()) {
-      if (ws.readyState !== WebSocket.OPEN) continue
-      if (!state.shellSessionSubscriptions.has(sessionId)) continue
-      publishShellSessionSubscriptions(ws, state, shellSessionManager)
-    }
-  })
-
   httpServer.on('close', () => {
     stopAgentSessionStreaming()
-    stopShellSessionStreaming()
-    shellSessionManager.closeAll()
     clearInterval(interval)
     for (const ws of wsServer.clients) {
       ws.close()
@@ -316,18 +290,9 @@ async function handleApiRequest(
   const { pathname, searchParams } = requestUrl
   const { security, operationsEnabled } = ctx
 
-  if (method === 'GET' && pathname.startsWith('/api/shell/')) {
-    const shellReadGuardFailure = validateShellReadRequest(req, security)
-    if (shellReadGuardFailure) {
-      writeJson(res, shellReadGuardFailure.statusCode, { error: shellReadGuardFailure.error })
-      return
-    }
-  }
-
   if ((method === 'POST' || method === 'DELETE')
     && (pathname.startsWith('/api/operations/')
-      || pathname.startsWith('/api/agent/')
-      || pathname.startsWith('/api/shell/'))) {
+      || pathname.startsWith('/api/agent/'))) {
     if (!operationsEnabled && pathname !== '/api/operations/update') {
       writeJson(res, 409, { error: 'Web operations are disabled by server policy.' })
       return
@@ -550,22 +515,6 @@ export function validateMutationRequest(
   return null
 }
 
-function validateShellReadRequest(
-  req: IncomingMessage,
-  security: WebSecurityContext,
-): { statusCode: number; error: string } | null {
-  const webToken = getSingleHeaderValue(req.headers[WEB_AUTH_TOKEN_HEADER])
-  if (!webToken) {
-    return { statusCode: 401, error: `Missing required header: ${WEB_AUTH_TOKEN_HEADER}` }
-  }
-
-  if (!isMatchingToken(webToken, security.webMutationToken)) {
-    return { statusCode: 403, error: 'Invalid web auth token' }
-  }
-
-  return null
-}
-
 function hasAllowedOrigin(req: IncomingMessage, security: WebSecurityContext, allowMissingOrigin: boolean): boolean {
   const originHeader = getSingleHeaderValue(req.headers.origin)
   if (!originHeader) {
@@ -738,24 +687,6 @@ function rejectUpgrade(
       payload,
   )
   socket.destroy()
-}
-
-function resolveWebSocketAuthenticationState(request: IncomingMessage, security: WebSecurityContext): boolean {
-  let requestUrl: URL
-  try {
-    requestUrl = getRequestUrl(request)
-  } catch {
-    return false
-  }
-
-  const queryToken = requestUrl.searchParams.get('token')
-  const headerToken = getSingleHeaderValue(request.headers[WEB_AUTH_TOKEN_HEADER])
-  const providedToken = toNonEmptyString(queryToken) ?? headerToken
-  if (!providedToken) {
-    return false
-  }
-
-  return isMatchingToken(providedToken, security.webMutationToken)
 }
 
 function isClientRequestError(message: string): boolean {

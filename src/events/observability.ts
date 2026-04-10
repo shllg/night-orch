@@ -3,6 +3,7 @@ import { createWriteStream, type WriteStream } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { Config } from '../config/schema.js'
+import { insertRunLogEvents } from '../state/run-log-events.js'
 import { logger } from '../utils/logger.js'
 import { agentEventBus } from './bus.js'
 import type { AgentEvent } from './types.js'
@@ -40,6 +41,15 @@ export class AgentObservability {
           event.timestamp,
         )
       }
+      insertRunLogEvents(this.db, events.map((event) => ({
+        runId: event.runId,
+        source: 'agent',
+        phase: event.phase,
+        role: event.role,
+        type: event.type,
+        data: event.data,
+        timestamp: event.timestamp,
+      })))
     })
     this.options = normalizeObservabilityOptions(config)
     agentEventBus.setRetentionLimit(this.options.eventRetention)

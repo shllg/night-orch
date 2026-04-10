@@ -2,7 +2,6 @@ import { type FormEvent, type ReactElement, useCallback, useEffect, useMemo, use
 import { useNavigate } from '@tanstack/react-router'
 
 import { BudgetOverridesPanel } from './components/BudgetOverridesPanel.js'
-import { ShellSessionsPage } from './components/ShellSessionsPage.js'
 import { DashboardHeader } from './components/DashboardHeader.js'
 import { DashboardMetrics } from './components/DashboardMetrics.js'
 import { DashboardNavigation } from './components/DashboardNavigation.js'
@@ -17,10 +16,6 @@ import { UpdateProgressModal, GIT_STATE_ORDER, NPM_STATE_ORDER } from './compone
 import { extractMessage } from './lib/format.js'
 import { STATUS_BADGE_TONE } from './lib/run-tone.js'
 import { asRunEventsPayload, mergeRunEvents } from './lib/run-events.js'
-import {
-  asShellSessionEventsPayload,
-  mergeShellSessionEvents,
-} from './lib/shell-session-events.js'
 import { confirmSelfUpdate } from './lib/update-confirmation.js'
 import {
   clearUpdateTransitionState,
@@ -39,9 +34,6 @@ import {
   type RuntimeSettingValue,
   type RunEvent,
   type RunSummary,
-  type ShellSessionDetail,
-  type ShellSessionEvent,
-  type ShellSessionsSnapshot,
   type SettingsSnapshot,
   type SessionResponse,
   type UpdateStatus,
@@ -106,12 +98,6 @@ export function App({
   const [historyRunsHasMore, setHistoryRunsHasMore] = useState(false)
   const [selectedRunId, setSelectedRunId] = useState('')
   const [runEvents, setRunEvents] = useState<RunEvent[]>([])
-  const [shellSessionsSnapshot, setShellSessionsSnapshot] = useState<ShellSessionsSnapshot | null>(null)
-  const [isShellSessionsLoading, setIsShellSessionsLoading] = useState(false)
-  const [selectedShellSessionId, setSelectedShellSessionId] = useState('')
-  const [selectedShellSession, setSelectedShellSession] = useState<ShellSessionDetail | null>(null)
-  const [shellSessionEvents, setShellSessionEvents] = useState<ShellSessionEvent[]>([])
-  const [shellCreateDraft, setShellCreateDraft] = useState<{ cwd: string }>({ cwd: '' })
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null)
   const [activeOperation, setActiveOperation] = useState<string | null>(null)
@@ -133,9 +119,7 @@ export function App({
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
   const selectedStreamRunIdRef = useRef('')
-  const selectedShellSessionIdRef = useRef('')
   const subscribedRunRef = useRef('')
-  const subscribedShellSessionRef = useRef('')
   const updateTransitionRef = useRef<UpdateTransitionState>(clearUpdateTransitionState())
   const lastPollTriggeredAtRef = useRef(Date.now())
   const operationsEnabledRef = useRef(operationsEnabled)
@@ -355,49 +339,6 @@ export function App({
     )
   }, [])
 
-  const loadShellSessions = useCallback(async () => {
-    if (!webMutationToken) {
-      throw new Error('Web session is not initialized yet. Refresh the page and try again.')
-    }
-    const response = await fetch('/api/shell/sessions', {
-      headers: {
-        [WEB_AUTH_TOKEN_HEADER]: webMutationToken,
-      },
-    })
-    if (!response.ok) {
-      throw new Error(`Failed to load shell sessions (${response.status})`)
-    }
-    const payload = await response.json() as ShellSessionsSnapshot
-    setShellSessionsSnapshot(payload)
-  }, [webMutationToken])
-
-  const loadShellSessionDetail = useCallback(async (sessionId: string) => {
-    if (!webMutationToken) {
-      throw new Error('Web session is not initialized yet. Refresh the page and try again.')
-    }
-    if (!sessionId) {
-      setSelectedShellSession(null)
-      return
-    }
-    const response = await fetch(`/api/shell/sessions/${encodeURIComponent(sessionId)}`, {
-      headers: {
-        [WEB_AUTH_TOKEN_HEADER]: webMutationToken,
-      },
-    })
-    if (response.status === 404) {
-      setSelectedShellSession(null)
-      return
-    }
-    if (!response.ok) {
-      throw new Error(`Failed to load shell session (${response.status})`)
-    }
-    const payload = await response.json() as { session?: ShellSessionDetail }
-    if (!payload.session) {
-      throw new Error('Malformed shell session response')
-    }
-    setSelectedShellSession(payload.session)
-  }, [webMutationToken])
-
   useEffect(() => {
     void (async () => {
       try {
@@ -479,58 +420,6 @@ export function App({
   }, [decodedIssueDetailRunId])
 
   useEffect(() => {
-    if (activePage !== 'agent' || !webMutationToken) return
-    let cancelled = false
-    setIsShellSessionsLoading(true)
-    setErrorMessage(null)
-    void (async () => {
-      try {
-        await loadShellSessions()
-      } catch (err) {
-        if (!cancelled) {
-          setErrorMessage((err as Error).message)
-        }
-      } finally {
-        if (!cancelled) {
-          setIsShellSessionsLoading(false)
-        }
-      }
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [activePage, loadShellSessions, webMutationToken])
-
-  useEffect(() => {
-    if (activePage !== 'agent') return
-    const sessions = shellSessionsSnapshot?.sessions ?? []
-    setSelectedShellSessionId((previous) => {
-      if (previous && sessions.some((session) => session.id === previous)) {
-        return previous
-      }
-      return sessions[0]?.id ?? ''
-    })
-  }, [activePage, shellSessionsSnapshot])
-
-  useEffect(() => {
-    if (activePage !== 'agent' || !webMutationToken) return
-    let cancelled = false
-    void (async () => {
-      try {
-        await loadShellSessionDetail(selectedShellSessionId)
-      } catch (err) {
-        if (!cancelled) {
-          setErrorMessage((err as Error).message)
-        }
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [activePage, loadShellSessionDetail, selectedShellSessionId, webMutationToken])
-
-  useEffect(() => {
     let cancelled = false
 
     const connect = (): void => {
@@ -549,10 +438,6 @@ export function App({
         if (activeRun) {
           socket.send(JSON.stringify({ type: 'subscribe-run-events', runId: activeRun, since: 0 }))
         }
-        const activeSession = selectedShellSessionIdRef.current
-        if (activeSession) {
-          socket.send(JSON.stringify({ type: 'subscribe-shell-session-events', sessionId: activeSession, since: 0 }))
-        }
       }
 
       socket.onmessage = (event) => {
@@ -570,39 +455,6 @@ export function App({
             }
 
             setRunEvents((previous) => mergeRunEvents(previous, payload.events))
-            return
-          }
-
-          if (envelope.type === 'shell-session-events' && envelope.payload) {
-            const payload = asShellSessionEventsPayload(envelope.payload)
-            if (!payload) {
-              return
-            }
-
-            setShellSessionsSnapshot((current) => {
-              if (!current) return current
-              return {
-                ...current,
-                sessions: current.sessions.map((session) => (
-                  session.id === payload.sessionId
-                    ? {
-                        ...session,
-                        status: payload.status,
-                  }
-                    : session
-                )),
-              }
-            })
-            if (payload.sessionId !== selectedShellSessionIdRef.current) {
-              return
-            }
-
-            setShellSessionEvents((previous) => mergeShellSessionEvents(previous, payload.events))
-            setSelectedShellSession((current) => (
-              current && current.id === payload.sessionId
-                ? { ...current, status: payload.status }
-                : current
-            ))
             return
           }
 
@@ -662,28 +514,6 @@ export function App({
 
     subscribedRunRef.current = selectedStreamRunId
   }, [selectedStreamRunId, socketConnected])
-
-  useEffect(() => {
-    selectedShellSessionIdRef.current = selectedShellSessionId
-    setShellSessionEvents([])
-
-    const socket = wsRef.current
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-      subscribedShellSessionRef.current = selectedShellSessionId
-      return
-    }
-
-    const previousSession = subscribedShellSessionRef.current
-    if (previousSession && previousSession !== selectedShellSessionId) {
-      socket.send(JSON.stringify({ type: 'unsubscribe-shell-session-events', sessionId: previousSession }))
-    }
-
-    if (selectedShellSessionId) {
-      socket.send(JSON.stringify({ type: 'subscribe-shell-session-events', sessionId: selectedShellSessionId, since: 0 }))
-    }
-
-    subscribedShellSessionRef.current = selectedShellSessionId
-  }, [selectedShellSessionId, socketConnected])
 
   const [serverUnreachable, setServerUnreachable] = useState(false)
 
@@ -820,48 +650,6 @@ export function App({
     }
   }, [loadDashboard, loadHistoryRunsPage, loadSettings, operationsEnabled, runsView, webMutationToken])
 
-  const runShellMutation = useCallback(async (
-    operationName: string,
-    endpoint: string,
-    payload: Record<string, unknown>,
-    method: 'POST' | 'DELETE' = 'POST',
-  ): Promise<Record<string, unknown> | null> => {
-    try {
-      setActiveOperation(operationName)
-      setErrorMessage(null)
-
-      if (!webMutationToken) {
-        throw new Error('Web session is not initialized yet. Refresh the page and try again.')
-      }
-      if (!operationsEnabled) {
-        throw new Error('Web operations are disabled by server policy.')
-      }
-
-      const response = await fetch(endpoint, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          [MUTATION_INTENT_HEADER]: MUTATION_INTENT_VALUE,
-          [WEB_AUTH_TOKEN_HEADER]: webMutationToken,
-        },
-        body: method === 'DELETE' ? undefined : JSON.stringify(payload),
-      })
-
-      const body = await response.json() as Record<string, unknown>
-      if (!response.ok) {
-        const message = typeof body['error'] === 'string' ? body['error'] : `Operation failed (${response.status})`
-        throw new Error(message)
-      }
-
-      return body
-    } catch (err) {
-      setErrorMessage((err as Error).message)
-      return null
-    } finally {
-      setActiveOperation(null)
-    }
-  }, [operationsEnabled, webMutationToken])
-
   const refreshDashboardData = useCallback(async () => {
     try {
       setIsHeaderRefreshing(true)
@@ -871,9 +659,6 @@ export function App({
         loadProjects(),
         loadSettings(),
       ]
-      if (activePage === 'agent') {
-        refreshTasks.push(loadShellSessions())
-      }
       if (activePage === 'issues' && runsView !== 'active') {
         refreshTasks.push(loadHistoryRunsPage({ append: false, offset: 0 }))
       }
@@ -886,7 +671,7 @@ export function App({
     } finally {
       setIsHeaderRefreshing(false)
     }
-  }, [activePage, loadDashboard, loadHistoryRunsPage, loadProjects, loadSettings, loadShellSessions, runsView])
+  }, [activePage, loadDashboard, loadHistoryRunsPage, loadProjects, loadSettings, runsView])
 
   const triggerPoll = useCallback(() => {
     lastPollTriggeredAtRef.current = Date.now()
@@ -1033,12 +818,8 @@ export function App({
     void runIssueOperation(run, {
       operationName: 'retry',
       endpoint: '/api/operations/retry',
-      confirmMessage: `Queue retry for ${run.repo}#${run.issue}?`,
-      fallbackMessage: `Retry queued for ${run.repo}#${run.issue}`,
-      payload: {
-        resetPlan: false,
-        fresh: false,
-      },
+      confirmMessage: `Queue fresh retry for ${run.repo}#${run.issue}?`,
+      fallbackMessage: `Fresh retry queued for ${run.repo}#${run.issue}`,
     })
   }, [runIssueOperation])
 
@@ -1196,58 +977,6 @@ export function App({
     )
   }, [costOverrideDraft, runOperation])
 
-  const submitCreateShellSession = useCallback(async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const response = await runShellMutation(
-      'shell:create-session',
-      '/api/shell/sessions',
-      {
-        cwd: shellCreateDraft.cwd.trim() || undefined,
-      },
-    )
-    if (!response) return
-
-    const session = response['session'] as ShellSessionDetail | undefined
-    await loadShellSessions()
-    if (session?.id) {
-      setSelectedShellSessionId(session.id)
-      setSelectedShellSession(session)
-      setShellSessionEvents([])
-      setFeedbackMessage(`Created shell session in ${session.cwd}`)
-    }
-  }, [loadShellSessions, runShellMutation, shellCreateDraft.cwd])
-
-  const closeShellSession = useCallback(async () => {
-    if (!selectedShellSessionId) return
-    const response = await runShellMutation(
-      'shell:close-session',
-      `/api/shell/sessions/${encodeURIComponent(selectedShellSessionId)}`,
-      {},
-      'DELETE',
-    )
-    if (!response) return
-
-    await loadShellSessions()
-    await loadShellSessionDetail(selectedShellSessionId)
-    setFeedbackMessage('Shell session closed')
-  }, [loadShellSessionDetail, loadShellSessions, runShellMutation, selectedShellSessionId])
-
-  const sendShellInput = useCallback((data: string) => {
-    const sessionId = selectedShellSessionIdRef.current
-    if (!sessionId) return
-    const socket = wsRef.current
-    if (!socket || socket.readyState !== WebSocket.OPEN) return
-    socket.send(JSON.stringify({ type: 'shell-input', sessionId, data }))
-  }, [])
-
-  const sendShellResize = useCallback((cols: number, rows: number) => {
-    const sessionId = selectedShellSessionIdRef.current
-    if (!sessionId) return
-    const socket = wsRef.current
-    if (!socket || socket.readyState !== WebSocket.OPEN) return
-    socket.send(JSON.stringify({ type: 'shell-resize', sessionId, cols, rows }))
-  }, [])
-
   const isIssueDetailScreen = activePage === 'issues' && decodedIssueDetailRunId !== null
   const isProjectDetailScreen = activePage === 'projects' && decodedProjectDetailRepo !== null
 
@@ -1366,33 +1095,6 @@ export function App({
                   onOpenRepo={openProjectDetail}
                 />
               )
-            )}
-
-            {activePage === 'agent' && (
-              <ShellSessionsPage
-                snapshot={shellSessionsSnapshot}
-                selectedSessionId={selectedShellSessionId}
-                selectedSession={selectedShellSession}
-                events={shellSessionEvents}
-                createDraft={shellCreateDraft}
-                isLoading={isShellSessionsLoading}
-                isMutating={activeOperation !== null}
-                socketConnected={socketConnected}
-                onSelectSession={(sessionId) => {
-                  setSelectedShellSessionId(sessionId)
-                }}
-                onCreateDraftChange={(patch) => {
-                  setShellCreateDraft((current) => ({ ...current, ...patch }))
-                }}
-                onCreateSession={(event) => {
-                  void submitCreateShellSession(event)
-                }}
-                onCloseSession={() => {
-                  void closeShellSession()
-                }}
-                onTerminalInput={sendShellInput}
-                onTerminalResize={sendShellResize}
-              />
             )}
 
             {activePage === 'settings' && (

@@ -60,7 +60,7 @@ describe('DashboardNavigation', () => {
       ),
     )
 
-    expect(buttons).toHaveLength(10)
+    expect(buttons).toHaveLength(8)
     expect(buttons.every((button) => typeof button.props['aria-label'] === 'string')).toBe(true)
 
     const activeButtons = buttons.filter((button) => button.props['aria-current'] === 'page')

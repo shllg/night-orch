@@ -398,10 +398,10 @@ Requires `acpx` installed as a dependency (`pnpm add acpx`).
 | `requireCollaborator` | boolean | `true` | Only repo collaborators can use comment commands. Set to `false` only for private repos where all commenters are trusted. |
 
 Supported commands (posted as issue comments):
-- `/orch retry` — re-queue a blocked/errored issue
-- `/orch rebase` — rebase the work branch onto the latest base
+- `/orch retry` — start a fresh retry from the latest base branch
+- `/orch rebase` — queue an explicit rebase of the work branch onto the latest base
 - `/orch cancel` — cancel an active run
-- `/orch continue` — queue a context-aware second pass for blocked/review-ready/errored runs
+- `/orch continue` — resume the existing branch with fresh context for blocked/review-ready/errored runs
 
 ## `workflows`
 
@@ -473,7 +473,7 @@ Reference a workflow in `repos[].workflow` by name.
 | `localPath` | string path | yes | none | Local repo checkout path. |
 | `baseBranch` | string | no | `main` | PR target branch. |
 | `branchPrefix` | string | no | `orch` | Work branch prefix. |
-| `updateStrategy` | `merge` \| `rebase` | no | `merge` | How to incorporate upstream base branch changes. `merge` creates merge commits (reliable for automated systems). `rebase` replays commits for linear history (use only if your repo requires linear history). |
+| `updateStrategy` | `merge` \| `rebase` | no | `merge` | How normal queued work incorporates upstream base branch changes. `merge` creates merge commits (reliable for automated systems). `rebase` replays commits for linear history (use only if your repo requires linear history). Explicit `/orch rebase` always performs a real git rebase regardless of this setting. |
 | `labels` | object | no | object with defaults | Orchestration label names. |
 | `kanban` | object | no | none | Optional alternate state-label flow activated by a trigger label. |
 | `labelConfig` | record | no | `{}` | Label metadata overrides for `labels-init`. |

@@ -17,16 +17,11 @@ import {
 } from '../server.js'
 
 export const handleOperationRoutes: RouteHandler = async (req, res, method, pathname, _searchParams, ctx) => {
-  const { deps, security, agentSessionManager, shellSessionManager } = ctx
+  const { deps, security, agentSessionManager } = ctx
   const runtimeDeps = resolveRuntimeDeps(deps)
 
   if (method === 'GET' && pathname === '/api/agent/sessions') {
     writeJson(res, 200, agentSessionManager.listSessions())
-    return true
-  }
-
-  if (method === 'GET' && pathname === '/api/shell/sessions') {
-    writeJson(res, 200, shellSessionManager.listSessions())
     return true
   }
 
@@ -58,32 +53,6 @@ export const handleOperationRoutes: RouteHandler = async (req, res, method, path
       return true
     }
 
-    const shellSessionEventsMatch = pathname.match(/^\/api\/shell\/sessions\/([^/]+)\/events$/)
-    if (shellSessionEventsMatch) {
-      const sessionId = decodeURIComponent(shellSessionEventsMatch[1] ?? '')
-      const since = toBoundedInt(_searchParams.get('since'), 0, 0, Number.MAX_SAFE_INTEGER)
-      const limit = toBoundedInt(_searchParams.get('limit'), 200, 1, 1_000)
-      try {
-        writeJson(res, 200, shellSessionManager.getEvents(sessionId, since, limit))
-      } catch (err) {
-        const message = (err as Error).message
-        const statusCode = message.startsWith('Session not found:') ? 404 : 400
-        writeJson(res, statusCode, { error: message })
-      }
-      return true
-    }
-
-    const shellSessionDetailMatch = pathname.match(/^\/api\/shell\/sessions\/([^/]+)$/)
-    if (shellSessionDetailMatch) {
-      const sessionId = decodeURIComponent(shellSessionDetailMatch[1] ?? '')
-      const session = shellSessionManager.getSession(sessionId)
-      if (!session) {
-        writeJson(res, 404, { error: `Session not found: ${sessionId}` })
-        return true
-      }
-      writeJson(res, 200, { session })
-      return true
-    }
   }
 
   if (method === 'GET' && pathname === '/api/update-status') {
@@ -461,43 +430,6 @@ export const handleOperationRoutes: RouteHandler = async (req, res, method, path
     const sessionId = decodeURIComponent(agentSessionCloseMatch[1] ?? '')
     try {
       const session = agentSessionManager.closeSession(sessionId)
-      writeJson(res, 200, { session })
-    } catch (err) {
-      const message = (err as Error).message
-      const statusCode = message.startsWith('Session not found:')
-        ? 404
-        : message.includes('running')
-          ? 409
-          : 400
-      writeJson(res, statusCode, { error: message })
-    }
-    return true
-  }
-
-  if (method === 'POST' && pathname === '/api/shell/sessions') {
-    const body = await readJsonBody(req)
-    const cwd = toNonEmptyString(body['cwd'])
-    const cols = toBoundedInt(body['cols'], NaN, 40, 400)
-    const rows = toBoundedInt(body['rows'], NaN, 10, 240)
-
-    try {
-      const session = shellSessionManager.createSession({
-        cwd,
-        cols: Number.isNaN(cols) ? undefined : cols,
-        rows: Number.isNaN(rows) ? undefined : rows,
-      })
-      writeJson(res, 200, { session })
-    } catch (err) {
-      writeJson(res, 400, { error: (err as Error).message })
-    }
-    return true
-  }
-
-  const shellSessionCloseMatch = pathname.match(/^\/api\/shell\/sessions\/([^/]+)$/)
-  if (method === 'DELETE' && shellSessionCloseMatch) {
-    const sessionId = decodeURIComponent(shellSessionCloseMatch[1] ?? '')
-    try {
-      const session = shellSessionManager.closeSession(sessionId)
       writeJson(res, 200, { session })
     } catch (err) {
       const message = (err as Error).message

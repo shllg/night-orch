@@ -12,7 +12,6 @@ import {
   type RunSummary,
   type SettingsSnapshot,
   type SessionResponse,
-  type ShellSessionsSnapshot,
 } from '../../web/src/types/dashboard.js'
 
 const SESSION_RESPONSE: SessionResponse = {
@@ -255,12 +254,6 @@ const SETTINGS_SNAPSHOT: SettingsSnapshot = {
   settings: [],
 }
 
-const SHELL_SESSIONS_SNAPSHOT: ShellSessionsSnapshot = {
-  generatedAt: '2026-04-06T10:00:00.000Z',
-  homePath: '/home/test',
-  sessions: [],
-}
-
 class MockWebSocket {
   static readonly OPEN = 1
   static readonly CLOSED = 3
@@ -331,7 +324,6 @@ function buildFetchMock(
         },
       )
     }
-    if (pathname === '/api/shell/sessions') return createJsonResponse(SHELL_SESSIONS_SNAPSHOT)
     if (pathname === '/api/update-status') return createJsonResponse({}, 404)
     if (method === 'POST' && pathname.startsWith('/api/operations/')) {
       return createJsonResponse({ message: `${pathname} accepted` })
@@ -376,7 +368,7 @@ function renderDashboard(pathname: string) {
   return { ...rendered, router }
 }
 
-function expectPageActive(label: 'issues' | 'stats' | 'projects' | 'shell' | 'settings'): void {
+function expectPageActive(label: 'issues' | 'stats' | 'projects' | 'settings'): void {
   const pageButtons = screen
     .getAllByRole('button', { name: new RegExp(`^${label}$`, 'i') })
     .filter((button) => button.getAttribute('aria-label') === label)
@@ -483,15 +475,15 @@ describe('dashboard router integration (real App)', () => {
     expectPageActive('settings')
   })
 
-  it('renders /agent with browser shell controls', async () => {
+  it('redirects /agent to /issues because the shell page was removed', async () => {
     const { router } = renderDashboard('/agent')
 
     await waitFor(() => {
-      expect(router.state.location.pathname).toBe('/agent')
+      expect(router.state.location.pathname).toBe('/issues')
     })
 
-    expect(screen.getByText('Browser Shell')).toBeDefined()
-    expectPageActive('shell')
+    expectPageActive('issues')
+    expect(screen.getByText('24h Throughput')).toBeDefined()
   })
 
   it('redirects invalid routes to /issues', async () => {
@@ -611,7 +603,7 @@ describe('dashboard router integration (real App)', () => {
       '/api/operations/delete-entry',
     ])
 
-    expect(operationCalls[0]?.body).toMatchObject({ repo: 'org/repo', issueNumber: 42, resetPlan: false, fresh: false })
+    expect(operationCalls[0]?.body).toMatchObject({ repo: 'org/repo', issueNumber: 42 })
     expect(operationCalls[1]?.body).toMatchObject({ repo: 'org/repo', issueNumber: 42 })
     expect(operationCalls[2]?.body).toMatchObject({ repo: 'org/repo', issueNumber: 42 })
     expect(operationCalls[3]?.body).toMatchObject({ repo: 'org/repo', issueNumber: 42, force: false })

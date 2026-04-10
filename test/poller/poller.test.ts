@@ -1000,7 +1000,8 @@ describe('pollOnce', () => {
       (call) => typeof call[2] === 'string' && call[2].includes('Rebase failed due to merge conflicts'),
     )
     expect(statusComment).toBeDefined()
-    expect(statusComment?.[2]).toContain('Use /orch retry')
+    expect(statusComment?.[2]).toContain('Use /orch continue')
+    expect(statusComment?.[2]).toContain('Use /orch continue to keep the existing branch')
 
     const run = db
       .prepare('SELECT status, block_reason FROM runs WHERE id = ?')

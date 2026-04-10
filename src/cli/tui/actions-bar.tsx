@@ -85,7 +85,7 @@ function issueHints(options: {
   if (busy) {
     return 'actions locked while task is running'
   }
-  return '[t]retry [T]retry fresh [c]continue [_]rebase [X]delete entry [$]cost-override'
+  return '[t/T]retry [c]continue [_]rebase [X]delete entry [$]cost-override'
 }
 
 export function buildActionHints(props: ActionsBarProps): ActionHints {

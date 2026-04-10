@@ -22,7 +22,6 @@ const PAGES: PageDefinition[] = [
   { id: 'issues', label: 'issues', shortLabel: 'issues', Icon: IssuesIcon },
   { id: 'stats', label: 'stats', shortLabel: 'stats', Icon: StatsIcon },
   { id: 'projects', label: 'projects', shortLabel: 'projects', Icon: ProjectsIcon },
-  { id: 'agent', label: 'shell', shortLabel: 'shell', Icon: AgentIcon },
   { id: 'settings', label: 'settings', shortLabel: 'settings', Icon: SettingsIcon },
 ]
 
@@ -136,20 +135,6 @@ function ProjectsIcon({ className }: IconProps): ReactElement {
         <rect x="3.5" y="5" width="17" height="14" rx="2.5" />
         <path d="M3.75 9.5h16.5" />
         <path d="M8.25 5v4.5" />
-      </>
-    ),
-  })
-}
-
-function AgentIcon({ className }: IconProps): ReactElement {
-  return baseIcon({
-    className,
-    children: (
-      <>
-        <rect x="4" y="4.5" width="16" height="15" rx="3" />
-        <circle cx="9" cy="10" r="1" />
-        <circle cx="15" cy="10" r="1" />
-        <path d="M8 14h8" />
       </>
     ),
   })

@@ -1,6 +1,7 @@
 import type { MCPDependencies } from '../server.js'
 import type { ForgeIssue } from '../../forge/types.js'
 import { RunManager } from '../../state/runs.js'
+import { loadRunLogEvents } from '../../state/run-log-events.js'
 import { CostTracker } from '../../loop/cost.js'
 import { isIssueEligibleForRepo } from '../../discovery/discover.js'
 import { flushActiveAgentObservability } from '../../events/observability.js'
@@ -26,25 +27,6 @@ interface HistoryRunRow extends RunTimingRow {
   iteration_count: number | null
   estimated_cost_usd: number | null
   last_error: string | null
-}
-
-interface AgentEventRow {
-  id: number
-  run_id: string
-  phase: string
-  role: string
-  event_type: string
-  data: string | null
-  created_at: string
-}
-
-function parseEventData(data: string | null): unknown {
-  if (!data) return null
-  try {
-    return JSON.parse(data)
-  } catch {
-    return { raw: data, parseError: 'Invalid JSON in stored event payload' }
-  }
 }
 
 interface QueryRunHistoryPageOptions {
@@ -254,18 +236,17 @@ export async function handleRunDetail(args: { runId: string }, deps: MCPDependen
   const run = runManager.getById(args.runId)
   if (!run) throw new Error(`Run not found: ${args.runId}`)
 
-  // Get events for this run
-  const events = deps.db
-    .prepare('SELECT event_type, phase, data, created_at FROM events WHERE run_id = ? ORDER BY created_at DESC LIMIT 50')
-    .all(args.runId) as Array<{ event_type: string; phase: string | null; data: string | null; created_at: string }>
+  const events = loadRunLogEvents(deps.db, args.runId, 0, 50).slice().reverse()
 
   return {
     ...run,
     events: events.map((e) => ({
-      type: e.event_type,
+      source: e.source,
+      type: e.type,
       phase: e.phase,
-      data: parseEventData(e.data),
-      at: e.created_at,
+      role: e.role,
+      data: e.data,
+      at: e.timestamp,
     })),
   }
 }
@@ -480,39 +461,12 @@ export async function handleStreamEvents(
   // Flush buffered in-memory events to DB so callers can poll near-real-time.
   flushActiveAgentObservability()
 
-  const rows = since > 0
-    ? deps.db
-      .prepare(
-        `SELECT id, run_id, phase, role, event_type, data, created_at
-         FROM agent_events
-         WHERE run_id = ? AND id > ?
-         ORDER BY id ASC
-         LIMIT ?`,
-      )
-      .all(args.runId, since, limit) as AgentEventRow[]
-    : deps.db
-      .prepare(
-        `SELECT id, run_id, phase, role, event_type, data, created_at
-         FROM agent_events
-         WHERE run_id = ?
-         ORDER BY id ASC
-         LIMIT ?`,
-      )
-      .all(args.runId, limit) as AgentEventRow[]
-
+  const rows = loadRunLogEvents(deps.db, args.runId, since, limit)
   const lastEventId = rows.length > 0 ? rows[rows.length - 1]!.id : since
 
   return {
     runId: args.runId,
-    events: rows.map((row) => ({
-      id: row.id,
-      runId: row.run_id,
-      phase: row.phase,
-      role: row.role,
-      type: row.event_type,
-      data: parseEventData(row.data),
-      timestamp: row.created_at,
-    })),
+    events: rows,
     lastEventId,
   }
 }

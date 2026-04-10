@@ -5,6 +5,8 @@ import { IssueManager } from './issues.js'
 import { logger } from '../utils/logger.js'
 
 export type RunStatus = 'queued' | 'running' | 'blocked' | 'review_ready' | 'error' | 'completed'
+export type RunOperationIntent = 'auto' | 'continue' | 'retry' | 'rebase'
+export type RunManualState = 'none' | 'awaiting_rebase_resolution'
 
 export interface RunRecord {
   id: string
@@ -32,6 +34,9 @@ export interface RunRecord {
   completionTokens: number
   cacheReadTokens: number
   blockReason: string | null
+  operationIntent: RunOperationIntent
+  manualState: RunManualState
+  controlPayload: Record<string, unknown> | null
   parentRunId: string | null
   /**
    * Number of auto-retries performed against this run row. Increments when
@@ -91,8 +96,8 @@ export class RunManager {
 
       this.db
         .prepare(
-          `INSERT INTO runs (id, repo, issue_number, issue_title, issue_node_id, status, planner, coder, reviewer, parent_run_id, started_at, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO runs (id, repo, issue_number, issue_title, issue_node_id, status, planner, coder, reviewer, operation_intent, manual_state, parent_run_id, started_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, 'auto', 'none', ?, ?, ?, ?)`,
         )
         .run(
           id,
@@ -136,6 +141,9 @@ export class RunManager {
       'completionTokens',
       'cacheReadTokens',
       'blockReason',
+      'operationIntent',
+      'manualState',
+      'controlPayload',
       'parentRunId',
     ] as const
 
@@ -159,6 +167,9 @@ export class RunManager {
       completionTokens: 'completion_tokens',
       cacheReadTokens: 'cache_read_tokens',
       blockReason: 'block_reason',
+      operationIntent: 'operation_intent',
+      manualState: 'manual_state',
+      controlPayload: 'control_payload',
       parentRunId: 'parent_run_id',
     }
 
@@ -169,7 +180,7 @@ export class RunManager {
       if (key in fields) {
         const col = columnMap[key] ?? key
         let val: unknown = fields[key]
-        if (key === 'phaseData' && val !== null) {
+        if ((key === 'phaseData' || key === 'controlPayload') && val !== null) {
           val = JSON.stringify(val)
         }
         setClauses.push(`${col} = ?`)
@@ -191,6 +202,95 @@ export class RunManager {
     })
 
     updateTx()
+  }
+
+  updateIfStatus(id: string, allowedStatuses: readonly RunStatus[], fields: Partial<RunRecord>): boolean {
+    if (allowedStatuses.length === 0) return false
+
+    const allowed = [
+      'status',
+      'issueTitle',
+      'iterationCount',
+      'currentPhase',
+      'phaseData',
+      'endedAt',
+      'lastError',
+      'prNumber',
+      'prTitle',
+      'branchName',
+      'branchSlug',
+      'worktreePath',
+      'estimatedCostUsd',
+      'promptTokens',
+      'completionTokens',
+      'cacheReadTokens',
+      'blockReason',
+      'operationIntent',
+      'manualState',
+      'controlPayload',
+      'parentRunId',
+    ] as const
+
+    const columnMap: Record<string, string> = {
+      issueNumber: 'issue_number',
+      issueTitle: 'issue_title',
+      issueNodeId: 'issue_node_id',
+      iterationCount: 'iteration_count',
+      currentPhase: 'current_phase',
+      phaseData: 'phase_data',
+      startedAt: 'started_at',
+      endedAt: 'ended_at',
+      lastError: 'last_error',
+      prNumber: 'pr_number',
+      prTitle: 'pr_title',
+      branchName: 'branch_name',
+      branchSlug: 'branch_slug',
+      worktreePath: 'worktree_path',
+      estimatedCostUsd: 'estimated_cost_usd',
+      promptTokens: 'prompt_tokens',
+      completionTokens: 'completion_tokens',
+      cacheReadTokens: 'cache_read_tokens',
+      blockReason: 'block_reason',
+      operationIntent: 'operation_intent',
+      manualState: 'manual_state',
+      controlPayload: 'control_payload',
+      parentRunId: 'parent_run_id',
+    }
+
+    const setClauses: string[] = []
+    const values: unknown[] = []
+
+    for (const key of allowed) {
+      if (key in fields) {
+        const col = columnMap[key] ?? key
+        let val: unknown = fields[key]
+        if ((key === 'phaseData' || key === 'controlPayload') && val !== null) {
+          val = JSON.stringify(val)
+        }
+        setClauses.push(`${col} = ?`)
+        values.push(val)
+      }
+    }
+
+    if (setClauses.length === 0) return false
+
+    setClauses.push('updated_at = ?')
+    values.push(nowUtcIso())
+    values.push(id, ...allowedStatuses)
+
+    const placeholders = allowedStatuses.map(() => '?').join(', ')
+    const updateTx = this.db.transaction(() => {
+      const result = this.db
+        .prepare(`UPDATE runs SET ${setClauses.join(', ')} WHERE id = ? AND status IN (${placeholders})`)
+        .run(...values)
+      if (result.changes > 0) {
+        this.issueManager.syncFromRunId(id)
+        return true
+      }
+      return false
+    })
+
+    return updateTx()
   }
 
   getById(id: string): RunRecord | null {
@@ -431,6 +531,9 @@ export class RunManager {
       completionTokens: row.completion_tokens ?? 0,
       cacheReadTokens: row.cache_read_tokens ?? 0,
       blockReason: row.block_reason ?? null,
+      operationIntent: coerceOperationIntent(row.operation_intent),
+      manualState: coerceManualState(row.manual_state),
+      controlPayload: safeParseRecordJson(row.control_payload, row.id, 'control_payload'),
       parentRunId: row.parent_run_id ?? null,
       retryCount: row.retry_count ?? 0,
     }
@@ -444,15 +547,31 @@ export class RunManager {
  * "no checkpoint data" shape.
  */
 function safeParsePhaseData(raw: string | null, runId: string): Record<string, unknown> | null {
+  return safeParseRecordJson(raw, runId, 'phase_data')
+}
+
+function safeParseRecordJson(
+  raw: string | null,
+  runId: string,
+  fieldName: 'phase_data' | 'control_payload',
+): Record<string, unknown> | null {
   if (!raw) return null
   try {
     const parsed = JSON.parse(raw) as unknown
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
     return parsed as Record<string, unknown>
   } catch (err) {
-    logger.warn({ runId, err }, 'Failed to parse run.phase_data JSON — returning null')
+    logger.warn({ runId, fieldName, err }, 'Failed to parse run JSON payload — returning null')
     return null
   }
+}
+
+function coerceOperationIntent(value: string | null | undefined): RunOperationIntent {
+  return value === 'continue' || value === 'retry' || value === 'rebase' ? value : 'auto'
+}
+
+function coerceManualState(value: string | null | undefined): RunManualState {
+  return value === 'awaiting_rebase_resolution' ? value : 'none'
 }
 
 interface RawRunRow {
@@ -481,6 +600,9 @@ interface RawRunRow {
   completion_tokens: number | null
   cache_read_tokens: number | null
   block_reason: string | null
+  operation_intent: string | null
+  manual_state: string | null
+  control_payload: string | null
   parent_run_id: string | null
   retry_count: number | null
 }

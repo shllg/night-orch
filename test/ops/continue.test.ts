@@ -166,7 +166,7 @@ describe('queueContinue', () => {
     expect(updated?.status).toBe('queued')
     expect(updated?.currentPhase).toBe('review')
     expect(updated?.blockReason).toBeNull()
-    expect(updated?.phaseData?.reactionType).toBe('merge_conflict')
+    expect(updated?.phaseData?.reactionType).toBe('continue')
     expect(updated?.phaseData?.reactionContext).toContain('PR has merge conflicts with base branch')
     expect(updated?.phaseData?.reactionContext).toContain('Please also fix the flaky timeout assertion.')
     expect(updated?.phaseData?.reactionContext).not.toContain('/orch continue')

@@ -30,6 +30,8 @@ export interface EnsureWorktreeParams {
   worktreePath: string
   /** Hard-reset the branch to baseBranch, discarding all prior commits. */
   resetToBase?: boolean
+  /** Reuse the branch as-is without auto-updating from base. */
+  preserveBranchState?: boolean
   /** How to incorporate upstream base branch changes. Defaults to 'merge'. */
   updateStrategy?: UpdateStrategy
 }
@@ -43,7 +45,15 @@ export interface WorktreeManager {
 export function createWorktreeManager(): WorktreeManager {
   return {
     async ensure(params: EnsureWorktreeParams): Promise<WorktreeInfo> {
-      const { repoLocalPath, baseBranch, branchName, worktreePath, resetToBase, updateStrategy = 'merge' } = params
+      const {
+        repoLocalPath,
+        baseBranch,
+        branchName,
+        worktreePath,
+        resetToBase,
+        preserveBranchState,
+        updateStrategy = 'merge',
+      } = params
 
       // 1. Fetch
       await fetchOrigin(repoLocalPath)
@@ -78,6 +88,12 @@ export function createWorktreeManager(): WorktreeManager {
             return { path: worktreePath, branchName, exists: true, isClean, rebaseConflict: false }
           }
 
+          if (preserveBranchState) {
+            logger.info({ worktreePath, branchName }, 'Reusing existing worktree without updating from base')
+            const isClean = await isWorktreeClean(worktreePath)
+            return { path: worktreePath, branchName, exists: true, isClean, rebaseConflict: false }
+          }
+
           logger.info({ worktreePath, branchName, updateStrategy }, 'Reusing existing worktree')
           const updateResult = await updateFromBase(worktreePath, baseBranch, updateStrategy)
           if (!updateResult.success) {
@@ -92,7 +108,17 @@ export function createWorktreeManager(): WorktreeManager {
         await removeWorktree(repoLocalPath, worktreePath)
       }
 
-      return await createFreshWorktree(repoLocalPath, baseBranch, branchName, worktreePath, updateStrategy)
+      return await createFreshWorktree(
+        repoLocalPath,
+        baseBranch,
+        branchName,
+        worktreePath,
+        updateStrategy,
+        {
+          resetToBase: resetToBase ?? false,
+          preserveBranchState: preserveBranchState ?? false,
+        },
+      )
     },
 
     async remove(worktreePath: string, deleteBranch = false): Promise<void> {
@@ -153,6 +179,10 @@ async function createFreshWorktree(
   branchName: string,
   worktreePath: string,
   updateStrategy: UpdateStrategy = 'merge',
+  options: {
+    resetToBase: boolean
+    preserveBranchState: boolean
+  } = { resetToBase: false, preserveBranchState: false },
 ): Promise<WorktreeInfo> {
   // Prune stale worktree registrations (directory deleted but still tracked by git)
   await runGit(['worktree', 'prune'], { cwd: repoLocalPath, reject: false })
@@ -163,6 +193,18 @@ async function createFreshWorktree(
   await runGit(['worktree', 'add', worktreePath, branchName], {
     cwd: repoLocalPath,
   })
+
+  if (options.resetToBase) {
+    logger.info({ worktreePath, branchName, baseBranch }, 'Fresh worktree requested with hard reset to base')
+    await hardResetToBase(worktreePath, baseBranch)
+    const isClean = await isWorktreeClean(worktreePath)
+    return { path: worktreePath, branchName, exists: true, isClean, rebaseConflict: false }
+  }
+
+  if (options.preserveBranchState) {
+    const isClean = await isWorktreeClean(worktreePath)
+    return { path: worktreePath, branchName, exists: true, isClean, rebaseConflict: false }
+  }
 
   // Attempt to incorporate latest base branch changes; on conflict, preserve branch as-is.
   // The AI coder will see the divergence and integrate base branch changes.

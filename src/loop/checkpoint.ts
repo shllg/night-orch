@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3'
 import type { LoopPhase, RunContext, PlannerOutput, CoderOutput, ReviewerOutput, VerifyResult } from './types.js'
 import { RunManager } from '../state/runs.js'
+import { insertRunLogEvent } from '../state/run-log-events.js'
 import { nowUtcIso } from '../utils/time.js'
 import { logger } from '../utils/logger.js'
 
@@ -36,6 +37,24 @@ export interface PersistedDecisionOutcome {
   action: 'publish' | 'iterate' | 'block' | 'error'
   reason?: string
   blockReason?: string | null
+}
+
+export function clearResumeDecisionArtifacts(
+  phaseData: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  if (!phaseData) return {}
+
+  const next = { ...phaseData }
+  delete next[DECISION_OUTCOMES_KEY]
+
+  const stepOutputs = next[STEP_OUTPUTS_KEY]
+  if (isRecord(stepOutputs) && 'blockMessage' in stepOutputs) {
+    const nextStepOutputs = { ...stepOutputs }
+    delete nextStepOutputs['blockMessage']
+    next[STEP_OUTPUTS_KEY] = nextStepOutputs
+  }
+
+  return next
 }
 
 export class Checkpoint {
@@ -253,6 +272,15 @@ export class Checkpoint {
           now,
           runId,
         )
+      insertRunLogEvent(this.db, {
+        runId,
+        source: 'system',
+        phase,
+        role: null,
+        type: eventType,
+        data,
+        timestamp: now,
+      })
     } catch (err) {
       // Best-effort event recording: checkpoint persistence must still succeed.
       // Log at debug so operators can diagnose silent drops without spamming.
