@@ -1,3 +1,4 @@
+import type Database from 'better-sqlite3'
 import type { Config } from '../config/schema.js'
 import type { ForgeAdapter } from '../forge/types.js'
 import type { NotificationChannel } from './types.js'
@@ -6,11 +7,13 @@ import { WebhookChannel } from './channels/webhook.js'
 import { DiscordChannel } from './channels/discord.js'
 import { SmtpChannel } from './channels/smtp.js'
 import { GitHubCommentChannel } from './channels/github-comment.js'
+import { WebPushChannel } from './channels/webpush.js'
 import { logger } from '../utils/logger.js'
 
 export function createChannels(
   config: Config['notifications'],
   forge?: ForgeAdapter,
+  db?: Database.Database,
 ): NotificationChannel[] {
   const channels: NotificationChannel[] = []
 
@@ -47,6 +50,28 @@ export function createChannels(
           ch.passEnv,
         ))
         break
+      case 'webpush': {
+        if (!db) {
+          logger.warn('webpush channel requires a database handle — skipping')
+          break
+        }
+        const publicKey = process.env[ch.vapidPublicKeyEnv]
+        const privateKey = process.env[ch.vapidPrivateKeyEnv]
+        const subject = process.env[ch.vapidSubjectEnv]
+        if (!publicKey || !privateKey || !subject) {
+          logger.warn(
+            {
+              vapidPublicKeyEnv: ch.vapidPublicKeyEnv,
+              vapidPrivateKeyEnv: ch.vapidPrivateKeyEnv,
+              vapidSubjectEnv: ch.vapidSubjectEnv,
+            },
+            'Web push VAPID env vars not fully set — skipping channel',
+          )
+          break
+        }
+        channels.push(new WebPushChannel(db, publicKey, privateKey, subject))
+        break
+      }
       default:
         // Exhaustive check — all known types handled above
         break

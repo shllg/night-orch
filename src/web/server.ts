@@ -15,10 +15,16 @@ import { nowUtcIso } from '../utils/time.js'
 import {
   buildDashboardSnapshot,
 } from './snapshots.js'
+import {
+  extractSessionCookie,
+  verifySessionCookie,
+} from './auth.js'
 import type { RouteContext } from './routes/context.js'
 import { handleRunRoutes } from './routes/api-runs.js'
 import { handleOperationRoutes } from './routes/api-operations.js'
 import { handleSettingsRoutes } from './routes/api-settings.js'
+import { handleAuthRoutes } from './routes/api-auth.js'
+import { handlePushRoutes } from './routes/api-push.js'
 import {
   handleWsMessage,
   publishRunSubscriptions,
@@ -45,6 +51,9 @@ export interface WebSecurityContext {
   webMutationToken: string
   mcpMutationAuthToken?: string
   operatorAuthMode: boolean
+  /** Secret used to sign session cookies. Generated at startup and
+   * kept in memory — restarts invalidate existing sessions. */
+  sessionSecret: Buffer
 }
 
 export type WebSocketCommand =
@@ -292,7 +301,8 @@ async function handleApiRequest(
 
   if ((method === 'POST' || method === 'DELETE')
     && (pathname.startsWith('/api/operations/')
-      || pathname.startsWith('/api/agent/'))) {
+      || pathname.startsWith('/api/agent/')
+      || pathname.startsWith('/api/push/'))) {
     if (!operationsEnabled && pathname !== '/api/operations/update') {
       writeJson(res, 409, { error: 'Web operations are disabled by server policy.' })
       return
@@ -305,6 +315,8 @@ async function handleApiRequest(
     }
   }
 
+  if (await handleAuthRoutes(req, res, method, pathname, searchParams, ctx)) return
+  if (await handlePushRoutes(req, res, method, pathname, searchParams, ctx)) return
   if (await handleRunRoutes(req, res, method, pathname, searchParams, ctx)) return
   if (await handleSettingsRoutes(req, res, method, pathname, searchParams, ctx)) return
   if (await handleOperationRoutes(req, res, method, pathname, searchParams, ctx)) return
@@ -503,9 +515,23 @@ export function validateMutationRequest(
     return { statusCode: 415, error: 'Content-Type must be application/json' }
   }
 
+  // Phase 2a: accept either a valid session cookie OR the legacy
+  // header token. The cookie path lets mobile browsers authenticate
+  // once via POST /api/auth/session and then present credentials
+  // automatically on subsequent mutations. The header path stays in
+  // place so CLI tools and integrations that speak the original
+  // contract continue to work unchanged.
+  const cookieSession = verifySessionCookie(
+    extractSessionCookie(req),
+    security.sessionSecret,
+  )
+  if (cookieSession !== null) {
+    return null
+  }
+
   const webToken = getSingleHeaderValue(req.headers[WEB_AUTH_TOKEN_HEADER])
   if (!webToken) {
-    return { statusCode: 401, error: `Missing required header: ${WEB_AUTH_TOKEN_HEADER}` }
+    return { statusCode: 401, error: `Missing session cookie or required header: ${WEB_AUTH_TOKEN_HEADER}` }
   }
 
   if (!isMatchingToken(webToken, security.webMutationToken)) {
@@ -566,6 +592,7 @@ function createWebSecurityContext(deps: MCPDependencies, options: WebServerOptio
     webMutationToken: operatorAuthMode ? operatorToken : randomBytes(24).toString('base64url'),
     mcpMutationAuthToken: resolveMcpMutationAuthToken(deps),
     operatorAuthMode,
+    sessionSecret: randomBytes(32),
   }
 }
 

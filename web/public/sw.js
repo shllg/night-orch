@@ -56,3 +56,60 @@ self.addEventListener('fetch', (event) => {
     }),
   )
 })
+
+// Phase 2c — Web Push notifications.
+// The `WebPushChannel` on the server encrypts a JSON payload matching:
+//   { event, title, body, repo, issueNumber, issueTitle, timestamp, prUrl? }
+// We show it as a system notification and, on click, focus an
+// existing tab (or open a new one) pointing at the dashboard root
+// so the operator can act on the alert without the service worker
+// needing any routing logic of its own.
+self.addEventListener('push', (event) => {
+  let payload = {}
+  if (event.data) {
+    try {
+      payload = event.data.json()
+    } catch {
+      payload = { title: 'night-orch update', body: event.data.text() }
+    }
+  }
+  const title = payload.title || 'night-orch'
+  const options = {
+    body: payload.body || 'Open the dashboard for details.',
+    icon: '/icon.svg',
+    badge: '/icon.svg',
+    tag: payload.event || 'night-orch',
+    renotify: true,
+    data: {
+      url: payload.prUrl || '/',
+      event: payload.event || null,
+      repo: payload.repo || null,
+      issueNumber: payload.issueNumber || null,
+      timestamp: payload.timestamp || null,
+    },
+  }
+  event.waitUntil(self.registration.showNotification(title, options))
+})
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const targetUrl = (event.notification.data && event.notification.data.url) || '/'
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) {
+        if ('focus' in client) {
+          return client.focus().then((focused) => {
+            if ('navigate' in focused && targetUrl.startsWith('/')) {
+              return focused.navigate(targetUrl)
+            }
+            return focused
+          })
+        }
+      }
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(targetUrl)
+      }
+      return undefined
+    }),
+  )
+})

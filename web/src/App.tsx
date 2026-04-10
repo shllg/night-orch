@@ -104,6 +104,13 @@ export function App({
   const [isHeaderRefreshing, setIsHeaderRefreshing] = useState(false)
   const [webMutationToken, setWebMutationToken] = useState<string | null>(null)
   const [operationsEnabled, setOperationsEnabled] = useState(true)
+  // Phase 2a — cookie auth state
+  const [operatorAuthMode, setOperatorAuthMode] = useState(false)
+  const [sessionAuthenticated, setSessionAuthenticated] = useState(false)
+  const [loginDialogOpen, setLoginDialogOpen] = useState(false)
+  const [loginTokenDraft, setLoginTokenDraft] = useState('')
+  const [loginError, setLoginError] = useState<string | null>(null)
+  const [loginBusy, setLoginBusy] = useState(false)
   const [settingsDrafts, setSettingsDrafts] = useState<Record<string, string>>({})
   const [dailyOverrideDraft, setDailyOverrideDraft] = useState('')
   const [costOverrideDraft, setCostOverrideDraft] = useState<{ repo: string; issueNumber: string; amount: string }>({
@@ -309,11 +316,84 @@ export function App({
       throw new Error(`Failed to initialize web session (${response.status})`)
     }
     const payload = await response.json() as SessionResponse
-    if (!payload.mutationToken) {
-      throw new Error('Missing mutation token in session response')
-    }
-    setWebMutationToken(payload.mutationToken)
     setOperationsEnabled(payload.operationsEnabled ?? true)
+    const externalAuth = payload.requiresExternalAuth ?? (payload.mutationToken === null)
+    setOperatorAuthMode(externalAuth)
+
+    if (!externalAuth && payload.mutationToken) {
+      // Loopback mode: server handed us the token directly, no login needed.
+      setWebMutationToken(payload.mutationToken)
+      setSessionAuthenticated(true)
+      return
+    }
+
+    // Phase 2a: operator-auth mode. Check whether a valid session
+    // cookie already exists from a prior login before prompting.
+    try {
+      const authStatus = await fetch('/api/auth/session')
+      if (authStatus.ok) {
+        const body = await authStatus.json() as { authenticated?: boolean }
+        if (body.authenticated === true) {
+          setSessionAuthenticated(true)
+          return
+        }
+      }
+    } catch {
+      // Best-effort — fall through to the login dialog.
+    }
+    setSessionAuthenticated(false)
+    setLoginDialogOpen(true)
+  }, [])
+
+  const submitLoginToken = useCallback(async () => {
+    if (!loginTokenDraft.trim()) {
+      setLoginError('Token is required.')
+      return
+    }
+    setLoginBusy(true)
+    setLoginError(null)
+    try {
+      const response = await fetch('/api/auth/session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          [MUTATION_INTENT_HEADER]: MUTATION_INTENT_VALUE,
+        },
+        body: JSON.stringify({ token: loginTokenDraft.trim() }),
+      })
+      if (response.status === 204) {
+        setSessionAuthenticated(true)
+        setLoginDialogOpen(false)
+        setLoginTokenDraft('')
+        setLoginError(null)
+        return
+      }
+      if (response.status === 401) {
+        setLoginError('Invalid token. Check NIGHT_ORCH_WEB_AUTH_TOKEN on the server.')
+        return
+      }
+      setLoginError(`Login failed (${response.status}).`)
+    } catch (err) {
+      setLoginError((err as Error).message)
+    } finally {
+      setLoginBusy(false)
+    }
+  }, [loginTokenDraft])
+
+  const logoutSession = useCallback(async () => {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          [MUTATION_INTENT_HEADER]: MUTATION_INTENT_VALUE,
+        },
+      })
+    } catch {
+      // Best-effort — even if the server errors we still clear local state.
+    }
+    setSessionAuthenticated(false)
+    setLoginDialogOpen(true)
   }, [])
 
   const loadProjects = useCallback(async () => {
@@ -610,22 +690,42 @@ export function App({
       setActiveOperation(operationName)
       setErrorMessage(null)
 
-      if (!webMutationToken) {
-        throw new Error('Web session is not initialized yet. Refresh the page and try again.')
+      // Phase 2a: either a header token OR a valid session cookie
+      // satisfies the mutation guard. In operator-auth mode we
+      // expect the cookie to be present (the login dialog runs
+      // before any mutation path); in loopback mode the server
+      // hands us the header token at startup.
+      if (!webMutationToken && !sessionAuthenticated) {
+        setLoginDialogOpen(true)
+        throw new Error('Log in first.')
       }
       if (!operationsEnabled) {
         throw new Error('Web operations are disabled by server policy.')
       }
 
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: MUTATION_INTENT_VALUE,
+      }
+      if (webMutationToken) {
+        headers[WEB_AUTH_TOKEN_HEADER] = webMutationToken
+      }
+
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          [MUTATION_INTENT_HEADER]: MUTATION_INTENT_VALUE,
-          [WEB_AUTH_TOKEN_HEADER]: webMutationToken,
-        },
+        headers,
+        credentials: 'same-origin',
         body: JSON.stringify(payload),
       })
+
+      // Phase 2a: a 401 in operator-auth mode usually means the
+      // session cookie expired — re-prompt for the token instead of
+      // bubbling a cryptic error.
+      if (response.status === 401 && operatorAuthMode) {
+        setSessionAuthenticated(false)
+        setLoginDialogOpen(true)
+        throw new Error('Session expired. Log in again.')
+      }
 
       const body = await response.json() as Record<string, unknown>
       if (!response.ok) {
@@ -648,7 +748,16 @@ export function App({
     } finally {
       setActiveOperation(null)
     }
-  }, [loadDashboard, loadHistoryRunsPage, loadSettings, operationsEnabled, runsView, webMutationToken])
+  }, [
+    loadDashboard,
+    loadHistoryRunsPage,
+    loadSettings,
+    operationsEnabled,
+    operatorAuthMode,
+    runsView,
+    sessionAuthenticated,
+    webMutationToken,
+  ])
 
   const refreshDashboardData = useCallback(async () => {
     try {
@@ -982,6 +1091,53 @@ export function App({
 
   return (
     <main data-theme="black" className="min-h-screen bg-orch-admin">
+      {loginDialogOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="norch-login-title"
+        >
+          <div className="w-full max-w-sm rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-2xl">
+            <h2 id="norch-login-title" className="text-base font-semibold text-slate-100">
+              Sign in
+            </h2>
+            <p className="mt-1 text-xs text-slate-400">
+              Enter the <code className="font-mono">NIGHT_ORCH_WEB_AUTH_TOKEN</code> configured on the server.
+              The browser will keep you signed in via an HttpOnly cookie for 7 days.
+            </p>
+            <input
+              type="password"
+              autoFocus
+              autoComplete="off"
+              value={loginTokenDraft}
+              onChange={(e) => setLoginTokenDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !loginBusy) void submitLoginToken()
+              }}
+              className="mt-3 w-full rounded border border-slate-600 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100 focus:border-orch-accent focus:outline-none"
+              placeholder="Paste token here"
+            />
+            {loginError && (
+              <p className="mt-2 text-xs text-rose-400" role="alert">
+                {loginError}
+              </p>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={loginBusy}
+                onClick={() => {
+                  void submitLoginToken()
+                }}
+                className="rounded bg-orch-accent px-3 py-2 text-sm font-medium text-slate-950 hover:bg-orch-accent/90 disabled:opacity-50"
+              >
+                {loginBusy ? 'Signing in…' : 'Sign in'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <DashboardHeader
         currentStateLabel={currentState.label}
         currentStateToneClass={currentState.toneClass}
@@ -1005,6 +1161,10 @@ export function App({
         onGoToSettings={() => {
           navigateToPage('settings')
         }}
+        // Phase 2a: only show the logout button when we're in
+        // cookie-auth mode (loopback mode has no login flow to log
+        // out of).
+        onLogout={operatorAuthMode && sessionAuthenticated ? () => { void logoutSession() } : undefined}
       />
 
       <div className="mx-auto flex w-full max-w-[1550px] flex-col gap-5 px-4 pb-24 pt-5 sm:px-6 md:pb-6 lg:px-8">

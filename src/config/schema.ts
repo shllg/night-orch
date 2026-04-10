@@ -26,11 +26,29 @@ const SmtpChannelSchema = z.object({
   passEnv: z.string(),
 })
 
+/**
+ * Phase 2c: Web Push notifications to browsers that subscribed via
+ * the web UI. All three VAPID values are env-var references so the
+ * private key never lands in YAML. Generate keys with:
+ *   npx web-push generate-vapid-keys
+ * Then export e.g.:
+ *   NIGHT_ORCH_VAPID_PUBLIC=<public>
+ *   NIGHT_ORCH_VAPID_PRIVATE=<private>
+ *   NIGHT_ORCH_VAPID_SUBJECT=mailto:you@example.com
+ */
+const WebPushChannelSchema = z.object({
+  type: z.literal('webpush'),
+  vapidPublicKeyEnv: z.string(),
+  vapidPrivateKeyEnv: z.string(),
+  vapidSubjectEnv: z.string(),
+})
+
 export const NotificationChannelSchema = z.discriminatedUnion('type', [
   ConsoleChannelSchema,
   WebhookChannelSchema,
   DiscordChannelSchema,
   SmtpChannelSchema,
+  WebPushChannelSchema,
 ])
 
 const NotificationEventsSchema = z.object({

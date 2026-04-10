@@ -266,8 +266,22 @@ export interface WsEnvelope {
 }
 
 export interface SessionResponse {
-  mutationToken: string
+  /**
+   * Bootstrap token for the legacy header-auth path. `null` in
+   * operator-auth mode — the frontend must then prompt the operator
+   * for the token and POST it to `/api/auth/session` to get a
+   * cookie-backed session.
+   */
+  mutationToken: string | null
   operationsEnabled?: boolean
+  requiresExternalAuth?: boolean
+  /** Phase 2a: server advertises cookie-auth bootstrap endpoint. */
+  supportsSessionCookie?: boolean
+}
+
+export interface AuthSessionStatus {
+  authenticated: boolean
+  operatorAuthMode: boolean
 }
 
 export type RuntimeSettingType = 'number' | 'boolean' | 'string' | 'json'

@@ -1327,8 +1327,10 @@ describe('startWebServer', () => {
         body: '{}',
       })
       expect(missingToken.status).toBe(401)
+      // Phase 2a: error now mentions both the cookie and the header
+      // fallback so operators see the cookie auth option.
       await expect(missingToken.json()).resolves.toMatchObject({
-        error: `Missing required header: ${WEB_AUTH_TOKEN_HEADER}`,
+        error: `Missing session cookie or required header: ${WEB_AUTH_TOKEN_HEADER}`,
       })
 
       const invalidToken = await fetch(`${baseUrl}/api/operations/poll`, {
@@ -1366,6 +1368,87 @@ describe('startWebServer', () => {
         process.env['NIGHT_ORCH_TEST_MCP_TOKEN'] = previousToken
       }
     }
+  })
+
+  it('Phase 2a — POST /api/auth/session sets a cookie that authorizes subsequent mutations', async () => {
+    const triggerPollCycle = vi.fn().mockReturnValue({
+      accepted: true as const,
+      state: 'woke-sleeper' as const,
+    })
+    deps.poller = { triggerPollCycle }
+
+    server = await startWebServer(deps, { host: '127.0.0.1', port: 0, frontendDistPath: frontendDir })
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('Unexpected address type')
+    baseUrl = `http://127.0.0.1:${address.port}`
+    const mutationToken = await getMutationToken(baseUrl)
+
+    // GET /api/auth/session → authenticated:false before login.
+    const preLogin = await fetch(`${baseUrl}/api/auth/session`)
+    expect(preLogin.status).toBe(200)
+    await expect(preLogin.json()).resolves.toMatchObject({ authenticated: false })
+
+    // Invalid token → 401.
+    const badLogin = await fetch(`${baseUrl}/api/auth/session`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+      },
+      body: JSON.stringify({ token: 'not-the-real-token' }),
+    })
+    expect(badLogin.status).toBe(401)
+
+    // Valid token → 204 + Set-Cookie.
+    const login = await fetch(`${baseUrl}/api/auth/session`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+      },
+      body: JSON.stringify({ token: mutationToken }),
+    })
+    expect(login.status).toBe(204)
+    const setCookie = login.headers.get('set-cookie')
+    expect(setCookie).not.toBeNull()
+    expect(setCookie).toContain('norch_session=')
+    expect(setCookie).toContain('HttpOnly')
+    expect(setCookie).toContain('SameSite=Lax')
+
+    // Extract the cookie value so we can present it on the mutation request.
+    const cookieValue = setCookie!.split(';')[0]!
+
+    // Mutation with ONLY the cookie (no web-token header) succeeds.
+    const poll = await fetch(`${baseUrl}/api/operations/poll`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+        Cookie: cookieValue,
+      },
+      body: '{}',
+    })
+    expect(poll.status).toBe(200)
+    expect(triggerPollCycle).toHaveBeenCalledTimes(1)
+  })
+
+  it('Phase 2a — POST /api/auth/logout clears the session cookie', async () => {
+    server = await startWebServer(deps, { host: '127.0.0.1', port: 0, frontendDistPath: frontendDir })
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('Unexpected address type')
+    baseUrl = `http://127.0.0.1:${address.port}`
+
+    const logout = await fetch(`${baseUrl}/api/auth/logout`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [MUTATION_INTENT_HEADER]: 'mutate',
+      },
+    })
+    expect(logout.status).toBe(204)
+    const setCookie = logout.headers.get('set-cookie')
+    expect(setCookie).toContain('norch_session=')
+    expect(setCookie).toContain('Max-Age=0')
   })
 
   it('returns 404 for missing asset files but serves index fallback for extensionless routes', async () => {

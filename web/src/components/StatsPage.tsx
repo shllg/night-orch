@@ -17,7 +17,7 @@ export function StatsPage({ snapshot, socketConnected }: StatsPageProps): ReactE
       <div className="flex flex-col gap-5">
         <DashboardMetrics snapshot={snapshot} />
         <section className="card border border-base-300/60 bg-base-200/60 shadow-panel backdrop-blur">
-          <div className="card-body p-6">
+          <div className="card-body p-4 sm:p-6">
             <h2 className="card-title text-lg">Stats</h2>
             <p className="text-sm text-base-content/75">Stats snapshot is loading.</p>
             <div className="mt-2 space-y-2">

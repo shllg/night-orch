@@ -57,6 +57,42 @@ night-orch run-once  # single poll cycle (useful for testing)
 
 The daemon polls each configured repo for issues labeled `orch:ready`, processes them through the AI pipeline, and creates PRs. It runs continuously until you stop it (Ctrl+C).
 
+### Remote web access + mobile
+
+The web UI at `127.0.0.1:3200` is loopback-only by default. To use it
+from a phone or another machine, bind it to a non-loopback interface
+and set an operator token:
+
+```bash
+export NIGHT_ORCH_WEB_AUTH_TOKEN=$(openssl rand -base64 24)
+night-orch web --host 0.0.0.0 --port 3200 \
+  --allowed-host myhost.example
+```
+
+On first visit the browser shows a sign-in dialog; paste the same
+token and the server replies with an `HttpOnly SameSite=Lax` session
+cookie that lasts 7 days. The cookie is rotated on every restart
+since the signing secret lives in memory — a stolen cookie stops
+working as soon as the daemon recycles.
+
+For **push notifications** to phones that have installed the web UI
+as a PWA, add a `webpush` notification channel:
+
+```yaml
+notifications:
+  channels:
+    - type: webpush
+      vapidPublicKeyEnv: NIGHT_ORCH_VAPID_PUBLIC
+      vapidPrivateKeyEnv: NIGHT_ORCH_VAPID_PRIVATE
+      vapidSubjectEnv: NIGHT_ORCH_VAPID_SUBJECT
+```
+
+Generate a VAPID keypair once with `npx web-push generate-vapid-keys`,
+export the three env vars on the daemon host, then open Settings in
+the web UI and click **Enable notifications**. Subsequent `blocked`,
+`pr_ready`, `error`, and `retry_exhausted` events deliver as
+background notifications even when the tab is closed.
+
 ### Monitoring
 
 From any terminal:

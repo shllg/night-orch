@@ -48,7 +48,7 @@ export function BudgetOverridesPanel({
 
   return (
     <section className="card border border-base-300/60 bg-base-200/60 shadow-panel backdrop-blur">
-      <div className="card-body p-6 sm:p-8">
+      <div className="card-body p-4 sm:p-6 md:p-8">
         <h2 className="card-title text-2xl font-semibold capitalize text-base-content">budget overrides</h2>
         <p className="max-w-3xl text-sm text-base-content/75">
           Unblock runs that were stopped by a cost cap without changing your saved limits. The daily override auto-expires at 00:00 UTC.

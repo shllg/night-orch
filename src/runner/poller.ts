@@ -141,7 +141,7 @@ export async function pollOnce(
         const repoImmediateFollowupRepos = new Set<string>()
         try {
           const forge = createForgeAdapter(repoConfig, config)
-          const channels = createChannels(config.notifications, forge)
+          const channels = createChannels(config.notifications, forge, db)
           const notifier = new NotificationDispatcher(channels, config.notifications.events)
 
           // Resolve bot user for comment upserts (best-effort, fallback to empty string)

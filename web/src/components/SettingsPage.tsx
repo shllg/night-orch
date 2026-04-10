@@ -2,6 +2,7 @@ import { type ReactElement, useEffect, useMemo, useState } from 'react'
 import { ButtonWeb } from '../../../src/components/button/button.web.js'
 import { ModalWeb } from '../../../src/components/modal/modal.web.js'
 import type { RuntimeSettingSnapshot, RuntimeSettingValue } from '../types/dashboard.js'
+import { PushNotificationSettings } from './PushNotificationSettings.js'
 
 interface SettingsPageProps {
   settings: RuntimeSettingSnapshot[]
@@ -56,12 +57,14 @@ export function SettingsPage({
 
   return (
     <section className="card border border-base-300/60 bg-base-200/60 shadow-panel backdrop-blur">
-      <div className="card-body p-5 sm:p-8">
+      <div className="card-body p-4 sm:p-6 lg:p-8">
         <h2 className="card-title text-2xl font-semibold capitalize text-base-content">settings</h2>
         <p className="max-w-3xl text-sm text-base-content/75">
           Runtime overrides are stored in SQLite and applied on top of YAML/default values.
         </p>
         <p className="text-xs text-base-content/60">Last refresh: {generatedAt ?? '-'}</p>
+
+        <PushNotificationSettings />
 
         {isLoading ? (
           <p className="text-sm text-base-content/70">Loading settings…</p>

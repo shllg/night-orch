@@ -191,6 +191,18 @@ Discriminated by `type`:
   - `to: string`
   - `userEnv: string` (env var name)
   - `passEnv: string` (env var name)
+- `webpush` (Phase 2c — Web Push notifications to subscribed browsers)
+  - `type: "webpush"`
+  - `vapidPublicKeyEnv: string` (env var name, public VAPID key)
+  - `vapidPrivateKeyEnv: string` (env var name, private VAPID key)
+  - `vapidSubjectEnv: string` (env var name, e.g. `mailto:you@example.com`)
+  - Generate a keypair once with `npx web-push generate-vapid-keys`,
+    export the three env vars on the daemon host, and the web UI's
+    Settings page will expose an "Enable notifications" button. Any
+    browser that subscribes receives background push notifications
+    for configured events (blocked, pr_ready, error, retry_exhausted
+    by default). Subscriptions are persisted in
+    `push_subscriptions` and pruned automatically on `410 Gone`.
 
 ### `notifications.events`
 

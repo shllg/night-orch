@@ -30,7 +30,7 @@ export function ProjectsPage({ snapshot, isLoading, onOpenRepo }: ProjectsPagePr
   if (!snapshot) {
     return (
       <section className="card border border-base-300/60 bg-base-200/60 shadow-panel backdrop-blur">
-        <div className="card-body p-6">
+        <div className="card-body p-4 sm:p-6">
           <h2 className="card-title text-2xl font-semibold text-base-content">Projects</h2>
           <div className="alert mt-3 border border-base-300/60 bg-base-100/70 text-sm">
             <span>Project configuration is currently unavailable.</span>

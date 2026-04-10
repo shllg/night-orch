@@ -34,6 +34,10 @@ export const handleRunRoutes: RouteHandler = async (_req, res, method, pathname,
       mutationToken: security.operatorAuthMode ? null : security.webMutationToken,
       operationsEnabled: ctx.operationsEnabled,
       requiresExternalAuth: security.operatorAuthMode,
+      // Phase 2a: advertise the cookie-auth bootstrap endpoint so the
+      // frontend can choose between auto-handed token (loopback mode)
+      // and the token-entry dialog (operator auth mode).
+      supportsSessionCookie: true,
     })
     return true
   }
