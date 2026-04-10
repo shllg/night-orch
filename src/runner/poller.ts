@@ -5,6 +5,7 @@ import { createForgeAdapter } from '../forge/factory.js'
 import { LeaseManager } from '../state/leases.js'
 import { RunManager } from '../state/runs.js'
 import { blocked } from '../loop/state.js'
+import { applyRecoveryPlan, classifyInfraError } from '../poller/error-recovery.js'
 import { IssueManager } from '../state/issues.js'
 import { discoverEligibleIssues } from '../discovery/discover.js'
 import { resolveRoles } from '../discovery/roles.js'
@@ -64,9 +65,6 @@ import {
   shouldResetBranch,
   makePayload,
   postStatusComment,
-  postErrorStatusComment,
-  toErrorMessage,
-  sanitizeErrorForComment,
 } from './helpers.js'
 
 const STATUS_MARKER = markerTag('status')
@@ -736,89 +734,29 @@ export async function pollOnce(
                 } catch (err) {
                   logger.error({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err }, 'Failed to process issue')
                   if (runId) {
-                    const errorMessage = toErrorMessage(err)
+                    // R6: delegate the classify-and-act logic to the
+                    // dedicated error-recovery module so the decision
+                    // is pure-function testable and the poller stays
+                    // focused on loop orchestration.
                     const existing = runManager.getById(runId)
-                    const currentRetries = existing?.retryCount ?? 0
-                    const maxRetries = config.loop.maxAutoRetries
-                    const canAutoRetry = currentRetries < maxRetries
-                    const attemptCount = currentRetries + 1
-
-                    runManager.update(runId, {
-                      status: 'error',
-                      lastError: errorMessage,
-                      endedAt: nowUtcIso(),
+                    const plan = classifyInfraError({
+                      runId,
+                      currentRetryCount: existing?.retryCount ?? 0,
+                      err,
+                      maxAutoRetries: config.loop.maxAutoRetries,
                     })
-
-                    if (canAutoRetry) {
-                      runManager.incrementRetryCount(runId)
-                      logger.info(
-                        { repo: repoConfig.repo, issue: discoveredIssue.issue.number, attempt: attemptCount, maxRetries },
-                        'Infra error — auto-retrying (transitioning back to ready)',
-                      )
-                      try {
-                        const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
-                        await transitionLabels(
-                          forge,
-                          issueRepo,
-                          discoveredIssue.issue.number,
-                          latestIssue.labels,
-                          'running',
-                          'queued',
-                          buildLabelConfig(repoConfig, latestIssue.labels),
-                        )
-                      } catch (labelErr) {
-                        logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: labelErr }, 'Failed to transition labels for auto-retry')
-                      }
-                      await postErrorStatusComment({
-                        forge,
-                        issueRepo,
-                        issueNumber: discoveredIssue.issue.number,
-                        botUser,
-                        error: `Attempt ${attemptCount} failed. Last error: ${errorMessage}`,
-                        retryCount: attemptCount,
-                        maxRetries,
-                        nextStep: 'Automatic retry queued. night-orch will retry this issue on the next poll cycle.',
-                        warnMessage: 'Failed to post auto-retry status comment',
-                      })
-                    } else {
-                      logger.warn(
-                        { repo: repoConfig.repo, issue: discoveredIssue.issue.number, currentRetries, maxRetries },
-                        'Auto-retry limit reached — marking as error',
-                      )
-                      try {
-                        const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
-                        await transitionLabels(
-                          forge,
-                          issueRepo,
-                          discoveredIssue.issue.number,
-                          latestIssue.labels,
-                          'running',
-                          'error',
-                          buildLabelConfig(repoConfig, latestIssue.labels),
-                        )
-                      } catch (labelErr) {
-                        logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: labelErr }, 'Failed to transition labels after retry exhaustion')
-                      }
-                      await postErrorStatusComment({
-                        forge,
-                        issueRepo,
-                        issueNumber: discoveredIssue.issue.number,
-                        botUser,
-                        error: `Failed after ${attemptCount} attempts. Last error: ${errorMessage}`,
-                        retryCount: attemptCount,
-                        maxRetries,
-                        nextStep: 'Inspect the failure, then use /orch retry or /orch continue.',
-                        warnMessage: 'Failed to post retry-exhausted status comment',
-                      })
-                      const sanitizedErrorForSummary = sanitizeErrorForComment(errorMessage)
-                      try {
-                        await notifier.dispatch(makePayload('retry_exhausted', repoConfig.repo, discoveredIssue.issue, {
-                          summary: `Failed after ${attemptCount} attempts: ${sanitizedErrorForSummary}`,
-                        }))
-                      } catch (notifyErr) {
-                        logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: notifyErr }, 'Failed to send retry exhaustion notification')
-                      }
-                    }
+                    await applyRecoveryPlan({
+                      plan,
+                      config,
+                      repoConfig,
+                      issueRepo,
+                      issue: discoveredIssue.issue,
+                      runId,
+                      botUser,
+                      forge,
+                      runManager,
+                      notifier,
+                    })
                   }
                   repoErrors++
                 } finally {
