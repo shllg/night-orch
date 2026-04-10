@@ -40,6 +40,15 @@ vi.mock('../../src/git/repo.js', () => ({
 import { logger } from '../../src/utils/logger.js'
 import { getDiffAgainstBranch } from '../../src/git/repo.js'
 
+// All worker fixtures include a non-empty tokenUsage so the post-R4a
+// step-executor accepts them. Tests that explicitly want to exercise
+// the missing-token-usage path construct their own result inline.
+const FIXTURE_TOKEN_USAGE = {
+  promptTokens: 100,
+  completionTokens: 50,
+  cacheReadTokens: 0,
+}
+
 function makePlannerResult(objective = 'Fix it'): WorkerTaskResult {
   return {
     rawOutput: '',
@@ -56,6 +65,7 @@ function makePlannerResult(objective = 'Fix it'): WorkerTaskResult {
     },
     parseError: null,
     sessionId: null,
+    tokenUsage: FIXTURE_TOKEN_USAGE,
   }
 }
 
@@ -73,6 +83,7 @@ function makeCoderResult(): WorkerTaskResult {
     },
     parseError: null,
     sessionId: null,
+    tokenUsage: FIXTURE_TOKEN_USAGE,
   }
 }
 
@@ -96,6 +107,7 @@ function makeReviewerResult(verdict: 'APPROVED' | 'CHANGES_REQUIRED' | 'BLOCKED'
     },
     parseError: null,
     sessionId: null,
+    tokenUsage: FIXTURE_TOKEN_USAGE,
   }
 }
 
@@ -128,6 +140,11 @@ function makeConfig(): Config {
       maxEmptyDiffRetries: 2,
     },
     security: { maxChangedFiles: 50, maxChangedLines: 5000, maxDailyCostUsd: 50, maxCostPerRunUsd: 10 },
+    cost: {
+      model: 'pay-per-use',
+      allowEstimatedDuration: false,
+      subscriptionMetered: { advisoryThresholdUsd: null, enforcePerRunLimit: false, enforceDailyLimit: false },
+    },
     workerProfiles: {
       claude: { type: 'claude', command: 'claude', args: ['-p'], workerTimeoutSeconds: 1800, minimalEnv: true, runtimeWrapper: null, env: {} },
     },
@@ -529,6 +546,7 @@ describe('executeLoop', () => {
       parsed: null,
       parseError: 'invalid reviewer output',
       sessionId: null,
+      tokenUsage: FIXTURE_TOKEN_USAGE,
     }
 
     const deps: LoopDependencies = {

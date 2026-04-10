@@ -271,6 +271,7 @@ whichever matches the scope of the situation:
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `model` | `pay-per-use`, `subscription`, or `subscription-metered` | `pay-per-use` | `pay-per-use` enforces `security.maxDailyCostUsd`/`security.maxCostPerRunUsd`; `subscription` bypasses cost-limit blocking; `subscription-metered` logs advisory warnings and can optionally enforce caps via `cost.subscriptionMetered`. |
+| `allowEstimatedDuration` | boolean | `false` | When `false` (default), worker runs that finish without parseable token usage **block the attempt** with `tokenCaptureFailed` instead of silently estimating cost from wall-clock duration. The duration estimate undercounted by 10–100× in production and was the root cause of inaccurate cost reports. Flip to `true` only as a temporary unblocker when a specific worker adapter genuinely cannot report token usage. |
 | `subscriptionMetered` | object | `{ advisoryThresholdUsd: null, enforcePerRunLimit: false, enforceDailyLimit: false }` | Controls warning/enforcement behavior for `subscription-metered` mode. Ignored for other models. |
 | `pricing` | object | unset | Optional model-aware pricing table. When unset, built-in defaults are used (input `$3/M`, output `$15/M`, cache-read `$0.3/M`, fallback `$0.008/min`) for advisory/estimated USD. |
 

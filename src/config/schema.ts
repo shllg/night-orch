@@ -311,6 +311,21 @@ const CostSchema = z.object({
   model: CostModelSchema.default('pay-per-use'),
   pricing: CostPricingSchema.optional(),
   subscriptionMetered: SubscriptionMeteredSchema,
+  /**
+   * R4a escape hatch: when `false` (default), worker invocations that
+   * return without parseable token usage cause the attempt to be
+   * blocked with `tokenCaptureFailed` instead of silently falling
+   * back to a duration-based cost estimate. The duration estimate
+   * undercounted by 10-100× in production and was the root cause of
+   * the "realistic cost measurement" issue documented in the plan.
+   *
+   * Set to `true` only as a temporary unblocker when a worker adapter
+   * is genuinely unable to report token usage and you'd rather pay
+   * with degraded accuracy than block the run. Each duration-based
+   * row will be tagged `token_source = 'estimated_duration'` once R4b
+   * lands so reports can surface the degradation.
+   */
+  allowEstimatedDuration: z.boolean().default(false),
 })
 
 // --- Metrics schema ---

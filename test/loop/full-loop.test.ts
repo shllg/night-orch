@@ -55,6 +55,11 @@ function makeConfig(): Config {
       maxEmptyDiffRetries: 2,
     },
     security: { maxChangedFiles: 50, maxChangedLines: 5000, maxDailyCostUsd: 50, maxCostPerRunUsd: 10 },
+    cost: {
+      model: 'pay-per-use',
+      allowEstimatedDuration: false,
+      subscriptionMetered: { advisoryThresholdUsd: null, enforcePerRunLimit: false, enforceDailyLimit: false },
+    },
     workerProfiles: {
       claude: { type: 'claude', command: 'claude', args: ['-p'], workerTimeoutSeconds: 1800, minimalEnv: true, runtimeWrapper: null, env: {} },
     },
@@ -119,6 +124,10 @@ function makeWorkerResult(parsed: unknown): WorkerTaskResult {
     parsed: parsed as WorkerTaskResult['parsed'],
     parseError: null,
     sessionId: null,
+    // R4a: workers without tokenUsage are now blocked unless
+    // cost.allowEstimatedDuration=true. Happy-path fixtures stub
+    // a non-empty usage so the engine accepts them.
+    tokenUsage: { promptTokens: 100, completionTokens: 50, cacheReadTokens: 0 },
   }
 }
 

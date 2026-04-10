@@ -15,8 +15,10 @@ import { superviseWorker } from './supervisor.js'
 import {
   WorkerAuthError,
   WorkerTimeoutError,
+  WorkerTokenCaptureError,
   WorkerTransientError,
 } from '../workers/errors.js'
+import { createHash } from 'node:crypto'
 import { getRemediation } from '../workers/auth-check.js'
 import { logger } from '../utils/logger.js'
 import { buildPlanningPrdPath, isPlanningIssue } from '../planning/mode.js'
@@ -160,6 +162,29 @@ export async function executeWorkerStep(
       { role: step.role, parseError: result.parseError, rawLength: result.rawOutput.length, rawHead: result.rawOutput.slice(0, 500), rawTail: result.rawOutput.slice(-500) },
       `${step.role} worker output parse failed`,
     )
+  }
+
+  // R4a: kill the silent duration-based cost fallback. Worker
+  // invocations that complete (exit 0) but produce no parseable token
+  // usage block the attempt unless the operator has explicitly set
+  // `cost.allowEstimatedDuration: true` in config. The duration
+  // estimate undercounted by 10-100× in production and was the root
+  // cause of the "realistic cost measurement" issue. The block path
+  // routes through R2's WorkerError catch in engine.ts, which maps
+  // WorkerTokenCaptureError to a typed `tokenCaptureFailed` blocked
+  // state.
+  if (result.tokenUsage === undefined && deps.config.cost.allowEstimatedDuration !== true) {
+    const rawOutputHash = `sha256:${createHash('sha256').update(result.rawOutput).digest('hex').slice(0, 16)}`
+    logger.error(
+      {
+        role: step.role,
+        adapterType,
+        rawOutputLength: result.rawOutput.length,
+        rawOutputHash,
+      },
+      `${step.role} worker produced no parseable token usage — blocking attempt`,
+    )
+    throw new WorkerTokenCaptureError(adapterType, step.id, rawOutputHash)
   }
 
   // Map result to the appropriate RunContext field based on role

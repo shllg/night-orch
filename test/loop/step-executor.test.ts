@@ -45,6 +45,14 @@ vi.mock('../../src/git/repo.js', () => ({
 // Factories
 // ---------------------------------------------------------------------------
 
+// Default token usage for happy-path fixtures (R4a — workers without
+// tokenUsage are now blocked unless cost.allowEstimatedDuration=true).
+const FIXTURE_TOKEN_USAGE = {
+  promptTokens: 100,
+  completionTokens: 50,
+  cacheReadTokens: 0,
+}
+
 function makePlannerResult(objective = 'Fix it'): WorkerTaskResult {
   return {
     rawOutput: '',
@@ -61,6 +69,7 @@ function makePlannerResult(objective = 'Fix it'): WorkerTaskResult {
     },
     parseError: null,
     sessionId: 'sess-planner-1',
+    tokenUsage: FIXTURE_TOKEN_USAGE,
   }
 }
 
@@ -78,6 +87,7 @@ function makeCoderResult(): WorkerTaskResult {
     },
     parseError: null,
     sessionId: 'sess-coder-1',
+    tokenUsage: FIXTURE_TOKEN_USAGE,
   }
 }
 
@@ -101,6 +111,7 @@ function makeReviewerResult(verdict: 'APPROVED' | 'CHANGES_REQUIRED' | 'BLOCKED'
     },
     parseError: null,
     sessionId: 'sess-reviewer-1',
+    tokenUsage: FIXTURE_TOKEN_USAGE,
   }
 }
 
@@ -127,6 +138,11 @@ function makeConfig(): Config {
       blockOnAmbiguousReview: true,
     },
     security: { maxChangedFiles: 50, maxChangedLines: 5000, maxDailyCostUsd: 50, maxCostPerRunUsd: 10 },
+    cost: {
+      model: 'pay-per-use',
+      allowEstimatedDuration: false,
+      subscriptionMetered: { advisoryThresholdUsd: null, enforcePerRunLimit: false, enforceDailyLimit: false },
+    },
     workerProfiles: {
       claude: { type: 'claude', command: 'claude', args: ['-p'], workerTimeoutSeconds: 1800, minimalEnv: true, runtimeWrapper: null, env: {} },
     },
@@ -302,6 +318,7 @@ describe('executeWorkerStep', () => {
       parsed: { custom: 'data' } as unknown as WorkerTaskResult['parsed'],
       parseError: null,
       sessionId: 'sess-custom-1',
+      tokenUsage: FIXTURE_TOKEN_USAGE,
     }
     const step: WorkerStep = { type: 'worker', id: 'lint-fix', role: 'linter' }
     const config = makeConfig()
@@ -386,6 +403,70 @@ describe('executeWorkerStep', () => {
     await expect(executeWorkerStep(makeCtx(), step, deps)).rejects.toThrow('No worker adapter found for role "planner"')
   })
 
+  it('R4a: throws WorkerTokenCaptureError when tokenUsage is missing', async () => {
+    const noUsageResult: WorkerTaskResult = {
+      rawOutput: 'response without usage metadata',
+      exitCode: 0,
+      timedOut: false,
+      durationMs: 1500,
+      parsed: {
+        objective: 'fix it',
+        assumptions: [],
+        filesToChange: [],
+        steps: [],
+        risks: [],
+        testStrategy: '',
+      },
+      parseError: null,
+      sessionId: null,
+      // tokenUsage intentionally omitted
+    }
+    const step: WorkerStep = { type: 'worker', id: 'plan', role: 'planner' }
+    const deps = makeDeps({ planner: makeMockAdapter(noUsageResult) })
+
+    // Default config has cost.allowEstimatedDuration=false, so the
+    // step-executor refuses to silently fall back to duration-based
+    // pricing and instead throws a typed token-capture error. The R2
+    // engine boundary maps this to a `tokenCaptureFailed` blocked
+    // state, but at the executor level we just expect the throw.
+    await expect(executeWorkerStep(makeCtx(), step, deps)).rejects.toMatchObject({
+      code: 'WORKER_TOKEN_CAPTURE_FAILURE',
+      step: 'plan',
+    })
+  })
+
+  it('R4a: tolerates missing tokenUsage when cost.allowEstimatedDuration=true', async () => {
+    const noUsageResult: WorkerTaskResult = {
+      rawOutput: 'response without usage metadata',
+      exitCode: 0,
+      timedOut: false,
+      durationMs: 1500,
+      parsed: {
+        objective: 'fix it',
+        assumptions: [],
+        filesToChange: [],
+        steps: [],
+        risks: [],
+        testStrategy: '',
+      },
+      parseError: null,
+      sessionId: null,
+    }
+    const step: WorkerStep = { type: 'worker', id: 'plan', role: 'planner' }
+    const config = makeConfig()
+    config.cost.allowEstimatedDuration = true
+    const deps: StepDependencies = {
+      adapters: { planner: makeMockAdapter(noUsageResult) },
+      config,
+    }
+
+    const result = await executeWorkerStep(makeCtx(), step, deps)
+    // Falls through to the legacy duration-based path. result.tokenUsage
+    // is still undefined; pricing.ts will use minuteUsd to estimate cost.
+    expect(result.tokenUsage).toBeUndefined()
+    expect(result.ctx.plan).not.toBeNull()
+  })
+
   it('coder parse failure with exit 0 falls back to git diff', async () => {
     const failedParseResult: WorkerTaskResult = {
       rawOutput: 'some raw output',
@@ -395,6 +476,7 @@ describe('executeWorkerStep', () => {
       parsed: null,
       parseError: 'Could not parse JSON',
       sessionId: null,
+      tokenUsage: FIXTURE_TOKEN_USAGE,
     }
     const step: WorkerStep = { type: 'worker', id: 'code', role: 'coder' }
     const deps = makeDeps({ coder: makeMockAdapter(failedParseResult) })
