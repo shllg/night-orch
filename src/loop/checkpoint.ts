@@ -4,6 +4,7 @@ import { RunManager } from '../state/runs.js'
 import { insertRunLogEvent } from '../state/run-log-events.js'
 import { nowUtcIso } from '../utils/time.js'
 import { logger } from '../utils/logger.js'
+import { parsePhaseData } from './checkpoint-schema.js'
 
 /**
  * Sentinel key used to store an array of completed phase IDs in phase_data.
@@ -155,7 +156,7 @@ export class Checkpoint {
 
     if (!row?.current_phase) return null
 
-    const phaseData = safeParsePhaseData(row.phase_data)
+    const phaseData = this.parsePhaseDataWithQuarantine(runId, row.current_phase, row.phase_data)
     const phaseArtifacts = (phaseData[row.current_phase] as Record<string, unknown>) ?? {}
 
     return {
@@ -203,7 +204,7 @@ export class Checkpoint {
 
     if (!row?.current_phase) return null
 
-    const phaseData = safeParsePhaseData(row.phase_data)
+    const phaseData = this.parsePhaseDataWithQuarantine(runId, row.current_phase, row.phase_data)
 
     // Reconstruct context from persisted phase artifacts
     const planArtifacts = phaseData['plan'] as Record<string, unknown> | undefined
@@ -242,11 +243,61 @@ export class Checkpoint {
 
   private getPhaseData(runId: string): Record<string, unknown> {
     const row = this.db
-      .prepare('SELECT phase_data FROM runs WHERE id = ?')
-      .get(runId) as { phase_data: string | null } | undefined
+      .prepare('SELECT current_phase, phase_data FROM runs WHERE id = ?')
+      .get(runId) as { current_phase: string | null; phase_data: string | null } | undefined
 
     if (!row?.phase_data) return {}
-    return safeParsePhaseData(row.phase_data)
+    return this.parsePhaseDataWithQuarantine(runId, row.current_phase, row.phase_data)
+  }
+
+  /**
+   * Parse a raw `phase_data` blob through the R5 zod schema. On
+   * failure (JSON parse error, non-object top level, or sentinel-key
+   * shape mismatch), write a row to `checkpoint_quarantine` so the
+   * operator can inspect the corruption later, and return an empty
+   * object so the caller resumes as if no checkpoint existed.
+   *
+   * This is the only path that reads phase_data across the
+   * Checkpoint class — pre-R5 the equivalent `safeParsePhaseData`
+   * function silently returned `{}` with a warning log, which meant
+   * corruption was invisible to anyone not tailing the logs.
+   */
+  private parsePhaseDataWithQuarantine(
+    runId: string,
+    phase: string | null,
+    raw: string | null | undefined,
+  ): Record<string, unknown> {
+    const result = parsePhaseData(raw)
+    if (result.ok) return result.data
+
+    logger.warn(
+      {
+        runId,
+        phase,
+        reason: result.reason,
+        detail: result.detail,
+        payloadLength: raw?.length ?? 0,
+      },
+      'phase_data failed validation — quarantining row and resuming as empty',
+    )
+
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO checkpoint_quarantine
+             (run_id, phase, reason, detail, payload)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .run(runId, phase, result.reason, result.detail, result.payload)
+    } catch (err) {
+      // Never let a quarantine write failure take down the read.
+      logger.error(
+        { runId, phase, err },
+        'Failed to write checkpoint_quarantine row — phase_data corruption may be lost',
+      )
+    }
+
+    return {}
   }
 
   private recordEvent(
@@ -286,25 +337,6 @@ export class Checkpoint {
       // Log at debug so operators can diagnose silent drops without spamming.
       logger.debug({ runId, eventType, phase, err }, 'Failed to record phase event')
     }
-  }
-}
-
-/**
- * Parse a phase_data JSON blob defensively. A corrupt row must not take
- * down checkpoint reads; the run will simply resume as if no checkpoint
- * existed. Logs a warning so operators can notice data corruption.
- */
-function safeParsePhaseData(raw: string | null | undefined): Record<string, unknown> {
-  if (!raw) return {}
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-      return {}
-    }
-    return parsed as Record<string, unknown>
-  } catch (err) {
-    logger.warn({ err, phaseDataLength: raw.length }, 'Failed to parse phase_data JSON — treating as empty')
-    return {}
   }
 }
 

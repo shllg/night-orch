@@ -305,4 +305,90 @@ describe('Checkpoint', () => {
       expect(checkpoint.getCompletedPhases('run-test-1')).toEqual(['plan', 'code'])
     })
   })
+
+  describe('R5 — phase_data quarantine', () => {
+    function countQuarantine(): number {
+      const row = db
+        .prepare('SELECT COUNT(*) AS c FROM checkpoint_quarantine WHERE run_id = ?')
+        .get('run-test-1') as { c: number }
+      return row.c
+    }
+
+    function latestQuarantineRow(): {
+      phase: string | null
+      reason: string
+      detail: string
+      payload: string | null
+    } {
+      return db
+        .prepare(
+          `SELECT phase, reason, detail, payload
+           FROM checkpoint_quarantine
+           WHERE run_id = ?
+           ORDER BY id DESC LIMIT 1`,
+        )
+        .get('run-test-1') as {
+        phase: string | null
+        reason: string
+        detail: string
+        payload: string | null
+      }
+    }
+
+    it('writes a parse_error row and resumes empty on malformed JSON', () => {
+      db.prepare(
+        `UPDATE runs SET current_phase = 'plan', phase_data = '{"broken":' WHERE id = 'run-test-1'`,
+      ).run()
+
+      const resumed = checkpoint.resumeFromCheckpoint('run-test-1', makeBaseCtx())
+      expect(resumed).not.toBeNull()
+      expect(resumed?.plan).toBeNull()
+      expect(resumed?.currentPhase).toBe('plan')
+
+      expect(countQuarantine()).toBe(1)
+      const row = latestQuarantineRow()
+      expect(row.reason).toBe('parse_error')
+      expect(row.phase).toBe('plan')
+      expect(row.payload).toBe('{"broken":')
+    })
+
+    it('writes a schema_error row when the top level is a JSON array', () => {
+      db.prepare(
+        `UPDATE runs SET current_phase = 'code', phase_data = '[]' WHERE id = 'run-test-1'`,
+      ).run()
+
+      const resumed = checkpoint.resumeFromCheckpoint('run-test-1', makeBaseCtx())
+      expect(resumed).not.toBeNull()
+
+      expect(countQuarantine()).toBe(1)
+      const row = latestQuarantineRow()
+      expect(row.reason).toBe('schema_error')
+      expect(row.phase).toBe('code')
+      expect(row.detail).toContain('array')
+    })
+
+    it('writes a schema_error row when __sessionIds contains a non-string', () => {
+      const corrupt = JSON.stringify({ __sessionIds: { planner: 42 } })
+      db.prepare(
+        `UPDATE runs SET current_phase = 'plan', phase_data = ? WHERE id = 'run-test-1'`,
+      ).run(corrupt)
+
+      checkpoint.resumeFromCheckpoint('run-test-1', makeBaseCtx())
+      expect(countQuarantine()).toBe(1)
+      const row = latestQuarantineRow()
+      expect(row.reason).toBe('schema_error')
+      expect(row.detail).toContain('__sessionIds')
+    })
+
+    it('does not quarantine valid phase_data', () => {
+      checkpoint.phaseCompleted('run-test-1', 'plan', { plan: { objective: 'ok' } })
+      checkpoint.resumeFromCheckpoint('run-test-1', makeBaseCtx())
+      expect(countQuarantine()).toBe(0)
+    })
+
+    it('does not quarantine when phase_data is null (no checkpoint)', () => {
+      checkpoint.resumeFromCheckpoint('run-test-1', makeBaseCtx())
+      expect(countQuarantine()).toBe(0)
+    })
+  })
 })

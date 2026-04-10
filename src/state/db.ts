@@ -27,6 +27,7 @@ import { up as migration022 } from './migrations/022-run-log-events.js'
 import { up as migration023 } from './migrations/023-attempt-columns.js'
 import { up as migration024 } from './migrations/024-attempts-head-index.js'
 import { up as migration025 } from './migrations/025-cost-token-source.js'
+import { up as migration026 } from './migrations/026-checkpoint-quarantine.js'
 
 const MIGRATIONS = [
   { version: 1, name: '001-initial', up: migration001 },
@@ -54,6 +55,7 @@ const MIGRATIONS = [
   { version: 23, name: '023-attempt-columns', up: migration023 },
   { version: 24, name: '024-attempts-head-index', up: migration024 },
   { version: 25, name: '025-cost-token-source', up: migration025 },
+  { version: 26, name: '026-checkpoint-quarantine', up: migration026 },
 ]
 
 export function initDatabase(dbPath: string): Database.Database {
