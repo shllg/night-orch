@@ -5,7 +5,7 @@ import { CostTracker } from '../loop/cost.js'
 import { buildLabelConfig } from '../labels/config.js'
 import { transitionLabels } from '../labels/manager.js'
 import { LeaseManager } from '../state/leases.js'
-import { RunManager } from '../state/runs.js'
+import { createFollowupAttempt } from '../state/attempts.js'
 import { resolveIssueRepo } from '../utils/issue-repo.js'
 import { logger } from '../utils/logger.js'
 import { markerTag, upsertBotComment } from '../forge/bot-comment.js'
@@ -32,7 +32,6 @@ export async function scanCostBlockedRuns(
 ): Promise<{ resumed: number; stillBlocked: number }> {
   const costTracker = new CostTracker(db)
   const leaseManager = new LeaseManager(db)
-  const runManager = new RunManager(db)
   const labelConfig = buildLabelConfig(repoConfig, [])
 
   // Find all cost-blocked runs for this repo
@@ -79,28 +78,29 @@ export async function scanCostBlockedRuns(
       'Cost budget cleared — auto-resuming blocked run',
     )
 
-    // Atomic transition: update run state, zero cost fields, release leases
+    // Atomic transition: finalize the cost-blocked attempt, INSERT a new
+    // continue attempt with a fresh cost ledger, release leases.
+    //
+    // Previously this mutated the same row back to queued and manually
+    // zeroed the cost columns, plus called subtractRunCostFromDaily to
+    // keep the daily aggregate from re-blocking the same run. Under the
+    // attempts model the new row starts at zero cost by construction and
+    // the previous row's historical costs stay attributed to it, so the
+    // subtract-and-zero dance is gone.
     const transition = db.transaction(() => {
-      // Subtract the run's cost from the daily total BEFORE zeroing
-      // the per-run accumulators — otherwise the daily budget check
-      // still sees the old accumulated total and re-blocks immediately.
-      costTracker.subtractRunCostFromDaily(runId)
-
-      runManager.update(runId, {
-        status: 'queued',
-        currentPhase: null,
-        lastError: null,
-        endedAt: null,
-        // Zero out per-run cost accumulator so the next checkBudget starts fresh
-        estimatedCostUsd: 0,
-        promptTokens: 0,
-        completionTokens: 0,
-        cacheReadTokens: 0,
-        // Clear block reason since we're unblocking
-        blockReason: null,
+      createFollowupAttempt(db, {
+        previousAttemptId: runId,
+        intent: 'continue',
+        resetBranch: false,
+        phaseData,
+        controlPayload: {
+          source: 'cost_auto_resume',
+          issueRepo,
+          preserveBranchState: true,
+          requestedAt: new Date().toISOString(),
+        },
       })
 
-      // Release any leases on this issue
       leaseManager.release(row.repo, issueNumber)
       if (issueRepo !== row.repo) {
         leaseManager.release(issueRepo, issueNumber)

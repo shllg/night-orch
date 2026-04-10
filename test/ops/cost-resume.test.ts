@@ -125,20 +125,51 @@ describe('scanCostBlockedRuns', () => {
     expect(result.resumed).toBe(1)
     expect(result.stillBlocked).toBe(0)
 
-    const row = db.prepare('SELECT status, block_reason, estimated_cost_usd, prompt_tokens, completion_tokens, cache_read_tokens FROM runs WHERE id = ?').get(runId) as {
+    // Under the immutable-attempts model the previous attempt stays at its
+    // historical state and is frozen; a new head attempt replaces it with
+    // a fresh cost ledger.
+    const prev = db
+      .prepare(
+        'SELECT status, block_reason, estimated_cost_usd, terminated_at FROM runs WHERE id = ?',
+      )
+      .get(runId) as {
+      status: string
+      block_reason: string | null
+      estimated_cost_usd: number
+      terminated_at: string | null
+    }
+    expect(prev.status).toBe('blocked')
+    expect(prev.block_reason).toBe('cost_limit')
+    expect(prev.estimated_cost_usd).toBe(100)
+    expect(prev.terminated_at).not.toBeNull()
+
+    const head = db
+      .prepare(
+        `SELECT status, block_reason, estimated_cost_usd, prompt_tokens,
+                completion_tokens, cache_read_tokens, previous_attempt_id, intent
+         FROM runs
+         WHERE repo = ? AND issue_number = ?
+         ORDER BY sequence_number DESC, created_at DESC
+         LIMIT 1`,
+      )
+      .get('org/repo', 1) as {
       status: string
       block_reason: string | null
       estimated_cost_usd: number
       prompt_tokens: number
       completion_tokens: number
       cache_read_tokens: number
+      previous_attempt_id: string | null
+      intent: string
     }
-    expect(row.status).toBe('queued')
-    expect(row.block_reason).toBeNull()
-    expect(row.estimated_cost_usd).toBe(0)
-    expect(row.prompt_tokens).toBe(0)
-    expect(row.completion_tokens).toBe(0)
-    expect(row.cache_read_tokens).toBe(0)
+    expect(head.status).toBe('queued')
+    expect(head.block_reason).toBeNull()
+    expect(head.estimated_cost_usd).toBe(0)
+    expect(head.prompt_tokens).toBe(0)
+    expect(head.completion_tokens).toBe(0)
+    expect(head.cache_read_tokens).toBe(0)
+    expect(head.previous_attempt_id).toBe(runId)
+    expect(head.intent).toBe('continue')
   })
 
   it('stays blocked when still over per-run limit', async () => {
@@ -200,12 +231,21 @@ describe('scanCostBlockedRuns', () => {
     expect(result.resumed).toBe(1)
     expect(result.stillBlocked).toBe(0)
 
-    const row = db.prepare('SELECT status, block_reason FROM runs WHERE id = ?').get(runId) as {
+    const head = db
+      .prepare(
+        `SELECT status, block_reason, previous_attempt_id FROM runs
+         WHERE repo = ? AND issue_number = ?
+         ORDER BY sequence_number DESC, created_at DESC
+         LIMIT 1`,
+      )
+      .get('org/repo', 1) as {
       status: string
       block_reason: string | null
+      previous_attempt_id: string | null
     }
-    expect(row.status).toBe('queued')
-    expect(row.block_reason).toBeNull()
+    expect(head.status).toBe('queued')
+    expect(head.block_reason).toBeNull()
+    expect(head.previous_attempt_id).toBe(runId)
   })
 
   it('resumes when daily cap override raised', async () => {

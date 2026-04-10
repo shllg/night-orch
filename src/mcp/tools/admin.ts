@@ -45,11 +45,12 @@ export async function handleCostReset(
   const result = resetIssueCost(deps.db, args.repo, args.issueNumber)
   return {
     success: true,
-    runId: result.runId,
+    runId: result.newRunId,
+    previousRunId: result.previousRunId,
     wasUnblocked: result.wasUnblocked,
     message: result.wasUnblocked
-      ? `Reset accumulated costs for ${args.repo}#${args.issueNumber} (run ${result.runId}) and re-queued the run.`
-      : `Reset accumulated costs for ${args.repo}#${args.issueNumber} (run ${result.runId}).`,
+      ? `Cost reset for ${args.repo}#${args.issueNumber}: queued new continue attempt ${result.newRunId} (previous ${result.previousRunId} unblocked).`
+      : `Cost reset for ${args.repo}#${args.issueNumber}: queued new continue attempt ${result.newRunId} (previous ${result.previousRunId}).`,
   }
 }
 

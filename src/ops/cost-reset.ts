@@ -1,23 +1,29 @@
 import type Database from 'better-sqlite3'
-import { CostTracker } from '../loop/cost.js'
+import { createFollowupAttempt } from '../state/attempts.js'
 import { RunManager } from '../state/runs.js'
 import { logger } from '../utils/logger.js'
 
 export interface CostResetResult {
-  runId: string
+  previousRunId: string
+  newRunId: string
   repo: string
   issueNumber: number
   wasUnblocked: boolean
 }
 
 /**
- * Reset accumulated costs for the latest run of an issue.
+ * "Reset the cost" of an issue's head attempt by inserting a fresh
+ * successor attempt. Under the immutable-attempts model a mutable
+ * cost-reset is impossible: the previous row is historical truth and
+ * starting a new accounting window means starting a new attempt.
  *
- * - Subtracts the run's cost from the daily total
- * - Zeros the run's `estimated_cost_usd`, `prompt_tokens`, `completion_tokens`, `cache_read_tokens`
- * - If the run was blocked with `block_reason = 'cost_limit'`, transitions status to `queued`
+ * The new attempt uses `continue` intent (branch, worktree, PR preserved)
+ * so the operator's recovery path is "keep going, fresh cost counter".
  *
- * Throws if no run exists for the issue.
+ * `wasUnblocked` is true when the previous attempt's status was
+ * `blocked` with `cost_limit`, matching the semantics of the old
+ * mutation-based cost-reset flow. Callers surface this to decide
+ * whether label transitions need to run.
  */
 export function resetIssueCost(
   db: Database.Database,
@@ -30,18 +36,30 @@ export function resetIssueCost(
     throw new Error(`No run found for ${repo}#${issueNumber}`)
   }
 
-  const costTracker = new CostTracker(db)
-  const result = costTracker.resetRunCost(run.id)
+  const wasUnblocked = run.status === 'blocked' && run.blockReason === 'cost_limit'
+
+  const result = createFollowupAttempt(db, {
+    previousAttemptId: run.id,
+    intent: 'continue',
+    resetBranch: false,
+    phaseData: run.phaseData,
+    controlPayload: {
+      source: 'cost_reset',
+      requestedAt: new Date().toISOString(),
+      preserveBranchState: true,
+    },
+  })
 
   logger.info(
-    { runId: run.id, repo, issueNumber, wasUnblocked: result.wasUnblocked },
-    result.wasUnblocked ? 'Reset cost and unblocked run' : 'Reset cost for run',
+    { previousRunId: run.id, newRunId: result.attemptId, repo, issueNumber, wasUnblocked },
+    wasUnblocked ? 'Cost reset — new continue attempt queued and unblocked' : 'Cost reset — new continue attempt queued',
   )
 
   return {
-    runId: run.id,
+    previousRunId: run.id,
+    newRunId: result.attemptId,
     repo,
     issueNumber,
-    wasUnblocked: result.wasUnblocked,
+    wasUnblocked,
   }
 }
