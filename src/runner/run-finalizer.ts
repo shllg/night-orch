@@ -13,6 +13,7 @@ import type { NotificationDispatcher } from '../notify/dispatcher.js'
 import { nowUtcIso } from '../utils/time.js'
 import { logger } from '../utils/logger.js'
 import type { RunContext } from '../loop/types.js'
+import { blocked, blockedReasonFromLegacy } from '../loop/state.js'
 import {
   STATUS_MARKER,
   buildBlockReason,
@@ -125,7 +126,11 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
           'running',
           'blocked',
           buildLabelConfig(repoConfig, latestIssue.labels),
-          'merge_conflict',
+          blocked({
+            type: 'mergeConflict',
+            files: [],
+            summary: err.message,
+          }).reason,
         )
         await postStatusComment({
           forge,
@@ -223,6 +228,12 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
     })
     runManager.setCostBudgetOverride(runId, null)
     const latestIssue = await forge.getIssue(issueRepo, issueNumber)
+    // Bridge: RunContext still carries the legacy `BlockReason` string
+    // (R1d will retype it). Lift it through the documented round-trip
+    // helper so labels/transitions only ever sees the typed shape.
+    const typedBlockReason = finalCtx.blockReason
+      ? blockedReasonFromLegacy(finalCtx.blockReason)
+      : undefined
     await transitionLabels(
       forge,
       issueRepo,
@@ -231,7 +242,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
       'running',
       'blocked',
       buildLabelConfig(repoConfig, latestIssue.labels),
-      finalCtx.blockReason ?? undefined,
+      typedBlockReason,
     )
 
     try {

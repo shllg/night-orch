@@ -5,7 +5,15 @@ import {
   isHumanRequired,
   type LabelConfig,
 } from '../../src/labels/transitions.js'
+import type { BlockedReason } from '../../src/loop/state.js'
 import type { MergeBatchStatus } from '../../src/merge-queue/types.js'
+
+const reviewerBlocked: BlockedReason = { type: 'reviewerBlocked', summary: 'no' }
+const costLimit: BlockedReason = { type: 'costLimit', limit: 'per-run', actualUsd: 12, limitUsd: 10 }
+const iterationLimit: BlockedReason = { type: 'iterationLimit', iterations: 4, max: 4 }
+const agentPassLimit: BlockedReason = { type: 'agentPassLimit', passes: 10, max: 10 }
+const ambiguousReview: BlockedReason = { type: 'ambiguousReview', excerpt: 'mangled' }
+const verifyConfig: BlockedReason = { type: 'verifyConfig', detail: 'no commands' }
 
 const config: LabelConfig = {
   ready: ['orch:ready'],
@@ -22,28 +30,28 @@ const config: LabelConfig = {
 }
 
 describe('isHumanRequired', () => {
-  it('returns true for reviewer_blocked', () => {
-    expect(isHumanRequired('reviewer_blocked')).toBe(true)
+  it('returns true for reviewerBlocked', () => {
+    expect(isHumanRequired(reviewerBlocked)).toBe(true)
   })
 
-  it('returns false for cost_limit', () => {
-    expect(isHumanRequired('cost_limit')).toBe(false)
+  it('returns false for costLimit', () => {
+    expect(isHumanRequired(costLimit)).toBe(false)
   })
 
-  it('returns false for iteration_limit', () => {
-    expect(isHumanRequired('iteration_limit')).toBe(false)
+  it('returns false for iterationLimit', () => {
+    expect(isHumanRequired(iterationLimit)).toBe(false)
   })
 
-  it('returns false for agent_pass_limit', () => {
-    expect(isHumanRequired('agent_pass_limit')).toBe(false)
+  it('returns false for agentPassLimit', () => {
+    expect(isHumanRequired(agentPassLimit)).toBe(false)
   })
 
-  it('returns false for ambiguous_review', () => {
-    expect(isHumanRequired('ambiguous_review')).toBe(false)
+  it('returns false for ambiguousReview', () => {
+    expect(isHumanRequired(ambiguousReview)).toBe(false)
   })
 
-  it('returns false for verify_config', () => {
-    expect(isHumanRequired('verify_config')).toBe(false)
+  it('returns false for verifyConfig', () => {
+    expect(isHumanRequired(verifyConfig)).toBe(false)
   })
 })
 
@@ -54,20 +62,20 @@ describe('computeLabelMutation', () => {
     expect(m.remove).toEqual(['orch:ready'])
   })
 
-  it('running → blocked (cost_limit): add only blocked, remove running', () => {
-    const m = computeLabelMutation('running', 'blocked', ['orch:running'], config, 'cost_limit')
+  it('running → blocked (costLimit): add only blocked, remove running', () => {
+    const m = computeLabelMutation('running', 'blocked', ['orch:running'], config, costLimit)
     expect(m.add).toEqual(['orch:blocked'])
     expect(m.remove).toEqual(['orch:running'])
   })
 
-  it('running → blocked (reviewer_blocked): add blocked + needsHuman, remove running', () => {
-    const m = computeLabelMutation('running', 'blocked', ['orch:running'], config, 'reviewer_blocked')
+  it('running → blocked (reviewerBlocked): add blocked + needsHuman, remove running', () => {
+    const m = computeLabelMutation('running', 'blocked', ['orch:running'], config, reviewerBlocked)
     expect(m.add).toEqual(['orch:blocked', 'orch:needs-human'])
     expect(m.remove).toEqual(['orch:running'])
   })
 
-  it('running → blocked (cost_limit) removes stale needsHuman label', () => {
-    const m = computeLabelMutation('running', 'blocked', ['orch:running', 'orch:needs-human'], config, 'cost_limit')
+  it('running → blocked (costLimit) removes stale needsHuman label', () => {
+    const m = computeLabelMutation('running', 'blocked', ['orch:running', 'orch:needs-human'], config, costLimit)
     expect(m.add).toEqual(['orch:blocked'])
     expect(m.remove).toEqual(['orch:running', 'orch:needs-human'])
   })

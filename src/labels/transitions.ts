@@ -1,5 +1,5 @@
 import type { RunStatus } from '../state/runs.js'
-import type { BlockReason } from '../loop/types.js'
+import type { BlockedReason } from '../loop/state.js'
 import type { MergeBatchStatus } from '../merge-queue/types.js'
 
 export interface LabelMutation {
@@ -21,9 +21,22 @@ export interface LabelConfig {
   mergeFailed: string
 }
 
-/** Returns true if the block reason genuinely requires human intervention. */
-export function isHumanRequired(reason: BlockReason): boolean {
-  return reason === 'reviewer_blocked'
+/**
+ * Returns true if the block reason genuinely requires human intervention.
+ *
+ * Tracks `BlockedReason.recoverable === false` semantics from
+ * `loop/state.ts:isBlockedReasonRecoverable`. The two functions answer
+ * subtly different questions:
+ *  - `isBlockedReasonRecoverable` → "will this clear naturally?"
+ *  - `isHumanRequired` → "should we add the needsHuman label now?"
+ *
+ * Today only `reviewerBlocked` flips the label; merge-conflict and
+ * auth-failure are non-recoverable but already convey their need via
+ * the blocked label alone. R6 will revisit when ErrorRecovery moves
+ * out of poller.
+ */
+export function isHumanRequired(reason: BlockedReason): boolean {
+  return reason.type === 'reviewerBlocked'
 }
 
 /**
@@ -35,7 +48,7 @@ export function computeLabelMutation(
   to: RunStatus,
   currentLabels: string[],
   config: LabelConfig,
-  blockReason?: BlockReason,
+  blockReason?: BlockedReason,
 ): LabelMutation {
   const current = new Set(currentLabels)
   let add: string[] = []

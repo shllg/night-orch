@@ -355,7 +355,9 @@ describe('pollOnce', () => {
 
     const blockedTransition = vi.mocked(transitionLabels).mock.calls.find((call) => call[5] === 'blocked')
     expect(blockedTransition).toBeDefined()
-    expect(blockedTransition?.[7]).toBe('reviewer_blocked')
+    // Post-R1c: transitionLabels receives the typed BlockedReason object
+    // (lifted from the legacy string by run-finalizer's bridge).
+    expect(blockedTransition?.[7]).toMatchObject({ type: 'reviewerBlocked' })
 
     const statusComment = mockCommentOnIssue.mock.calls.find(
       (call) => typeof call[2] === 'string' && call[2].includes('Reviewer blocked: needs human sign-off'),

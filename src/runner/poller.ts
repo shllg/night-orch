@@ -4,6 +4,7 @@ import type { MetricsService } from '../metrics/service.js'
 import { createForgeAdapter } from '../forge/factory.js'
 import { LeaseManager } from '../state/leases.js'
 import { RunManager } from '../state/runs.js'
+import { blocked } from '../loop/state.js'
 import { IssueManager } from '../state/issues.js'
 import { discoverEligibleIssues } from '../discovery/discover.js'
 import { resolveRoles } from '../discovery/roles.js'
@@ -444,7 +445,12 @@ export async function pollOnce(
                       'running',
                       'blocked',
                       buildLabelConfig(repoConfig, latestIssue.labels),
-                      'merge_conflict',
+                      blocked({
+                        type: 'mergeConflict',
+                        files: rebaseResult.conflictAnalysis?.files ?? [],
+                        summary: rebaseResult.conflictAnalysis?.summary
+                          ?? 'Rebase failed due to merge conflicts',
+                      }).reason,
                     )
                     await postStatusComment({
                       forge,

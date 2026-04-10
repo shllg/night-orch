@@ -1,6 +1,6 @@
 import type { ForgeAdapter } from '../forge/types.js'
 import type { RunStatus } from '../state/runs.js'
-import type { BlockReason } from '../loop/types.js'
+import type { BlockedReason } from '../loop/state.js'
 import { computeLabelMutation, type LabelConfig } from './transitions.js'
 import { logger } from '../utils/logger.js'
 
@@ -16,7 +16,7 @@ export async function transitionLabels(
   from: RunStatus,
   to: RunStatus,
   labelConfig: LabelConfig,
-  blockReason?: BlockReason,
+  blockReason?: BlockedReason,
 ): Promise<void> {
   const mutation = computeLabelMutation(from, to, currentLabels, labelConfig, blockReason)
 

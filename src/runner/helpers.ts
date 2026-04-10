@@ -5,7 +5,9 @@ import type { RunManualState, RunOperationIntent } from '../state/runs.js'
 import type { ResolvedRoles } from '../discovery/roles.js'
 import type { DiscoveredIssue } from '../discovery/discover.js'
 import type { ResolvedWorkflow } from '../loop/workflow.js'
-import type { RunContext, BlockReason } from '../loop/types.js'
+import type { RunContext } from '../loop/types.js'
+import type { BlockedReason } from '../loop/state.js'
+import { assertNever, blockedReasonFromLegacy } from '../loop/state.js'
 import type { NotificationPayload } from '../notify/types.js'
 import type { ForgeAdapter } from '../forge/types.js'
 import { markerTag, upsertBotComment } from '../forge/bot-comment.js'
@@ -123,33 +125,48 @@ export function buildBlockReason(ctx: RunContext): string {
       : ctx.reviewResult.summary
   }
   if (ctx.blockReason) {
-    return blockReasonSummary(ctx.blockReason, ctx)
+    // Bridge: ctx.blockReason is still the legacy string enum (R1d will
+    // retype). Lift through fromLegacy so blockReasonSummary only sees
+    // the typed shape.
+    return blockReasonSummary(blockedReasonFromLegacy(ctx.blockReason), ctx)
   }
   return `Blocked in phase ${ctx.currentPhase} (no review result available)`
 }
 
-export function blockReasonSummary(reason: BlockReason, ctx: RunContext): string {
-  switch (reason) {
-    case 'cost_limit':
+/**
+ * Render a human-readable, action-oriented summary for a typed
+ * `BlockedReason`. Used as the body of the blocked status comment and
+ * the lastError column on the run row.
+ *
+ * Exhaustive switch — adding a new variant to `BlockedReason` in
+ * `loop/state.ts` produces a compile error here until handled.
+ */
+export function blockReasonSummary(reason: BlockedReason, ctx: RunContext): string {
+  switch (reason.type) {
+    case 'costLimit':
       return `Cost limit exceeded (estimated: $${ctx.estimatedCostUsd.toFixed(4)}). Grant a budget override or raise the limit in Settings to continue.`
-    case 'iteration_limit':
+    case 'iterationLimit':
       return `Maximum review iterations reached (${ctx.iteration}/${ctx.adjustedLimits.maxReviewIterations}). Use /orch continue to add more iterations with PR context, or raise the limit in Settings.`
-    case 'agent_pass_limit':
+    case 'agentPassLimit':
       return `Maximum total agent passes reached (${ctx.totalAgentPasses}/${ctx.adjustedLimits.maxTotalAgentPasses}). Use /orch continue to resume, or raise the limit in Settings.`
-    case 'reviewer_blocked':
+    case 'reviewerBlocked':
       return 'Reviewer marked this run as blocked. Address the review findings, then use /orch continue.'
-    case 'ambiguous_review':
+    case 'ambiguousReview':
       return 'Review output was not parseable. Use /orch retry to re-run, or disable blockOnAmbiguousReview in Settings.'
-    case 'verify_config':
+    case 'verifyConfig':
       return 'Verification is required but verify commands or results are unavailable. Check repo verify config.'
-    case 'merge_conflict':
+    case 'mergeConflict':
       return 'Rebase or merge conflict encountered. Use /orch continue to keep the existing branch and resolve the conflict, or /orch retry to start fresh from the latest base branch.'
-    case 'auth_failure':
-      return 'Worker CLI authentication expired. Re-authenticate the worker CLI, then use /orch retry.'
-    case 'empty_diff':
+    case 'authFailure':
+      return `Worker CLI authentication expired (${reason.adapter}). Re-authenticate the worker CLI, then use /orch retry.`
+    case 'emptyDiff':
       return `Coder produced no file changes after ${ctx.emptyDiffRetries} attempt(s). The task may need clarification. Use /orch retry to start fresh from the latest base branch.`
+    case 'workerTimeout':
+      return `${reason.adapter} timed out during ${reason.step} after ${reason.timeoutMs}ms. Use /orch retry to start fresh, or increase the worker timeout in Settings.`
+    case 'tokenCaptureFailed':
+      return `${reason.adapter} produced output without parseable token usage during ${reason.step}. This is a worker bug — capture the raw output and file an issue.`
     default:
-      return `Blocked in phase ${ctx.currentPhase}. Use /orch retry to re-run or /orch continue to resume.`
+      return assertNever(reason, 'blockReasonSummary')
   }
 }
 

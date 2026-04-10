@@ -2,6 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { transitionLabels } from '../../src/labels/manager.js'
 import type { ForgeAdapter } from '../../src/forge/types.js'
 import type { LabelConfig } from '../../src/labels/transitions.js'
+import type { BlockedReason } from '../../src/loop/state.js'
+
+const reviewerBlockedReason: BlockedReason = { type: 'reviewerBlocked', summary: 'no' }
+const costLimitReason: BlockedReason = {
+  type: 'costLimit',
+  limit: 'per-run',
+  actualUsd: 12,
+  limitUsd: 10,
+}
 
 vi.mock('../../src/utils/logger.js', () => ({
   logger: {
@@ -130,19 +139,19 @@ describe('transitionLabels', () => {
     expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:running'])
   })
 
-  it('handles transition to blocked with reviewer_blocked — adds blocked + needsHuman', async () => {
+  it('handles transition to blocked with reviewerBlocked — adds blocked + needsHuman', async () => {
     const forge = makeMockForge()
 
-    await transitionLabels(forge, 'org/repo', 1, ['orch:running'], 'running', 'blocked', labelConfig, 'reviewer_blocked')
+    await transitionLabels(forge, 'org/repo', 1, ['orch:running'], 'running', 'blocked', labelConfig, reviewerBlockedReason)
 
     expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:blocked', 'orch:needs-human'])
     expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:running'])
   })
 
-  it('handles transition to blocked with cost_limit — adds only blocked label', async () => {
+  it('handles transition to blocked with costLimit — adds only blocked label', async () => {
     const forge = makeMockForge()
 
-    await transitionLabels(forge, 'org/repo', 1, ['orch:running'], 'running', 'blocked', labelConfig, 'cost_limit')
+    await transitionLabels(forge, 'org/repo', 1, ['orch:running'], 'running', 'blocked', labelConfig, costLimitReason)
 
     expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:blocked'])
   })
@@ -158,7 +167,7 @@ describe('transitionLabels', () => {
       'running',
       'blocked',
       labelConfig,
-      'cost_limit',
+      costLimitReason,
     )
 
     expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:running', 'orch:needs-human'])
