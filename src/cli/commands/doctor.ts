@@ -225,6 +225,81 @@ export async function doctorCommand(globalOpts?: GlobalOpts): Promise<void> {
     }
   }
 
+  // 10. Direct-LLM provider probe — sends a 1-token completion to
+  //     catch bad API keys and wrong model slugs at startup instead
+  //     of on the first triage/reviewer call in production.
+  const aiInternal = config.ai.internal
+  const aiFeatureEnabled =
+    aiInternal.enable.triage
+    || aiInternal.enable.reviewerParseFallback
+    || aiInternal.enable.prBody
+  if (aiInternal.provider && aiInternal.model && aiFeatureEnabled) {
+    const label = `AI provider (${aiInternal.provider} / ${aiInternal.model})`
+    const { createAiClient } = await import('../../ai/factory.js')
+    const {
+      AiAuthError,
+      AiInvalidResponseError,
+      AiRateLimitError,
+      AiTransientError,
+    } = await import('../../ai/errors.js')
+    const client = createAiClient(config)
+    if (!client) {
+      results.push({
+        name: label,
+        passed: false,
+        message: `apiKeyEnv '${aiInternal.apiKeyEnv ?? '(unset)'}' not set in environment`,
+      })
+    } else {
+      try {
+        await client.complete({
+          system: 'Reply with a single character.',
+          user: 'ping',
+          maxTokens: 1,
+          temperature: 0,
+          timeoutMs: 10_000,
+        })
+        results.push({ name: label, passed: true, message: 'Reachable; auth + model slug OK' })
+      } catch (err) {
+        if (err instanceof AiAuthError) {
+          results.push({
+            name: label,
+            passed: false,
+            message: `Auth failed — check ${aiInternal.apiKeyEnv}. ${err.message}`,
+          })
+        } else if (err instanceof AiInvalidResponseError) {
+          // OpenAI surfaces unknown-model as 404; Anthropic surfaces
+          // it as 400 with an error body. Either way, the operator
+          // most likely has the wrong slug.
+          results.push({
+            name: label,
+            passed: false,
+            message: `Model unavailable or invalid response — check the slug. ${err.message}`,
+          })
+        } else if (err instanceof AiRateLimitError) {
+          results.push({
+            name: label,
+            passed: false,
+            message: `Rate-limited by provider (HTTP 429). Configured correctly, but try again in a moment. ${err.message}`,
+            optional: true,
+          })
+        } else if (err instanceof AiTransientError) {
+          results.push({
+            name: label,
+            passed: false,
+            message: `Transient provider error — ${err.message}`,
+            optional: true,
+          })
+        } else {
+          results.push({
+            name: label,
+            passed: false,
+            message: (err as Error).message,
+          })
+        }
+      }
+    }
+  }
+
   printResults(results)
 }
 

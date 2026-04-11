@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createAiClient } from '../../src/ai/factory.js'
 import { AnthropicClient } from '../../src/ai/anthropic.js'
 import { OpenRouterClient } from '../../src/ai/openrouter.js'
+import { OpenAiClient } from '../../src/ai/openai.js'
 import type { Config } from '../../src/config/schema.js'
 
 function makeConfig(overrides: Partial<Config['ai']['internal']> = {}): Config {
@@ -30,6 +31,7 @@ describe('createAiClient', () => {
   beforeEach(() => {
     originalEnv['TEST_ANTHROPIC_KEY'] = process.env['TEST_ANTHROPIC_KEY']
     originalEnv['TEST_OR_KEY'] = process.env['TEST_OR_KEY']
+    originalEnv['TEST_OPENAI_KEY'] = process.env['TEST_OPENAI_KEY']
   })
 
   afterEach(() => {
@@ -89,5 +91,19 @@ describe('createAiClient', () => {
     expect(client).toBeInstanceOf(OpenRouterClient)
     expect(client?.provider).toBe('openrouter')
     expect(client?.model).toBe('anthropic/claude-3-5-sonnet')
+  })
+
+  it('builds an OpenAiClient when configured for openai', () => {
+    process.env['TEST_OPENAI_KEY'] = 'sk-openai-test'
+    const client = createAiClient(
+      makeConfig({
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        apiKeyEnv: 'TEST_OPENAI_KEY',
+      }),
+    )
+    expect(client).toBeInstanceOf(OpenAiClient)
+    expect(client?.provider).toBe('openai')
+    expect(client?.model).toBe('gpt-4o-mini')
   })
 })

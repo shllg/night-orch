@@ -390,7 +390,7 @@ const AiEnableSchema = z.object({
 }).default({})
 
 const AiInternalSchema = z.object({
-  provider: z.enum(['anthropic', 'openrouter']).nullable().default(null),
+  provider: z.enum(['anthropic', 'openrouter', 'openai']).nullable().default(null),
   model: z.string().nullable().default(null),
   /** Env var name that holds the API key. Refuses literal keys in
    * YAML to keep secrets out of committed config files. */

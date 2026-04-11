@@ -2,6 +2,7 @@ import type { Config } from '../config/schema.js'
 import type { AiClient } from './types.js'
 import { AnthropicClient } from './anthropic.js'
 import { OpenRouterClient } from './openrouter.js'
+import { OpenAiClient } from './openai.js'
 import { logger } from '../utils/logger.js'
 
 /**
@@ -41,6 +42,8 @@ export function createAiClient(config: Config): AiClient | null {
       return new AnthropicClient(internal.model, apiKey)
     case 'openrouter':
       return new OpenRouterClient(internal.model, apiKey)
+    case 'openai':
+      return new OpenAiClient(internal.model, apiKey)
     default: {
       const _exhaustive: never = internal.provider
       throw new Error(`Unknown ai.internal.provider: ${String(_exhaustive)}`)

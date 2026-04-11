@@ -336,8 +336,8 @@ parser).
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `provider` | `"anthropic"` \| `"openrouter"` \| `null` | `null` | Which direct-LLM backend to use. `null` disables the layer. |
-| `model` | string \| `null` | `null` | Model id passed to the provider (e.g. `"claude-3-5-sonnet-20241022"` for Anthropic, `"anthropic/claude-3.5-sonnet"` for OpenRouter). |
+| `provider` | `"anthropic"` \| `"openrouter"` \| `"openai"` \| `null` | `null` | Which direct-LLM backend to use. `null` disables the layer. |
+| `model` | string \| `null` | `null` | Model id passed to the provider (e.g. `"claude-3-5-sonnet-20241022"` for Anthropic, `"anthropic/claude-3.5-sonnet"` for OpenRouter, `"gpt-4o-mini"` for OpenAI). |
 | `apiKeyEnv` | string \| `null` | `null` | Env var name holding the API key. Refuses literal keys in YAML. |
 | `timeoutMs` | positive int | `30000` | Per-request timeout. |
 | `maxTokens` | positive int | `1024` | Default max tokens per call. Each consumer may override. |

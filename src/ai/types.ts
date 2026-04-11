@@ -21,7 +21,7 @@
 import type { ZodSchema } from 'zod'
 import type { TokenUsage } from '../workers/types.js'
 
-export type AiProvider = 'anthropic' | 'openrouter'
+export type AiProvider = 'anthropic' | 'openrouter' | 'openai'
 
 /**
  * Single request into the AI layer. `system` and `user` map to the
