@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { Checkpoint } from '../../src/loop/checkpoint.js'
+import {
+  Checkpoint,
+  extractDecisionOutcomes,
+  findTerminalDecisionOutcome,
+  type PersistedDecisionOutcome,
+} from '../../src/loop/checkpoint.js'
 import { initDatabase } from '../../src/state/db.js'
 import type { RunContext } from '../../src/loop/types.js'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -303,6 +308,66 @@ describe('Checkpoint', () => {
       checkpoint.phaseCompleted('run-test-1', 'plan', { plan: { objective: 'a' } })
       checkpoint.phaseCompleted('run-test-1', 'code', { codeResult: { summary: 'b' } })
       expect(checkpoint.getCompletedPhases('run-test-1')).toEqual(['plan', 'code'])
+    })
+  })
+
+  describe('findTerminalDecisionOutcome', () => {
+    const terminal: PersistedDecisionOutcome = { action: 'publish', reason: 'go' }
+    const blockTerminal: PersistedDecisionOutcome = { action: 'block', reason: 'halt', blockReason: 'cost_limit' }
+    const errorTerminal: PersistedDecisionOutcome = { action: 'error' }
+    const iterate: PersistedDecisionOutcome = { action: 'iterate', reason: 'retry' }
+
+    it('returns publish outcome as terminal', () => {
+      const result = findTerminalDecisionOutcome({ decide: terminal })
+      expect(result?.phase).toBe('decide')
+      expect(result?.outcome.action).toBe('publish')
+    })
+
+    it('returns block outcome as terminal', () => {
+      expect(findTerminalDecisionOutcome({ decide: blockTerminal })?.outcome.action).toBe('block')
+    })
+
+    it('returns error outcome as terminal', () => {
+      expect(findTerminalDecisionOutcome({ decide: errorTerminal })?.outcome.action).toBe('error')
+    })
+
+    it('does NOT treat iterate as terminal', () => {
+      expect(findTerminalDecisionOutcome({ decide: iterate })).toBeNull()
+    })
+
+    it('returns null for an empty outcomes map', () => {
+      expect(findTerminalDecisionOutcome({})).toBeNull()
+    })
+
+    it('returns the first terminal entry when multiple phases exist', () => {
+      const result = findTerminalDecisionOutcome({
+        'decide-first': iterate,
+        'decide-second': terminal,
+      })
+      expect(result?.phase).toBe('decide-second')
+    })
+  })
+
+  describe('extractDecisionOutcomes', () => {
+    it('returns empty map for null/undefined phase_data', () => {
+      expect(extractDecisionOutcomes(null)).toEqual({})
+      expect(extractDecisionOutcomes(undefined)).toEqual({})
+    })
+
+    it('returns empty map when __decisionOutcomes is absent', () => {
+      expect(extractDecisionOutcomes({ plan: { objective: 'x' } })).toEqual({})
+    })
+
+    it('returns empty map when __decisionOutcomes is not an object', () => {
+      expect(extractDecisionOutcomes({ __decisionOutcomes: 'garbage' })).toEqual({})
+      expect(extractDecisionOutcomes({ __decisionOutcomes: [1, 2, 3] })).toEqual({})
+    })
+
+    it('returns the decision map when present and well-shaped', () => {
+      const outcomes = extractDecisionOutcomes({
+        __decisionOutcomes: { decide: { action: 'publish' } },
+      })
+      expect(outcomes['decide']?.action).toBe('publish')
     })
   })
 

@@ -4,6 +4,7 @@ import type { WorkerAdapter } from '../workers/types.js'
 import type { MetricsService } from '../metrics/service.js'
 import type { ResolvedWorkflow } from './workflow.js'
 import type { PersistedDecisionOutcome } from './checkpoint.js'
+import { findTerminalDecisionOutcome } from './checkpoint.js'
 import { updateContext, recordPhase } from './context.js'
 import { hashVerifyResults, assessProgress } from './progress.js'
 import { commitChanges } from './commit.js'
@@ -555,22 +556,6 @@ function resolveStartingStepIndex(
 
   const nextStepIndex = resumedPhaseIndex + 1
   return nextStepIndex < steps.length ? nextStepIndex : resumedPhaseIndex
-}
-
-/**
- * If a persisted decision outcome is terminal (publish/block/error),
- * return it so the engine can replay the outcome on resume. iterate is
- * not terminal — the crashed attempt went on to re-run earlier steps.
- */
-function findTerminalDecisionOutcome(
-  outcomes: Record<string, PersistedDecisionOutcome>,
-): { phase: string; outcome: PersistedDecisionOutcome } | null {
-  for (const [phase, outcome] of Object.entries(outcomes)) {
-    if (outcome.action === 'publish' || outcome.action === 'block' || outcome.action === 'error') {
-      return { phase, outcome }
-    }
-  }
-  return null
 }
 
 function applyPersistedDecisionOutcome(

@@ -462,11 +462,52 @@ Requires `acpx` installed as a dependency (`pnpm add acpx`).
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `enabled` | boolean | `false` | When true, `run` starts embedded HTTP/SSE MCP server. |
-| `transport` | `stdio` | `stdio` | Current schema only allows `stdio`. |
-| `authTokenEnv` | string or `null` | `null` | If set, mutating MCP tools require matching `authToken` argument. |
-| `httpPort` | positive int | `3100` | Host/port used by embedded HTTP/SSE server started by `run`. |
-| `httpHost` | string | `127.0.0.1` | Host bind for embedded HTTP/SSE server. |
+| `enabled` | boolean | `false` | When true, `run` starts the embedded MCP HTTP server (dual transport — see below). |
+| `transport` | `stdio` | `stdio` | Reserved. The standalone `night-orch mcp` command speaks stdio; the HTTP server started by `run`/`web` exposes streamable HTTP and legacy SSE on the same port regardless of this value. |
+| `authTokenEnv` | string or `null` | `null` | Name of an environment variable holding a bearer token. When set and the env var is non-empty, every MCP request must present a matching `Authorization: Bearer …` header. **Required** when `httpHost` is non-loopback. |
+| `httpPort` | positive int | `3100` | Port the embedded MCP server listens on. |
+| `httpHost` | string | `127.0.0.1` | Host to bind. Loopback (`127.0.0.1`, `::1`, `localhost`) is always allowed; any other host requires `authTokenEnv` to be set. |
+
+### Transports
+
+The embedded MCP server exposes **both** transports on the same port so old and new clients can coexist:
+
+- **Streamable HTTP** (modern) — `POST /mcp`, with `Mcp-Session-Id` response/request header for session routing. Also `GET /mcp` (server-initiated SSE stream) and `DELETE /mcp` (client-initiated session teardown). This is the transport Claude Code's `type: "http"` client speaks.
+- **Legacy SSE** — `GET /sse` for the session handshake followed by `POST /mcp?sessionId=…` for follow-up JSON-RPC messages. Kept for backwards compatibility with existing proxies and older MCP clients.
+
+A liveness probe is available at `GET /health` and does not require auth.
+
+### Exposing MCP over a private network
+
+To let a remote Claude Code instance connect directly (e.g. over Tailscale), bind to a non-loopback address and configure a strong bearer token:
+
+```yaml
+mcp:
+  enabled: true
+  httpHost: 100.94.242.23    # e.g. Tailscale IP
+  httpPort: 8808
+  authTokenEnv: NIGHT_ORCH_MCP_TOKEN
+```
+
+```bash
+export NIGHT_ORCH_MCP_TOKEN=$(openssl rand -hex 32)
+```
+
+Client-side `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "night-orch": {
+      "type": "http",
+      "url": "http://100.94.242.23:8808/mcp",
+      "headers": { "Authorization": "Bearer ${NIGHT_ORCH_MCP_TOKEN}" }
+    }
+  }
+}
+```
+
+Non-loopback binding **without** `authTokenEnv` is rejected at startup — exposing mutation tools to an unauthenticated listener is never a supported configuration.
 
 ## `commentCommands`
 

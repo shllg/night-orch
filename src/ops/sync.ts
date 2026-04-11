@@ -11,11 +11,17 @@ import { createWorktreeManager } from '../git/worktree.js'
 import { resolveIssueRepo } from '../utils/issue-repo.js'
 import { logger } from '../utils/logger.js'
 import { nowUtcIso } from '../utils/time.js'
+import {
+  extractDecisionOutcomes,
+  findTerminalDecisionOutcome,
+  type PersistedDecisionOutcome,
+} from '../loop/checkpoint.js'
+import { parsePhaseData } from '../loop/checkpoint-schema.js'
 
 export interface SyncAction {
   repo: string
   issueNumber: number
-  action: 'completed' | 'closed' | 'label_corrected' | 'lease_expired' | 'stale_cleared'
+  action: 'completed' | 'closed' | 'label_corrected' | 'lease_expired' | 'stale_cleared' | 'finalizer_orphan'
   reason: string
   prNumber: number | null
 }
@@ -44,6 +50,29 @@ interface ActiveRunRow {
   branch_name: string | null
   worktree_path: string | null
   phase_data: string | null
+  ended_at: string | null
+}
+
+/**
+ * Return the first terminal decide outcome recorded on a run whose
+ * `ended_at` is still null — i.e. the finalizer persisted the decision but
+ * the process died before `run_finalizer` could write the run to its
+ * terminal status. Returns `null` when the row is either properly
+ * finalized (ended_at set) or still in flight (no terminal decision yet).
+ *
+ * Pure: inspects only the row's phase_data blob and ended_at column so
+ * unit tests can exercise it without mocking the DB.
+ */
+export function detectFinalizerOrphan(
+  run: Pick<ActiveRunRow, 'phase_data' | 'ended_at'>,
+): { phase: string; outcome: PersistedDecisionOutcome } | null {
+  if (run.ended_at !== null) return null
+
+  const parsed = parsePhaseData(run.phase_data)
+  if (!parsed.ok) return null
+
+  const outcomes = extractDecisionOutcomes(parsed.data)
+  return findTerminalDecisionOutcome(outcomes)
 }
 
 export class SyncEngine {
@@ -130,6 +159,16 @@ export class SyncEngine {
       return await this.markStale(run, dryRun, 'Cannot check GitHub state')
     }
 
+    // Finalizer-orphan check: a crash between decide checkpoint and
+    // finalize persists a terminal __decisionOutcomes entry but never
+    // writes ended_at. Catching this here (before the generic PR/issue
+    // state dance) preserves the explicit crash signature in the error
+    // message so `/orch continue` produces a correctly-seeded follow-up.
+    const orphan = detectFinalizerOrphan(run)
+    if (orphan) {
+      return await this.markFinalizerOrphan(run, dryRun, orphan, forge)
+    }
+
     // Check if PR exists and its state.
     const prState = await this.resolvePRState(forge, run)
     if (prState === 'merged') {
@@ -159,6 +198,18 @@ export class SyncEngine {
     } catch {
       logger.warn({ repo: run.repo }, 'Cannot create forge adapter for queued run reconciliation')
       return null
+    }
+
+    // Finalizer-orphan check: a queued run still carrying a terminal
+    // __decisionOutcomes entry with no ended_at is the exact signature
+    // of a process crash inside the finalizer window. Route it to the
+    // explicit orphan marker so the user's next `/orch continue` starts
+    // from a clean, continuable error state rather than the deadlock
+    // state (queued in DB + `orch:running` label on the forge) that
+    // discovery silently skips.
+    const orphan = detectFinalizerOrphan(run)
+    if (orphan) {
+      return await this.markFinalizerOrphan(run, dryRun, orphan, forge)
     }
 
     // Queued runs should not remain active if the issue has already been closed externally.
@@ -317,6 +368,43 @@ export class SyncEngine {
     return { repo: run.repo, issueNumber: run.issue_number, action: 'label_corrected', reason, prNumber: run.pr_number }
   }
 
+  private async markFinalizerOrphan(
+    run: ActiveRunRow,
+    dryRun: boolean,
+    orphan: { phase: string; outcome: PersistedDecisionOutcome },
+    forge: ForgeAdapter,
+  ): Promise<SyncAction> {
+    const actionLabel = orphan.outcome.action
+    const reason = `Orphaned after process restart during ${actionLabel} finalize — run /orch continue to resume`
+    if (!dryRun) {
+      this.runManager.update(run.id, {
+        status: 'error',
+        endedAt: nowUtcIso(),
+        lastError: reason,
+      })
+      const issueRepo = resolveIssueRepoFromRun(run)
+      this.leaseManager.release(issueRepo, run.issue_number)
+      if (issueRepo !== run.repo) {
+        this.leaseManager.release(run.repo, run.issue_number)
+      }
+      this.updateLabels(forge, run, 'error').catch((err) => {
+        logger.debug({ repo: run.repo, issue: run.issue_number, err }, 'Label update failed while marking finalizer orphan')
+      })
+    }
+    logger.warn(
+      {
+        runId: run.id,
+        repo: run.repo,
+        issue: run.issue_number,
+        prevStatus: run.status,
+        orphanPhase: orphan.phase,
+        orphanAction: actionLabel,
+      },
+      reason,
+    )
+    return { repo: run.repo, issueNumber: run.issue_number, action: 'finalizer_orphan', reason, prNumber: run.pr_number }
+  }
+
   private async markStale(run: ActiveRunRow, dryRun: boolean, reason: string): Promise<SyncAction> {
     if (!dryRun) {
       this.runManager.update(run.id, {
@@ -347,7 +435,7 @@ export class SyncEngine {
     return { repo: run.repo, issueNumber: run.issue_number, action: 'stale_cleared', reason, prNumber: null }
   }
 
-  private async updateLabels(forge: ForgeAdapter, run: ActiveRunRow, targetStatus: 'completed' | 'review_ready'): Promise<void> {
+  private async updateLabels(forge: ForgeAdapter, run: ActiveRunRow, targetStatus: 'completed' | 'review_ready' | 'error'): Promise<void> {
     const repoConfig = this.config.repos.find((r) => r.repo === run.repo)
     if (!repoConfig) return
 
@@ -429,7 +517,8 @@ export class SyncEngine {
              i.pr_number,
              i.branch_name,
              i.worktree_path,
-             r.phase_data
+             r.phase_data,
+             r.ended_at
            FROM issues i
            LEFT JOIN runs r ON r.id = i.current_run_id
            WHERE i.status IN ('running', 'queued', 'blocked', 'review_ready', 'error')
@@ -444,7 +533,8 @@ export class SyncEngine {
              r.pr_number,
              r.branch_name,
              r.worktree_path,
-             r.phase_data
+             r.phase_data,
+             r.ended_at
            FROM runs r
            WHERE r.status IN ('running', 'queued', 'blocked', 'review_ready', 'error')
              AND NOT EXISTS (
@@ -456,10 +546,10 @@ export class SyncEngine {
                  AND i.status = r.status
              )
          )
-         SELECT id, repo, issue_number, status, pr_number, branch_name, worktree_path, phase_data
+         SELECT id, repo, issue_number, status, pr_number, branch_name, worktree_path, phase_data, ended_at
          FROM canonical_active
          UNION ALL
-         SELECT id, repo, issue_number, status, pr_number, branch_name, worktree_path, phase_data
+         SELECT id, repo, issue_number, status, pr_number, branch_name, worktree_path, phase_data, ended_at
          FROM fallback_active`,
       )
       .all() as ActiveRunRow[]

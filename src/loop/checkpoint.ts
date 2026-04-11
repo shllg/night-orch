@@ -40,6 +40,38 @@ export interface PersistedDecisionOutcome {
   blockReason?: string | null
 }
 
+/**
+ * Extract the `__decisionOutcomes` map from an already-parsed `phase_data`
+ * object. Accepts any unknown shape and returns an empty map if the key is
+ * missing or malformed — callers can treat the result as authoritative.
+ */
+export function extractDecisionOutcomes(
+  phaseData: Record<string, unknown> | null | undefined,
+): Record<string, PersistedDecisionOutcome> {
+  if (!phaseData) return {}
+  const raw = phaseData[DECISION_OUTCOMES_KEY]
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  return raw as Record<string, PersistedDecisionOutcome>
+}
+
+/**
+ * Given a map of persisted decision outcomes, return the first terminal
+ * one (`publish` / `block` / `error`). `iterate` is deliberately excluded —
+ * it is not terminal, the crashed attempt went on to re-run earlier steps.
+ *
+ * Returns `null` when no decision has reached a terminal action yet.
+ */
+export function findTerminalDecisionOutcome(
+  outcomes: Record<string, PersistedDecisionOutcome>,
+): { phase: string; outcome: PersistedDecisionOutcome } | null {
+  for (const [phase, outcome] of Object.entries(outcomes)) {
+    if (outcome.action === 'publish' || outcome.action === 'block' || outcome.action === 'error') {
+      return { phase, outcome }
+    }
+  }
+  return null
+}
+
 export function clearResumeDecisionArtifacts(
   phaseData: Record<string, unknown> | null | undefined,
 ): Record<string, unknown> {
@@ -180,9 +212,7 @@ export class Checkpoint {
    */
   getDecisionOutcomes(runId: string): Record<string, PersistedDecisionOutcome> {
     const phaseData = this.getPhaseData(runId)
-    const raw = phaseData[DECISION_OUTCOMES_KEY]
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
-    return raw as Record<string, PersistedDecisionOutcome>
+    return extractDecisionOutcomes(phaseData)
   }
 
   /**
