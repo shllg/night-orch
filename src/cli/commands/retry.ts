@@ -2,6 +2,7 @@ import { loadConfig, resolveConfigPath, ConfigError } from '../../config/loader.
 import type { UpdateStrategy } from '../../git/worktree.js'
 import { initDatabase } from '../../state/db.js'
 import { RetryEngine } from '../../ops/retry.js'
+import { requestExternalPollCycle } from '../../poller/control.js'
 
 interface GlobalOpts {
   config?: string
@@ -69,7 +70,12 @@ export async function retryCommand(
       console.log('Note: retry is always fresh now; --fresh and --reset-plan are accepted for compatibility only.')
     }
     if (globalOpts?.immediate) console.log('Immediate processing started')
-    if (globalOpts?.dryRun) console.log('(dry run — no changes applied)')
+    if (globalOpts?.dryRun) {
+      console.log('(dry run — no changes applied)')
+    } else if (!globalOpts?.immediate) {
+      requestExternalPollCycle(config.storage.dbPath)
+      console.log('Requested an immediate poll cycle for any running daemon using this database.')
+    }
   } catch (err) {
     console.error((err as Error).message)
     process.exitCode = 1

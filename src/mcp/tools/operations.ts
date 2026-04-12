@@ -1,6 +1,7 @@
 import type { MCPDependencies } from '../server.js'
 import type { UpdateStrategy } from '../../git/worktree.js'
-import type { ManualPollTriggerResult } from '../../poller/control.js'
+import type { ExternalPollTriggerResult, ManualPollTriggerResult } from '../../poller/control.js'
+import { requestExternalPollCycle } from '../../poller/control.js'
 import { RetryEngine } from '../../ops/retry.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { CleanupEngine } from '../../ops/cleanup.js'
@@ -142,6 +143,12 @@ export async function handleContinue(
   }
 }
 
-function triggerPoller(deps: MCPDependencies): ManualPollTriggerResult | null {
-  return deps.poller ? deps.poller.triggerPollCycle() : null
+function triggerPoller(
+  deps: MCPDependencies,
+): ManualPollTriggerResult | ExternalPollTriggerResult {
+  if (deps.poller) {
+    return deps.poller.triggerPollCycle()
+  }
+
+  return requestExternalPollCycle(deps.config.storage.dbPath)
 }

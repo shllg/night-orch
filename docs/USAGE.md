@@ -540,7 +540,7 @@ Options: `--config`, `--trust-workspace`, `--dry-run`, `--log-level`
 
 Start the embedded web control surface. Serves the React/Tailwind frontend, a REST API under `/api/*`, and a WebSocket stream endpoint at `/ws`.
 
-By default, `web` runs in attach mode: no poll loop, no metrics server, and no embedded MCP server are started in the web process. Manual web operations (`poll`, `sync`, `cleanup`, `retry`, `continue`, `rebase`, `delete entry`, `labels-init`, runtime settings set/clear) remain available and execute in the web process.
+By default, `web` runs in attach mode: no poll loop, no metrics server, and no embedded MCP server are started in the web process. Manual web operations (`poll`, `sync`, `cleanup`, `retry`, `continue`, `rebase`, `delete entry`, `labels-init`, runtime settings set/clear) remain available and execute in the web process. Queued issue actions also signal any running daemon that uses the same database so the next poll cycle starts without waiting for the regular interval.
 Use `--standalone` to run poller + metrics + embedded MCP in the same process as the web server.
 Dashboard-level quick actions for `refresh`, `poll`, `sync`, and `cleanup` are in the sticky header; the Issues-page Operations panel is reserved for Deploy controls.
 Issue-specific actions (`retry`, `continue`, `rebase`, `delete entry`) are launched from each issue's detail page and require a confirmation dialog before execution. The detail page now includes a per-action strategy selector (`repo default`, `merge`, `rebase`) for manual retry/continue/rebase operations. Project labels initialization (`labels-init`) is launched from each project's detail page using the `Bootstrap Labels` action and also requires confirmation. `Delete entry` also supports a force toggle for active/shared-state cleanup scenarios.
@@ -597,13 +597,13 @@ Reconcile database state with GitHub: mark runs for merged PRs as completed, det
 
 Start a fresh retry of a blocked or errored issue from the latest base branch. The existing worktree/branch state is discarded and night-orch rebuilds from the source branch tip.
 
-Options: `--immediate` (process now instead of queuing), `--strategy merge|rebase` (override the repo default for this manual action). The legacy `--fresh` and `--reset-plan` flags are accepted for compatibility but have no additional effect.
+Options: `--immediate` (process now instead of queuing), `--strategy merge|rebase` (override the repo default for this manual action). The legacy `--fresh` and `--reset-plan` flags are accepted for compatibility but have no additional effect. When a retry is queued without `--immediate`, night-orch also signals any running daemon that uses the same database so the next poll cycle starts promptly.
 
 ### `night-orch rebase <repo> <issue>`
 
 Queue an explicit git rebase of the PR branch onto the latest base branch, then run verify commands to check if code adjustments are needed. If verify fails after a successful rebase, the issue is automatically re-queued for the coder to fix. If the rebase conflicts, the run blocks and waits for either `continue` or `retry`.
 
-Options: `--strategy merge|rebase` (override the action strategy for this manual rebase request). `merge` merges the latest base branch into the work branch; `rebase` replays commits and is still the default behavior for explicit rebase runs.
+Options: `--strategy merge|rebase` (override the action strategy for this manual rebase request). `merge` merges the latest base branch into the work branch; `rebase` replays commits and is still the default behavior for explicit rebase runs. Successful queueing also signals any running daemon that uses the same database to wake for the next cycle immediately.
 
 Also available as a comment command: `/orch rebase` (with `--check` by default).
 
@@ -613,7 +613,7 @@ Queue a context-aware second pass for blocked/review-ready/errored work. Night-o
 
 After an explicit rebase conflicts, `/orch continue` keeps the current branch state and asks the agent to resolve the conflict. Use `/orch retry` instead when you want to discard the current branch state and restart from the latest base branch.
 
-Options: `--strategy merge|rebase` (override the repo default for this manual action). This is most useful when resuming after a rebase conflict and you want the next manual update step to use a different strategy.
+Options: `--strategy merge|rebase` (override the repo default for this manual action). This is most useful when resuming after a rebase conflict and you want the next manual update step to use a different strategy. Successful queueing also signals any running daemon that uses the same database to wake for the next cycle immediately.
 
 Also available as a comment command: `/orch continue`.
 

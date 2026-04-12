@@ -3,6 +3,7 @@ import type { UpdateStrategy } from '../../git/worktree.js'
 import { initDatabase } from '../../state/db.js'
 import { createForgeAdapter } from '../../forge/factory.js'
 import { queueRebase } from '../../ops/rebase-and-check.js'
+import { requestExternalPollCycle } from '../../poller/control.js'
 
 interface GlobalOpts {
   config?: string
@@ -71,8 +72,10 @@ export async function rebaseCommand(
     })
 
     if (result.queued) {
+      requestExternalPollCycle(config.storage.dbPath)
       console.log(`Queued ${repo}#${num} for rebase and re-evaluation`)
       console.log('The poller will rebase, verify, and fix any issues on the next cycle.')
+      console.log('Requested an immediate poll cycle for any running daemon using this database.')
     } else {
       console.log(`Not queued: ${result.reason}`)
     }

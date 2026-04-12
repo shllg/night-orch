@@ -3,6 +3,7 @@ import type { UpdateStrategy } from '../../git/worktree.js'
 import { initDatabase } from '../../state/db.js'
 import { createForgeAdapter } from '../../forge/factory.js'
 import { queueContinue } from '../../ops/continue.js'
+import { requestExternalPollCycle } from '../../poller/control.js'
 
 interface GlobalOpts {
   config?: string
@@ -77,7 +78,9 @@ export async function continueCommand(
         console.log(`Continue preview for ${repo}#${num}`)
         console.log('(dry run — no changes applied)')
       } else {
+        requestExternalPollCycle(config.storage.dbPath)
         console.log(`Queued ${repo}#${num} for a continue pass`)
+        console.log('Requested an immediate poll cycle for any running daemon using this database.')
       }
       console.log(result.reason)
     } else {

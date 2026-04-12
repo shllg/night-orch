@@ -4,7 +4,7 @@ import { pollOnce } from '../../runner/poller.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { AutoCleanupScheduler } from '../../ops/auto-cleanup.js'
 import { ShutdownHandler } from '../../poller/shutdown.js'
-import { PollCycleController } from '../../poller/control.js'
+import { PollCycleController, resolveExternalPollTriggerPath } from '../../poller/control.js'
 import { createMetricsService, type MetricsService } from '../../metrics/service.js'
 import { createForgeAdapter } from '../../forge/factory.js'
 import { startMCPHttpServer } from '../../mcp/http.js'
@@ -79,7 +79,7 @@ export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
 
   // Start embedded MCP HTTP/SSE server
   let mcpServer: Server | undefined
-  const pollerControl = new PollCycleController()
+  const pollerControl = new PollCycleController(resolveExternalPollTriggerPath(baseConfig.storage.dbPath))
   if (runtimeConfig.mcp.enabled) {
     const forgeAdapters = new Map<string, ForgeAdapter>()
     for (const repo of runtimeConfig.repos) {

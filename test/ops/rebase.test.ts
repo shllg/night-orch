@@ -128,15 +128,18 @@ describe('autoRebase', () => {
       // rebase fails with conflict
       mockExeca.mockRejectedValueOnce({ stderr: 'CONFLICT (content): Merge conflict in src/main.ts' })
       // list conflicted files
-      mockExeca.mockResolvedValueOnce({ stdout: '' } as never)
+      mockExeca.mockResolvedValueOnce({ stdout: 'src/main.ts\nREADME.md\n' } as never)
       // rebase --abort succeeds
       mockExeca.mockResolvedValueOnce({ exitCode: 0 } as never)
 
       const result = await autoRebase(target, '/tmp/repo', 'rebase')
       expect(result.result).toBe('conflict')
-      expect(result.conflictAnalysis?.files).toEqual([])
-      expect(mockExeca).toHaveBeenCalledTimes(5)
-      expect(mockExeca).toHaveBeenNthCalledWith(5,
+      expect(result.conflictAnalysis?.files).toEqual(['src/main.ts', 'README.md'])
+      expect(result.conflictAnalysis?.summary).toContain('src/main.ts, README.md')
+      expect(result.conflictAnalysis?.summary).toContain('resolve manually and continue')
+      expect(result.conflictAnalysis?.summary).toContain('continue with merge strategy')
+      expect(result.conflictAnalysis?.summary).toContain('abort and re-open the issue')
+      expect(mockExeca).toHaveBeenCalledWith(
         'git',
         ['rebase', '--abort'],
         expect.any(Object),

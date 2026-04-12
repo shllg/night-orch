@@ -4,7 +4,7 @@ import { initDatabase } from '../../state/db.js'
 import { pollOnce } from '../../runner/poller.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { ShutdownHandler } from '../../poller/shutdown.js'
-import { PollCycleController } from '../../poller/control.js'
+import { PollCycleController, resolveExternalPollTriggerPath } from '../../poller/control.js'
 import { createMetricsService, type MetricsService } from '../../metrics/service.js'
 import { createForgeAdapter } from '../../forge/factory.js'
 import type { ForgeAdapter } from '../../forge/types.js'
@@ -112,7 +112,9 @@ export async function webCommand(
   }
 
   // Start optional embedded MCP server (standalone mode only).
-  const pollerControl = standalone ? new PollCycleController() : null
+  const pollerControl = standalone
+    ? new PollCycleController(resolveExternalPollTriggerPath(baseConfig.storage.dbPath))
+    : null
   let mcpServer: Server | undefined
   if (standalone && runtimeConfig.mcp.enabled) {
     try {
