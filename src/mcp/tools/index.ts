@@ -105,6 +105,7 @@ export function registerTools(): ToolDefinition[] {
           issueNumber: { type: 'number', description: 'Issue number to retry' },
           resetPlan: { type: 'boolean', description: 'Deprecated compatibility field. Retry already starts fresh.', default: false },
           fresh: { type: 'boolean', description: 'Deprecated compatibility field. Retry already starts fresh.', default: false },
+          strategy: { type: 'string', description: 'Override strategy for this action', enum: ['merge', 'rebase'] },
           authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
         },
         required: ['repo', 'issueNumber'],
@@ -261,15 +262,16 @@ export function registerTools(): ToolDefinition[] {
     },
     {
       name: 'night-orch-stream-events',
-      description: 'Get recent run log events for a run, including system and agent messages.',
+      description: 'Get recent run log events for a run or issue, including system, user, and agent messages.',
       inputSchema: {
         type: 'object',
         properties: {
           runId: { type: 'string', description: 'Run ID (e.g., run-abc123)' },
+          repo: { type: 'string', description: 'Repository (owner/name). Use with issueNumber for issue-scoped event history.' },
+          issueNumber: { type: 'number', description: 'Issue number. Use with repo for issue-scoped event history.' },
           since: { type: 'number', description: 'Only return events with id > since' },
           limit: { type: 'number', description: 'Max events (default: 50, max: 200)', default: 50 },
         },
-        required: ['runId'],
       },
     },
     {
@@ -281,6 +283,7 @@ export function registerTools(): ToolDefinition[] {
           repo: { type: 'string', description: 'Repository (owner/name)' },
           issueNumber: { type: 'number', description: 'Issue number' },
           check: { type: 'boolean', description: 'Run verify commands after rebase (default: true)', default: true },
+          strategy: { type: 'string', description: 'Override strategy for this action', enum: ['merge', 'rebase'] },
           authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
         },
         required: ['repo', 'issueNumber'],
@@ -294,6 +297,7 @@ export function registerTools(): ToolDefinition[] {
         properties: {
           repo: { type: 'string', description: 'Repository (owner/name)' },
           issueNumber: { type: 'number', description: 'Issue number' },
+          strategy: { type: 'string', description: 'Override strategy for this action', enum: ['merge', 'rebase'] },
           authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
         },
         required: ['repo', 'issueNumber'],
@@ -338,7 +342,7 @@ export async function handleToolCall(
     case 'night-orch-cost-report':
       return handleCostReport(args as { days?: number }, runtimeDeps)
     case 'night-orch-retry':
-      return handleRetry(args as { repo: string; issueNumber: number; resetPlan?: boolean; fresh?: boolean; authToken?: string }, runtimeDeps)
+      return handleRetry(args as { repo: string; issueNumber: number; resetPlan?: boolean; fresh?: boolean; strategy?: 'merge' | 'rebase'; authToken?: string }, runtimeDeps)
     case 'night-orch-cost-override':
       return handleCostOverride(
         args as { repo: string; issueNumber: number; amountUsd?: number; clear?: boolean; authToken?: string },
@@ -372,11 +376,11 @@ export async function handleToolCall(
     case 'night-orch-list-issues':
       return handleListIssues(args as { repo: string; filter?: string }, runtimeDeps)
     case 'night-orch-stream-events':
-      return handleStreamEvents(args as { runId: string; since?: number; limit?: number }, runtimeDeps)
+      return handleStreamEvents(args as { runId?: string; repo?: string; issueNumber?: number; since?: number; limit?: number }, runtimeDeps)
     case 'night-orch-rebase':
-      return handleRebase(args as { repo: string; issueNumber: number; check?: boolean; authToken?: string }, runtimeDeps)
+      return handleRebase(args as { repo: string; issueNumber: number; check?: boolean; strategy?: 'merge' | 'rebase'; authToken?: string }, runtimeDeps)
     case 'night-orch-continue':
-      return handleContinue(args as { repo: string; issueNumber: number; authToken?: string }, runtimeDeps)
+      return handleContinue(args as { repo: string; issueNumber: number; strategy?: 'merge' | 'rebase'; authToken?: string }, runtimeDeps)
     case 'night-orch-update':
       return handleUpdate(args as { authToken?: string }, runtimeDeps)
     default:

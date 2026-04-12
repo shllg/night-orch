@@ -9,7 +9,7 @@ import type { AgentEvent } from '../events/types.js'
 import type { AgentObservability } from '../events/observability.js'
 import type { RunContext } from '../loop/types.js'
 import type { EnvSetupResult } from '../environment/manager.js'
-import type { WorktreeManager } from '../git/worktree.js'
+import type { UpdateStrategy, WorktreeManager } from '../git/worktree.js'
 
 import { blocked } from '../loop/state.js'
 import { executeLoop } from '../loop/engine.js'
@@ -263,6 +263,7 @@ export async function dispatchAttempt(
 
     const operationIntent = resolveOperationIntent(activeRun)
     const controlPayload = resolveControlPayload(activeRun)
+    const updateStrategyOverride = resolveUpdateStrategyOverride(controlPayload)
     const isRebaseRun = operationIntent === 'rebase'
     const isContinueRun = operationIntent === 'continue'
     const isFreshRetry = operationIntent === 'retry'
@@ -270,7 +271,9 @@ export async function dispatchAttempt(
 
     // Check if prior run left tainted work that should be discarded
     const planningMode = isPlanningIssue(discoveredIssue.issue.labels, repoConfigForRun)
-    const preserveBranchState = Boolean(controlPayload?.preserveBranchState) || isContinueRun || isRebaseRun
+    const preserveBranchState = Boolean(controlPayload?.preserveBranchState)
+      || isRebaseRun
+      || (isContinueRun && updateStrategyOverride === undefined)
     const resetToBase = isFreshRetry
       || (operationIntent === 'auto'
         && !isRebaseRun
@@ -284,7 +287,7 @@ export async function dispatchAttempt(
       worktreePath,
       resetToBase,
       preserveBranchState,
-      updateStrategy: repoConfig.updateStrategy,
+      updateStrategy: updateStrategyOverride ?? repoConfig.updateStrategy,
     })
 
     // Execute rebase if this is a rebase-queued run
@@ -301,6 +304,7 @@ export async function dispatchAttempt(
         pollerNotifier,
         botUser,
         controlPayload,
+        updateStrategyOverride,
       })
       if (rebaseOutcome !== 'continue-to-loop') {
         outcome = rebaseOutcome
@@ -598,6 +602,7 @@ interface HandleRebaseRunParams {
   pollerNotifier: PollerNotifier
   botUser: string
   controlPayload: Record<string, unknown> | null
+  updateStrategyOverride?: UpdateStrategy
 }
 
 type RebaseOutcome = 'continue-to-loop' | 'processed' | 'errored'
@@ -615,6 +620,7 @@ async function handleRebaseRun(params: HandleRebaseRunParams): Promise<RebaseOut
     pollerNotifier,
     botUser,
     controlPayload,
+    updateStrategyOverride,
   } = params
 
   logger.info(
@@ -631,6 +637,7 @@ async function handleRebaseRun(params: HandleRebaseRunParams): Promise<RebaseOut
     discoveredIssue.issue.number,
     verifyCommands,
     controlPayload?.['checkAfter'] !== false,
+    updateStrategyOverride ?? 'rebase',
   )
 
   if (rebaseResult.conflict) {
@@ -730,4 +737,11 @@ async function handleRebaseRun(params: HandleRebaseRunParams): Promise<RebaseOut
   }
 
   return 'continue-to-loop'
+}
+
+function resolveUpdateStrategyOverride(
+  controlPayload: Record<string, unknown> | null,
+): UpdateStrategy | undefined {
+  const raw = controlPayload?.['updateStrategy']
+  return raw === 'merge' || raw === 'rebase' ? raw : undefined
 }

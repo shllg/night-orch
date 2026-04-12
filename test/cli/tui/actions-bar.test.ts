@@ -13,11 +13,12 @@ describe('buildActionHints', () => {
       runsFocused: false,
       projectsFocused: false,
       autoRefresh: true,
+      manualStrategy: null,
     }))
 
     expect(sections.navigation).toContain('[1-5]tabs [h/l]tabs [j/k]select issue [o/enter]open')
     expect(sections.global).toContain('[q]quit [r]refresh [p]poll [s]sync [L]labels-init [D]cleanup(confirm)')
-    expect(sections.issue).toContain('[t/T]retry [c]continue [_]rebase [X]delete entry [$]cost-override')
+    expect(sections.issue).toContain('[t/T]retry [c]continue [_]rebase [m]strategy:default [X]delete entry [$]cost-override')
   })
 
   it('keeps issue actions visible in monitor mode while hiding poll/sync/cleanup', () => {
@@ -28,10 +29,11 @@ describe('buildActionHints', () => {
       projectsFocused: false,
       autoRefresh: true,
       controlsEnabled: false,
+      manualStrategy: null,
     }))
 
     expect(sections.global).toBe('[q]quit [r]refresh')
-    expect(sections.issue).toContain('[t/T]retry [c]continue [_]rebase [X]delete entry [$]cost-override')
+    expect(sections.issue).toContain('[t/T]retry [c]continue [_]rebase [m]strategy:default [X]delete entry [$]cost-override')
   })
 
   it('shows focused run controls when detail view is open', () => {
@@ -41,6 +43,7 @@ describe('buildActionHints', () => {
       runsFocused: true,
       projectsFocused: false,
       autoRefresh: true,
+      manualStrategy: null,
     }))
 
     expect(sections.navigation).toContain('[1-5]tabs [h/l]tabs [j/k]scroll run')
@@ -55,6 +58,7 @@ describe('buildActionHints', () => {
       runsFocused: false,
       projectsFocused: false,
       autoRefresh: false,
+      manualStrategy: null,
     }))
 
     expect(sections.navigation).toBe('[1-5]tabs [h/l]tabs')
@@ -70,6 +74,7 @@ describe('buildActionHints', () => {
       runsFocused: true,
       projectsFocused: false,
       autoRefresh: true,
+      manualStrategy: null,
     }))
 
     expect(sections.global).toContain('[q]quit [r]refresh [a]toggle auto-refresh')
@@ -83,6 +88,7 @@ describe('buildActionHints', () => {
       runsFocused: false,
       projectsFocused: false,
       autoRefresh: true,
+      manualStrategy: null,
     }))
 
     expect(sections.navigation).toContain('[j/k]select project [o/enter]open')
@@ -97,6 +103,7 @@ describe('buildActionHints', () => {
       runsFocused: false,
       projectsFocused: true,
       autoRefresh: true,
+      manualStrategy: null,
     }))
 
     expect(sections.navigation).toBe('[1-5]tabs [h/l]tabs')
@@ -111,6 +118,7 @@ describe('buildActionHints', () => {
       runsFocused: false,
       projectsFocused: false,
       autoRefresh: false,
+      manualStrategy: null,
     }))
 
     expect(sections.navigation).toContain('[j/k]select log [J/K]scroll raw')
@@ -125,6 +133,7 @@ describe('buildActionHints', () => {
       runsFocused: false,
       projectsFocused: false,
       autoRefresh: true,
+      manualStrategy: null,
     }))
 
     expect(sections.navigation).toContain('[1-5]tabs [h/l]tabs [j/k]select setting')

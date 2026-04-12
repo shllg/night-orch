@@ -1,3 +1,4 @@
+import { normalizeRunStatus } from '../../components/issue-row/view-model.js'
 import type { TabId } from './types.js'
 
 export const TABS: Array<{ id: TabId; hotkey: string; label: string }> = [
@@ -10,7 +11,7 @@ export const TABS: Array<{ id: TabId; hotkey: string; label: string }> = [
 
 export type TuiColor = 'white' | 'gray' | 'yellow' | 'cyan' | 'magenta' | 'green' | 'red'
 
-export const STATUS_COLORS: Record<string, TuiColor> = {
+export const STATUS_COLORS: Record<ReturnType<typeof normalizeRunStatus>, TuiColor> = {
   running: 'yellow',
   queued: 'cyan',
   review_ready: 'magenta',
@@ -47,7 +48,18 @@ const PHASE_COLORS: Record<string, TuiColor> = {
 }
 
 export function colorForRunStatus(status: string): TuiColor {
-  return STATUS_COLORS[status] ?? 'white'
+  const normalized = status.trim().toLowerCase()
+  if (
+    normalized !== 'queued'
+    && normalized !== 'running'
+    && normalized !== 'review_ready'
+    && normalized !== 'completed'
+    && normalized !== 'blocked'
+    && normalized !== 'error'
+  ) {
+    return 'white'
+  }
+  return STATUS_COLORS[normalizeRunStatus(status)] ?? 'white'
 }
 
 export function colorForPhase(phase: string | null | undefined): TuiColor {

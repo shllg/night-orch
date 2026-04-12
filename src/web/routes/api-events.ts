@@ -49,6 +49,33 @@ export async function handleWsMessage(
     return
   }
 
+  if (command.type === 'subscribe-issue-events') {
+    const repo = typeof command.repo === 'string' ? command.repo.trim() : ''
+    const issueNumber = typeof command.issueNumber === 'number' ? command.issueNumber : Number.NaN
+    if (!repo || !Number.isInteger(issueNumber) || issueNumber < 1) {
+      sendWebsocket(ws, { type: 'error', error: 'repo and issueNumber are required for subscribe-issue-events' })
+      return
+    }
+
+    const cursor = Number.isFinite(command.since) ? Math.max(0, Math.floor(command.since ?? 0)) : 0
+    state.issueSubscriptions.set(`${repo}#${issueNumber}`, { repo, issueNumber, since: cursor })
+    sendWebsocket(ws, { type: 'subscribed', payload: { repo, issueNumber, since: cursor } })
+    return
+  }
+
+  if (command.type === 'unsubscribe-issue-events') {
+    const repo = typeof command.repo === 'string' ? command.repo.trim() : ''
+    const issueNumber = typeof command.issueNumber === 'number' ? command.issueNumber : Number.NaN
+    if (!repo || !Number.isInteger(issueNumber) || issueNumber < 1) {
+      sendWebsocket(ws, { type: 'error', error: 'repo and issueNumber are required for unsubscribe-issue-events' })
+      return
+    }
+
+    state.issueSubscriptions.delete(`${repo}#${issueNumber}`)
+    sendWebsocket(ws, { type: 'unsubscribed', payload: { repo, issueNumber } })
+    return
+  }
+
   if (command.type === 'subscribe-agent-session-events') {
     const sessionId = typeof command.sessionId === 'string' ? command.sessionId : ''
     if (!sessionId) {
@@ -120,6 +147,51 @@ export async function publishRunSubscriptions(
       sendWebsocket(ws, {
         type: 'error',
         error: `Failed to stream events for ${runId}: ${(err as Error).message}`,
+      })
+    }
+  }
+}
+
+export async function publishIssueSubscriptions(
+  ws: WebSocket,
+  state: WsClientState,
+  deps: MCPDependencies,
+): Promise<void> {
+  for (const [subscriptionKey, subscription] of state.issueSubscriptions.entries()) {
+    try {
+      const result = await handleToolCall(
+        'night-orch-stream-events',
+        { repo: subscription.repo, issueNumber: subscription.issueNumber, since: subscription.since, limit: 200 },
+        deps,
+      )
+
+      const eventPayload = toRunEventPayload(result)
+      if (!eventPayload) {
+        continue
+      }
+
+      state.issueSubscriptions.set(subscriptionKey, {
+        ...subscription,
+        since: eventPayload.lastEventId,
+      })
+
+      if (eventPayload.events.length === 0) {
+        continue
+      }
+
+      sendWebsocket(ws, {
+        type: 'issue-events',
+        payload: {
+          repo: subscription.repo,
+          issueNumber: subscription.issueNumber,
+          events: eventPayload.events,
+          lastEventId: eventPayload.lastEventId,
+        },
+      })
+    } catch (err) {
+      sendWebsocket(ws, {
+        type: 'error',
+        error: `Failed to stream events for ${subscription.repo}#${subscription.issueNumber}: ${(err as Error).message}`,
       })
     }
   }

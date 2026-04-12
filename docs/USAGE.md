@@ -543,8 +543,9 @@ Start the embedded web control surface. Serves the React/Tailwind frontend, a RE
 By default, `web` runs in attach mode: no poll loop, no metrics server, and no embedded MCP server are started in the web process. Manual web operations (`poll`, `sync`, `cleanup`, `retry`, `continue`, `rebase`, `delete entry`, `labels-init`, runtime settings set/clear) remain available and execute in the web process.
 Use `--standalone` to run poller + metrics + embedded MCP in the same process as the web server.
 Dashboard-level quick actions for `refresh`, `poll`, `sync`, and `cleanup` are in the sticky header; the Issues-page Operations panel is reserved for Deploy controls.
-Issue-specific actions (`retry`, `continue`, `rebase`, `delete entry`) are launched from each issue's detail page and require a confirmation dialog before execution. Project labels initialization (`labels-init`) is launched from each project's detail page using the `Bootstrap Labels` action and also requires confirmation. `Delete entry` also supports a force toggle for active/shared-state cleanup scenarios.
-Run detail pages render line-oriented run logs that combine system and agent events in one ordered stream.
+Issue-specific actions (`retry`, `continue`, `rebase`, `delete entry`) are launched from each issue's detail page and require a confirmation dialog before execution. The detail page now includes a per-action strategy selector (`repo default`, `merge`, `rebase`) for manual retry/continue/rebase operations. Project labels initialization (`labels-init`) is launched from each project's detail page using the `Bootstrap Labels` action and also requires confirmation. `Delete entry` also supports a force toggle for active/shared-state cleanup scenarios.
+Issue detail pages render line-oriented issue history rather than only the currently selected run's log. The stream keeps prior attempts visible after `continue`/`retry`, and manual actions are recorded as highlighted `user_action` entries alongside system and agent events.
+The web client now keeps the websocket open across auth-token refreshes, uses heartbeat-based liveness detection, and reconnects with exponential backoff instead of a fixed 2-second loop.
 On narrow mobile viewports, the top-line dashboard metric cards render in a compact 2-column layout so the runs list stays the primary focus on the Issues page.
 The Issues page run list now includes history filters (`Active`, `Completed`, `Failed`, `All`) plus a `Load more` control for paginated archive browsing (20 runs per page).
 
@@ -576,7 +577,7 @@ Show current state: active runs, active leases, daily cost against budget, recen
 
 ### `night-orch tui`
 
-Live-updating terminal dashboard. Refreshes every 2 seconds. Shows active runs, merge queue, cost bar, recent history, issue actions (`poll`, `sync`, `cleanup`, `retry`, `continue`, `rebase`, `delete entry`), and a Settings tab (`5`) for runtime overrides (read-only keys are listed but cannot be changed). Press Ctrl+C to exit.
+Live-updating terminal dashboard. Refreshes every 2 seconds. Shows active runs, merge queue, cost bar, recent history, issue actions (`poll`, `sync`, `cleanup`, `retry`, `continue`, `rebase`, `delete entry`), and a Settings tab (`5`) for runtime overrides (read-only keys are listed but cannot be changed). Press `m` on the Runs list to cycle the manual action strategy override (`default` → `merge` → `rebase`) used by retry/continue/rebase. Press Ctrl+C to exit.
 
 ### `night-orch settings`
 
@@ -596,13 +597,13 @@ Reconcile database state with GitHub: mark runs for merged PRs as completed, det
 
 Start a fresh retry of a blocked or errored issue from the latest base branch. The existing worktree/branch state is discarded and night-orch rebuilds from the source branch tip.
 
-Options: `--immediate` (process now instead of queuing). The legacy `--fresh` and `--reset-plan` flags are accepted for compatibility but have no additional effect.
+Options: `--immediate` (process now instead of queuing), `--strategy merge|rebase` (override the repo default for this manual action). The legacy `--fresh` and `--reset-plan` flags are accepted for compatibility but have no additional effect.
 
 ### `night-orch rebase <repo> <issue>`
 
 Queue an explicit git rebase of the PR branch onto the latest base branch, then run verify commands to check if code adjustments are needed. If verify fails after a successful rebase, the issue is automatically re-queued for the coder to fix. If the rebase conflicts, the run blocks and waits for either `continue` or `retry`.
 
-Options: `--no-check` (skip verify commands after rebase — just rebase and push).
+Options: `--strategy merge|rebase` (override the action strategy for this manual rebase request). `merge` merges the latest base branch into the work branch; `rebase` replays commits and is still the default behavior for explicit rebase runs.
 
 Also available as a comment command: `/orch rebase` (with `--check` by default).
 
@@ -611,6 +612,8 @@ Also available as a comment command: `/orch rebase` (with `--check` by default).
 Queue a context-aware second pass for blocked/review-ready/errored work. Night-orch collects the latest PR context (review comments, CI failures, mergeability state) and resumes the existing branch with that context.
 
 After an explicit rebase conflicts, `/orch continue` keeps the current branch state and asks the agent to resolve the conflict. Use `/orch retry` instead when you want to discard the current branch state and restart from the latest base branch.
+
+Options: `--strategy merge|rebase` (override the repo default for this manual action). This is most useful when resuming after a rebase conflict and you want the next manual update step to use a different strategy.
 
 Also available as a comment command: `/orch continue`.
 

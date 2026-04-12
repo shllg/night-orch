@@ -57,6 +57,13 @@ export function describeEventData(data: RunEvent['data']): string {
 }
 
 export function describeRunEvent(event: RunEvent): string {
+  if (event.source === 'user' && event.type === 'user_action') {
+    const kind = typeof event.data?.['kind'] === 'string' ? event.data['kind'] : 'action'
+    const strategy = typeof event.data?.['strategy'] === 'string' ? ` (${event.data['strategy']})` : ''
+    const actor = typeof event.data?.['actor'] === 'string' ? ` by ${event.data['actor']}` : ''
+    return `${kind}${strategy}${actor}`
+  }
+
   const phase = event.phase ?? '-'
   const role = event.role ?? event.source
   const detail = describeEventData(event.data)

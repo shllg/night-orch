@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 
-export type RunLogSource = 'system' | 'agent'
+export type RunLogSource = 'system' | 'agent' | 'user'
 
 export interface RunLogEventRecord {
   id: number
@@ -93,13 +93,79 @@ export function loadRunLogEvents(
   return rows.map((row) => ({
     id: row.id,
     runId: row.run_id,
-    source: row.source === 'agent' ? 'agent' : 'system',
+    source: normalizeEventSource(row.source),
     phase: row.phase,
     role: row.role,
     type: row.event_type,
     data: parseEventData(row.data),
     timestamp: row.created_at,
   }))
+}
+
+export function loadIssueLogEvents(
+  db: Database.Database,
+  repo: string,
+  issueNumber: number,
+  since: number,
+  limit: number,
+): RunLogEventRecord[] {
+  const rows = since > 0
+    ? db
+      .prepare(
+        `SELECT e.id, e.run_id, e.source, e.phase, e.role, e.event_type, e.data, e.created_at
+         FROM run_log_events e
+         INNER JOIN runs r ON r.id = e.run_id
+         WHERE r.repo = ? AND r.issue_number = ? AND e.id > ?
+         ORDER BY e.id ASC
+         LIMIT ?`,
+      )
+      .all(repo, issueNumber, since, limit) as RawRunLogEventRow[]
+    : db
+      .prepare(
+        `SELECT e.id, e.run_id, e.source, e.phase, e.role, e.event_type, e.data, e.created_at
+         FROM run_log_events e
+         INNER JOIN runs r ON r.id = e.run_id
+         WHERE r.repo = ? AND r.issue_number = ?
+         ORDER BY e.id ASC
+         LIMIT ?`,
+      )
+      .all(repo, issueNumber, limit) as RawRunLogEventRow[]
+
+  return rows.map((row) => ({
+    id: row.id,
+    runId: row.run_id,
+    source: normalizeEventSource(row.source),
+    phase: row.phase,
+    role: row.role,
+    type: row.event_type,
+    data: parseEventData(row.data),
+    timestamp: row.created_at,
+  }))
+}
+
+export function recordUserAction(
+  db: Database.Database,
+  params: {
+    runId: string
+    kind: string
+    actor: string
+    details?: Record<string, unknown> | null
+    timestamp?: string
+  },
+): void {
+  insertRunLogEvent(db, {
+    runId: params.runId,
+    source: 'user',
+    phase: null,
+    role: params.actor,
+    type: 'user_action',
+    data: {
+      kind: params.kind,
+      actor: params.actor,
+      ...(params.details ?? {}),
+    },
+    timestamp: params.timestamp ?? new Date().toISOString(),
+  })
 }
 
 function parseEventData(raw: string | null): Record<string, unknown> | null {
@@ -113,4 +179,11 @@ function parseEventData(raw: string | null): Record<string, unknown> | null {
   } catch {
     return null
   }
+}
+
+function normalizeEventSource(source: string): RunLogSource {
+  if (source === 'agent' || source === 'user') {
+    return source
+  }
+  return 'system'
 }

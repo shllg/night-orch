@@ -1,4 +1,5 @@
 import { loadConfig, resolveConfigPath, ConfigError } from '../../config/loader.js'
+import type { UpdateStrategy } from '../../git/worktree.js'
 import { initDatabase } from '../../state/db.js'
 import { RetryEngine } from '../../ops/retry.js'
 
@@ -13,6 +14,7 @@ interface RetryCommandOpts extends GlobalOpts {
   immediate?: boolean
   resetPlan?: boolean
   fresh?: boolean
+  strategy?: UpdateStrategy
 }
 
 export async function retryCommand(
@@ -20,6 +22,12 @@ export async function retryCommand(
   issueNumber: string,
   globalOpts?: RetryCommandOpts,
 ): Promise<void> {
+  const strategy = normalizeStrategy(globalOpts?.strategy)
+  if (globalOpts?.strategy && !strategy) {
+    console.error(`Invalid strategy: ${globalOpts.strategy}. Expected merge or rebase.`)
+    process.exitCode = 1
+    return
+  }
   const num = parseInt(issueNumber, 10)
   if (isNaN(num)) {
     console.error(`Invalid issue number: ${issueNumber}`)
@@ -52,6 +60,8 @@ export async function retryCommand(
       resetPlan: true,
       resetBranch: true,
       dryRun: globalOpts?.dryRun ?? false,
+      strategyOverride: strategy,
+      actor: 'cli',
     })
 
     console.log(`Fresh retry queued for ${repo}#${num}`)
@@ -66,4 +76,8 @@ export async function retryCommand(
   } finally {
     db.close()
   }
+}
+
+function normalizeStrategy(value: unknown): UpdateStrategy | undefined {
+  return value === 'merge' || value === 'rebase' ? value : undefined
 }

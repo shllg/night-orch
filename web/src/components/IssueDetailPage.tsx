@@ -1,8 +1,11 @@
 import { type ReactElement, useEffect, useMemo, useRef, useState } from 'react'
 
 import { describeRunEvent, formatTimestamp, truncate } from '../lib/format.js'
+import { STATUS_BADGE_TONE } from '../lib/run-tone.js'
 import { type RunEvent, type RunSummary } from '../types/dashboard.js'
 import { ActionButton } from './ActionButton.js'
+
+type UpdateStrategy = 'merge' | 'rebase'
 
 interface IssueDetailPageProps {
   run: RunSummary | null
@@ -10,9 +13,9 @@ interface IssueDetailPageProps {
   runEvents: RunEvent[]
   operationsEnabled: boolean
   activeOperation: string | null
-  onRetry: (run: RunSummary) => void
-  onRebase: (run: RunSummary) => void
-  onContinue: (run: RunSummary) => void
+  onRetry: (run: RunSummary, strategy: UpdateStrategy | null) => void
+  onRebase: (run: RunSummary, strategy: UpdateStrategy | null) => void
+  onContinue: (run: RunSummary, strategy: UpdateStrategy | null) => void
   onDeleteEntry: (run: RunSummary, force: boolean) => void
   onResetCost: (run: RunSummary) => void
   onBack: () => void
@@ -36,6 +39,7 @@ export function IssueDetailPage({
 }: IssueDetailPageProps): ReactElement {
   const [autoScroll, setAutoScroll] = useState(true)
   const [forceDelete, setForceDelete] = useState(false)
+  const [actionStrategy, setActionStrategy] = useState<'default' | UpdateStrategy>('default')
   const eventsContainerRef = useRef<HTMLDivElement | null>(null)
 
   const visibleEvents = useMemo(
@@ -52,6 +56,7 @@ export function IssueDetailPage({
   useEffect(() => {
     setAutoScroll(true)
     setForceDelete(false)
+    setActionStrategy('default')
   }, [runId])
 
   return (
@@ -89,7 +94,7 @@ export function IssueDetailPage({
                 {truncate(resolveIssueTitle(run.issueTitle), 200)}
               </p>
               <div className="mt-2 flex flex-wrap gap-2 text-xs text-base-content/80">
-                <span className="badge badge-sm">{run.status.replaceAll('_', ' ')}</span>
+                <span className={`badge badge-sm ${STATUS_BADGE_TONE[run.status]}`}>{run.status.replaceAll('_', ' ')}</span>
                 <span className="badge badge-sm">phase {truncate(run.phase?.trim() || '-', 28)}</span>
                 <span className="badge badge-sm">iter {run.iterations}</span>
                 <span className="badge badge-sm">${run.costUsd.toFixed(2)}</span>
@@ -123,19 +128,35 @@ export function IssueDetailPage({
                 disabled={!operationsEnabled}
                 className={`mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 ${!operationsEnabled ? 'opacity-60' : ''}`}
               >
+                <label className="form-control sm:col-span-2">
+                  <div className="label py-0 pb-1">
+                    <span className="label-text text-xs uppercase tracking-wide text-base-content/70">
+                      Update Strategy
+                    </span>
+                  </div>
+                  <select
+                    className="select select-bordered select-sm w-full bg-base-100/80"
+                    value={actionStrategy}
+                    onChange={(event) => setActionStrategy(event.target.value as 'default' | UpdateStrategy)}
+                  >
+                    <option value="default">Repo default</option>
+                    <option value="merge">Merge</option>
+                    <option value="rebase">Rebase</option>
+                  </select>
+                </label>
                 <ActionButton
                   busy={activeOperation === 'retry'}
-                  onClick={() => onRetry(run)}
+                  onClick={() => onRetry(run, actionStrategy === 'default' ? null : actionStrategy)}
                   label="Queue Retry"
                 />
                 <ActionButton
                   busy={activeOperation === 'rebase'}
-                  onClick={() => onRebase(run)}
+                  onClick={() => onRebase(run, actionStrategy === 'default' ? null : actionStrategy)}
                   label="Queue Rebase"
                 />
                 <ActionButton
                   busy={activeOperation === 'continue'}
-                  onClick={() => onContinue(run)}
+                  onClick={() => onContinue(run, actionStrategy === 'default' ? null : actionStrategy)}
                   label="Queue Continue Pass"
                 />
                 <ActionButton
@@ -166,7 +187,7 @@ export function IssueDetailPage({
               </div>
             ) : visibleEvents.length === 0 ? (
               <div className="alert border border-base-300/60 bg-base-100/70 text-sm">
-                <span>No events yet for this run.</span>
+                <span>No events yet for this issue.</span>
               </div>
             ) : (
               <section className="min-w-0 rounded-box border border-base-300/70 bg-base-100/70 px-3 py-3">
@@ -188,10 +209,25 @@ export function IssueDetailPage({
                   className="mt-3 max-h-[70vh] min-w-0 overflow-x-hidden overflow-y-auto rounded-box border border-base-300/60 bg-base-200/50 p-3 pr-1 font-mono text-xs"
                 >
                   {visibleEvents.map((event) => (
-                    <div key={event.id} className="grid min-w-0 grid-cols-[auto_auto_1fr] gap-x-3 gap-y-1 border-b border-base-300/30 py-1 last:border-b-0">
+                    <div
+                      key={event.id}
+                      className={`grid min-w-0 grid-cols-[auto_auto_1fr] gap-x-3 gap-y-1 border-b py-1 last:border-b-0 ${
+                        event.source === 'user'
+                          ? 'rounded-md border-l-2 border-l-accent border-b-base-300/30 bg-accent/5 px-2'
+                          : 'border-b-base-300/30'
+                      }`}
+                    >
                       <span className="text-base-content/55">{formatTimestamp(event.timestamp)}</span>
-                      <span className={`break-all ${event.source === 'system' ? 'text-secondary' : 'text-info'}`}>
-                        {event.source === 'system' ? 'system' : event.role ?? 'agent'}
+                      <span
+                        className={`break-all ${
+                          event.source === 'system'
+                            ? 'text-secondary'
+                            : event.source === 'user'
+                              ? 'text-accent'
+                              : 'text-info'
+                        }`}
+                      >
+                        {event.source === 'system' ? 'system' : event.source === 'user' ? `user:${event.role ?? 'manual'}` : event.role ?? 'agent'}
                       </span>
                       <span className="whitespace-pre-wrap break-words text-base-content/85">
                         {describeRunEvent(event)}

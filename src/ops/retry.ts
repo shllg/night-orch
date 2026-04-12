@@ -1,12 +1,14 @@
 import type Database from 'better-sqlite3'
 import type { Config } from '../config/schema.js'
 import type { ForgeAdapter } from '../forge/types.js'
+import type { UpdateStrategy } from '../git/worktree.js'
 import { createForgeAdapter } from '../forge/factory.js'
 import { buildLabelConfig } from '../labels/config.js'
 import { transitionLabels } from '../labels/manager.js'
 import { LeaseManager } from '../state/leases.js'
 import { RunManager, type RunStatus } from '../state/runs.js'
 import { createFollowupAttempt } from '../state/attempts.js'
+import { recordUserAction } from '../state/run-log-events.js'
 import { pollOnce } from '../runner/poller.js'
 import { resolveIssueRepo } from '../utils/issue-repo.js'
 import { logger } from '../utils/logger.js'
@@ -16,6 +18,8 @@ export interface RetryOptions {
   resetPlan: boolean
   resetBranch: boolean
   dryRun: boolean
+  strategyOverride?: UpdateStrategy
+  actor?: string
 }
 
 const RETRYABLE_STATUSES: RunStatus[] = ['blocked', 'error', 'review_ready']
@@ -41,6 +45,8 @@ export class RetryEngine {
       resetPlan: options.resetPlan ?? true,
       resetBranch: options.resetBranch ?? true,
       dryRun: options.dryRun ?? false,
+      strategyOverride: options.strategyOverride,
+      actor: options.actor,
     }
 
     const runManager = new RunManager(this.db)
@@ -95,6 +101,7 @@ export class RetryEngine {
             resetPlan: true,
             resetBranch: true,
             retryRequestedAt: requestedAt,
+            ...(opts.strategyOverride ? { updateStrategy: opts.strategyOverride } : {}),
           },
         })
         this.leaseManager.release(repo, issueNumber)
@@ -112,6 +119,13 @@ export class RetryEngine {
       { previousRunId: run.id, newRunId: newAttemptId, repo, issue: issueNumber },
       'Queued retry as new attempt',
     )
+
+    recordUserAction(this.db, {
+      runId: newAttemptId,
+      kind: 'retry',
+      actor: opts.actor ?? 'manual',
+      details: opts.strategyOverride ? { strategy: opts.strategyOverride } : null,
+    })
 
     // Apply label mutations
     await this.updateLabels(repo, issueRepo, issueNumber, run.status)

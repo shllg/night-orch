@@ -103,6 +103,7 @@ export function App({
   const [activeOperation, setActiveOperation] = useState<string | null>(null)
   const [isHeaderRefreshing, setIsHeaderRefreshing] = useState(false)
   const [webMutationToken, setWebMutationToken] = useState<string | null>(null)
+  const [authReady, setAuthReady] = useState(false)
   const [operationsEnabled, setOperationsEnabled] = useState(true)
   // Phase 2a — cookie auth state
   const [operatorAuthMode, setOperatorAuthMode] = useState(false)
@@ -122,16 +123,18 @@ export function App({
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
   const [updateStartedAt, setUpdateStartedAt] = useState<number | null>(null)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const [issueDetailRunCache, setIssueDetailRunCache] = useState<RunSummary | null>(null)
 
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
-  const selectedStreamRunIdRef = useRef('')
-  const subscribedRunRef = useRef('')
+  const selectedIssueStreamKeyRef = useRef('')
+  const subscribedIssueRef = useRef('')
   const updateTransitionRef = useRef<UpdateTransitionState>(clearUpdateTransitionState())
   const lastPollTriggeredAtRef = useRef(Date.now())
   const operationsEnabledRef = useRef(operationsEnabled)
   const activeOperationRef = useRef(activeOperation)
   const webMutationTokenRef = useRef(webMutationToken)
+  const sessionAuthenticatedRef = useRef(sessionAuthenticated)
   const historyRunsRequestRef = useRef(0)
 
   const repos = snapshot?.config.repos ?? []
@@ -175,13 +178,21 @@ export function App({
       : null,
     [decodedIssueDetailRunId, knownRunsById],
   )
-  const selectedStreamRunId = selectedIssueDetailRun?.hasRun ? selectedIssueDetailRun.runId : ''
+  const issueDetailRun = selectedIssueDetailRun ?? issueDetailRunCache
+  const selectedIssueStreamKey = issueDetailRun ? `${issueDetailRun.repo}#${issueDetailRun.issue}` : ''
 
   const currentState = useMemo(() => {
     if (updateInProgress) {
       return {
         label: `updating ${updateStatus?.state ?? 'starting'}`,
         toneClass: 'badge-warning',
+      }
+    }
+
+    if (!authReady) {
+      return {
+        label: 'initializing',
+        toneClass: 'badge-neutral',
       }
     }
 
@@ -210,7 +221,7 @@ export function App({
       label: 'idle',
       toneClass: 'badge-neutral',
     }
-  }, [queuedRuns, runningRuns, socketConnected, updateInProgress, updateStatus?.state])
+  }, [authReady, queuedRuns, runningRuns, socketConnected, updateInProgress, updateStatus?.state])
 
   const buildVersionLabel = useMemo(() => {
     const version = snapshot?.build?.version ?? FRONTEND_BUILD_VERSION
@@ -311,38 +322,42 @@ export function App({
   }, [])
 
   const loadSessionToken = useCallback(async () => {
-    const response = await fetch('/api/session')
-    if (!response.ok) {
-      throw new Error(`Failed to initialize web session (${response.status})`)
-    }
-    const payload = await response.json() as SessionResponse
-    setOperationsEnabled(payload.operationsEnabled ?? true)
-    const externalAuth = payload.requiresExternalAuth ?? (payload.mutationToken === null)
-    setOperatorAuthMode(externalAuth)
-
-    if (!externalAuth && payload.mutationToken) {
-      // Loopback mode: server handed us the token directly, no login needed.
-      setWebMutationToken(payload.mutationToken)
-      setSessionAuthenticated(true)
-      return
-    }
-
-    // Phase 2a: operator-auth mode. Check whether a valid session
-    // cookie already exists from a prior login before prompting.
     try {
-      const authStatus = await fetch('/api/auth/session')
-      if (authStatus.ok) {
-        const body = await authStatus.json() as { authenticated?: boolean }
-        if (body.authenticated === true) {
-          setSessionAuthenticated(true)
-          return
-        }
+      const response = await fetch('/api/session')
+      if (!response.ok) {
+        throw new Error(`Failed to initialize web session (${response.status})`)
       }
-    } catch {
-      // Best-effort — fall through to the login dialog.
+      const payload = await response.json() as SessionResponse
+      setOperationsEnabled(payload.operationsEnabled ?? true)
+      const externalAuth = payload.requiresExternalAuth ?? (payload.mutationToken === null)
+      setOperatorAuthMode(externalAuth)
+
+      if (!externalAuth && payload.mutationToken) {
+        // Loopback mode: server handed us the token directly, no login needed.
+        setWebMutationToken(payload.mutationToken)
+        setSessionAuthenticated(true)
+        return
+      }
+
+      // Phase 2a: operator-auth mode. Check whether a valid session
+      // cookie already exists from a prior login before prompting.
+      try {
+        const authStatus = await fetch('/api/auth/session')
+        if (authStatus.ok) {
+          const body = await authStatus.json() as { authenticated?: boolean }
+          if (body.authenticated === true) {
+            setSessionAuthenticated(true)
+            return
+          }
+        }
+      } catch {
+        // Best-effort — fall through to the login dialog.
+      }
+      setSessionAuthenticated(false)
+      setLoginDialogOpen(true)
+    } finally {
+      setAuthReady(true)
     }
-    setSessionAuthenticated(false)
-    setLoginDialogOpen(true)
   }, [])
 
   const submitLoginToken = useCallback(async () => {
@@ -495,28 +510,49 @@ export function App({
   }, [webMutationToken])
 
   useEffect(() => {
+    sessionAuthenticatedRef.current = sessionAuthenticated
+  }, [sessionAuthenticated])
+
+  useEffect(() => {
     if (!decodedIssueDetailRunId) return
     setSelectedRunId(decodedIssueDetailRunId)
   }, [decodedIssueDetailRunId])
 
   useEffect(() => {
+    if (!decodedIssueDetailRunId) {
+      setIssueDetailRunCache(null)
+      return
+    }
+    if (selectedIssueDetailRun) {
+      setIssueDetailRunCache(selectedIssueDetailRun)
+    }
+  }, [decodedIssueDetailRunId, selectedIssueDetailRun])
+
+  useEffect(() => {
+    if (!authReady) {
+      return
+    }
+
     let cancelled = false
+    let reconnectDelayMs = 2000
 
     const connect = (): void => {
       const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-      const authQuery = webMutationToken
-        ? `?token=${encodeURIComponent(webMutationToken)}`
-        : ''
-      const socket = new WebSocket(`${protocol}://${window.location.host}/ws${authQuery}`)
+      const socket = new WebSocket(`${protocol}://${window.location.host}/ws`)
       wsRef.current = socket
 
       socket.onopen = () => {
         if (cancelled) return
+        reconnectDelayMs = 2000
         setSocketConnected(true)
         socket.send(JSON.stringify({ type: 'refresh' }))
-        const activeRun = selectedStreamRunIdRef.current
-        if (activeRun) {
-          socket.send(JSON.stringify({ type: 'subscribe-run-events', runId: activeRun, since: 0 }))
+        const activeIssueKey = selectedIssueStreamKeyRef.current
+        if (activeIssueKey) {
+          const [repo, issueNumberRaw] = activeIssueKey.split('#')
+          const issueNumber = Number.parseInt(issueNumberRaw ?? '', 10)
+          if (repo && Number.isInteger(issueNumber) && issueNumber > 0) {
+            socket.send(JSON.stringify({ type: 'subscribe-issue-events', repo, issueNumber, since: 0 }))
+          }
         }
       }
 
@@ -529,8 +565,12 @@ export function App({
           }
 
           if (envelope.type === 'run-events' && envelope.payload) {
+            return
+          }
+
+          if (envelope.type === 'issue-events' && envelope.payload) {
             const payload = asRunEventsPayload(envelope.payload)
-            if (!payload || payload.runId !== selectedStreamRunIdRef.current) {
+            if (!payload || `${payload.repo}#${payload.issueNumber}` !== selectedIssueStreamKeyRef.current) {
               return
             }
 
@@ -553,7 +593,8 @@ export function App({
         setSocketConnected(false)
 
         if (cancelled) return
-        reconnectTimerRef.current = window.setTimeout(connect, 2000)
+        reconnectTimerRef.current = window.setTimeout(connect, reconnectDelayMs)
+        reconnectDelayMs = Math.min(reconnectDelayMs * 2, 30_000)
       }
 
       socket.onerror = () => {
@@ -571,29 +612,41 @@ export function App({
       wsRef.current?.close()
       wsRef.current = null
     }
-  }, [webMutationToken])
+  }, [authReady])
 
   useEffect(() => {
-    selectedStreamRunIdRef.current = selectedStreamRunId
-    setRunEvents([])
+    selectedIssueStreamKeyRef.current = selectedIssueStreamKey
+    const previousIssueKey = subscribedIssueRef.current
+    if (previousIssueKey && previousIssueKey !== selectedIssueStreamKey) {
+      setRunEvents([])
+    } else if (!previousIssueKey && selectedIssueStreamKey) {
+      setRunEvents([])
+    }
 
     const socket = wsRef.current
     if (!socket || socket.readyState !== WebSocket.OPEN) {
-      subscribedRunRef.current = selectedStreamRunId
+      subscribedIssueRef.current = selectedIssueStreamKey
       return
     }
 
-    const previousRun = subscribedRunRef.current
-    if (previousRun && previousRun !== selectedStreamRunId) {
-      socket.send(JSON.stringify({ type: 'unsubscribe-run-events', runId: previousRun }))
+    if (previousIssueKey && previousIssueKey !== selectedIssueStreamKey) {
+      const [repo, issueNumberRaw] = previousIssueKey.split('#')
+      const issueNumber = Number.parseInt(issueNumberRaw ?? '', 10)
+      if (repo && Number.isInteger(issueNumber) && issueNumber > 0) {
+        socket.send(JSON.stringify({ type: 'unsubscribe-issue-events', repo, issueNumber }))
+      }
     }
 
-    if (selectedStreamRunId) {
-      socket.send(JSON.stringify({ type: 'subscribe-run-events', runId: selectedStreamRunId, since: 0 }))
+    if (selectedIssueStreamKey) {
+      const [repo, issueNumberRaw] = selectedIssueStreamKey.split('#')
+      const issueNumber = Number.parseInt(issueNumberRaw ?? '', 10)
+      if (repo && Number.isInteger(issueNumber) && issueNumber > 0) {
+        socket.send(JSON.stringify({ type: 'subscribe-issue-events', repo, issueNumber, since: 0 }))
+      }
     }
 
-    subscribedRunRef.current = selectedStreamRunId
-  }, [selectedStreamRunId, socketConnected])
+    subscribedIssueRef.current = selectedIssueStreamKey
+  }, [selectedIssueStreamKey, socketConnected])
 
   const [serverUnreachable, setServerUnreachable] = useState(false)
 
@@ -794,7 +847,7 @@ export function App({
       const cooldownElapsed = Date.now() - lastPollTriggeredAtRef.current >= AUTO_POLL_COOLDOWN_MS
       const canPoll = operationsEnabledRef.current
         && activeOperationRef.current === null
-        && webMutationTokenRef.current !== null
+        && (webMutationTokenRef.current !== null || sessionAuthenticatedRef.current)
 
       if (cooldownElapsed && canPoll) {
         triggerPoll()
@@ -923,30 +976,33 @@ export function App({
     )
   }, [runOperation])
 
-  const triggerIssueRetry = useCallback((run: RunSummary) => {
+  const triggerIssueRetry = useCallback((run: RunSummary, strategy: 'merge' | 'rebase' | null) => {
     void runIssueOperation(run, {
       operationName: 'retry',
       endpoint: '/api/operations/retry',
-      confirmMessage: `Queue fresh retry for ${run.repo}#${run.issue}?`,
+      confirmMessage: `Queue fresh retry for ${run.repo}#${run.issue}${strategy ? ` with ${strategy} strategy` : ''}?`,
       fallbackMessage: `Fresh retry queued for ${run.repo}#${run.issue}`,
+      payload: strategy ? { strategy } : undefined,
     })
   }, [runIssueOperation])
 
-  const triggerIssueRebase = useCallback((run: RunSummary) => {
+  const triggerIssueRebase = useCallback((run: RunSummary, strategy: 'merge' | 'rebase' | null) => {
     void runIssueOperation(run, {
       operationName: 'rebase',
       endpoint: '/api/operations/rebase',
-      confirmMessage: `Queue rebase for ${run.repo}#${run.issue}?`,
+      confirmMessage: `Queue rebase for ${run.repo}#${run.issue}${strategy ? ` with ${strategy} strategy` : ''}?`,
       fallbackMessage: `Rebase queued for ${run.repo}#${run.issue}`,
+      payload: strategy ? { strategy } : undefined,
     })
   }, [runIssueOperation])
 
-  const triggerIssueContinue = useCallback((run: RunSummary) => {
+  const triggerIssueContinue = useCallback((run: RunSummary, strategy: 'merge' | 'rebase' | null) => {
     void runIssueOperation(run, {
       operationName: 'continue',
       endpoint: '/api/operations/continue',
-      confirmMessage: `Queue continue pass for ${run.repo}#${run.issue}?`,
+      confirmMessage: `Queue continue pass for ${run.repo}#${run.issue}${strategy ? ` with ${strategy} strategy` : ''}?`,
       fallbackMessage: `Continue pass queued for ${run.repo}#${run.issue}`,
+      payload: strategy ? { strategy } : undefined,
     })
   }, [runIssueOperation])
 
@@ -1186,7 +1242,7 @@ export function App({
             {activePage === 'issues' && (
               isIssueDetailScreen ? (
                 <IssueDetailPage
-                  run={selectedIssueDetailRun}
+                  run={issueDetailRun}
                   runId={decodedIssueDetailRunId ?? ''}
                   runEvents={runEvents}
                   operationsEnabled={operationsEnabled}

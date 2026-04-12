@@ -113,6 +113,7 @@ program
   .option('--immediate', 'Process immediately instead of queuing for next poll')
   .option('--reset-plan', 'Deprecated compatibility flag. Retry already starts fresh from the latest base.')
   .option('--fresh', 'Deprecated compatibility flag. Retry already starts fresh from the latest base.')
+  .option('--strategy <strategy>', 'Override branch update strategy for this action (merge|rebase)')
   .description('Start a fresh retry of one task from the latest base branch')
   .action((repo, issueNumber, opts, cmd) => retryCommand(repo, issueNumber, { ...cmd.parent?.opts(), ...opts }))
 
@@ -128,18 +129,20 @@ program
   .command('rebase')
   .argument('<repo>', 'Repository (owner/name)')
   .argument('<issue-number>', 'Issue number')
+  .option('--strategy <strategy>', 'Override rebase action strategy (merge|rebase)')
   .description('Queue issue for rebase onto latest base, verify, and fix if needed')
   .action(async (repo, issueNumber, _opts, cmd) => {
     const { rebaseCommand } = await import('./commands/rebase.js')
-    await rebaseCommand(repo, issueNumber, cmd.parent?.opts())
+    await rebaseCommand(repo, issueNumber, { ...cmd.parent?.opts(), ..._opts })
   })
 
 program
   .command('continue')
   .argument('<repo>', 'Repository (owner/name)')
   .argument('<issue-number>', 'Issue number')
+  .option('--strategy <strategy>', 'Override branch update strategy for this action (merge|rebase)')
   .description('Queue a context-aware continue pass for blocked/review_ready/error work')
-  .action((repo, issueNumber, _opts, cmd) => continueCommand(repo, issueNumber, cmd.parent?.opts()))
+  .action((repo, issueNumber, opts, cmd) => continueCommand(repo, issueNumber, { ...cmd.parent?.opts(), ...opts }))
 
 program
   .command('cost-override')

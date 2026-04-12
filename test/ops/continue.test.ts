@@ -370,4 +370,51 @@ describe('queueContinue', () => {
     expect(updated?.completionTokens).toBe(0)
     expect(updated?.cacheReadTokens).toBe(0)
   })
+
+  it('persists strategy override and records a user action event', async () => {
+    const runManager = new RunManager(db)
+    const run = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 65,
+      issueNodeId: 'node-65',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(run.id, {
+      status: 'blocked',
+      manualState: 'awaiting_rebase_resolution',
+      endedAt: '2026-02-01T12:00:00Z',
+      controlPayload: {
+        conflictSummary: 'Rebase conflicted with upstream changes',
+      },
+    })
+
+    const forge = makeForge({
+      listIssueComments: vi.fn().mockResolvedValue([]),
+    })
+    const result = await queueContinue(db, forge, makeRepoConfig(), 65, '', {
+      strategyOverride: 'merge',
+      actor: 'web',
+    })
+
+    expect(result.queued).toBe(true)
+    const updated = runManager.getByRepoAndIssue('org/repo', 65)
+    expect(updated?.controlPayload?.updateStrategy).toBe('merge')
+    expect(updated?.controlPayload?.preserveBranchState).toBe(false)
+
+    const eventRow = db.prepare(
+      `SELECT source, role, event_type, data
+       FROM run_log_events
+       WHERE run_id = ?`,
+    ).get(updated?.id) as { source: string; role: string | null; event_type: string; data: string | null }
+    expect(eventRow.source).toBe('user')
+    expect(eventRow.role).toBe('web')
+    expect(eventRow.event_type).toBe('user_action')
+    expect(JSON.parse(eventRow.data ?? '{}')).toMatchObject({
+      kind: 'continue',
+      actor: 'web',
+      strategy: 'merge',
+    })
+  })
 })

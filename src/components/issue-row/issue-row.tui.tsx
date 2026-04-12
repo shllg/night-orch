@@ -8,9 +8,10 @@ type StatusColor = 'blue' | 'yellow' | 'magenta' | 'red' | 'green'
 const STATUS_COLOR: Record<IssueRowStatus, StatusColor> = {
   queued: 'blue',
   running: 'yellow',
-  review: 'magenta',
+  review_ready: 'magenta',
   blocked: 'red',
-  done: 'green',
+  completed: 'green',
+  error: 'red',
 }
 
 export function IssueRowTui(props: IssueRowProps): ReactElement {

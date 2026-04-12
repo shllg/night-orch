@@ -1,11 +1,31 @@
 import type { IssueRowProps, IssueRowStatus, IssueRowViewModel } from './types.js'
 
-const STATUS_LABELS: Record<IssueRowStatus, string> = {
+export const STATUS_LABELS: Record<IssueRowStatus, string> = {
   queued: 'queued',
   running: 'running',
-  review: 'in review',
+  review_ready: 'in review',
   blocked: 'blocked',
-  done: 'done',
+  completed: 'done',
+  error: 'error',
+}
+
+export function normalizeRunStatus(status: string): IssueRowStatus {
+  switch (status.trim().toLowerCase()) {
+    case 'queued':
+      return 'queued'
+    case 'running':
+      return 'running'
+    case 'review_ready':
+      return 'review_ready'
+    case 'blocked':
+      return 'blocked'
+    case 'completed':
+      return 'completed'
+    case 'error':
+      return 'error'
+    default:
+      return 'error'
+  }
 }
 
 export function buildIssueRowViewModel(props: IssueRowProps): IssueRowViewModel {

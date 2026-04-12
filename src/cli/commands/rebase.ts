@@ -1,4 +1,5 @@
 import { loadConfig, resolveConfigPath, ConfigError } from '../../config/loader.js'
+import type { UpdateStrategy } from '../../git/worktree.js'
 import { initDatabase } from '../../state/db.js'
 import { createForgeAdapter } from '../../forge/factory.js'
 import { queueRebase } from '../../ops/rebase-and-check.js'
@@ -8,6 +9,7 @@ interface GlobalOpts {
   trustWorkspace?: boolean
   dryRun?: boolean
   logLevel?: string
+  strategy?: UpdateStrategy
 }
 
 export async function rebaseCommand(
@@ -15,6 +17,12 @@ export async function rebaseCommand(
   issueNumber: string,
   globalOpts?: GlobalOpts,
 ): Promise<void> {
+  const strategy = normalizeStrategy(globalOpts?.strategy)
+  if (globalOpts?.strategy && !strategy) {
+    console.error(`Invalid strategy: ${globalOpts.strategy}. Expected merge or rebase.`)
+    process.exitCode = 1
+    return
+  }
   const num = parseInt(issueNumber, 10)
   if (isNaN(num)) {
     console.error(`Invalid issue number: ${issueNumber}`)
@@ -57,7 +65,10 @@ export async function rebaseCommand(
   }
 
   try {
-    const result = await queueRebase(db, forge, repoConfig, num, botUser)
+    const result = await queueRebase(db, forge, repoConfig, num, botUser, {
+      strategyOverride: strategy,
+      actor: 'cli',
+    })
 
     if (result.queued) {
       console.log(`Queued ${repo}#${num} for rebase and re-evaluation`)
@@ -71,4 +82,8 @@ export async function rebaseCommand(
   } finally {
     db.close()
   }
+}
+
+function normalizeStrategy(value: unknown): UpdateStrategy | undefined {
+  return value === 'merge' || value === 'rebase' ? value : undefined
 }

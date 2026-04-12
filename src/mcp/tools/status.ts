@@ -1,7 +1,7 @@
 import type { MCPDependencies } from '../server.js'
 import type { ForgeIssue } from '../../forge/types.js'
 import { RunManager } from '../../state/runs.js'
-import { loadRunLogEvents } from '../../state/run-log-events.js'
+import { loadIssueLogEvents, loadRunLogEvents } from '../../state/run-log-events.js'
 import { CostTracker } from '../../loop/cost.js'
 import { isIssueEligibleForRepo } from '../../discovery/discover.js'
 import { flushActiveAgentObservability } from '../../events/observability.js'
@@ -451,11 +451,11 @@ export async function handleListIssues(
 }
 
 export async function handleStreamEvents(
-  args: { runId: string; since?: number; limit?: number },
+  args: { runId?: string; repo?: string; issueNumber?: number; since?: number; limit?: number },
   deps: MCPDependencies,
 ): Promise<unknown> {
-  if (!args.runId) {
-    throw new Error('runId is required')
+  if (!args.runId && (!args.repo || typeof args.issueNumber !== 'number')) {
+    throw new Error('runId or repo+issueNumber is required')
   }
 
   const since = Math.max(0, Math.floor(args.since ?? 0))
@@ -465,11 +465,13 @@ export async function handleStreamEvents(
   // Flush buffered in-memory events to DB so callers can poll near-real-time.
   flushActiveAgentObservability()
 
-  const rows = loadRunLogEvents(deps.db, args.runId, since, limit)
+  const rows = args.runId
+    ? loadRunLogEvents(deps.db, args.runId, since, limit)
+    : loadIssueLogEvents(deps.db, args.repo!, args.issueNumber!, since, limit)
   const lastEventId = rows.length > 0 ? rows[rows.length - 1]!.id : since
 
   return {
-    runId: args.runId,
+    ...(args.runId ? { runId: args.runId } : { repo: args.repo, issueNumber: args.issueNumber }),
     events: rows,
     lastEventId,
   }

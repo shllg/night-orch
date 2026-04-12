@@ -1,5 +1,6 @@
 import React from 'react'
 import { Box, Text } from 'ink'
+import type { UpdateStrategy } from '../../git/worktree.js'
 import type { TabId } from './types.js'
 
 interface ActionsBarProps {
@@ -9,6 +10,7 @@ interface ActionsBarProps {
   projectsFocused: boolean
   autoRefresh: boolean
   controlsEnabled?: boolean
+  manualStrategy: UpdateStrategy | null
 }
 
 interface ActionHintSection {
@@ -68,8 +70,9 @@ function issueHints(options: {
   busy: boolean
   runsFocused: boolean
   projectsFocused: boolean
+  manualStrategy: UpdateStrategy | null
 }): string {
-  const { activeTab, busy, runsFocused, projectsFocused } = options
+  const { activeTab, busy, runsFocused, projectsFocused, manualStrategy } = options
   if (activeTab === 'settings') {
     return '[+/-]adjust number [space]toggle bool [u]unset override'
   }
@@ -85,7 +88,8 @@ function issueHints(options: {
   if (busy) {
     return 'actions locked while task is running'
   }
-  return '[t/T]retry [c]continue [_]rebase [X]delete entry [$]cost-override'
+  const strategyLabel = manualStrategy ?? 'default'
+  return `[t/T]retry [c]continue [_]rebase [m]strategy:${strategyLabel} [X]delete entry [$]cost-override`
 }
 
 export function buildActionHints(props: ActionsBarProps): ActionHints {
@@ -114,6 +118,7 @@ export function buildActionHints(props: ActionsBarProps): ActionHints {
           busy: props.busy,
           runsFocused: props.runsFocused,
           projectsFocused: props.projectsFocused,
+          manualStrategy: props.manualStrategy,
         }),
       },
     ],

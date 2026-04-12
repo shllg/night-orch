@@ -1736,6 +1736,85 @@ describe('startWebServer', () => {
     const error = errorPayload as Error
     expect(error.message).toContain('Unexpected server response: 403')
   })
+
+  it('streams issue-scoped events over websocket subscriptions', async () => {
+    const runManager = new RunManager(db)
+    const firstRun = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 21,
+      issueNodeId: 'node-21',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    db.prepare(
+      `INSERT INTO run_log_events (run_id, source, phase, role, event_type, data, created_at)
+       VALUES (?, 'agent', 'code', 'coder', 'text', '{"text":"hello"}', datetime('now'))`,
+    ).run(firstRun.id)
+    runManager.update(firstRun.id, { status: 'completed', endedAt: '2026-04-12T10:01:00Z' })
+
+    const secondRun = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 21,
+      issueNodeId: 'node-21',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    db.prepare(
+      `INSERT INTO run_log_events (run_id, source, phase, role, event_type, data, created_at)
+       VALUES (?, 'user', NULL, 'web', 'user_action', '{"kind":"retry"}', datetime('now'))`,
+    ).run(secondRun.id)
+
+    server = await startWebServer(
+      deps,
+      {
+        host: '127.0.0.1',
+        port: 0,
+        frontendDistPath: frontendDir,
+        snapshotIntervalMs: 50,
+      },
+    )
+
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Unexpected address type')
+    }
+
+    const wsOrigin = `http://127.0.0.1:${address.port}`
+    const ws = new WebSocket(`ws://127.0.0.1:${address.port}/ws`, { origin: wsOrigin })
+    await once(ws, 'open')
+    ws.send(JSON.stringify({ type: 'subscribe-issue-events', repo: 'org/repo', issueNumber: 21, since: 0 }))
+
+    const issueEvents = await waitForWsMessage<{
+      repo: string
+      issueNumber: number
+      events: Array<{ runId: string; source: string }>
+      lastEventId: number
+    }>(ws, (payload) => {
+      if (!payload || typeof payload !== 'object') return null
+      const message = payload as { type?: unknown; payload?: unknown }
+      if (message.type !== 'issue-events' || !message.payload || typeof message.payload !== 'object') return null
+      const body = message.payload as {
+        repo?: unknown
+        issueNumber?: unknown
+        events?: unknown
+        lastEventId?: unknown
+      }
+      if (body.repo !== 'org/repo' || body.issueNumber !== 21 || !Array.isArray(body.events) || body.events.length < 2) return null
+      if (typeof body.lastEventId !== 'number') return null
+      return body as {
+        repo: string
+        issueNumber: number
+        events: Array<{ runId: string; source: string }>
+        lastEventId: number
+      }
+    }, 5000)
+
+    expect(issueEvents.events.map((event) => event.runId)).toEqual([firstRun.id, secondRun.id])
+    expect(issueEvents.events.map((event) => event.source)).toEqual(['agent', 'user'])
+    ws.close()
+  })
 })
 
 async function getMutationToken(baseUrl: string): Promise<string> {

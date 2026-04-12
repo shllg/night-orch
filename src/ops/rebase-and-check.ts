@@ -2,10 +2,12 @@ import type Database from 'better-sqlite3'
 import type { ForgeAdapter } from '../forge/types.js'
 import type { RepoConfig } from '../config/schema.js'
 import { autoRebase, type RebaseConflictAnalysis, type RebaseTarget } from './rebase.js'
+import type { UpdateStrategy } from '../git/worktree.js'
 import { runVerifyCommands, allVerifyPassed } from '../loop/verifier.js'
 import { buildVerifierEnv } from '../workers/env.js'
 import { RunManager } from '../state/runs.js'
 import { createFollowupAttempt } from '../state/attempts.js'
+import { recordUserAction } from '../state/run-log-events.js'
 import { transitionLabels } from '../labels/manager.js'
 import { buildLabelConfig } from '../labels/config.js'
 import { upsertBotComment, markerTag } from '../forge/bot-comment.js'
@@ -33,7 +35,7 @@ export async function queueRebase(
   repoConfig: RepoConfig,
   issueNumber: number,
   botUser: string,
-  options: { check?: boolean } = {},
+  options: { check?: boolean; strategyOverride?: UpdateStrategy; actor?: string } = {},
 ): Promise<{ queued: boolean; reason: string }> {
   const runManager = new RunManager(db)
 
@@ -71,11 +73,22 @@ export async function queueRebase(
         checkAfter: options.check ?? true,
         requestedAt: new Date().toISOString(),
         preserveBranchState: true,
+        ...(options.strategyOverride ? { updateStrategy: options.strategyOverride } : {}),
       },
     })
   } catch (err) {
     logger.warn({ runId: run.id, err }, 'Failed to queue rebase attempt')
     return { queued: false, reason: 'Run state changed while queuing rebase' }
+  }
+
+  const queuedRun = runManager.getByRepoAndIssue(repoConfig.repo, issueNumber)
+  if (queuedRun) {
+    recordUserAction(db, {
+      runId: queuedRun.id,
+      kind: 'rebase',
+      actor: options.actor ?? 'manual',
+      details: options.strategyOverride ? { strategy: options.strategyOverride } : null,
+    })
   }
 
   // Transition labels
@@ -115,6 +128,7 @@ export async function executeRebase(
   issueNumber: number,
   verifyCommands: Array<string | string[]>,
   checkAfter = true,
+  strategy: UpdateStrategy = 'rebase',
 ): Promise<{ rebased: boolean; verifyPassed: boolean; conflict: boolean; conflictAnalysis?: RebaseConflictAnalysis; error?: string }> {
   const target: RebaseTarget = {
     repo,
@@ -125,7 +139,7 @@ export async function executeRebase(
     worktreePath,
   }
 
-  const rebaseResult = await autoRebase(target, repoLocalPath, 'rebase')
+  const rebaseResult = await autoRebase(target, repoLocalPath, strategy)
 
   if (rebaseResult.result === 'up_to_date') {
     return { rebased: false, verifyPassed: true, conflict: false }

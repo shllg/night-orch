@@ -5,9 +5,10 @@ import { buildIssueRowViewModel } from './view-model.js'
 const STATUS_BADGE_CLASS: Record<IssueRowStatus, string> = {
   queued: 'badge-info',
   running: 'badge-warning',
-  review: 'badge-accent',
+  review_ready: 'badge-accent',
   blocked: 'badge-error',
-  done: 'badge-success',
+  completed: 'badge-success',
+  error: 'badge-error',
 }
 
 export function IssueRowWeb(props: IssueRowProps): ReactElement {

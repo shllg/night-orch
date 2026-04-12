@@ -201,7 +201,7 @@ export interface DashboardSnapshot {
 export interface RunEvent {
   id: number
   runId: string
-  source: 'system' | 'agent'
+  source: 'system' | 'agent' | 'user'
   phase: string | null
   role: string | null
   type: string
@@ -210,7 +210,9 @@ export interface RunEvent {
 }
 
 export interface RunEventsPayload {
-  runId: string
+  runId?: string
+  repo?: string
+  issueNumber?: number
   events: RunEvent[]
   lastEventId: number
 }

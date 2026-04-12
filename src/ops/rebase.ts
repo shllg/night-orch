@@ -139,7 +139,7 @@ async function collectConflictAnalysis(
 
   return {
     files,
-    summary: `Rebase onto origin/${baseBranch} conflicted in ${files.length} file(s). Resolve by combining the existing branch changes with the latest base branch changes where necessary.`,
+    summary: formatConflictSummary(baseBranch, files),
     excerpts,
   }
 }
@@ -183,4 +183,13 @@ function truncateConflictText(value: string): string {
   const trimmed = value.trim()
   if (trimmed.length <= 1200) return trimmed
   return `${trimmed.slice(0, 1200)}\n[... truncated ...]`
+}
+
+function formatConflictSummary(baseBranch: string, files: string[]): string {
+  const listedFiles = files.slice(0, 5)
+  const fileSummary = listedFiles.length > 0 ? `: ${listedFiles.join(', ')}` : ''
+  return [
+    `Rebase onto origin/${baseBranch} hit conflicts in ${files.length} file(s)${fileSummary}.`,
+    'Options: (a) resolve manually and continue, (b) continue with merge strategy, (c) abort and re-open the issue.',
+  ].join(' ')
 }

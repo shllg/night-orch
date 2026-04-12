@@ -1,11 +1,13 @@
 import type Database from 'better-sqlite3'
 import type { ForgeAdapter, ForgeComment } from '../forge/types.js'
 import type { RepoConfig } from '../config/schema.js'
+import type { UpdateStrategy } from '../git/worktree.js'
 import type { Reaction, ReactionCursor, ReactionType } from '../reactions/types.js'
 import { clearResumeDecisionArtifacts } from '../loop/checkpoint.js'
 import { RunManager } from '../state/runs.js'
 import { LeaseManager } from '../state/leases.js'
 import { createFollowupAttempt } from '../state/attempts.js'
+import { recordUserAction } from '../state/run-log-events.js'
 import { transitionLabels } from '../labels/manager.js'
 import { buildLabelConfig } from '../labels/config.js'
 import { scanForReactions } from '../reactions/scanner.js'
@@ -28,6 +30,8 @@ const PHASE_CHECKPOINT_FALLBACK_ORDER = ['decide', 'review', 'verify', 'code', '
 export interface QueueContinueOptions {
   issueRepo?: string
   dryRun?: boolean
+  strategyOverride?: UpdateStrategy
+  actor?: string
 }
 
 export async function queueContinue(
@@ -59,6 +63,7 @@ export async function queueContinue(
     return { queued: true, reason: 'Would queue a context-aware continue pass' }
   }
 
+  const applyStrategyDuringResume = run.manualState === 'awaiting_rebase_resolution' && options.strategyOverride !== undefined
   const followup = await buildFollowupContext({
     forge,
     issueRepo,
@@ -98,8 +103,9 @@ export async function queueContinue(
           controlPayload: {
             source: run.manualState === 'awaiting_rebase_resolution' ? 'rebase_conflict' : 'manual_continue',
             issueRepo,
-            preserveBranchState: true,
+            preserveBranchState: applyStrategyDuringResume ? false : true,
             requestedAt: nowUtcIso(),
+            ...(options.strategyOverride ? { updateStrategy: options.strategyOverride } : {}),
           },
         })
         // Seed the resume phase on the new attempt so the engine picks up
@@ -124,6 +130,13 @@ export async function queueContinue(
   if (newAttemptId === null) {
     return { queued: false, reason: 'Run state changed while queuing continue' }
   }
+
+  recordUserAction(db, {
+    runId: newAttemptId,
+    kind: 'continue',
+    actor: options.actor ?? 'manual',
+    details: options.strategyOverride ? { strategy: options.strategyOverride } : null,
+  })
 
   try {
     const issue = await forge.getIssue(issueRepo, issueNumber)
@@ -154,6 +167,7 @@ export async function queueContinue(
       issueNumber,
       runId: run.id,
       primaryType: followup.primaryType,
+      strategyOverride: options.strategyOverride,
     },
     'Queued issue for continue pass',
   )

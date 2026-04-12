@@ -315,4 +315,40 @@ describe('RetryEngine', () => {
 
     await expect(engine.retry('org/repo', 1)).rejects.toThrow('can only retry')
   })
+
+  it('persists strategy override and records a user action event', async () => {
+    const forge = makeMockForge()
+    insertRun(db, { status: 'error' })
+
+    const engine = new RetryEngine(db, makeConfig(), () => forge)
+    await engine.retry('org/repo', 1, { strategyOverride: 'merge', actor: 'web' })
+
+    const head = fetchHead(db, 'org/repo', 1)
+    expect(JSON.parse(head.phase_data ?? '{}')).toMatchObject({
+      reactionType: 'retry',
+    })
+
+    const controlRow = db.prepare(
+      `SELECT control_payload
+       FROM runs
+       WHERE id = ?`,
+    ).get(head.id) as { control_payload: string | null }
+    expect(JSON.parse(controlRow.control_payload ?? '{}')).toMatchObject({
+      updateStrategy: 'merge',
+    })
+
+    const eventRow = db.prepare(
+      `SELECT source, role, event_type, data
+       FROM run_log_events
+       WHERE run_id = ?`,
+    ).get(head.id) as { source: string; role: string | null; event_type: string; data: string | null }
+    expect(eventRow.source).toBe('user')
+    expect(eventRow.role).toBe('web')
+    expect(eventRow.event_type).toBe('user_action')
+    expect(JSON.parse(eventRow.data ?? '{}')).toMatchObject({
+      kind: 'retry',
+      actor: 'web',
+      strategy: 'merge',
+    })
+  })
 })

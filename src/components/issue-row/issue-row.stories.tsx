@@ -20,7 +20,7 @@ type Story = StoryObj<typeof meta>
 
 export const Default: Story = {}
 
-const STATUS_SAMPLES: IssueRowStatus[] = ['queued', 'running', 'review', 'blocked', 'done']
+const STATUS_SAMPLES: IssueRowStatus[] = ['queued', 'running', 'review_ready', 'blocked', 'completed', 'error']
 
 export const StatusMatrix: Story = {
   render: (args) => (

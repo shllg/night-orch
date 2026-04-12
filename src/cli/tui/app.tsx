@@ -12,6 +12,7 @@ import { pollOnce } from '../../runner/poller.js'
 import { queueRebase } from '../../ops/rebase-and-check.js'
 import { queueContinue } from '../../ops/continue.js'
 import { createForgeAdapter } from '../../forge/factory.js'
+import type { UpdateStrategy } from '../../git/worktree.js'
 import type Database from 'better-sqlite3'
 import { loadTuiStats } from '../../state/stats.js'
 import { ActionsBar } from './actions-bar.js'
@@ -178,6 +179,7 @@ export type TuiActionCommand =
   | 'deleteEntry'
   | 'costOverride'
   | 'dailyCostOverride'
+  | 'toggleStrategy'
   | 'cleanupArm'
   | 'cleanupConfirm'
   | 'standaloneMessage'
@@ -230,6 +232,7 @@ export function resolveActionCommand(args: ResolveActionCommandInput): TuiAction
   if (args.input === 't' || args.input === 'T') return 'retry'
   if (args.input === 'c') return 'continue'
   if (args.input === '_') return 'rebase'
+  if (args.input === 'm') return 'toggleStrategy'
   if (args.input === 'X') return 'deleteEntry'
   if (args.input === '$') return 'costOverride'
   return 'none'
@@ -258,6 +261,7 @@ export function App({
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [cleanupConfirmPending, setCleanupConfirmPending] = useState(false)
   const [lastRefreshAt, setLastRefreshAt] = useState(nowUtcIso())
+  const [manualStrategy, setManualStrategy] = useState<UpdateStrategy | null>(null)
   const [titleLookup, setTitleLookup] = useState<TitleLookup>({ issues: {}, prs: {} })
   const [runEventScrollOffset, setRunEventScrollOffset] = useState(0)
   const [selectedLogId, setSelectedLogId] = useState<number | null>(null)
@@ -658,10 +662,15 @@ export function App({
         resetPlan: true,
         resetBranch: true,
         dryRun,
+        strategyOverride: manualStrategy ?? undefined,
+        actor: 'tui',
       })
+      if (!dryRun && enableBackgroundPoller) {
+        await runPollCycle('manual', selectedIssue)
+      }
       return `queued fresh retry for ${selectedIssue.repo}#${selectedIssue.issue_number}${dryRun ? ' (dry-run)' : ''}`
     })
-  }, [config, db, dryRun, runAction, selectedIssue])
+  }, [config, db, dryRun, enableBackgroundPoller, manualStrategy, runAction, runPollCycle, selectedIssue])
 
   const runSync = useCallback(async () => {
     await runAction('sync', async () => {
@@ -735,10 +744,16 @@ export function App({
       } catch {
         // Best effort only.
       }
-      const result = await queueRebase(db, forge, repoConfig, target.issue_number, botUser)
+      const result = await queueRebase(db, forge, repoConfig, target.issue_number, botUser, {
+        strategyOverride: manualStrategy ?? undefined,
+        actor: 'tui',
+      })
+      if (!dryRun && result.queued && enableBackgroundPoller) {
+        await runPollCycle('manual', target)
+      }
       return `${target.repo}#${target.issue_number}: ${result.reason}`
     })
-  }, [config, db, issues, runAction, selectedIssue])
+  }, [config, db, dryRun, enableBackgroundPoller, issues, manualStrategy, runAction, runPollCycle, selectedIssue])
 
   const runContinue = useCallback(async () => {
     await runAction('continue', async () => {
@@ -755,10 +770,17 @@ export function App({
       } catch {
         // Best effort only.
       }
-      const result = await queueContinue(db, forge, repoConfig, target.issue_number, botUser, { dryRun })
+      const result = await queueContinue(db, forge, repoConfig, target.issue_number, botUser, {
+        dryRun,
+        strategyOverride: manualStrategy ?? undefined,
+        actor: 'tui',
+      })
+      if (!dryRun && result.queued && enableBackgroundPoller) {
+        await runPollCycle('manual', target)
+      }
       return `${target.repo}#${target.issue_number}: ${result.reason}${dryRun ? ' (dry-run)' : ''}`
     })
-  }, [config, db, dryRun, issues, runAction, selectedIssue])
+  }, [config, db, dryRun, enableBackgroundPoller, issues, manualStrategy, runAction, runPollCycle, selectedIssue])
 
   const runDeleteEntry = useCallback(async () => {
     await runAction('delete-entry', async () => {
@@ -1171,6 +1193,16 @@ export function App({
       void runCleanup()
       return
     }
+    if (actionCommand === 'toggleStrategy') {
+      setManualStrategy((current) => {
+        const next = current === null ? 'merge' : current === 'merge' ? 'rebase' : null
+        const label = next ?? 'repo default'
+        setStatusLine(`Manual strategy: ${label}`)
+        appendLog('info', `manual strategy set to ${label}`)
+        return next
+      })
+      return
+    }
     if (actionCommand === 'retry') {
       void runRetry()
       return
@@ -1278,6 +1310,7 @@ export function App({
         projectsFocused={activeTab === 'projects' && projectsViewMode === 'focus'}
         autoRefresh={autoRefresh}
         controlsEnabled={enableBackgroundPoller}
+        manualStrategy={manualStrategy}
       />
     </Box>
   )

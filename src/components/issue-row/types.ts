@@ -1,4 +1,4 @@
-export type IssueRowStatus = 'queued' | 'running' | 'review' | 'blocked' | 'done'
+export type IssueRowStatus = 'queued' | 'running' | 'review_ready' | 'blocked' | 'completed' | 'error'
 
 export interface IssueRowProps {
   repo: string

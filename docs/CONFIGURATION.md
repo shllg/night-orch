@@ -592,7 +592,7 @@ Reference a workflow in `repos[].workflow` by name.
 | `localPath` | string path | yes | none | Local repo checkout path. |
 | `baseBranch` | string | no | `main` | PR target branch. |
 | `branchPrefix` | string | no | `orch` | Work branch prefix. |
-| `updateStrategy` | `merge` \| `rebase` | no | `merge` | How normal queued work incorporates upstream base branch changes. `merge` creates merge commits (reliable for automated systems). `rebase` replays commits for linear history (use only if your repo requires linear history). Explicit `/orch rebase` always performs a real git rebase regardless of this setting. |
+| `updateStrategy` | `merge` \| `rebase` | no | `merge` | How normal queued work incorporates upstream base branch changes by default. `merge` creates merge commits (reliable for automated systems). `rebase` replays commits for linear history (use only if your repo requires linear history). Manual `retry`, `continue`, and `rebase` actions can override this default per action from the CLI, TUI, MCP, or web UI. |
 | `labels` | object | no | object with defaults | Orchestration label names. |
 | `kanban` | object | no | none | Optional alternate state-label flow activated by a trigger label. |
 | `labelConfig` | record | no | `{}` | Label metadata overrides for `labels-init`. |

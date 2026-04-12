@@ -102,6 +102,17 @@ export const handleRunRoutes: RouteHandler = async (_req, res, method, pathname,
       return true
     }
 
+    const issueEventsMatch = pathname.match(/^\/api\/repos\/([^/]+)\/issues\/(\d+)\/events$/)
+    if (issueEventsMatch) {
+      const repo = decodeURIComponent(issueEventsMatch[1] ?? '')
+      const issueNumber = Number.parseInt(issueEventsMatch[2] ?? '', 10)
+      const since = toBoundedInt(searchParams.get('since'), 0, 0, Number.MAX_SAFE_INTEGER)
+      const limit = toBoundedInt(searchParams.get('limit'), 100, 1, 200)
+      const result = await handleToolCall('night-orch-stream-events', { repo, issueNumber, since, limit }, runtimeDeps)
+      writeJson(res, 200, result)
+      return true
+    }
+
     const repoIssuesMatch = pathname.match(/^\/api\/repos\/([^/]+)\/issues$/)
     if (repoIssuesMatch) {
       const repo = decodeURIComponent(repoIssuesMatch[1] ?? '')

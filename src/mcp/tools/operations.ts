@@ -1,4 +1,6 @@
 import type { MCPDependencies } from '../server.js'
+import type { UpdateStrategy } from '../../git/worktree.js'
+import type { ManualPollTriggerResult } from '../../poller/control.js'
 import { RetryEngine } from '../../ops/retry.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { CleanupEngine } from '../../ops/cleanup.js'
@@ -8,7 +10,14 @@ import { pollOnce } from '../../runner/poller.js'
 import { assertMcpMutationAuth } from './auth.js'
 
 export async function handleRetry(
-  args: { repo: string; issueNumber: number; resetPlan?: boolean; fresh?: boolean; authToken?: string },
+  args: {
+    repo: string
+    issueNumber: number
+    resetPlan?: boolean
+    fresh?: boolean
+    strategy?: UpdateStrategy
+    authToken?: string
+  },
   deps: MCPDependencies,
 ): Promise<unknown> {
   assertMcpMutationAuth(args.authToken, deps)
@@ -18,8 +27,15 @@ export async function handleRetry(
     resetBranch: true,
     dryRun: false,
     immediate: false,
+    strategyOverride: args.strategy,
+    actor: 'mcp',
   })
-  return { success: true, message: `Fresh retry queued for ${args.repo}#${args.issueNumber}` }
+  const trigger = triggerPoller(deps)
+  return {
+    success: true,
+    message: `Fresh retry queued for ${args.repo}#${args.issueNumber}`,
+    ...(trigger ? { pollTrigger: trigger } : {}),
+  }
 }
 
 export async function handleSync(args: { dryRun?: boolean; authToken?: string }, deps: MCPDependencies): Promise<unknown> {
@@ -67,7 +83,7 @@ export async function handlePoll(
 }
 
 export async function handleRebase(
-  args: { repo: string; issueNumber: number; check?: boolean; authToken?: string },
+  args: { repo: string; issueNumber: number; check?: boolean; strategy?: UpdateStrategy; authToken?: string },
   deps: MCPDependencies,
 ): Promise<unknown> {
   assertMcpMutationAuth(args.authToken, deps)
@@ -85,16 +101,20 @@ export async function handleRebase(
   const { queueRebase } = await import('../../ops/rebase-and-check.js')
   const result = await queueRebase(deps.db, forge, repoConfig, args.issueNumber, botUser, {
     check: args.check,
+    strategyOverride: args.strategy,
+    actor: 'mcp',
   })
+  const trigger = result.queued ? triggerPoller(deps) : null
 
   return {
     queued: result.queued,
     reason: result.reason,
+    ...(trigger ? { pollTrigger: trigger } : {}),
   }
 }
 
 export async function handleContinue(
-  args: { repo: string; issueNumber: number; authToken?: string },
+  args: { repo: string; issueNumber: number; strategy?: UpdateStrategy; authToken?: string },
   deps: MCPDependencies,
 ): Promise<unknown> {
   assertMcpMutationAuth(args.authToken, deps)
@@ -109,10 +129,19 @@ export async function handleContinue(
     botUser = auth.user
   } catch { /* best effort */ }
 
-  const result = await queueContinue(deps.db, forge, repoConfig, args.issueNumber, botUser)
+  const result = await queueContinue(deps.db, forge, repoConfig, args.issueNumber, botUser, {
+    strategyOverride: args.strategy,
+    actor: 'mcp',
+  })
+  const trigger = result.queued ? triggerPoller(deps) : null
 
   return {
     queued: result.queued,
     reason: result.reason,
+    ...(trigger ? { pollTrigger: trigger } : {}),
   }
+}
+
+function triggerPoller(deps: MCPDependencies): ManualPollTriggerResult | null {
+  return deps.poller ? deps.poller.triggerPollCycle() : null
 }

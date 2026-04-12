@@ -448,6 +448,50 @@ describe('MCP Tools', () => {
     expect(second.lastEventId).toBe(second.events[0]!.id)
   })
 
+  it('stream-events supports issue-scoped history across attempts', async () => {
+    const runManager = new RunManager(db)
+    const firstRun = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 6,
+      issueNodeId: '',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    db.prepare(
+      `INSERT INTO run_log_events (run_id, source, phase, role, event_type, data, created_at)
+       VALUES (?, 'agent', 'code', 'coder', 'text', '{"text":"first"}', datetime('now'))`,
+    ).run(firstRun.id)
+    runManager.update(firstRun.id, { status: 'completed', endedAt: new Date().toISOString() })
+
+    const secondRun = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 6,
+      issueNodeId: '',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    db.prepare(
+      `INSERT INTO run_log_events (run_id, source, phase, role, event_type, data, created_at)
+       VALUES (?, 'user', NULL, 'web', 'user_action', '{"kind":"retry"}', datetime('now'))`,
+    ).run(secondRun.id)
+
+    const result = await handleToolCall('night-orch-stream-events', { repo: 'org/repo', issueNumber: 6 }, deps) as {
+      repo: string
+      issueNumber: number
+      events: Array<{ runId: string; source: string }>
+      lastEventId: number
+    }
+
+    expect(result.repo).toBe('org/repo')
+    expect(result.issueNumber).toBe(6)
+    expect(result.events).toHaveLength(2)
+    expect(result.events.map((event) => event.runId)).toEqual([firstRun.id, secondRun.id])
+    expect(result.events.map((event) => event.source)).toEqual(['agent', 'user'])
+    expect(result.lastEventId).toBe(result.events[1]?.id)
+  })
+
   it('unknown tool throws', async () => {
     await expect(handleToolCall('unknown-tool', {}, deps)).rejects.toThrow('Unknown tool')
   })

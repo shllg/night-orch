@@ -4,15 +4,19 @@ export function asRunEventsPayload(payload: unknown): RunEventsPayload | null {
   if (!payload || typeof payload !== 'object') return null
 
   const runId = (payload as { runId?: unknown }).runId
+  const repo = (payload as { repo?: unknown }).repo
+  const issueNumber = (payload as { issueNumber?: unknown }).issueNumber
   const events = (payload as { events?: unknown }).events
   const lastEventId = (payload as { lastEventId?: unknown }).lastEventId
 
-  if (typeof runId !== 'string') return null
+  if (typeof runId !== 'string' && typeof repo !== 'string') return null
   if (!Array.isArray(events)) return null
   if (typeof lastEventId !== 'number') return null
 
   return {
-    runId,
+    ...(typeof runId === 'string' ? { runId } : {}),
+    ...(typeof repo === 'string' ? { repo } : {}),
+    ...(typeof issueNumber === 'number' ? { issueNumber } : {}),
     events: events.filter((event): event is RunEvent => {
       if (!event || typeof event !== 'object') return false
       const maybeId = (event as { id?: unknown }).id

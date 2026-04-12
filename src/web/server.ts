@@ -27,6 +27,7 @@ import { handleAuthRoutes } from './routes/api-auth.js'
 import { handlePushRoutes } from './routes/api-push.js'
 import {
   handleWsMessage,
+  publishIssueSubscriptions,
   publishRunSubscriptions,
   publishAgentSessionSubscriptions,
 } from './routes/api-events.js'
@@ -48,7 +49,9 @@ export interface WebServerOptions {
 
 export interface WsClientState {
   runSubscriptions: Map<string, number>
+  issueSubscriptions: Map<string, { repo: string; issueNumber: number; since: number }>
   agentSessionSubscriptions: Map<string, number>
+  isAlive: boolean
 }
 
 export interface WebSecurityContext {
@@ -68,6 +71,8 @@ export interface WebSecurityContext {
 export type WebSocketCommand =
   | { type: 'subscribe-run-events'; runId: string; since?: number }
   | { type: 'unsubscribe-run-events'; runId: string }
+  | { type: 'subscribe-issue-events'; repo: string; issueNumber: number; since?: number }
+  | { type: 'unsubscribe-issue-events'; repo: string; issueNumber: number }
   | { type: 'subscribe-agent-session-events'; sessionId: string; since?: number }
   | { type: 'unsubscribe-agent-session-events'; sessionId: string }
   | { type: 'refresh' }
@@ -213,7 +218,9 @@ export async function startWebServer(
   wsServer.on('connection', (ws) => {
     const state: WsClientState = {
       runSubscriptions: new Map(),
+      issueSubscriptions: new Map(),
       agentSessionSubscriptions: new Map(),
+      isAlive: true,
     }
     clients.set(ws, state)
 
@@ -229,6 +236,10 @@ export async function startWebServer(
         return
       }
       void handleWsMessage(ws, state, decoded, deps, agentSessionManager)
+    })
+
+    ws.on('pong', () => {
+      state.isAlive = true
     })
 
     ws.on('close', () => {
@@ -254,6 +265,7 @@ export async function startWebServer(
       for (const [ws, state] of clients.entries()) {
         if (ws.readyState !== WebSocket.OPEN) continue
         await publishRunSubscriptions(ws, state, deps)
+        await publishIssueSubscriptions(ws, state, deps)
         publishAgentSessionSubscriptions(ws, state, agentSessionManager)
       }
     } catch (err) {
@@ -268,6 +280,20 @@ export async function startWebServer(
   }, snapshotIntervalMs)
   interval.unref()
 
+  const heartbeatInterval = setInterval(() => {
+    for (const [ws, state] of clients.entries()) {
+      if (ws.readyState !== WebSocket.OPEN) continue
+      if (!state.isAlive) {
+        ws.terminate()
+        clients.delete(ws)
+        continue
+      }
+      state.isAlive = false
+      ws.ping()
+    }
+  }, 15_000)
+  heartbeatInterval.unref()
+
   const stopAgentSessionStreaming = agentSessionManager.onSessionEvent((sessionId) => {
     for (const [ws, state] of clients.entries()) {
       if (ws.readyState !== WebSocket.OPEN) continue
@@ -278,6 +304,7 @@ export async function startWebServer(
   httpServer.on('close', () => {
     stopAgentSessionStreaming()
     clearInterval(interval)
+    clearInterval(heartbeatInterval)
     for (const ws of wsServer.clients) {
       ws.close()
     }

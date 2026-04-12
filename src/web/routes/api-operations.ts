@@ -137,6 +137,7 @@ export const handleOperationRoutes: RouteHandler = async (req, res, method, path
     const body = await readJsonBody(req)
     const repo = toNonEmptyString(body['repo'])
     const issueNumber = toBoundedInt(body['issueNumber'], NaN, 1, Number.MAX_SAFE_INTEGER)
+    const strategy = parseUpdateStrategy(body['strategy'])
 
     if (!repo || Number.isNaN(issueNumber)) {
       writeJson(res, 400, { error: 'repo and issueNumber are required' })
@@ -151,6 +152,7 @@ export const handleOperationRoutes: RouteHandler = async (req, res, method, path
           issueNumber,
           resetPlan: Boolean(body['resetPlan']),
           fresh: Boolean(body['fresh']),
+          ...(strategy ? { strategy } : {}),
         },
         security,
       ),
@@ -164,6 +166,7 @@ export const handleOperationRoutes: RouteHandler = async (req, res, method, path
     const body = await readJsonBody(req)
     const repo = toNonEmptyString(body['repo'])
     const issueNumber = toBoundedInt(body['issueNumber'], NaN, 1, Number.MAX_SAFE_INTEGER)
+    const strategy = parseUpdateStrategy(body['strategy'])
 
     if (!repo || Number.isNaN(issueNumber)) {
       writeJson(res, 400, { error: 'repo and issueNumber are required' })
@@ -177,6 +180,7 @@ export const handleOperationRoutes: RouteHandler = async (req, res, method, path
           repo,
           issueNumber,
           check: body['check'] === undefined ? true : Boolean(body['check']),
+          ...(strategy ? { strategy } : {}),
         },
         security,
       ),
@@ -190,6 +194,7 @@ export const handleOperationRoutes: RouteHandler = async (req, res, method, path
     const body = await readJsonBody(req)
     const repo = toNonEmptyString(body['repo'])
     const issueNumber = toBoundedInt(body['issueNumber'], NaN, 1, Number.MAX_SAFE_INTEGER)
+    const strategy = parseUpdateStrategy(body['strategy'])
 
     if (!repo || Number.isNaN(issueNumber)) {
       writeJson(res, 400, { error: 'repo and issueNumber are required' })
@@ -202,6 +207,7 @@ export const handleOperationRoutes: RouteHandler = async (req, res, method, path
         {
           repo,
           issueNumber,
+          ...(strategy ? { strategy } : {}),
         },
         security,
       ),
@@ -451,4 +457,8 @@ function resolveRuntimeDeps(deps: MCPDependencies): MCPDependencies {
     ...deps,
     config: resolveConfigWithRuntimeSettings(deps.config, deps.db),
   }
+}
+
+function parseUpdateStrategy(value: unknown): 'merge' | 'rebase' | undefined {
+  return value === 'merge' || value === 'rebase' ? value : undefined
 }
