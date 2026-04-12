@@ -288,11 +288,15 @@ export async function handleListRuns(
     }
   }
 
+  // Active view: exclude terminated attempts so Continue/Retry
+  // predecessors stay in the history panel instead of surfacing as
+  // duplicate rows for the same issue in the dashboard's "Active" tab.
   const filteredRows = loadRuns(deps.db, {
     limit: limit + 1,
     offset,
     repo: args.repo,
     status: args.status,
+    includeTerminated: false,
   })
   const hasMore = filteredRows.length > limit
   const pageRows = hasMore ? filteredRows.slice(0, limit) : filteredRows

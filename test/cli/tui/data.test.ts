@@ -414,4 +414,67 @@ describe('loadRuns', () => {
     expect(rows.every((row) => row.repo === 'org/repo')).toBe(true)
     expect(rows.every((row) => row.status === 'queued')).toBe(true)
   })
+
+  describe('includeTerminated: false (Active view)', () => {
+    const insertRun = (db: Database.Database, row: {
+      id: string
+      issue_number: number
+      status: string
+      terminated_at: string | null
+      created_at: string
+    }) => {
+      db.prepare(
+        `INSERT INTO runs (
+          id, repo, issue_number, issue_title, status, current_phase, iteration_count, estimated_cost_usd,
+          pr_number, pr_title, terminated_at, created_at, updated_at
+        ) VALUES (?, 'org/repo', ?, 'Issue', ?, NULL, 0, 0, NULL, NULL, ?, ?, ?)`,
+      ).run(row.id, row.issue_number, row.status, row.terminated_at, row.created_at, row.created_at)
+    }
+
+    it('excludes terminated attempts from the result', () => {
+      // Chain on issue #156: two terminated predecessors + one live head.
+      // The #156 regression we're guarding against is the web UI showing
+      // all three as "duplicate queued tasks" in the Active tab.
+      insertRun(db, { id: 'run-orig', issue_number: 156, status: 'error', terminated_at: '2026-04-11T12:00:00Z', created_at: '2026-04-11T11:00:00Z' })
+      insertRun(db, { id: 'run-continue-1', issue_number: 156, status: 'queued', terminated_at: '2026-04-11T13:00:00Z', created_at: '2026-04-11T12:30:00Z' })
+      insertRun(db, { id: 'run-continue-2', issue_number: 156, status: 'queued', terminated_at: null, created_at: '2026-04-11T13:00:00Z' })
+
+      const rows = loadRuns(db, { includeTerminated: false })
+      const ids = new Set(rows.map((r) => r.id))
+      expect(ids.has('run-continue-2')).toBe(true)
+      expect(ids.has('run-continue-1')).toBe(false)
+      expect(ids.has('run-orig')).toBe(false)
+      expect(rows.filter((r) => r.issue_number === 156)).toHaveLength(1)
+    })
+
+    it('default (includeTerminated: true) still returns the full history', () => {
+      insertRun(db, { id: 'run-terminated', issue_number: 200, status: 'blocked', terminated_at: '2026-04-11T12:00:00Z', created_at: '2026-04-11T11:00:00Z' })
+      insertRun(db, { id: 'run-live', issue_number: 200, status: 'queued', terminated_at: null, created_at: '2026-04-11T13:00:00Z' })
+
+      const rows = loadRuns(db)
+      const ids = new Set(rows.map((r) => r.id))
+      expect(ids.has('run-live')).toBe(true)
+      expect(ids.has('run-terminated')).toBe(true)
+    })
+
+    it('terminated-only issue (no live head) is excluded from the Active view', () => {
+      // Edge case: the *only* attempt for an issue is terminated. The
+      // Active view should not surface it at all — it belongs in history.
+      insertRun(db, { id: 'run-lonely-terminated', issue_number: 300, status: 'error', terminated_at: '2026-04-11T12:00:00Z', created_at: '2026-04-11T11:00:00Z' })
+
+      const rows = loadRuns(db, { includeTerminated: false })
+      expect(rows.some((r) => r.issue_number === 300)).toBe(false)
+    })
+
+    it('issue with a live head in a non-active status (error) is still included', () => {
+      // Regression guard: after the reconciler's markFinalizerOrphan runs,
+      // the live head has status='error' with terminated_at=NULL. That row
+      // MUST stay in the Active view so the user sees the broken run and
+      // can click /orch continue.
+      insertRun(db, { id: 'run-orphan-error', issue_number: 400, status: 'error', terminated_at: null, created_at: '2026-04-11T11:00:00Z' })
+
+      const rows = loadRuns(db, { includeTerminated: false })
+      expect(rows.some((r) => r.id === 'run-orphan-error')).toBe(true)
+    })
+  })
 })

@@ -55,6 +55,19 @@ export interface LoadRunsOptions {
   offset?: number
   repo?: string
   status?: string
+  /**
+   * When false, rows whose `terminated_at` is set are excluded from the
+   * result — i.e. only the one live head per `(repo, issue_number)` is
+   * returned. This is what the web UI's "Active" tab and the MCP list
+   * runs tool's default view want: superseded Continue/Retry predecessors
+   * stay in the history panel instead of masquerading as duplicate
+   * active rows.
+   *
+   * Defaults to `true` so the TUI's issue-grouped view (which renders
+   * the full attempt chain under each issue) keeps its existing
+   * behaviour.
+   */
+  includeTerminated?: boolean
 }
 
 export function loadRuns(
@@ -64,6 +77,8 @@ export function loadRuns(
   const options = typeof limitOrOptions === 'number'
     ? { limit: limitOrOptions }
     : (limitOrOptions ?? {})
+  const includeTerminated = options.includeTerminated ?? true
+
   const conditions: string[] = []
   const params: unknown[] = []
 
@@ -77,6 +92,17 @@ export function loadRuns(
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+
+  // When `includeTerminated` is false, terminated attempts must be
+  // excluded *before* the `ranked_runs` window function picks the top
+  // row. Otherwise a chain like
+  //   live queued <- terminated error (from /orch continue) <- terminated running
+  // ranks the most-recently-created terminated row as run_rank=1, and the
+  // active view shows the whole zombie chain.
+  const runsSourceClause = includeTerminated
+    ? 'FROM runs r'
+    : 'FROM runs r WHERE r.terminated_at IS NULL'
+
   const query = `WITH ranked_runs AS (
          SELECT
            r.repo,
@@ -90,7 +116,7 @@ export function loadRuns(
                r.rowid DESC,
                r.id DESC
            ) AS run_rank
-         FROM runs r
+         ${runsSourceClause}
        ),
        unresolved_issues AS (
          SELECT rr.repo, rr.issue_number
@@ -154,6 +180,7 @@ export function loadRuns(
          INNER JOIN unresolved_issues u
            ON u.repo = r.repo
           AND u.issue_number = r.issue_number
+         ${includeTerminated ? '' : 'WHERE r.terminated_at IS NULL'}
        ),
        issue_override_rows AS (
          SELECT
