@@ -28,12 +28,14 @@ import { TABS } from './constants.js'
 import type { ProjectsViewMode, RunsViewMode, TabId, TuiLogLine } from './types.js'
 import { formatUtcClock, nowUtcIso } from '../../utils/time.js'
 import { getBuildInfo } from '../../utils/build-info.js'
+import { FileLoopEngine } from '../../fileloop/engine.js'
 import {
   clearRuntimeSettingOverride,
   listRuntimeSettings,
   resolveConfigWithRuntimeSettings,
   setRuntimeSettingOverride,
 } from '../../settings/runtime.js'
+import { FileLoopView } from './views/file-loop.js'
 
 interface AppProps {
   db: Database.Database
@@ -77,6 +79,7 @@ export function resolveTabHotkey(input: string): TabId | null {
   if (input === '3') return 'stats'
   if (input === '4') return 'logs'
   if (input === '5') return 'settings'
+  if (input === '6') return 'fileloop'
   return null
 }
 
@@ -172,6 +175,8 @@ export type TuiActionCommand =
   | 'refresh'
   | 'poll'
   | 'sync'
+  | 'fileLoopStart'
+  | 'fileLoopStop'
   | 'labelsInit'
   | 'retry'
   | 'continue'
@@ -220,6 +225,8 @@ export function resolveActionCommand(args: ResolveActionCommandInput): TuiAction
   if (args.input === 's') return 'sync'
   if (args.input === 'L') return 'labelsInit'
   if (args.input === '%') return 'dailyCostOverride'
+  if (args.activeTab === 'fileloop' && args.input === 'f') return 'fileLoopStart'
+  if (args.activeTab === 'fileloop' && args.input === 'x') return 'fileLoopStop'
 
   if (args.input === 'D') {
     return args.cleanupConfirmPending ? 'cleanupConfirm' : 'cleanupArm'
@@ -315,6 +322,14 @@ export function App({
     () => listRuntimeSettings(config, db),
     [config, db, tick],
   )
+  const fileLoopRows = useMemo(() => {
+    const engine = new FileLoopEngine(db, runtimeConfig)
+    return runtimeConfig.repos.map((repo) => ({
+      repo: repo.repo,
+      active: engine.getActiveSession(repo.repo),
+      recent: engine.listSessions(repo.repo, 1)[0] ?? null,
+    }))
+  }, [db, runtimeConfig])
 
   const forgeByRepo = useMemo(() => {
     const map = new Map<string, ReturnType<typeof createForgeAdapter>>()
@@ -717,6 +732,40 @@ export function App({
     })
   }, [activeTab, config, dryRun, runAction, selectedIssue, selectedProjectIndex])
 
+  const runFileLoopStart = useCallback(async () => {
+    await runAction('file-loop-start', async () => {
+      const currentRuntimeConfig = resolveConfigWithRuntimeSettings(config, db)
+      const repoConfig = currentRuntimeConfig.repos[selectedProjectIndex]
+      if (!repoConfig) throw new Error('No repository selected')
+      if (dryRun) {
+        return `[dry-run] would start file-loop for ${repoConfig.repo}`
+      }
+      const engine = new FileLoopEngine(db, currentRuntimeConfig)
+      const session = engine.startSession(repoConfig)
+      if (enableBackgroundPoller) {
+        await runPollCycle('manual')
+      }
+      return `started file-loop session ${session.id} for ${repoConfig.repo}`
+    })
+  }, [config, db, dryRun, enableBackgroundPoller, runAction, runPollCycle, selectedProjectIndex])
+
+  const runFileLoopStop = useCallback(async () => {
+    await runAction('file-loop-stop', async () => {
+      const currentRuntimeConfig = resolveConfigWithRuntimeSettings(config, db)
+      const repoConfig = currentRuntimeConfig.repos[selectedProjectIndex]
+      if (!repoConfig) throw new Error('No repository selected')
+      if (dryRun) {
+        return `[dry-run] would stop file-loop for ${repoConfig.repo}`
+      }
+      const engine = new FileLoopEngine(db, currentRuntimeConfig)
+      const session = engine.stopSession(repoConfig.repo)
+      if (enableBackgroundPoller) {
+        await runPollCycle('manual')
+      }
+      return `requested stop for file-loop session ${session.id} on ${repoConfig.repo}`
+    })
+  }, [config, db, dryRun, enableBackgroundPoller, runAction, runPollCycle, selectedProjectIndex])
+
   const clearCleanupConfirmation = useCallback(() => {
     if (cleanupConfirmTimer.current) {
       clearTimeout(cleanupConfirmTimer.current)
@@ -1075,6 +1124,17 @@ export function App({
       }
     }
 
+    if (activeTab === 'fileloop') {
+      if (key.downArrow || input === 'j') {
+        setSelectedProjectIndex((current) => moveProjectSelection(current, 1, runtimeConfig.repos.length))
+        return
+      }
+      if (key.upArrow || input === 'k') {
+        setSelectedProjectIndex((current) => moveProjectSelection(current, -1, runtimeConfig.repos.length))
+        return
+      }
+    }
+
     if (activeTab === 'logs') {
       if (key.downArrow || input === 'j') {
         const nextId = moveLogSelection(logLines, selectedLogId, 1)
@@ -1161,6 +1221,14 @@ export function App({
     }
     if (actionCommand === 'sync') {
       void runSync()
+      return
+    }
+    if (actionCommand === 'fileLoopStart') {
+      void runFileLoopStart()
+      return
+    }
+    if (actionCommand === 'fileLoopStop') {
+      void runFileLoopStop()
       return
     }
     if (actionCommand === 'labelsInit') {
@@ -1300,6 +1368,12 @@ export function App({
         <SettingsView
           settings={runtimeSettings}
           selectedIndex={selectedSettingIndex}
+        />
+      )}
+      {activeTab === 'fileloop' && (
+        <FileLoopView
+          rows={fileLoopRows}
+          selectedIndex={selectedProjectIndex}
         />
       )}
 

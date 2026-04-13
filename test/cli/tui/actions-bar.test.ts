@@ -16,7 +16,7 @@ describe('buildActionHints', () => {
       manualStrategy: null,
     }))
 
-    expect(sections.navigation).toContain('[1-5]tabs [h/l]tabs [j/k]select issue [o/enter]open')
+    expect(sections.navigation).toContain('[1-6]tabs [h/l]tabs [j/k]select issue [o/enter]open')
     expect(sections.global).toContain('[q]quit [r]refresh [p]poll [s]sync [L]labels-init [D]cleanup(confirm)')
     expect(sections.issue).toContain('[t/T]retry [c]continue [_]rebase [m]strategy:default [X]delete entry [$]cost-override')
   })
@@ -46,7 +46,7 @@ describe('buildActionHints', () => {
       manualStrategy: null,
     }))
 
-    expect(sections.navigation).toContain('[1-5]tabs [h/l]tabs [j/k]scroll run')
+    expect(sections.navigation).toContain('[1-6]tabs [h/l]tabs [j/k]scroll run')
     expect(sections.global).toContain('[q/esc]close [r]refresh')
     expect(sections.issue).toContain('focused run detail')
   })
@@ -61,7 +61,7 @@ describe('buildActionHints', () => {
       manualStrategy: null,
     }))
 
-    expect(sections.navigation).toBe('[1-5]tabs [h/l]tabs')
+    expect(sections.navigation).toBe('[1-6]tabs [h/l]tabs')
     expect(sections.global).toContain('[q]quit [r]refresh [a]toggle auto-refresh')
     expect(sections.issue).not.toContain('retry')
     expect(sections.issue).not.toContain('rebase')
@@ -106,7 +106,7 @@ describe('buildActionHints', () => {
       manualStrategy: null,
     }))
 
-    expect(sections.navigation).toBe('[1-5]tabs [h/l]tabs')
+    expect(sections.navigation).toBe('[1-6]tabs [h/l]tabs')
     expect(sections.global).toContain('[q/esc]close [r]refresh')
     expect(sections.issue).toContain('focused project detail')
   })
@@ -136,7 +136,21 @@ describe('buildActionHints', () => {
       manualStrategy: null,
     }))
 
-    expect(sections.navigation).toContain('[1-5]tabs [h/l]tabs [j/k]select setting')
+    expect(sections.navigation).toContain('[1-6]tabs [h/l]tabs [j/k]select setting')
     expect(sections.issue).toContain('[+/-]adjust number [space]toggle bool [u]unset override')
+  })
+
+  it('shows file-loop controls on file-loop tab', () => {
+    const sections = sectionMap(buildActionHints({
+      activeTab: 'fileloop',
+      busy: false,
+      runsFocused: false,
+      projectsFocused: false,
+      autoRefresh: true,
+      manualStrategy: null,
+    }))
+
+    expect(sections.navigation).toContain('[1-6]tabs [h/l]tabs [j/k]select repo')
+    expect(sections.issue).toContain('[f]start [x]stop')
   })
 })

@@ -17,6 +17,8 @@ Night-orch is a **central orchestrator** that runs as a single daemon on your ma
 
 Night-orch **never modifies your project clones directly**. It creates temporary git worktrees from them into its own storage area, does all AI work there, and pushes branches/PRs to the remote.
 
+In addition to issue-driven runs, night-orch can run an explicit repo-idle `file-loop` maintenance session. That loop works in its own worktree, applies only low-risk trivial edits automatically, and accumulates non-trivial follow-ups in `loop.md` for review in a single PR.
+
 Repo-local overrides are optional: if a repo contains `.night-orch.yml` (or `.night-orch.yaml`), those settings are deep-merged with the central config for that repo.
 
 ## Getting Started
@@ -583,7 +585,7 @@ The metrics line includes a runtime-override annotation when effective `metrics.
 
 ### `night-orch tui`
 
-Live-updating terminal dashboard. Refreshes every 2 seconds. Shows active runs, merge queue, cost bar, recent history, issue actions (`poll`, `sync`, `cleanup`, `retry`, `continue`, `rebase`, `delete entry`), and a Settings tab (`5`) for runtime overrides (read-only keys are listed but cannot be changed). Press `m` on the Runs list to cycle the manual action strategy override (`default` → `merge` → `rebase`) used by retry/continue/rebase. Press Ctrl+C to exit.
+Live-updating terminal dashboard. Refreshes every 2 seconds. Shows active runs, merge queue, cost bar, recent history, issue actions (`poll`, `sync`, `cleanup`, `retry`, `continue`, `rebase`, `delete entry`), a Settings tab (`5`) for runtime overrides (read-only keys are listed but cannot be changed), and a File-Loop tab (`6`) for starting/stopping repo-scoped file-loop sessions. Press `m` on the Runs list to cycle the manual action strategy override (`default` → `merge` → `rebase`) used by retry/continue/rebase. On the File-Loop tab, use `f` to start a session for the selected repo and `x` to request stop. Press Ctrl+C to exit.
 
 ### `night-orch settings`
 
@@ -625,6 +627,33 @@ Options: `--strategy merge|rebase` (override the repo default for this manual ac
 
 Also available as a comment command: `/orch continue`.
 
+### `night-orch file-loop <action>`
+
+Manage repo-scoped file-loop sessions. Actions: `start`, `stop`, `status`.
+
+Typical usage:
+
+```bash
+night-orch file-loop start --repo owner/repo
+night-orch file-loop start --repo owner/repo --max-minutes 120
+night-orch file-loop status
+night-orch file-loop stop --repo owner/repo --wait
+```
+
+Behavior:
+
+- A file-loop session only progresses while the repo has no active issue runs.
+- Candidate files are filtered by `fileLoop.includeGlobs`, `fileLoop.excludeGlobs`, and `fileLoop.maxFileLines`.
+- The reviewer profile classifies each file. Only `trivial` edits are applied automatically.
+- Non-trivial follow-up work is appended to `loop.md` instead of being auto-edited.
+- `stop --wait` blocks until the current session finalizes and, if there are commits, publishes its PR outcome.
+
+Options:
+
+- `--repo <owner/name>`: required when multiple repos are configured
+- `--max-minutes <n>`: override the session duration for `start`
+- `--wait`: for `stop`, wait until finalization completes
+
 ### `night-orch cleanup`
 
 Remove stale worktrees, delete merged branches, archive old logs. Respects `storage.retention` settings.
@@ -639,7 +668,7 @@ Send a test notification through all configured channels. Verifies webhook/Disco
 
 ### `night-orch mcp`
 
-Start the MCP server on stdio transport (for Claude Code integration). Exposes 18 tools and 3 resources for querying and controlling night-orch.
+Start the MCP server on stdio transport (for Claude Code integration). Exposes 23 tools and 3 resources for querying and controlling night-orch.
 
 ### `night-orch monitoring`
 
@@ -759,7 +788,7 @@ the Phase 4 gate without Prometheus access.
 
 Night-orch exposes an MCP server for integration with Claude Code and other MCP clients.
 
-### Tools (18)
+### Tools (23)
 
 | Tool | Description |
 |------|-------------|
@@ -771,6 +800,10 @@ Night-orch exposes an MCP server for integration with Claude Code and other MCP 
 | `night-orch-list-runs` | Filtered run listing |
 | `night-orch-cost-report` | Daily cost breakdown |
 | `night-orch-retry` | Re-run an issue |
+| `night-orch-cost-override` | Grant a per-run budget override to the latest run for an issue |
+| `night-orch-daily-cost-override` | Raise today's daily budget cap |
+| `night-orch-cost-reset` | Reset the latest run's accumulated cost and resume cost-blocked work |
+| `night-orch-daily-cost-reset` | Reset today's accumulated daily cost counters |
 | `night-orch-continue` | Queue a context-aware second pass |
 | `night-orch-sync` | Reconcile DB with GitHub |
 | `night-orch-cleanup` | Remove stale resources |
@@ -781,6 +814,7 @@ Night-orch exposes an MCP server for integration with Claude Code and other MCP 
 | `night-orch-stream-events` | Stream recent agent events |
 | `night-orch-rebase` | Queue rebase + re-evaluate |
 | `night-orch-update` | Trigger self-update |
+| `night-orch-file-loop` | Start, stop, or inspect repo-scoped file-loop sessions |
 
 ### Usage
 

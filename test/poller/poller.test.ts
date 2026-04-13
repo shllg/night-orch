@@ -66,8 +66,20 @@ vi.mock('../../src/labels/manager.js', () => ({
 }))
 
 const mockExecuteLoop = vi.fn()
+const mockFileLoopGetActiveSession = vi.fn().mockReturnValue(null)
+const mockFileLoopTickRepo = vi.fn().mockResolvedValue(null)
 vi.mock('../../src/loop/engine.js', () => ({
   executeLoop: (...args: unknown[]) => mockExecuteLoop(...args),
+}))
+vi.mock('../../src/fileloop/engine.js', () => ({
+  FileLoopEngine: class MockFileLoopEngine {
+    getActiveSession(...args: unknown[]) {
+      return mockFileLoopGetActiveSession(...args)
+    }
+    tickRepo(...args: unknown[]) {
+      return mockFileLoopTickRepo(...args)
+    }
+  },
 }))
 
 const mockExecuteRebase = vi.fn().mockResolvedValue({
@@ -160,6 +172,8 @@ describe('pollOnce', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mockFileLoopGetActiveSession.mockReturnValue(null)
+    mockFileLoopTickRepo.mockResolvedValue(null)
     tmpDir = mkdtempSync(join(tmpdir(), 'night-orch-poller-test-'))
     db = initDatabase(join(tmpDir, 'test.db'))
   })
@@ -178,6 +192,23 @@ describe('pollOnce', () => {
     expect(result.processed).toBe(0)
     expect(result.errors).toBe(0)
     expect(result.immediateFollowupRepos).toEqual([])
+  })
+
+  it('runs the file-loop hook on idle repos when a session is active', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([])
+    mockFileLoopGetActiveSession.mockReturnValue({
+      id: 1,
+      repo: 'org/repo',
+      status: 'running',
+    })
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    const result = await pollOnce(config, db, false)
+
+    expect(result.processed).toBe(0)
+    expect(result.errors).toBe(0)
+    expect(mockFileLoopTickRepo).toHaveBeenCalledTimes(1)
+    expect(mockFileLoopTickRepo.mock.calls[0]?.[0]).toMatchObject({ repo: 'org/repo' })
   })
 
   it('dry run logs discovered issues without processing', async () => {

@@ -192,6 +192,76 @@ const PlanningConfigSchema = z.object({
   prdDirectory: z.string().default('docs/prd'),
 })
 
+const FileLoopVerifyConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  commands: z.array(z.string()).default(['pnpm typecheck']),
+  timeoutSeconds: z.number().int().positive().default(60),
+})
+
+const FileLoopFinalizeVerifyConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  commands: z.array(z.string()).default(['pnpm typecheck', 'pnpm lint']),
+  timeoutSeconds: z.number().int().positive().default(300),
+  onFailure: z.enum(['draft-pr', 'no-pr']).default('draft-pr'),
+})
+
+export const FileLoopConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  maxDurationMinutes: z.number().int().positive().default(480),
+  maxIterations: z.number().int().positive().default(1000),
+  minIntervalSecondsBetweenFiles: z.number().int().min(0).default(5),
+  perIterationTimeoutSeconds: z.number().int().positive().default(120),
+  maxCostUsd: z.number().nonnegative().default(5),
+  maxFileLines: z.number().int().positive().default(1500),
+  includeGlobs: z.array(z.string()).default(['**/*.{ts,tsx,js,jsx,py,go,rs,md}']),
+  excludeGlobs: z.array(z.string()).default([
+    '**/node_modules/**',
+    '**/dist/**',
+    '**/.env*',
+    '**/*.lock',
+    '**/package-lock.json',
+    '**/pnpm-lock.yaml',
+    '**/yarn.lock',
+    '**/*.snap',
+    '**/*.min.*',
+    '**/.git/**',
+    'loop.md',
+  ]),
+  reviewerProfileKey: z.string().default('claude-cheap'),
+  branchNameTemplate: z.string().default('orch/file-loop/{repoSlug}/{yyyyMmDd}'),
+  loopMdPath: z.string().default('loop.md'),
+  commitPrefix: z.string().default('[FILE-LOOP]'),
+  perEditVerify: FileLoopVerifyConfigSchema.default({}),
+  finalizeVerify: FileLoopFinalizeVerifyConfigSchema.default({}),
+}).strict()
+
+const RepoFileLoopConfigSchema = z.object({
+  enabled: z.boolean().optional(),
+  maxDurationMinutes: z.number().int().positive().optional(),
+  maxIterations: z.number().int().positive().optional(),
+  minIntervalSecondsBetweenFiles: z.number().int().min(0).optional(),
+  perIterationTimeoutSeconds: z.number().int().positive().optional(),
+  maxCostUsd: z.number().nonnegative().optional(),
+  maxFileLines: z.number().int().positive().optional(),
+  includeGlobs: z.array(z.string()).optional(),
+  excludeGlobs: z.array(z.string()).optional(),
+  reviewerProfileKey: z.string().optional(),
+  branchNameTemplate: z.string().optional(),
+  loopMdPath: z.string().optional(),
+  commitPrefix: z.string().optional(),
+  perEditVerify: z.object({
+    enabled: z.boolean().optional(),
+    commands: z.array(z.string()).optional(),
+    timeoutSeconds: z.number().int().positive().optional(),
+  }).strict().optional(),
+  finalizeVerify: z.object({
+    enabled: z.boolean().optional(),
+    commands: z.array(z.string()).optional(),
+    timeoutSeconds: z.number().int().positive().optional(),
+    onFailure: z.enum(['draft-pr', 'no-pr']).optional(),
+  }).strict().optional(),
+}).strict()
+
 // --- Workflow schemas ---
 
 const WorkflowWorkerStepSchema = z.object({
@@ -274,6 +344,7 @@ const RepoConfigSchema = z.object({
   verify: z.array(CommandSpecSchema).default([]),
   prompts: PromptsSchema.optional(),
   planning: PlanningConfigSchema.default({}),
+  fileLoop: RepoFileLoopConfigSchema.default({}),
   selectors: SelectorsSchema.default({}),
   agents: z.record(z.string()).default({}),
   workflow: z.string().optional(),
@@ -460,6 +531,8 @@ export const ConfigSchema = z.object({
     maxConcurrentSubtasks: z.number().int().min(1).max(10).default(3),
   }).default({}),
 
+  fileLoop: FileLoopConfigSchema.default({}),
+
   security: SecuritySchema.default({}),
 
   cost: CostSchema.default({}),
@@ -577,6 +650,7 @@ export const ProjectConfigSchema = z.object({
   verify: z.unknown().optional(),
   prompts: z.unknown().optional(),
   planning: z.unknown().optional(),
+  fileLoop: z.unknown().optional(),
   selectors: z.unknown().optional(),
   agents: z.unknown().optional(),
   workflow: z.unknown().optional(),
@@ -592,3 +666,5 @@ export type WorkerProfile = z.infer<typeof WorkerProfileSchema>
 export type EnvironmentConfig = z.infer<typeof EnvironmentConfigSchema>
 export type CostModel = z.infer<typeof CostModelSchema>
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>
+export type FileLoopConfig = z.infer<typeof FileLoopConfigSchema>
+export type RepoFileLoopConfig = z.infer<typeof RepoFileLoopConfigSchema>

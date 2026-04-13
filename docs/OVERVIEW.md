@@ -1,6 +1,6 @@
 # Night-Orch: Architecture Overview
 
-Night-orch is an autonomous orchestrator that watches GitHub/Forgejo repositories for eligible issues, dispatches AI coding agents (Claude Code, Codex) to plan, implement, and review changes, then publishes the result as a pull request. It runs as a long-lived poller, manages concurrent work via leases, tracks state in SQLite, and enforces strict security isolation between the orchestrator (which holds forge tokens) and the AI workers (which never see them).
+Night-orch is an autonomous orchestrator that watches GitHub/Forgejo repositories for eligible issues, dispatches AI coding agents (Claude Code, Codex) to plan, implement, and review changes, then publishes the result as a pull request. It also supports an explicit repo-idle `file-loop` maintenance mode for low-risk cleanup passes outside issue-driven work. It runs as a long-lived poller, manages concurrent work via leases, tracks state in SQLite, and enforces strict security isolation between the orchestrator (which holds forge tokens) and the AI workers (which never see them).
 
 ---
 
@@ -8,7 +8,7 @@ Night-orch is an autonomous orchestrator that watches GitHub/Forgejo repositorie
 
 This walkthrough follows a single issue from discovery to PR. Read this first to ground yourself before diving into subsystems.
 
-1. **Poll** — The runner (`src/runner/poller.ts`) wakes up on an interval and calls the forge API to list open issues matching configured label selectors.
+1. **Poll** — The runner (`src/runner/poller.ts`) wakes up on an interval and calls the forge API to list open issues matching configured label selectors. If a repo has an active file-loop session, the same poll cycle also gives that session a chance to advance even when no issues were discovered.
 
 2. **Triage** — Each issue is classified as `trivial`, `standard`, or `architectural` based on labels and body length (`src/discovery/triage.ts`). Architectural issues are labeled for humans and skipped. Trivial issues get shorter timeouts.
 
@@ -124,6 +124,9 @@ AI agents invoked as CLI subprocesses. `claude.ts` and `codex.ts` implement the 
 ### Loop Engine (`src/loop/`)
 The heart of the system. Covered in detail below.
 
+### File Loop (`src/fileloop/`)
+Repo-idle maintenance engine for explicit `file-loop` sessions. The session store and file-state store live in SQLite, candidate selection filters files by glob and size, the reviewer worker classifies each candidate, only `trivial` edits are applied automatically, and deferred work is appended to `loop.md`. Publication reuses the normal forge adapter path, but final verification can choose between opening a draft PR or suppressing PR creation on failure.
+
 ### Publishing (`src/publishing/`)
 Pushes branches and creates/updates PRs via the forge adapter. Compiles PR title and body from context. On failure, transitions labels to error and posts a comment.
 
@@ -140,7 +143,7 @@ Posts configured mentions to PRs. Deduplication is commit-specific (tracked in S
 Prometheus metrics via `prom-client`. `createMetricsService()` returns either a live service or a no-op. All metric calls are wrapped in try-catch — metrics never block or throw. HTTP endpoint serves `/metrics` (Prometheus format) and `/api/stats` (JSON).
 
 ### MCP Server (`src/mcp/`)
-Model Context Protocol interface for external agents. Eighteen tools — see [USAGE.md → MCP Integration](./USAGE.md#mcp-integration) for the full list. Three resources (status, config, metrics). Mutation tools require the auth token from `mcp.authTokenEnv` when configured. Transport: `stdio` for the standalone `night-orch mcp` command; HTTP/SSE when embedded in the `run` daemon (host/port from `mcp.httpHost` / `mcp.httpPort`). Run-event streaming exposes one ordered log across system and agent events.
+Model Context Protocol interface for external agents. Twenty-three tools — see [USAGE.md → MCP Integration](./USAGE.md#mcp-integration) for the full list. Three resources (status, config, metrics). Mutation tools require the auth token from `mcp.authTokenEnv` when configured. Transport: `stdio` for the standalone `night-orch mcp` command; HTTP/SSE when embedded in the `run` daemon (host/port from `mcp.httpHost` / `mcp.httpPort`). Run-event streaming exposes one ordered log across system and agent events.
 
 ### Poller (`src/poller/`)
 The R6 decomposition of the old `src/runner/poller.ts` god object. `discovery-scheduler.ts` picks eligible issues each cycle. `reaction-processor.ts` turns forge events (comment commands, label changes, PR reactions) into typed control commands. `attempt-dispatcher.ts` holds the lease, inserts a new `attempts` row, runs the loop engine, and finalizes. `error-recovery.ts` classifies typed worker errors and decides retry vs. block. `notify-dispatcher.ts` maps attempt events to notification payloads.

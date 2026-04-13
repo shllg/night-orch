@@ -95,6 +95,8 @@ describe('ConfigSchema', () => {
     if (result.success) {
       expect(result.data.github.pollIntervalSeconds).toBe(300)
       expect(result.data.loop.maxReviewIterations).toBe(4)
+      expect(result.data.fileLoop.enabled).toBe(false)
+      expect(result.data.fileLoop.maxDurationMinutes).toBe(480)
       expect(result.data.security.maxDailyCostUsd).toBe(50)
       expect(result.data.cost.model).toBe('pay-per-use')
       expect(result.data.metrics.host).toBe('0.0.0.0')
@@ -102,6 +104,28 @@ describe('ConfigSchema', () => {
       expect(result.data.repos[0]?.baseBranch).toBe('main')
       expect(result.data.repos[0]?.branchPrefix).toBe('orch')
       expect(result.data.notifications.events.onPrUpdated).toBe(true)
+    }
+  })
+
+  it('accepts repo-specific file-loop overrides', () => {
+    const raw = loadExampleConfig()
+    raw.fileLoop = {
+      enabled: true,
+      reviewerProfileKey: 'claude-default',
+    }
+    raw.repos[0].fileLoop = {
+      maxDurationMinutes: 120,
+      finalizeVerify: {
+        onFailure: 'no-pr',
+      },
+    }
+
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.fileLoop.enabled).toBe(true)
+      expect(result.data.repos[0]?.fileLoop.maxDurationMinutes).toBe(120)
+      expect(result.data.repos[0]?.fileLoop.finalizeVerify?.onFailure).toBe('no-pr')
     }
   })
 

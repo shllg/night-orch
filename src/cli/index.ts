@@ -44,6 +44,7 @@ import { updateCommand } from './commands/update.js'
 import { continueCommand } from './commands/continue.js'
 import { costOverrideCommand } from './commands/cost-override.js'
 import { dailyCostOverrideCommand } from './commands/daily-cost-override.js'
+import { fileLoopCommand } from './commands/file-loop.js'
 import {
   settingsListCommand,
   settingsSetCommand,
@@ -169,6 +170,15 @@ program
   .action((amount, opts, cmd) =>
     dailyCostOverrideCommand(amount, { ...cmd.parent?.opts(), ...opts }),
   )
+
+program
+  .command('file-loop')
+  .argument('<action>', 'Action to perform (start|stop|status)')
+  .option('--repo <repo>', 'Repository (owner/name)')
+  .option('--max-minutes <minutes>', 'Override session duration in minutes for start')
+  .option('--wait', 'For stop: wait until the session finalizes')
+  .description('Manage repo-scoped file-loop sessions')
+  .action((action, opts, cmd) => fileLoopCommand(action, { ...cmd.parent?.opts(), ...opts }))
 
 program
   .command('cleanup')

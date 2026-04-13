@@ -52,6 +52,31 @@ loop:
   # maxSubtasks: 5               # Max sub-tasks per decomposition
   # maxConcurrentSubtasks: 3     # Max parallel sub-task worktrees
 
+fileLoop:
+  enabled: false
+  maxDurationMinutes: 480
+  maxIterations: 1000
+  minIntervalSecondsBetweenFiles: 5
+  perIterationTimeoutSeconds: 120
+  maxCostUsd: 5
+  maxFileLines: 1500
+  reviewerProfileKey: claude-default
+  branchNameTemplate: orch/file-loop/{repoSlug}/{yyyyMmDd}
+  loopMdPath: loop.md
+  commitPrefix: "[FILE-LOOP]"
+  perEditVerify:
+    enabled: true
+    commands:
+      - pnpm typecheck
+    timeoutSeconds: 60
+  finalizeVerify:
+    enabled: true
+    commands:
+      - pnpm typecheck
+      - pnpm lint
+    timeoutSeconds: 300
+    onFailure: draft-pr
+
 security:
   maxChangedFiles: 50
   maxChangedLines: 5000
@@ -202,6 +227,12 @@ repos:
     #     mergeFailed: kanban:merge-failed
     planning:
       prdDirectory: docs/prd
+    # Optional repo-specific file-loop overrides. Values merge over the
+    # top-level fileLoop defaults.
+    # fileLoop:
+    #   enabled: true
+    #   maxDurationMinutes: 240
+    #   reviewerProfileKey: codex-default
     # Optional per-label metadata overrides used by `night-orch labels-init`
     labelConfig:
       orch:ready:

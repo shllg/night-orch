@@ -61,11 +61,12 @@ describe('MCP Tools', () => {
     expect(names).toContain('night-orch-stream-events')
     expect(names).toContain('night-orch-rebase')
     expect(names).toContain('night-orch-continue')
+    expect(names).toContain('night-orch-file-loop')
     expect(names).toContain('night-orch-cost-override')
     expect(names).toContain('night-orch-daily-cost-override')
     expect(names).toContain('night-orch-cost-reset')
     expect(names).toContain('night-orch-daily-cost-reset')
-    expect(tools.length).toBe(22)
+    expect(tools.length).toBe(23)
   })
 
   it('settings tools list/set/clear runtime overrides', async () => {
@@ -162,6 +163,15 @@ describe('MCP Tools', () => {
 
     const result = await handleToolCall('night-orch-status', { repo: 'org/repo' }, deps) as { activeRuns: number }
     expect(result.activeRuns).toBe(1)
+  })
+
+  it('file-loop status tool returns empty sessions by default', async () => {
+    const result = await handleToolCall('night-orch-file-loop', { action: 'status', repo: 'org/repo' }, deps) as {
+      success: boolean
+      sessions: unknown[]
+    }
+    expect(result.success).toBe(true)
+    expect(result.sessions).toEqual([])
   })
 
   it('run-detail returns run info', async () => {

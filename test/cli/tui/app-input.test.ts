@@ -18,6 +18,7 @@ describe('tui app input helpers', () => {
     expect(resolveTabHotkey('3')).toBe('stats')
     expect(resolveTabHotkey('4')).toBe('logs')
     expect(resolveTabHotkey('5')).toBe('settings')
+    expect(resolveTabHotkey('6')).toBe('fileloop')
     expect(resolveTabHotkey('x')).toBeNull()
   })
 
@@ -180,6 +181,24 @@ describe('tui action key dispatch', () => {
       ...baseArgs,
       activeTab: 'stats',
       input: 't',
+    })).toBe('none')
+  })
+
+  it('maps file-loop actions only on the file-loop tab', () => {
+    expect(resolveActionCommand({
+      ...baseArgs,
+      activeTab: 'fileloop',
+      input: 'f',
+    })).toBe('fileLoopStart')
+    expect(resolveActionCommand({
+      ...baseArgs,
+      activeTab: 'fileloop',
+      input: 'x',
+    })).toBe('fileLoopStop')
+    expect(resolveActionCommand({
+      ...baseArgs,
+      activeTab: 'stats',
+      input: 'f',
     })).toBe('none')
   })
 

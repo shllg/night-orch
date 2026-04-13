@@ -74,7 +74,7 @@ Registered keys are visible via `night-orch settings list` (or Web/TUI Settings/
 - `commentCommands`: `enabled`, `requireCollaborator`
 - `workflows`
 
-Keys **not** in the runtime registry — edit YAML and restart the daemon: `ai.*`, `cost.allowEstimatedDuration`, all `repos[]` settings, `github.tokenEnv` environment values (the registry exposes the env var *name*, not the token itself). Use `night-orch daily-cost-override` / `night-orch cost-override` for budget headroom rather than mutating `security.maxDailyCostUsd` at runtime.
+Keys **not** in the runtime registry — edit YAML and restart the daemon: `ai.*`, `fileLoop.*`, `cost.allowEstimatedDuration`, all `repos[]` settings, `github.tokenEnv` environment values (the registry exposes the env var *name*, not the token itself). Use `night-orch daily-cost-override` / `night-orch cost-override` for budget headroom rather than mutating `security.maxDailyCostUsd` at runtime.
 
 Update surfaces:
 
@@ -115,6 +115,7 @@ Update surfaces:
 | `storage` | object | no | object with defaults | DB/worktree/log paths. |
 | `notifications` | object | no | object with defaults | Channel/event notification config. |
 | `loop` | object | no | object with defaults | Loop decision limits and behavior. |
+| `fileLoop` | object | no | object with defaults | Repo-idle maintenance loop for low-risk file cleanup and review. |
 | `security` | object | no | object with defaults | Diff/cost safety limits. |
 | `cost` | object | no | object with defaults | Cost model (`pay-per-use` enforces USD caps; `subscription` is advisory-only; `subscription-metered` tracks advisory USD with optional enforcement). |
 | `workerProfiles` | record | no | `{}` | Named CLI profiles for agents. |
@@ -240,6 +241,52 @@ Note: loop limits are later triage-adjusted per issue (trivial/standard/architec
 ### Decomposition
 
 When `decompose: true`, issues classified as `standard` triage level with a body exceeding 500 characters (or containing 3+ numbered items/headings) are sent to the planner for decomposition. The planner decides whether to split the issue and outputs 2-5 atomic sub-tasks. Each sub-task runs the full Plan→Code→Verify→Review loop in its own git worktree. Sub-tasks execute in parallel waves based on their dependency graph, up to `maxConcurrentSubtasks` concurrent worktrees.
+
+## `fileLoop`
+
+`fileLoop` configures a repo-scoped maintenance loop that runs only while the repo is otherwise idle. A session iterates through candidate files in a dedicated `file-loop` worktree, asks the configured reviewer profile to classify the next change, applies only `trivial` edits automatically, records larger follow-up ideas in `loop.md`, and publishes one PR when the session ends.
+
+Operational constraints:
+
+- File-loop work runs only when a repo has no active issue runs.
+- Sessions are started and stopped explicitly through CLI, MCP, or the TUI file-loop tab.
+- Top-level `fileLoop` values provide defaults; `repos[].fileLoop` merges over them for per-repo overrides.
+- Final publish runs `finalizeVerify`; if verification fails, `onFailure` controls whether a draft PR is still opened.
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `false` | Master gate. `night-orch file-loop start` refuses to start when disabled for the repo. |
+| `maxDurationMinutes` | positive int | `480` | Hard wall-clock cap per session unless `start --max-minutes` overrides it. |
+| `maxIterations` | positive int | `1000` | Upper bound on file-loop iterations per session. |
+| `minIntervalSecondsBetweenFiles` | int >= 0 | `5` | Cooldown before reconsidering the next file. |
+| `perIterationTimeoutSeconds` | positive int | `120` | Timeout for each reviewer worker invocation. |
+| `maxCostUsd` | non-negative number | `5` | Session cost cap. Hitting it requests finalization. |
+| `maxFileLines` | positive int | `1500` | Skip files larger than this line count. |
+| `includeGlobs` | string[] | `["**/*.{ts,tsx,js,jsx,py,go,rs,md}"]` | Candidate file allowlist. |
+| `excludeGlobs` | string[] | built-in list | Candidate file denylist. Defaults exclude generated artifacts, lockfiles, `.git`, and `loop.md`. |
+| `reviewerProfileKey` | string | `claude-cheap` | Worker profile name, or a worker `type`, used for file review iterations. Override this if your config does not define `claude-cheap`. |
+| `branchNameTemplate` | string | `orch/file-loop/{repoSlug}/{yyyyMmDd}` | Supports `{repoSlug}` and `{yyyyMmDd}` placeholders. |
+| `loopMdPath` | string | `loop.md` | Repo-relative backlog file for deferred refactor notes. |
+| `commitPrefix` | string | `[FILE-LOOP]` | Prefix used for per-file and `loop.md` commits. |
+| `perEditVerify` | object | object with defaults | Verification run immediately after each trivial edit. |
+| `finalizeVerify` | object | object with defaults | Verification run once before PR publication/finalization. |
+
+### `fileLoop.perEditVerify`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `true` | If false, trivial edits are committed without per-file verification. |
+| `commands` | string[] | `["pnpm typecheck"]` | Commands run sequentially in the file-loop worktree. |
+| `timeoutSeconds` | positive int | `60` | Per-command timeout budget. |
+
+### `fileLoop.finalizeVerify`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `true` | If false, publication does not run final verification. |
+| `commands` | string[] | `["pnpm typecheck", "pnpm lint"]` | Commands run sequentially before publication. |
+| `timeoutSeconds` | positive int | `300` | Per-command timeout budget. |
+| `onFailure` | `draft-pr` \| `no-pr` | `draft-pr` | Whether to still open a draft PR when final verification fails. |
 
 ## `security`
 
@@ -603,6 +650,7 @@ Reference a workflow in `repos[].workflow` by name.
 | `labelConfig` | record | no | `{}` | Label metadata overrides for `labels-init`. |
 | `defaults` | object | no | object with defaults | Default roles + mention settings. |
 | `planning` | object | no | object with defaults | Planning-only mode settings (PRD path). |
+| `fileLoop` | object | no | `{}` | Per-repo overrides merged onto top-level `fileLoop`. |
 | `environment` | object | no | none | Shared/dedicated env setup. |
 | `verify` | `CommandSpec[]` | no | `[]` | Verify commands run in worktree. |
 | `prompts` | object | no | none | Optional custom system prompt template paths. |
@@ -756,6 +804,31 @@ When this label is present, night-orch uses a planning-only workflow and must pr
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `prdDirectory` | string | `docs/prd` | Repository-relative directory where planning-mode PRD files are created. |
+
+### `repos[].fileLoop`
+
+Repo-level file-loop overrides merge onto the top-level `fileLoop` block for that repo only.
+
+Example:
+
+```yaml
+fileLoop:
+  enabled: false
+  reviewerProfileKey: claude-default
+
+repos:
+  - repo: myorg/myrepo
+    fileLoop:
+      enabled: true
+      maxDurationMinutes: 180
+      reviewerProfileKey: codex-default
+      includeGlobs:
+        - "src/**/*.{ts,tsx}"
+      excludeGlobs:
+        - "src/generated/**"
+```
+
+Repo overrides support the same keys as top-level `fileLoop`, but every field is optional. Nested `perEditVerify` and `finalizeVerify` objects merge field-by-field rather than replacing the entire object.
 
 ### `repos[].environment`
 

@@ -4,6 +4,7 @@ import { handleListSettings, handleSetSetting, handleClearSetting } from './sett
 import { handleStatus, handleRunDetail, handleListRuns, handleCostReport, handleListIssues, handleStreamEvents } from './status.js'
 import { handleRetry, handleSync, handleCleanup, handlePoll, handleRebase, handleContinue } from './operations.js'
 import { handleCostOverride, handleCostReset, handleDailyCostOverride, handleDailyCostReset, handleLabelsInit, handleDeleteEntry, handleUpdate } from './admin.js'
+import { handleFileLoop } from './file-loop.js'
 
 interface ToolDefinition {
   name: string
@@ -313,6 +314,20 @@ export function registerTools(): ToolDefinition[] {
         },
       },
     },
+    {
+      name: 'night-orch-file-loop',
+      description: 'Start, stop, or inspect repo-scoped file-loop sessions.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', description: 'Action to perform', enum: ['start', 'stop', 'status'] },
+          repo: { type: 'string', description: 'Repository (owner/name). Required when multiple repos are configured.' },
+          maxMinutes: { type: 'number', description: 'Optional duration override for start.', default: 0 },
+          authToken: { type: 'string', description: 'Required for start/stop when mcp.authTokenEnv is configured' },
+        },
+        required: ['action'],
+      },
+    },
   ]
 }
 
@@ -383,6 +398,8 @@ export async function handleToolCall(
       return handleContinue(args as { repo: string; issueNumber: number; strategy?: 'merge' | 'rebase'; authToken?: string }, runtimeDeps)
     case 'night-orch-update':
       return handleUpdate(args as { authToken?: string }, runtimeDeps)
+    case 'night-orch-file-loop':
+      return handleFileLoop(args as { action: 'start' | 'stop' | 'status'; repo?: string; maxMinutes?: number; authToken?: string }, runtimeDeps)
     default:
       throw new Error(`Unknown tool: ${name}`)
   }

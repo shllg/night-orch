@@ -18,6 +18,7 @@ import {
 import { dispatchAttempt } from '../poller/attempt-dispatcher.js'
 import { discoverIssuesForRepo } from '../poller/discovery-scheduler.js'
 import { processRepoReactions } from '../poller/reaction-processor.js'
+import { FileLoopEngine } from '../fileloop/engine.js'
 
 /**
  * R6 wiring-only poller.
@@ -64,6 +65,7 @@ export async function pollOnce(
   const runManager = new RunManager(db)
   const issueManager = new IssueManager(db)
   const worktreeManager = createWorktreeManager()
+  const fileLoopEngine = new FileLoopEngine(db, config, worktreeManager)
   const costTracker = new CostTracker(db)
 
   let processed = 0
@@ -106,6 +108,7 @@ export async function pollOnce(
           leaseManager,
           issueManager,
           worktreeManager,
+          fileLoopEngine,
           costTracker,
           observability,
           metrics,
@@ -139,6 +142,7 @@ interface PollRepoParams {
   leaseManager: LeaseManager
   issueManager: IssueManager
   worktreeManager: ReturnType<typeof createWorktreeManager>
+  fileLoopEngine: FileLoopEngine
   costTracker: CostTracker
   observability: AgentObservability
   metrics?: MetricsService
@@ -156,6 +160,7 @@ async function pollRepo(params: PollRepoParams): Promise<PollResult> {
     leaseManager,
     issueManager,
     worktreeManager,
+    fileLoopEngine,
     observability,
     metrics,
     dryRun,
@@ -194,7 +199,12 @@ async function pollRepo(params: PollRepoParams): Promise<PollResult> {
       targetIssue,
     })
 
-    if (discovered.length === 0) {
+    const fileLoopSession = fileLoopEngine.getActiveSession(repoConfig.repo)
+    if (!dryRun && fileLoopSession) {
+      await fileLoopEngine.tickRepo(repoConfig, forge)
+    }
+
+    if (discovered.length === 0 && !fileLoopSession) {
       return {
         processed: repoProcessed,
         errors: repoErrors,
