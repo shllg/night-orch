@@ -1,5 +1,6 @@
 import type { ForgeAdapter, PRCheckStatus, ForgePRReview, ForgePRReviewComment } from '../forge/types.js'
 import type { Reaction, ReactionCursor, ReactionScanResult } from './types.js'
+import { isBotAuthored } from '../forge/bot-comment.js'
 import { logger } from '../utils/logger.js'
 import { nowUtcIso } from '../utils/time.js'
 
@@ -16,6 +17,9 @@ const EMPTY_CURSOR: ReactionCursor = {
  * - Human review submissions (changes_requested, commented with body)
  * - Inline review comments (new since last scan)
  *
+ * Bot-vs-human distinction is marker-based (see isBotAuthored), not
+ * author-identity-based, so single-user deployments work correctly.
+ *
  * Returns only NEW reactions since the provided cursor.
  * The caller is responsible for persisting the returned cursor.
  */
@@ -24,7 +28,6 @@ export async function scanForReactions(
   repo: string,
   prNumber: number,
   issueNumber: number,
-  botUser: string,
   cursor: ReactionCursor = EMPTY_CURSOR,
 ): Promise<ReactionScanResult> {
   const reactions: Reaction[] = []
@@ -85,7 +88,7 @@ export async function scanForReactions(
   try {
     const reviews = await forge.listPRReviews(repo, prNumber)
     const newReviews = reviews.filter(
-      (r) => r.id > cursor.lastReviewId && r.user !== botUser,
+      (r) => r.id > cursor.lastReviewId && !isBotAuthored(r.body),
     )
 
     const actionableReviews = newReviews.filter(
@@ -114,7 +117,7 @@ export async function scanForReactions(
   try {
     const comments = await forge.listPRReviewComments(repo, prNumber)
     const newComments = comments.filter(
-      (c) => c.id > cursor.lastCommentId && c.user !== botUser,
+      (c) => c.id > cursor.lastCommentId && !isBotAuthored(c.body),
     )
 
     if (newComments.length > 0) {

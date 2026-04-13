@@ -503,13 +503,17 @@ Each poll cycle scans `review_ready` PRs for new events. When a reaction is dete
 2. The issue is transitioned back to `queued` with reaction context
 3. On the next poll cycle, the next pass receives the reaction context and can address it
 
-This happens automatically — no configuration needed beyond the standard setup.
+This happens automatically — no configuration needed beyond the standard setup. Reactions are identified by the content of the comment/review, not by its author, so feedback you post under the same GitHub identity that runs night-orch is still picked up. See [Single-user deployment](./single-user.md) for the details.
 
 ---
 
 ## Comment Commands
 
-Night-orch responds to commands posted as GitHub issue comments:
+Night-orch responds to commands posted on the backing issue **or** on the PR. Accepted sources:
+
+- Issue conversation comments
+- PR review bodies (the top-level text submitted with the review)
+- PR inline review comments (anchored to a file/line)
 
 | Command | Action |
 |---------|--------|
@@ -519,6 +523,8 @@ Night-orch responds to commands posted as GitHub issue comments:
 | `/orch continue` | Queue a context-aware second pass for blocked/review-ready/errored runs |
 
 Once a run reaches `review_ready`, re-trigger it through `/orch continue`, `/orch retry`, or `/orch rebase`. Re-adding `orch:ready` manually is treated as stale orchestration state and will be scrubbed on the next poll.
+
+Night-orch distinguishes its own comments from yours via an HTML marker (`<!-- night-orch:… -->`), not by GitHub author, so `/orch` commands you post under the same identity that runs night-orch are still parsed. See [Single-user deployment](./single-user.md).
 
 ### Configuration
 

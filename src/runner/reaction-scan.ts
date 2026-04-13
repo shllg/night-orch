@@ -16,11 +16,10 @@ export interface ScanAndHandleReactionsParams {
   forge: ForgeAdapter
   runManager: RunManager
   repoConfig: Config['repos'][0]
-  botUser: string
 }
 
 export async function scanAndHandleReactions(params: ScanAndHandleReactionsParams): Promise<void> {
-  const { db, forge, runManager, repoConfig, botUser } = params
+  const { db, forge, runManager, repoConfig } = params
 
   const rows = runManager
     .getActive()
@@ -41,7 +40,6 @@ export async function scanAndHandleReactions(params: ScanAndHandleReactionsParam
       row.repo,
       row.pr_number,
       row.issue_number,
-      botUser,
       cursor,
     )
 

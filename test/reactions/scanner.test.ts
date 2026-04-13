@@ -45,7 +45,7 @@ describe('scanForReactions', () => {
       getPRCheckStatus: vi.fn().mockResolvedValue(checkStatus),
     })
 
-    const result = await scanForReactions(forge, 'org/repo', 1, 42, 'bot', emptyCursor)
+    const result = await scanForReactions(forge, 'org/repo', 1, 42, emptyCursor)
 
     expect(result.reactions).toHaveLength(1)
     expect(result.reactions[0]!.type).toBe('ci_failure')
@@ -63,7 +63,7 @@ describe('scanForReactions', () => {
     })
 
     const cursor: ReactionCursor = { ...emptyCursor, lastCheckConclusion: 'failure' }
-    const result = await scanForReactions(forge, 'org/repo', 1, 42, 'bot', cursor)
+    const result = await scanForReactions(forge, 'org/repo', 1, 42, cursor)
 
     // Should NOT react because lastCheckConclusion was already 'failure'
     const ciReactions = result.reactions.filter((r) => r.type === 'ci_failure')
@@ -78,24 +78,65 @@ describe('scanForReactions', () => {
       listPRReviews: vi.fn().mockResolvedValue(reviews),
     })
 
-    const result = await scanForReactions(forge, 'org/repo', 1, 42, 'bot', emptyCursor)
+    const result = await scanForReactions(forge, 'org/repo', 1, 42, emptyCursor)
 
     expect(result.reactions.some((r) => r.type === 'human_review')).toBe(true)
     expect(result.cursor.lastReviewId).toBe(10)
   })
 
-  it('ignores bot reviews', async () => {
+  it('ignores reviews whose body carries the night-orch marker', async () => {
     const reviews: ForgePRReview[] = [
-      { id: 10, user: 'bot', state: 'commented', body: 'Automated review', submittedAt: '' },
+      { id: 10, user: 'bot', state: 'commented', body: '<!-- night-orch:status --> Automated review', submittedAt: '' },
     ]
     const forge = makeForge({
       listPRReviews: vi.fn().mockResolvedValue(reviews),
     })
 
-    const result = await scanForReactions(forge, 'org/repo', 1, 42, 'bot', emptyCursor)
+    const result = await scanForReactions(forge, 'org/repo', 1, 42, emptyCursor)
 
     const humanReactions = result.reactions.filter((r) => r.type === 'human_review')
     expect(humanReactions).toHaveLength(0)
+  })
+
+  it('picks up same-user review in single-user deployments', async () => {
+    // Regression: when night-orch runs under the owner's PAT, the owner's
+    // own review must still count as human feedback.
+    const reviews: ForgePRReview[] = [
+      { id: 10, user: 'shllg', state: 'changes_requested', body: 'fix the tests', submittedAt: '' },
+    ]
+    const forge = makeForge({
+      listPRReviews: vi.fn().mockResolvedValue(reviews),
+    })
+
+    const result = await scanForReactions(forge, 'org/repo', 1, 42, emptyCursor)
+
+    expect(result.reactions.some((r) => r.type === 'human_review')).toBe(true)
+  })
+
+  it('picks up same-user inline review comment in single-user deployments', async () => {
+    const comments: ForgePRReviewComment[] = [
+      { id: 55, user: 'shllg', body: 'needs null check', path: 'src/a.ts', line: 10, createdAt: '' },
+    ]
+    const forge = makeForge({
+      listPRReviewComments: vi.fn().mockResolvedValue(comments),
+    })
+
+    const result = await scanForReactions(forge, 'org/repo', 1, 42, emptyCursor)
+
+    expect(result.reactions.some((r) => r.type === 'review_comment')).toBe(true)
+  })
+
+  it('ignores inline review comments whose body carries the night-orch marker', async () => {
+    const comments: ForgePRReviewComment[] = [
+      { id: 60, user: 'bot', body: '<!-- night-orch:status --> nothing to see', path: 'src/a.ts', line: 1, createdAt: '' },
+    ]
+    const forge = makeForge({
+      listPRReviewComments: vi.fn().mockResolvedValue(comments),
+    })
+
+    const result = await scanForReactions(forge, 'org/repo', 1, 42, emptyCursor)
+
+    expect(result.reactions.some((r) => r.type === 'review_comment')).toBe(false)
   })
 
   it('detects new inline review comments', async () => {
@@ -106,7 +147,7 @@ describe('scanForReactions', () => {
       listPRReviewComments: vi.fn().mockResolvedValue(comments),
     })
 
-    const result = await scanForReactions(forge, 'org/repo', 1, 42, 'bot', emptyCursor)
+    const result = await scanForReactions(forge, 'org/repo', 1, 42, emptyCursor)
 
     expect(result.reactions.some((r) => r.type === 'review_comment')).toBe(true)
     expect(result.cursor.lastCommentId).toBe(20)
@@ -121,7 +162,7 @@ describe('scanForReactions', () => {
     })
 
     const cursor: ReactionCursor = { ...emptyCursor, lastCommentId: 10 }
-    const result = await scanForReactions(forge, 'org/repo', 1, 42, 'bot', cursor)
+    const result = await scanForReactions(forge, 'org/repo', 1, 42, cursor)
 
     const commentReactions = result.reactions.filter((r) => r.type === 'review_comment')
     expect(commentReactions).toHaveLength(0)
@@ -129,7 +170,7 @@ describe('scanForReactions', () => {
 
   it('returns empty reactions when nothing new', async () => {
     const forge = makeForge()
-    const result = await scanForReactions(forge, 'org/repo', 1, 42, 'bot', emptyCursor)
+    const result = await scanForReactions(forge, 'org/repo', 1, 42, emptyCursor)
     expect(result.reactions).toHaveLength(0)
   })
 
@@ -148,7 +189,7 @@ describe('scanForReactions', () => {
       }),
     })
 
-    const result = await scanForReactions(forge, 'org/repo', 1, 42, 'bot', emptyCursor)
+    const result = await scanForReactions(forge, 'org/repo', 1, 42, emptyCursor)
 
     const conflictReaction = result.reactions.find((r) => r.type === 'merge_conflict')
     expect(conflictReaction).toBeDefined()
@@ -172,7 +213,7 @@ describe('scanForReactions', () => {
     })
 
     const cursor: ReactionCursor = { ...emptyCursor, lastMergeableState: 'conflicting' }
-    const result = await scanForReactions(forge, 'org/repo', 1, 42, 'bot', cursor)
+    const result = await scanForReactions(forge, 'org/repo', 1, 42, cursor)
 
     const conflictReactions = result.reactions.filter((r) => r.type === 'merge_conflict')
     expect(conflictReactions).toHaveLength(0)
@@ -195,7 +236,7 @@ describe('scanForReactions', () => {
     })
 
     const cursor: ReactionCursor = { ...emptyCursor, lastMergeableState: 'mergeable' }
-    const result = await scanForReactions(forge, 'org/repo', 1, 42, 'bot', cursor)
+    const result = await scanForReactions(forge, 'org/repo', 1, 42, cursor)
 
     const conflictReactions = result.reactions.filter((r) => r.type === 'merge_conflict')
     expect(conflictReactions).toHaveLength(1)
@@ -217,7 +258,7 @@ describe('scanForReactions', () => {
     })
 
     const cursor: ReactionCursor = { ...emptyCursor, lastMergeableState: 'conflicting' }
-    const result = await scanForReactions(forge, 'org/repo', 1, 42, 'bot', cursor)
+    const result = await scanForReactions(forge, 'org/repo', 1, 42, cursor)
 
     expect(result.reactions.filter((r) => r.type === 'merge_conflict')).toHaveLength(0)
     expect(result.cursor.lastMergeableState).toBe('mergeable')
@@ -228,7 +269,7 @@ describe('scanForReactions', () => {
       getPR: vi.fn().mockRejectedValue(new Error('boom')),
     })
 
-    const result = await scanForReactions(forge, 'org/repo', 1, 42, 'bot', emptyCursor)
+    const result = await scanForReactions(forge, 'org/repo', 1, 42, emptyCursor)
 
     expect(result.reactions.filter((r) => r.type === 'merge_conflict')).toHaveLength(0)
     expect(result.cursor.lastMergeableState).toBeNull()

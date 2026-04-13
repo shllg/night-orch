@@ -10,6 +10,7 @@ export default defineConfig({
       { text: 'Usage', link: '/USAGE' },
       { text: 'Configuration', link: '/CONFIGURATION' },
       { text: 'Deployment', link: '/deployment' },
+      { text: 'Single-user', link: '/single-user' },
     ],
     sidebar: [
       {
@@ -19,6 +20,7 @@ export default defineConfig({
           { text: 'Usage', link: '/USAGE' },
           { text: 'Configuration', link: '/CONFIGURATION' },
           { text: 'Deployment', link: '/deployment' },
+          { text: 'Single-user deployment', link: '/single-user' },
         ],
       },
     ],

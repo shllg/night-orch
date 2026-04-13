@@ -256,7 +256,6 @@ async function buildFollowupContext(params: BuildFollowupContextParams): Promise
     issueRepo,
     issueNumber,
     prNumber,
-    botUser,
   })
   if (reactions.length > 0) {
     sections.push(formatReactionSection(reactions))
@@ -339,11 +338,10 @@ interface CollectReactionsParams {
   issueRepo: string
   issueNumber: number
   prNumber: number | null
-  botUser: string
 }
 
 async function collectReactions(params: CollectReactionsParams): Promise<Reaction[]> {
-  const { forge, issueRepo, issueNumber, prNumber, botUser } = params
+  const { forge, issueRepo, issueNumber, prNumber } = params
   if (!prNumber) return []
 
   try {
@@ -352,7 +350,6 @@ async function collectReactions(params: CollectReactionsParams): Promise<Reactio
       issueRepo,
       prNumber,
       issueNumber,
-      botUser,
       EMPTY_CURSOR,
     )
     return scanResult.reactions

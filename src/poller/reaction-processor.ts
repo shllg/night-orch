@@ -40,7 +40,7 @@ export async function processRepoReactions(
   const { config, db, forge, repoConfig, runManager, leaseManager, botUser } = params
 
   try {
-    await scanAndHandleReactions({ db, forge, runManager, repoConfig, botUser })
+    await scanAndHandleReactions({ db, forge, runManager, repoConfig })
   } catch (err) {
     logger.warn({ repo: repoConfig.repo, err }, 'Reaction scan failed — continuing with issue discovery')
   }

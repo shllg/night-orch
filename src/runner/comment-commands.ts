@@ -2,7 +2,7 @@ import type { Config } from '../config/schema.js'
 import type Database from 'better-sqlite3'
 import type { RunManager } from '../state/runs.js'
 import type { LeaseManager } from '../state/leases.js'
-import type { ForgeAdapter } from '../forge/types.js'
+import type { ForgeAdapter, ForgeComment } from '../forge/types.js'
 import { transitionLabels } from '../labels/manager.js'
 import { buildLabelConfig } from '../labels/config.js'
 import { queueRebase } from '../ops/rebase-and-check.js'
@@ -15,6 +15,7 @@ import {
   type OrchCommand,
 } from '../discovery/commands.js'
 import { resolveIssueRepo } from '../utils/issue-repo.js'
+import { isBotAuthored } from '../forge/bot-comment.js'
 import { nowUtcIso } from '../utils/time.js'
 import { logger } from '../utils/logger.js'
 
@@ -39,6 +40,41 @@ function getHttpStatus(err: unknown): number | null {
   if (typeof e.status === 'number') return e.status
   if (typeof e.response?.status === 'number') return e.response.status
   return null
+}
+
+/**
+ * Collect every source where a `/orch` command could be posted for a run:
+ * the issue's conversation comments plus — when the run has an open PR —
+ * the PR's review bodies and inline review comments. Bot-authored content
+ * (detected by HTML marker) is filtered out so the command parser never
+ * re-executes a command night-orch echoed in a status comment.
+ */
+export async function collectCommentSources(
+  forge: ForgeAdapter,
+  issueRepo: string,
+  issueNumber: number,
+  prNumber: number | null,
+): Promise<ForgeComment[]> {
+  const out: ForgeComment[] = []
+
+  const issueComments = await forge.listIssueComments(issueRepo, issueNumber)
+  out.push(...issueComments)
+
+  if (prNumber !== null) {
+    const [reviews, reviewComments] = await Promise.all([
+      forge.listPRReviews(issueRepo, prNumber).catch(() => []),
+      forge.listPRReviewComments(issueRepo, prNumber).catch(() => []),
+    ])
+    for (const r of reviews) {
+      if (!r.body?.trim()) continue
+      out.push({ id: r.id, body: r.body, user: r.user, createdAt: r.submittedAt, updatedAt: r.submittedAt })
+    }
+    for (const c of reviewComments) {
+      out.push({ id: c.id, body: c.body, user: c.user, createdAt: c.createdAt, updatedAt: c.createdAt })
+    }
+  }
+
+  return out.filter((c) => !isBotAuthored(c.body))
 }
 
 export async function processCommentCommands(params: ProcessCommentCommandsParams): Promise<void> {
@@ -68,7 +104,10 @@ export async function processCommentCommands(params: ProcessCommentCommandsParam
   const issueRows = [...new Map(
     activeRuns.map((run) => {
       const issueRepo = resolveIssueRepo(run.phaseData, repoConfig.repo)
-      return [`${issueRepo}#${run.issueNumber}`, { issue_number: run.issueNumber, issue_repo: issueRepo }] as const
+      return [
+        `${issueRepo}#${run.issueNumber}`,
+        { issue_number: run.issueNumber, issue_repo: issueRepo, pr_number: run.prNumber ?? null },
+      ] as const
     }),
   ).values()]
     .sort((a, b) => a.issue_repo.localeCompare(b.issue_repo) || a.issue_number - b.issue_number)
@@ -83,9 +122,9 @@ export async function processCommentCommands(params: ProcessCommentCommandsParam
       continue
     }
 
-    let comments: Awaited<ReturnType<typeof forge.listIssueComments>>
+    let comments: ForgeComment[]
     try {
-      comments = await forge.listIssueComments(row.issue_repo, row.issue_number)
+      comments = await collectCommentSources(forge, row.issue_repo, row.issue_number, row.pr_number)
     } catch (err) {
       if (getHttpStatus(err) === 404) {
         missingCommentCommandIssues.add(issueKey)

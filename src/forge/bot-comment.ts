@@ -1,11 +1,21 @@
 import type { ForgeAdapter, ForgeComment } from './types.js'
 
-const MARKER_PREFIX = '<!-- night-orch:'
+export const MARKER_PREFIX = '<!-- night-orch:'
 const MARKER_SUFFIX = ' -->'
 
 /** Build an HTML comment marker for a given kind (e.g., 'plan', 'status'). */
 export function markerTag(kind: string): string {
   return `${MARKER_PREFIX}${kind}${MARKER_SUFFIX}`
+}
+
+/**
+ * Detect whether a comment/review body was authored by night-orch itself by
+ * looking for the HTML marker prefix. Prefer this over author-identity checks
+ * so single-user deployments (where the operator's PAT is both "bot" and
+ * "human") can still distinguish bot-posted content from the human's own.
+ */
+export function isBotAuthored(body: string | null | undefined): boolean {
+  return typeof body === 'string' && body.includes(MARKER_PREFIX)
 }
 
 /**
