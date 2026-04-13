@@ -29,6 +29,9 @@ export interface RunSummary {
   phase: string | null
   iterations: number
   costUsd: number
+  promptTokens: number
+  completionTokens: number
+  cacheReadTokens: number
   lastError: string | null
   startedAt: string | null
   endedAt: string | null

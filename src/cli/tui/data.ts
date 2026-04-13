@@ -10,6 +10,9 @@ export interface RunListRow {
   current_phase: string | null
   iteration_count: number | null
   estimated_cost_usd: number | null
+  prompt_tokens: number | null
+  completion_tokens: number | null
+  cache_read_tokens: number | null
   last_error: string | null
   pr_number: number | null
   pr_title: string | null
@@ -26,6 +29,9 @@ export interface IssueListRow {
   current_phase: string | null
   iteration_count: number | null
   estimated_cost_usd: number | null
+  prompt_tokens: number | null
+  completion_tokens: number | null
+  cache_read_tokens: number | null
   last_error: string | null
   pr_number: number | null
   pr_title: string | null
@@ -154,6 +160,9 @@ export function loadRuns(
            r.current_phase,
            r.iteration_count,
            r.estimated_cost_usd,
+           r.prompt_tokens,
+           r.completion_tokens,
+           r.cache_read_tokens,
            r.last_error,
            r.pr_number,
            COALESCE(
@@ -208,6 +217,9 @@ export function loadRuns(
            i.current_phase,
            i.iteration_count,
            i.estimated_cost_usd,
+           0 AS prompt_tokens,
+           0 AS completion_tokens,
+           0 AS cache_read_tokens,
            i.last_error,
            i.pr_number,
            COALESCE(
@@ -255,6 +267,9 @@ export function loadRuns(
          current_phase,
          iteration_count,
          estimated_cost_usd,
+         prompt_tokens,
+         completion_tokens,
+         cache_read_tokens,
          last_error,
          pr_number,
          pr_title,
@@ -310,6 +325,9 @@ export function buildIssueList(runs: RunListRow[]): IssueListRow[] {
         current_phase: run.current_phase,
         iteration_count: run.iteration_count,
         estimated_cost_usd: run.estimated_cost_usd,
+        prompt_tokens: run.prompt_tokens,
+        completion_tokens: run.completion_tokens,
+        cache_read_tokens: run.cache_read_tokens,
         last_error: run.last_error,
         pr_number: run.pr_number,
         pr_title: run.pr_title,
@@ -337,6 +355,9 @@ export function buildIssueList(runs: RunListRow[]): IssueListRow[] {
       existing.current_phase = run.current_phase
       existing.iteration_count = run.iteration_count
       existing.estimated_cost_usd = run.estimated_cost_usd
+      existing.prompt_tokens = run.prompt_tokens
+      existing.completion_tokens = run.completion_tokens
+      existing.cache_read_tokens = run.cache_read_tokens
       existing.last_error = run.last_error
       existing.pr_number = run.pr_number
       existing.pr_title = run.pr_title

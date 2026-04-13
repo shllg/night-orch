@@ -74,3 +74,10 @@ export function truncate(value: string, maxLength: number): string {
   if (value.length <= maxLength) return value
   return `${value.slice(0, maxLength - 3)}...`
 }
+
+export function formatTokenCount(value: number): string {
+  if (!Number.isFinite(value) || value < 0) return '0'
+  if (value < 1_000) return String(Math.round(value))
+  if (value < 1_000_000) return `${(value / 1_000).toFixed(value < 10_000 ? 1 : 0)}k`
+  return `${(value / 1_000_000).toFixed(value < 10_000_000 ? 1 : 0)}M`
+}

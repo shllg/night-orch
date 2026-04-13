@@ -26,6 +26,9 @@ interface HistoryRunRow extends RunTimingRow {
   current_phase: string | null
   iteration_count: number | null
   estimated_cost_usd: number | null
+  prompt_tokens: number | null
+  completion_tokens: number | null
+  cache_read_tokens: number | null
   last_error: string | null
 }
 
@@ -93,6 +96,9 @@ function queryRunHistoryPage(
          r.current_phase,
          r.iteration_count,
          r.estimated_cost_usd,
+         r.prompt_tokens,
+         r.completion_tokens,
+         r.cache_read_tokens,
          r.last_error,
          r.started_at,
          r.ended_at
@@ -168,6 +174,9 @@ function mapRunRow(
   phase: string | null
   iterations: number
   costUsd: number
+  promptTokens: number
+  completionTokens: number
+  cacheReadTokens: number
   lastError: string | null
   startedAt: string | null
   endedAt: string | null
@@ -183,6 +192,9 @@ function mapRunRow(
     phase: row.current_phase,
     iterations: row.iteration_count ?? 0,
     costUsd: row.estimated_cost_usd ?? 0,
+    promptTokens: row.prompt_tokens ?? 0,
+    completionTokens: row.completion_tokens ?? 0,
+    cacheReadTokens: row.cache_read_tokens ?? 0,
     lastError: row.last_error,
     startedAt: row.started_at,
     endedAt: row.ended_at,
@@ -324,6 +336,9 @@ export async function handleListRuns(
         phase: row.current_phase,
         iterations: row.iteration_count ?? 0,
         costUsd: row.estimated_cost_usd ?? 0,
+        promptTokens: row.prompt_tokens ?? 0,
+        completionTokens: row.completion_tokens ?? 0,
+        cacheReadTokens: row.cache_read_tokens ?? 0,
         lastError: row.last_error,
         startedAt: hasRun ? timing?.started_at ?? null : null,
         endedAt: hasRun ? timing?.ended_at ?? null : null,

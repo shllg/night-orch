@@ -2,7 +2,7 @@ import { type ReactElement, useEffect, useMemo, useRef, useState } from 'react'
 import { BadgeWeb } from '../../../src/components/badge/badge.web.js'
 import { ButtonWeb } from '../../../src/components/button/button.web.js'
 
-import { describeRunEvent, formatTimestamp, truncate } from '../lib/format.js'
+import { describeRunEvent, formatTimestamp, formatTokenCount, truncate } from '../lib/format.js'
 import { STATUS_BADGE_TONE } from '../lib/run-tone.js'
 import { type RunEvent, type RunSummary } from '../types/dashboard.js'
 import { ActionButton } from './ActionButton.js'
@@ -103,6 +103,21 @@ export function IssueDetailPage({
                 <BadgeWeb size="sm">phase {truncate(run.phase?.trim() || '-', 28)}</BadgeWeb>
                 <BadgeWeb size="sm">iter {run.iterations}</BadgeWeb>
                 <BadgeWeb size="sm">${run.costUsd.toFixed(2)}</BadgeWeb>
+                <BadgeWeb
+                  size="sm"
+                  title={`prompt ${run.promptTokens.toLocaleString()} · completion ${run.completionTokens.toLocaleString()} · cache-read ${run.cacheReadTokens.toLocaleString()}`}
+                >
+                  {formatTokenCount(run.promptTokens + run.completionTokens)} tok
+                </BadgeWeb>
+                {run.cacheReadTokens > 0 && (
+                  <BadgeWeb
+                    size="sm"
+                    tone="ghost"
+                    title={`Cache-read tokens: ${run.cacheReadTokens.toLocaleString()}`}
+                  >
+                    {formatTokenCount(run.cacheReadTokens)} cache
+                  </BadgeWeb>
+                )}
                 <BadgeWeb size="sm">
                   {run.prNumber !== null ? `PR #${run.prNumber}` : 'no PR'}
                 </BadgeWeb>
