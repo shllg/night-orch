@@ -1,4 +1,5 @@
 import { type ReactElement } from 'react'
+import { ButtonWeb } from '../../../src/components/button/button.web.js'
 
 import { formatTimestamp, truncate } from '../lib/format.js'
 import {
@@ -66,9 +67,9 @@ export function ProjectDetailPage({
             <span>Project configuration is currently unavailable.</span>
           </div>
           <div className="mt-4">
-            <button type="button" className="btn btn-sm btn-ghost" onClick={onBack}>
+            <ButtonWeb type="button" size="sm" tone="ghost" onClick={onBack}>
               Back to projects
-            </button>
+            </ButtonWeb>
           </div>
         </div>
       </section>
@@ -85,9 +86,9 @@ export function ProjectDetailPage({
               Updated {formatTimestamp(snapshot.generatedAt)}
             </p>
           </div>
-          <button type="button" className="btn btn-sm btn-ghost" onClick={onBack}>
+          <ButtonWeb type="button" size="sm" tone="ghost" onClick={onBack}>
             Back to projects
-          </button>
+          </ButtonWeb>
         </div>
 
         {!selectedProject ? (

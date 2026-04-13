@@ -1,4 +1,5 @@
 import { type ReactElement, type ReactNode } from 'react'
+import { BadgeWeb } from '../../../src/components/badge/badge.web.js'
 
 import { formatMoney, formatTimestamp, truncate } from '../lib/format.js'
 import { type DashboardSnapshot, type StatusAggregate } from '../types/dashboard.js'
@@ -80,9 +81,9 @@ export function StatsPage({ snapshot, socketConnected }: StatsPageProps): ReactE
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="card-title text-lg">
               Architecture health{' '}
-              <span className={`badge badge-sm ${healthAllGreen ? 'badge-success' : 'badge-warning'}`}>
+              <BadgeWeb size="sm" className={healthAllGreen ? 'badge-success' : 'badge-warning'}>
                 {healthAllGreen ? 'healthy' : 'drift detected'}
-              </span>
+              </BadgeWeb>
             </h2>
             <span className="text-xs text-base-content/60">
               Phase 4 gate signals — all four should stay at 0 in a healthy deployment.

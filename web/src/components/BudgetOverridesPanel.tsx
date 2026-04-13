@@ -1,5 +1,7 @@
 import { type FormEvent, type ReactElement } from 'react'
+import { BadgeWeb } from '../../../src/components/badge/badge.web.js'
 import { ButtonWeb } from '../../../src/components/button/button.web.js'
+import { TextInputWeb } from '../../../src/components/text-input/text-input.web.js'
 
 import { formatMoney } from '../lib/format.js'
 
@@ -66,7 +68,7 @@ export function BudgetOverridesPanel({
               <dd className="font-mono text-base-content">
                 ${formatMoney(effectiveDailyBudgetUsd)}
                 {hasDailyOverride && (
-                  <span className="ml-2 badge badge-warning badge-xs">override</span>
+                  <BadgeWeb size="xs" tone="warning" className="ml-2">override</BadgeWeb>
                 )}
               </dd>
             </dl>
@@ -77,9 +79,10 @@ export function BudgetOverridesPanel({
             >
               <label className="form-control">
                 <span className="label label-text text-xs">New cap (USD)</span>
-                <input
-                  className="input input-bordered input-xs w-32 font-mono"
+                <TextInputWeb
                   type="number"
+                  size="xs"
+                  className="w-32 font-mono"
                   min={1}
                   max={10000}
                   step={1}
@@ -152,9 +155,10 @@ export function BudgetOverridesPanel({
               </label>
               <label className="form-control">
                 <span className="label label-text text-xs">Issue #</span>
-                <input
-                  className="input input-bordered input-xs w-24 font-mono"
+                <TextInputWeb
                   type="number"
+                  size="xs"
+                  className="w-24 font-mono"
                   min={1}
                   step={1}
                   value={issueDraft.issueNumber}
@@ -165,9 +169,10 @@ export function BudgetOverridesPanel({
               </label>
               <label className="form-control">
                 <span className="label label-text text-xs">Amount (USD)</span>
-                <input
-                  className="input input-bordered input-xs w-28 font-mono"
+                <TextInputWeb
                   type="number"
+                  size="xs"
+                  className="w-28 font-mono"
                   min={0.1}
                   step={0.5}
                   value={issueDraft.amount}

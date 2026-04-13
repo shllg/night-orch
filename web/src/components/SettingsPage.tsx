@@ -1,6 +1,8 @@
 import { type ReactElement, useEffect, useMemo, useState } from 'react'
+import { BadgeWeb } from '../../../src/components/badge/badge.web.js'
 import { ButtonWeb } from '../../../src/components/button/button.web.js'
 import { ModalWeb } from '../../../src/components/modal/modal.web.js'
+import { TextInputWeb } from '../../../src/components/text-input/text-input.web.js'
 import type { RuntimeSettingSnapshot, RuntimeSettingValue } from '../types/dashboard.js'
 import { PushNotificationSettings } from './PushNotificationSettings.js'
 
@@ -85,12 +87,13 @@ export function SettingsPage({
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-semibold text-base-content">{setting.label}</span>
-                        <span
-                          className={`badge badge-xs ${setting.source === 'override' ? 'badge-info' : 'badge-ghost'}`}
+                        <BadgeWeb
+                          size="xs"
+                          className={setting.source === 'override' ? 'badge-info' : 'badge-ghost'}
                         >
                           {setting.source === 'override' ? 'overwritten' : 'default/yaml'}
-                        </span>
-                        {!setting.mutable ? <span className="badge badge-xs badge-warning">read-only</span> : null}
+                        </BadgeWeb>
+                        {!setting.mutable ? <BadgeWeb size="xs" tone="warning">read-only</BadgeWeb> : null}
                       </div>
                       <p className="mt-1 break-all font-mono text-[11px] text-base-content/55">{setting.key}</p>
                       <p className="mt-2 text-sm text-base-content/75">{setting.description}</p>
@@ -221,10 +224,11 @@ export function SettingsPage({
                   <option value="false">false</option>
                 </select>
               ) : selectedSetting.type === 'number' ? (
-                <input
-                  className="input input-bordered w-full max-w-xs font-mono"
+                <TextInputWeb
                   type="number"
                   value={selectedDraft}
+                  fullWidth
+                  className="max-w-xs font-mono"
                   min={selectedSetting.min}
                   max={selectedSetting.max}
                   step={selectedSetting.step}
@@ -259,10 +263,11 @@ export function SettingsPage({
                   disabled={!selectedOverwriteEnabled || selectedBusy || selectedReadOnly}
                 />
               ) : (
-                <input
-                  className="input input-bordered w-full max-w-xs font-mono"
+                <TextInputWeb
                   type="text"
                   value={selectedDraft}
+                  fullWidth
+                  className="max-w-xs font-mono"
                   onChange={(event) => {
                     onDraftChange(selectedSetting.key, event.target.value)
                   }}

@@ -1,4 +1,5 @@
 import { type ReactElement } from 'react'
+import { ButtonWeb } from '../../../src/components/button/button.web.js'
 
 import { type DashboardPage } from '../types/dashboard.js'
 
@@ -36,22 +37,24 @@ export function DashboardNavigation({ activePage, onPageChange }: DashboardNavig
           {PAGES.map((page) => {
             const isActive = activePage === page.id
             return (
-              <button
+              <ButtonWeb
                 key={page.id}
                 type="button"
                 onClick={() => onPageChange(page.id)}
                 aria-current={isActive ? 'page' : undefined}
-                aria-label={page.label}
+                ariaLabel={page.label}
                 title={page.label}
-                className={`btn btn-sm h-11 w-full rounded-lg border border-transparent px-2 ${
+                tone={isActive ? 'primary' : 'ghost'}
+                size="sm"
+                className={`h-11 w-full rounded-lg border border-transparent px-2 ${
                   isActive
-                    ? 'btn-primary text-primary-content'
-                    : 'btn-ghost bg-base-100/25 text-base-content/75 hover:bg-base-100/45 hover:text-base-content'
+                    ? 'text-primary-content'
+                    : 'bg-base-100/25 text-base-content/75 hover:bg-base-100/45 hover:text-base-content'
                 } justify-center lg:justify-start lg:gap-3 lg:px-3`}
               >
                 <page.Icon className="size-4 shrink-0" />
                 <span className="hidden text-sm capitalize lg:inline">{page.label}</span>
-              </button>
+              </ButtonWeb>
             )
           })}
         </nav>
