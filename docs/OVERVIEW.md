@@ -28,7 +28,7 @@ This walkthrough follows a single issue from discovery to PR. Read this first to
    - **Decide** — A pure function examines accumulated context and returns: `publish`, `iterate`, `block`, or `error`.
    - If `iterate`, the loop repeats from Code with review feedback folded in.
 
-8. **Publish** — On `publish` decision, the branch is pushed and a PR is created/updated via the forge adapter (`src/publishing/`). Labels transition to `review_ready`.
+8. **Publish** — On `publish` decision, the branch is pushed and a PR is created/updated via the forge adapter (`src/publishing/`). Labels transition to `review_ready`, and that finalize step scrubs the other orchestration labels so the issue does not re-enter discovery until a real follow-up control action is queued.
 
 9. **Notify** — Configured channels (console, webhook, Discord, SMTP, GitHub comment) receive event notifications (`src/notify/`).
 

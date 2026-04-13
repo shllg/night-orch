@@ -70,7 +70,14 @@ export function computeLabelMutation(
       break
     case 'review_ready':
       add = [config.reviewReady]
-      remove = [config.running, config.retry]
+      remove = [
+        ...config.ready,
+        config.running,
+        config.blocked,
+        config.needsHuman,
+        config.error,
+        config.retry,
+      ]
       break
     case 'error':
       add = [config.error]

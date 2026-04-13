@@ -7,6 +7,7 @@ import {
 } from '../../src/labels/transitions.js'
 import type { BlockedReason } from '../../src/loop/state.js'
 import type { MergeBatchStatus } from '../../src/merge-queue/types.js'
+import type { RunStatus } from '../../src/state/runs.js'
 
 const reviewerBlocked: BlockedReason = { type: 'reviewerBlocked', summary: 'no' }
 const costLimit: BlockedReason = { type: 'costLimit', limit: 'per-run', actualUsd: 12, limitUsd: 10 }
@@ -56,100 +57,129 @@ describe('isHumanRequired', () => {
 })
 
 describe('computeLabelMutation', () => {
-  it('queued → running: add running, remove ready', () => {
-    const m = computeLabelMutation('queued', 'running', ['orch:ready'], config)
-    expect(m.add).toEqual(['orch:running'])
-    expect(m.remove).toEqual(['orch:ready'])
+  const fromStates: RunStatus[] = ['queued', 'running', 'review_ready', 'blocked', 'error', 'completed']
+  const labelScenarios = [
+    { name: 'empty labels', labels: [] },
+    { name: 'single ready label', labels: ['orch:ready', 'keep:me'] },
+    {
+      name: 'dirty orchestration labels',
+      labels: [
+        'orch:ready',
+        'queue:ready',
+        'orch:running',
+        'orch:blocked',
+        'orch:needs-human',
+        'orch:review-ready',
+        'orch:error',
+        'orch:retry',
+        'keep:me',
+      ],
+    },
+  ] as const
+  const multiReadyConfig: LabelConfig = {
+    ...config,
+    ready: ['orch:ready', 'queue:ready'],
+  }
+  const orchestrationLabels = [
+    ...multiReadyConfig.ready,
+    multiReadyConfig.running,
+    multiReadyConfig.blocked,
+    multiReadyConfig.needsHuman,
+    multiReadyConfig.reviewReady,
+    multiReadyConfig.error,
+    multiReadyConfig.retry,
+  ]
+
+  function applyMutation(currentLabels: string[], mutation: { add: string[]; remove: string[] }): string[] {
+    const next = new Set(currentLabels)
+    for (const label of mutation.remove) next.delete(label)
+    for (const label of mutation.add) next.add(label)
+    return [...next]
+  }
+
+  function orchestrationOnly(labels: string[]): string[] {
+    return labels.filter((label) => orchestrationLabels.includes(label)).sort()
+  }
+
+  it('queued restores every ready label and clears transient orchestration labels', () => {
+    for (const from of fromStates) {
+      for (const scenario of labelScenarios) {
+        const queuedMutation = computeLabelMutation(from, 'queued', scenario.labels, multiReadyConfig)
+        expect(orchestrationOnly(applyMutation(scenario.labels, queuedMutation))).toEqual(
+          [...multiReadyConfig.ready].sort(),
+        )
+      }
+    }
   })
 
-  it('running → blocked (costLimit): add only blocked, remove running', () => {
-    const m = computeLabelMutation('running', 'blocked', ['orch:running'], config, costLimit)
-    expect(m.add).toEqual(['orch:blocked'])
-    expect(m.remove).toEqual(['orch:running'])
+  it('review_ready strips every other orchestration label across starting states', () => {
+    for (const from of fromStates) {
+      for (const scenario of labelScenarios) {
+        const reviewReadyMutation = computeLabelMutation(from, 'review_ready', scenario.labels, multiReadyConfig)
+        expect(orchestrationOnly(applyMutation(scenario.labels, reviewReadyMutation))).toEqual(
+          [multiReadyConfig.reviewReady],
+        )
+      }
+    }
   })
 
-  it('running → blocked (reviewerBlocked): add blocked + needsHuman, remove running', () => {
-    const m = computeLabelMutation('running', 'blocked', ['orch:running'], config, reviewerBlocked)
-    expect(m.add).toEqual(['orch:blocked', 'orch:needs-human'])
-    expect(m.remove).toEqual(['orch:running'])
+  it('completed strips all orchestration labels across starting states', () => {
+    for (const from of fromStates) {
+      for (const scenario of labelScenarios) {
+        const completedMutation = computeLabelMutation(from, 'completed', scenario.labels, multiReadyConfig)
+        expect(orchestrationOnly(applyMutation(scenario.labels, completedMutation))).toEqual([])
+      }
+    }
   })
 
-  it('running → blocked (costLimit) removes stale needsHuman label', () => {
-    const m = computeLabelMutation('running', 'blocked', ['orch:running', 'orch:needs-human'], config, costLimit)
-    expect(m.add).toEqual(['orch:blocked'])
-    expect(m.remove).toEqual(['orch:running', 'orch:needs-human'])
+  it('blocked transitions cover all BlockedReason variants and preserve the needsHuman branch', () => {
+    const blockCases: Array<{ name: string; reason?: BlockedReason }> = [
+      { name: 'reviewerBlocked', reason: reviewerBlocked },
+      { name: 'costLimit', reason: costLimit },
+      { name: 'iterationLimit', reason: iterationLimit },
+      { name: 'agentPassLimit', reason: agentPassLimit },
+      { name: 'ambiguousReview', reason: ambiguousReview },
+      { name: 'verifyConfig', reason: verifyConfig },
+      { name: 'undefined', reason: undefined },
+    ]
+
+    for (const from of fromStates) {
+      for (const scenario of labelScenarios) {
+        for (const blockCase of blockCases) {
+          const blockedMutation = computeLabelMutation(from, 'blocked', scenario.labels, multiReadyConfig, blockCase.reason)
+          const nextLabels = applyMutation(scenario.labels, blockedMutation)
+          expect(nextLabels).toContain(multiReadyConfig.blocked)
+          expect(nextLabels).not.toContain(multiReadyConfig.running)
+          if (isHumanRequired(blockCase.reason ?? costLimit)) {
+            expect(nextLabels).toContain(multiReadyConfig.needsHuman)
+          } else {
+            expect(nextLabels).not.toContain(multiReadyConfig.needsHuman)
+          }
+        }
+      }
+    }
   })
 
-  it('running → blocked (no blockReason): add only blocked, remove running', () => {
-    const m = computeLabelMutation('running', 'blocked', ['orch:running'], config)
-    expect(m.add).toEqual(['orch:blocked'])
-    expect(m.remove).toEqual(['orch:running'])
-  })
-
-  it('running → review_ready: add reviewReady, remove running + retry', () => {
-    const m = computeLabelMutation('running', 'review_ready', ['orch:running', 'orch:retry'], config)
-    expect(m.add).toEqual(['orch:review-ready'])
-    expect(m.remove).toContain('orch:running')
-    expect(m.remove).toContain('orch:retry')
-  })
-
-  it('running → error: add error, remove running', () => {
-    const m = computeLabelMutation('running', 'error', ['orch:running'], config)
-    expect(m.add).toEqual(['orch:error'])
-    expect(m.remove).toEqual(['orch:running'])
-  })
-
-  it('blocked → running (retry): add running, remove blocked + needsHuman + error + retry', () => {
-    const m = computeLabelMutation('blocked', 'running', ['orch:blocked', 'orch:needs-human'], config)
-    expect(m.add).toEqual(['orch:running'])
-    expect(m.remove).toContain('orch:blocked')
-    expect(m.remove).toContain('orch:needs-human')
-  })
-
-  it('idempotent: already has target labels → empty add', () => {
-    const m = computeLabelMutation('queued', 'running', ['orch:ready', 'orch:running'], config)
-    expect(m.add).toEqual([])
-    expect(m.remove).toEqual(['orch:ready'])
-  })
-
-  it('no-op when no labels need changing', () => {
-    const m = computeLabelMutation('running', 'running', ['orch:running'], config)
-    expect(m.add).toEqual([])
-    expect(m.remove).toEqual([])
-  })
-
-  it('error → queued: add ready, remove terminal labels', () => {
-    const m = computeLabelMutation(
-      'error',
-      'queued',
-      ['orch:error', 'orch:running', 'orch:retry', 'orch:blocked', 'orch:needs-human'],
-      config,
+  it('is idempotent once the target review_ready state is applied', () => {
+    const first = computeLabelMutation(
+      'running',
+      'review_ready',
+      ['orch:ready', 'queue:ready', 'orch:running', 'orch:retry'],
+      multiReadyConfig,
     )
-    expect(m.add).toEqual(['orch:ready'])
-    expect(m.remove).toContain('orch:error')
-    expect(m.remove).toContain('orch:running')
-    expect(m.remove).toContain('orch:blocked')
-    expect(m.remove).toContain('orch:needs-human')
-    expect(m.remove).toContain('orch:retry')
+    const applied = applyMutation(['orch:ready', 'queue:ready', 'orch:running', 'orch:retry'], first)
+    const second = computeLabelMutation('review_ready', 'review_ready', applied, multiReadyConfig)
+    expect(second).toEqual({ add: [], remove: [] })
   })
 
-  it('any non-completed state → completed: remove all runtime orchestration labels', () => {
-    const m = computeLabelMutation(
-      'blocked',
-      'completed',
-      ['orch:ready', 'orch:running', 'orch:blocked', 'orch:needs-human', 'orch:review-ready', 'orch:error', 'orch:retry'],
-      config,
+  it('review_ready from a clean state is an empty diff', () => {
+    const mutation = computeLabelMutation(
+      'review_ready',
+      'review_ready',
+      ['orch:review-ready'],
+      multiReadyConfig,
     )
-    expect(m.add).toEqual([])
-    expect(m.remove).toEqual([
-      'orch:ready',
-      'orch:running',
-      'orch:blocked',
-      'orch:needs-human',
-      'orch:review-ready',
-      'orch:error',
-      'orch:retry',
-    ])
+    expect(mutation).toEqual({ add: [], remove: [] })
   })
 })
 

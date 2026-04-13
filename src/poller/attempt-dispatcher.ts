@@ -200,6 +200,41 @@ export async function dispatchAttempt(
       }
     }
 
+    if (replayableRun && !queuedRun && replayableRun.status === 'review_ready') {
+      logger.info(
+        { repo: repoConfig.repo, issue: discoveredIssue.issue.number, runId: replayableRun.id },
+        'Skipping review_ready run with no queued control action',
+      )
+      const labelCfg = buildLabelConfig(repoConfig, discoveredIssue.issue.labels)
+      const staleAdds = [labelCfg.reviewReady].filter(
+        (label) => !discoveredIssue.issue.labels.includes(label),
+      )
+      const staleRemoves = [
+        ...labelCfg.ready,
+        labelCfg.running,
+        labelCfg.blocked,
+        labelCfg.needsHuman,
+        labelCfg.error,
+        labelCfg.retry,
+      ].filter((label) => discoveredIssue.issue.labels.includes(label))
+      if (staleAdds.length > 0 || staleRemoves.length > 0) {
+        try {
+          if (staleAdds.length > 0) {
+            await forge.addLabels(issueRepo, discoveredIssue.issue.number, staleAdds)
+          }
+          if (staleRemoves.length > 0) {
+            await forge.removeLabels(issueRepo, discoveredIssue.issue.number, staleRemoves)
+          }
+        } catch (err) {
+          logger.warn(
+            { repo: repoConfig.repo, issue: discoveredIssue.issue.number, err },
+            'Failed to reconcile labels for skipped review_ready run',
+          )
+        }
+      }
+      return { outcome: 'skipped', immediateFollowupRepo: null }
+    }
+
     const activeRun = queuedRun ?? replayableRun
     const roles = activeRun
       ? {

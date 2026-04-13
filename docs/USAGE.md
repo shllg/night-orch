@@ -516,6 +516,8 @@ Night-orch responds to commands posted as GitHub issue comments:
 | `/orch cancel` | Cancel an active run |
 | `/orch continue` | Queue a context-aware second pass for blocked/review-ready/errored runs |
 
+Once a run reaches `review_ready`, re-trigger it through `/orch continue`, `/orch retry`, or `/orch rebase`. Re-adding `orch:ready` manually is treated as stale orchestration state and will be scrubbed on the next poll.
+
 ### Configuration
 
 ```yaml
@@ -616,6 +618,8 @@ Also available as a comment command: `/orch rebase` (with `--check` by default).
 Queue a context-aware second pass for blocked/review-ready/errored work. Night-orch collects the latest PR context (review comments, CI failures, mergeability state) and resumes the existing branch with that context.
 
 After an explicit rebase conflicts, `/orch continue` keeps the current branch state and asks the agent to resolve the conflict. Use `/orch retry` instead when you want to discard the current branch state and restart from the latest base branch.
+
+For review-ready issues, `continue`, `retry`, and `rebase` are the supported re-entry paths. Manually re-adding `orch:ready` does not start another pass.
 
 Options: `--strategy merge|rebase` (override the repo default for this manual action). This is most useful when resuming after a rebase conflict and you want the next manual update step to use a different strategy. Successful queueing also signals any running daemon that uses the same database to wake for the next cycle immediately.
 
