@@ -103,20 +103,22 @@ export function IssueDetailPage({
                 <BadgeWeb size="sm">phase {truncate(run.phase?.trim() || '-', 28)}</BadgeWeb>
                 <BadgeWeb size="sm">iter {run.iterations}</BadgeWeb>
                 <BadgeWeb size="sm">${run.costUsd.toFixed(2)}</BadgeWeb>
-                <BadgeWeb
-                  size="sm"
+                <span
                   title={`prompt ${run.promptTokens.toLocaleString()} · completion ${run.completionTokens.toLocaleString()} · cache-read ${run.cacheReadTokens.toLocaleString()}`}
                 >
-                  {formatTokenCount(run.promptTokens + run.completionTokens)} tok
-                </BadgeWeb>
-                {run.cacheReadTokens > 0 && (
-                  <BadgeWeb
-                    size="sm"
-                    tone="ghost"
-                    title={`Cache-read tokens: ${run.cacheReadTokens.toLocaleString()}`}
-                  >
-                    {formatTokenCount(run.cacheReadTokens)} cache
+                  <BadgeWeb size="sm">
+                    {formatTokenCount(run.promptTokens + run.completionTokens)} tok
                   </BadgeWeb>
+                </span>
+                {run.cacheReadTokens > 0 && (
+                  <span title={`Cache-read tokens: ${run.cacheReadTokens.toLocaleString()}`}>
+                    <BadgeWeb
+                      size="sm"
+                      tone="ghost"
+                    >
+                      {formatTokenCount(run.cacheReadTokens)} cache
+                    </BadgeWeb>
+                  </span>
                 )}
                 <BadgeWeb size="sm">
                   {run.prNumber !== null ? `PR #${run.prNumber}` : 'no PR'}
