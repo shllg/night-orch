@@ -120,6 +120,17 @@ describe('DashboardHeader', () => {
     expect(onGoToSettings).toHaveBeenCalledTimes(1)
   })
 
+  it('renders DaisyUI tooltips for header icon actions', () => {
+    const html = renderHeader({})
+
+    expect((html.match(/class="tooltip tooltip-bottom"/g) ?? []).length).toBe(5)
+    expect(html).toContain('data-tip="Refresh data"')
+    expect(html).toContain('data-tip="Trigger poll"')
+    expect(html).toContain('data-tip="Run sync"')
+    expect(html).toContain('data-tip="Run cleanup"')
+    expect(html).toContain('data-tip="Open settings"')
+  })
+
   it('shows busy/disabled action states while operations are active', () => {
     const html = renderHeader({
       isRefreshing: true,

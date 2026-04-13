@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { HTMLAttributes, ReactNode } from 'react'
 
 export type BadgeTone =
   | 'neutral'
@@ -14,7 +14,7 @@ export type BadgeTone =
 export type BadgeVariant = 'solid' | 'outline'
 export type BadgeSize = 'xs' | 'sm' | 'md'
 
-export interface BadgeProps {
+export interface BadgeProps extends Omit<HTMLAttributes<HTMLSpanElement>, 'children' | 'className'> {
   children: ReactNode
   tone?: BadgeTone
   variant?: BadgeVariant
