@@ -558,6 +558,7 @@ Issue detail pages render line-oriented issue history rather than only the curre
 The web client now keeps the websocket open across auth-token refreshes, uses heartbeat-based liveness detection, and reconnects with exponential backoff instead of a fixed 2-second loop.
 On narrow mobile viewports, the top-line dashboard metric cards render in a compact 2-column layout so the runs list stays the primary focus on the Issues page.
 The Issues page run list now includes history filters (`Active`, `Completed`, `Failed`, `All`) plus a `Load more` control for paginated archive browsing (20 runs per page).
+Inline run errors on both issue cards and issue detail pages are rendered in a reusable error block with line numbers, a one-click copy control (`Copied!` feedback), and expand/collapse controls for long traces.
 
 For mobile or server-hosted setups, use an external terminal client such as Terminus instead of expecting shell access through the browser UI.
 

@@ -157,6 +157,25 @@ const ISSUE_DETAIL_RUN: RunSummary = {
   endedAt: null,
 }
 
+const ISSUE_LIST_RUN_WITH_ERROR: RunSummary = {
+  runId: 'run-list-error-1',
+  hasRun: true,
+  repo: 'org/repo',
+  issue: 55,
+  issueTitle: 'Run card copy behavior',
+  status: 'error',
+  prNumber: null,
+  phase: 'verify',
+  iterations: 3,
+  costUsd: 0.85,
+  promptTokens: 3400,
+  completionTokens: 1100,
+  cacheReadTokens: 9000,
+  lastError: 'build failed\nstack line 1\nstack line 2\nstack line 3',
+  startedAt: '2026-04-06T09:20:00.000Z',
+  endedAt: '2026-04-06T09:23:00.000Z',
+}
+
 const COMPLETED_HISTORY_RUN_PAGE_ONE: RunSummary = {
   runId: 'run-completed-1',
   hasRun: true,
@@ -477,6 +496,33 @@ describe('dashboard router integration (real App)', () => {
       expect(screen.getByText('Second completed history run')).toBeDefined()
     })
     expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull()
+  })
+
+  it('copies run-card error text without triggering navigation and opens detail via explicit action', async () => {
+    const fetchMock = buildFetchMock(withRuns([ISSUE_LIST_RUN_WITH_ERROR]))
+    vi.stubGlobal('fetch', fetchMock)
+    const writeText = vi.fn<(value: string) => Promise<void>>().mockResolvedValue(undefined)
+    Object.defineProperty(globalThis.navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    })
+
+    const { router } = renderDashboard('/issues')
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/issues')
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy error' }))
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('build failed\nstack line 1\nstack line 2\nstack line 3')
+    })
+    expect(router.state.location.pathname).toBe('/issues')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open run run-list-error-1' }))
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/issues/run-list-error-1')
+    })
   })
 
   it('renders /settings with real settings content and active nav state', async () => {

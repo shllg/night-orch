@@ -4,6 +4,20 @@ import { buildBadgeViewModel } from './view-model.js'
 
 export function BadgeWeb(props: BadgeProps): ReactElement {
   const badge = buildBadgeViewModel(props)
+  const {
+    children,
+    tone: _tone,
+    variant: _variant,
+    size: _size,
+    capitalize: _capitalize,
+    className: _className,
+    ...nativeProps
+  } = props
+  void _tone
+  void _variant
+  void _size
+  void _capitalize
+  void _className
 
-  return <span className={badge.webClassName}>{props.children}</span>
+  return <span {...nativeProps} className={badge.webClassName}>{children}</span>
 }

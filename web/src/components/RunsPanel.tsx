@@ -10,6 +10,7 @@ import {
   badgeToneForPrNumber,
 } from '../lib/run-tone.js'
 import { type RunListView, type RunStatus, type RunSummary } from '../types/dashboard.js'
+import { ErrorBlock } from './ErrorBlock.js'
 
 interface RunsPanelProps {
   isLoading: boolean
@@ -97,10 +98,8 @@ export function RunsPanel({
               {filteredRuns.map((run) => {
                 const isRunning = run.status === 'running'
                 return (
-                  <button
+                  <div
                     key={run.runId}
-                    type="button"
-                    onClick={() => onOpenRun(run.runId)}
                     className={`card w-full min-w-0 overflow-hidden border text-left transition-all ${
                       selectedRunId === run.runId
                         ? 'border-primary/65 bg-primary/10 shadow-md'
@@ -120,13 +119,24 @@ export function RunsPanel({
                             {run.hasRun ? run.runId : 'Tracked issue (no run yet)'}
                           </p>
                         </div>
-                        <BadgeWeb
-                          size="sm"
-                          capitalize
-                          className={`${statusTone[run.status]} ${isRunning ? 'orch-working-pulse' : ''}`}
-                        >
-                          {run.status.replaceAll('_', ' ')}
-                        </BadgeWeb>
+                        <div className="flex items-center gap-2">
+                          <ButtonWeb
+                            type="button"
+                            size="xs"
+                            tone={selectedRunId === run.runId ? 'primary' : 'ghost'}
+                            ariaLabel={`Open run ${run.runId}`}
+                            onClick={() => onOpenRun(run.runId)}
+                          >
+                            Open
+                          </ButtonWeb>
+                          <BadgeWeb
+                            size="sm"
+                            capitalize
+                            className={`${statusTone[run.status]} ${isRunning ? 'orch-working-pulse' : ''}`}
+                          >
+                            {run.status.replaceAll('_', ' ')}
+                          </BadgeWeb>
+                        </div>
                       </div>
                       <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
                         <BadgeWeb size="xs" className={badgeToneForPhase(run.phase)}>
@@ -146,12 +156,15 @@ export function RunsPanel({
                         </span>
                       </div>
                       {run.lastError && (
-                        <p className="whitespace-pre-wrap break-words rounded-md border border-error/30 bg-error/10 px-2 py-1 text-xs text-error">
-                          {truncate(run.lastError, 500)}
-                        </p>
+                        <ErrorBlock
+                          error={run.lastError}
+                          title="Recent error"
+                          collapsedLineCount={6}
+                          collapsedCharCount={1200}
+                        />
                       )}
                     </div>
-                  </button>
+                  </div>
                 )
               })}
             </div>

@@ -6,6 +6,7 @@ import { describeRunEvent, formatTimestamp, formatTokenCount, truncate } from '.
 import { STATUS_BADGE_TONE } from '../lib/run-tone.js'
 import { type RunEvent, type RunSummary } from '../types/dashboard.js'
 import { ActionButton } from './ActionButton.js'
+import { ErrorBlock } from './ErrorBlock.js'
 
 type UpdateStrategy = 'merge' | 'rebase'
 
@@ -125,9 +126,13 @@ export function IssueDetailPage({
                 </BadgeWeb>
               </div>
               {run.lastError && (
-                <p className="mt-2 whitespace-pre-wrap break-words rounded-md border border-error/30 bg-error/10 px-2 py-1 text-xs text-error">
-                  {truncate(run.lastError, 2000)}
-                </p>
+                <ErrorBlock
+                  className="mt-2"
+                  error={run.lastError}
+                  title="Run error"
+                  collapsedLineCount={14}
+                  collapsedCharCount={6000}
+                />
               )}
               <p className="mt-2 text-[11px] text-base-content/65">
                 started {run.startedAt ? formatTimestamp(run.startedAt) : '-'}
