@@ -84,6 +84,7 @@ export function DashboardHeader({
           <div className="flex items-center gap-2 self-end lg:self-start">
             <ActionIconButton
               label={isRefreshing ? 'Refreshing...' : 'Refresh data'}
+              tooltipLabel="Refresh data"
               onClick={onRefresh}
               disabled={isRefreshing}
               busy={isRefreshing}
@@ -92,6 +93,7 @@ export function DashboardHeader({
             </ActionIconButton>
             <ActionIconButton
               label={activeOperation === 'poll' ? 'Polling...' : 'Trigger poll'}
+              tooltipLabel="Trigger poll"
               onClick={onPoll}
               disabled={!canRunMutations}
               busy={activeOperation === 'poll'}
@@ -100,6 +102,7 @@ export function DashboardHeader({
             </ActionIconButton>
             <ActionIconButton
               label={activeOperation === 'sync' ? 'Syncing...' : 'Run sync'}
+              tooltipLabel="Run sync"
               onClick={onSync}
               disabled={!canRunMutations}
               busy={activeOperation === 'sync'}
@@ -108,17 +111,18 @@ export function DashboardHeader({
             </ActionIconButton>
             <ActionIconButton
               label={activeOperation === 'cleanup' ? 'Cleaning up...' : 'Run cleanup'}
+              tooltipLabel="Run cleanup"
               onClick={onCleanup}
               disabled={!canRunMutations}
               busy={activeOperation === 'cleanup'}
             >
               <CleanupIcon />
             </ActionIconButton>
-            <ActionIconButton label="Open settings" onClick={onGoToSettings}>
+            <ActionIconButton label="Open settings" tooltipLabel="Open settings" onClick={onGoToSettings}>
               <SettingsIcon />
             </ActionIconButton>
             {onLogout && (
-              <ActionIconButton label="Sign out" onClick={onLogout}>
+              <ActionIconButton label="Sign out" tooltipLabel="Sign out" onClick={onLogout}>
                 <LogoutIcon />
               </ActionIconButton>
             )}
@@ -167,31 +171,34 @@ function StatPill({
 
 function ActionIconButton({
   label,
+  tooltipLabel,
   onClick,
   disabled = false,
   busy = false,
   children,
 }: {
   label: string
+  tooltipLabel?: string
   onClick: () => void
   disabled?: boolean
   busy?: boolean
   children: ReactElement
 }): ReactElement {
   return (
-    <ButtonWeb
-      type="button"
-      tone="ghost"
-      size="sm"
-      shape="circle"
-      className="border border-base-100/45 bg-base-100/30 hover:bg-base-100/50"
-      onClick={onClick}
-      disabled={disabled}
-      title={label}
-      ariaLabel={label}
-    >
-      {busy ? <span className="loading loading-spinner loading-xs" aria-hidden="true" /> : children}
-    </ButtonWeb>
+    <div className="tooltip tooltip-bottom" data-tip={tooltipLabel ?? label}>
+      <ButtonWeb
+        type="button"
+        tone="ghost"
+        size="sm"
+        shape="circle"
+        className="border border-base-100/45 bg-base-100/30 hover:bg-base-100/50"
+        onClick={onClick}
+        disabled={disabled}
+        ariaLabel={label}
+      >
+        {busy ? <span className="loading loading-spinner loading-xs" aria-hidden="true" /> : children}
+      </ButtonWeb>
+    </div>
   )
 }
 
