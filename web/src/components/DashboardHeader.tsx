@@ -1,4 +1,6 @@
 import { type ReactElement } from 'react'
+import { BadgeWeb } from '../../../src/components/badge/badge.web.js'
+import { ButtonWeb } from '../../../src/components/button/button.web.js'
 
 interface DashboardHeaderProps {
   currentStateLabel: string
@@ -58,9 +60,13 @@ export function DashboardHeader({
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/75">
               <span className="text-[10px] uppercase tracking-[0.22em] text-base-content/65">State</span>
-              <span className={`badge badge-sm capitalize ${currentStateToneClass} ${isWorking ? 'orch-working-pulse' : ''}`}>
+              <BadgeWeb
+                size="sm"
+                capitalize
+                className={`${currentStateToneClass} ${isWorking ? 'orch-working-pulse' : ''}`}
+              >
                 {currentStateLabel}
-              </span>
+              </BadgeWeb>
               <span className={socketConnected ? 'text-success' : 'text-warning'}>
                 {socketConnected ? 'stream online' : 'stream reconnecting'}
               </span>
@@ -173,16 +179,19 @@ function ActionIconButton({
   children: ReactElement
 }): ReactElement {
   return (
-    <button
+    <ButtonWeb
       type="button"
-      className="btn btn-ghost btn-sm btn-circle border border-base-100/45 bg-base-100/30 hover:bg-base-100/50"
+      tone="ghost"
+      size="sm"
+      shape="circle"
+      className="border border-base-100/45 bg-base-100/30 hover:bg-base-100/50"
       onClick={onClick}
       disabled={disabled}
       title={label}
-      aria-label={label}
+      ariaLabel={label}
     >
       {busy ? <span className="loading loading-spinner loading-xs" aria-hidden="true" /> : children}
-    </button>
+    </ButtonWeb>
   )
 }
 

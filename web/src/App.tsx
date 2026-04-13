@@ -1,5 +1,6 @@
 import { type FormEvent, type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
+import { ButtonWeb } from '../../src/components/button/button.web.js'
 
 import { BudgetOverridesPanel } from './components/BudgetOverridesPanel.js'
 import { DashboardHeader } from './components/DashboardHeader.js'
@@ -1359,15 +1360,17 @@ export function App({
         </div>
 
         <div className="flex flex-col items-center gap-2 pb-16 pt-1 md:pb-2">
-          <button
+          <ButtonWeb
             type="button"
-            className="btn btn-outline btn-sm border-primary/55 bg-base-200/45 text-primary hover:bg-primary/15"
+            variant="outline"
+            size="sm"
+            className="border-primary/55 bg-base-200/45 text-primary hover:bg-primary/15"
             onClick={() => {
               window.location.reload()
             }}
           >
             UI reload
-          </button>
+          </ButtonWeb>
           <span className="text-[10px] text-base-content/50">{buildVersionLabel}</span>
         </div>
       </div>

@@ -1,4 +1,6 @@
 import { type FormEvent, type ReactElement } from 'react'
+import { BadgeWeb } from '../../../src/components/badge/badge.web.js'
+import { ButtonWeb } from '../../../src/components/button/button.web.js'
 import {
   type InteractiveAgentSessionDetail,
   type InteractiveAgentSessionEvent,
@@ -100,9 +102,9 @@ export function AgentSessionsPage({
               </select>
             </label>
 
-            <button className="btn btn-primary btn-sm" type="submit" disabled={isMutating}>
+            <ButtonWeb type="submit" tone="primary" size="sm" disabled={isMutating}>
               Create Session
-            </button>
+            </ButtonWeb>
           </form>
 
           <div className="divider my-1" />
@@ -128,7 +130,9 @@ export function AgentSessionsPage({
                 >
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <span className="font-medium capitalize">{session.agent}</span>
-                    <span className={`badge badge-xs ${STATUS_BADGE_CLASS[session.status]}`}>{session.status}</span>
+                    <BadgeWeb size="xs" className={STATUS_BADGE_CLASS[session.status]}>
+                      {session.status}
+                    </BadgeWeb>
                   </div>
                   <p className="truncate text-xs text-base-content/65">{session.id}</p>
                   <p className="text-[11px] text-base-content/55">turns: {session.turnCount}</p>
@@ -145,18 +149,22 @@ export function AgentSessionsPage({
             <>
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="card-title text-lg capitalize">{selectedSession.agent} Session</h2>
-                <span className={`badge badge-sm ${STATUS_BADGE_CLASS[selectedSession.status]}`}>
+                <BadgeWeb size="sm" className={STATUS_BADGE_CLASS[selectedSession.status]}>
                   {selectedSession.status}
-                </span>
-                <span className="badge badge-outline badge-sm">turns {selectedSession.turnCount}</span>
-                <button
+                </BadgeWeb>
+                <BadgeWeb size="sm" variant="outline">
+                  turns {selectedSession.turnCount}
+                </BadgeWeb>
+                <ButtonWeb
                   type="button"
-                  className="btn btn-outline btn-xs ml-auto"
+                  size="xs"
+                  variant="outline"
+                  className="ml-auto"
                   onClick={onCloseSession}
                   disabled={selectedSession.status === 'running' || isMutating}
                 >
                   Close Session
-                </button>
+                </ButtonWeb>
               </div>
 
               {selectedSession.lastError && (
@@ -194,13 +202,14 @@ export function AgentSessionsPage({
                   disabled={selectedSession.status === 'running' || selectedSession.status === 'closed' || isMutating}
                 />
                 <div className="flex justify-end">
-                  <button
+                  <ButtonWeb
                     type="submit"
-                    className="btn btn-primary btn-sm"
+                    tone="primary"
+                    size="sm"
                     disabled={selectedSession.status === 'running' || selectedSession.status === 'closed' || isMutating}
                   >
                     Send Prompt
-                  </button>
+                  </ButtonWeb>
                 </div>
               </form>
             </>

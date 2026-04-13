@@ -1,4 +1,6 @@
 import { type ReactElement } from 'react'
+import { BadgeWeb } from '../../../src/components/badge/badge.web.js'
+import { ButtonWeb } from '../../../src/components/button/button.web.js'
 
 import { formatMoney, formatRunTime, truncate } from '../lib/format.js'
 import {
@@ -68,14 +70,15 @@ export function RunsPanel({
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
           {RUN_VIEW_FILTERS.map((view) => (
-            <button
+            <ButtonWeb
               key={view.value}
               type="button"
               onClick={() => onRunsViewChange(view.value)}
-              className={`btn btn-xs ${runsView === view.value ? 'btn-primary' : 'btn-ghost'}`}
+              size="xs"
+              tone={runsView === view.value ? 'primary' : 'ghost'}
             >
               {view.label}
-            </button>
+            </ButtonWeb>
           ))}
         </div>
 
@@ -117,23 +120,27 @@ export function RunsPanel({
                             {run.hasRun ? run.runId : 'Tracked issue (no run yet)'}
                           </p>
                         </div>
-                        <span className={`badge badge-sm capitalize ${statusTone[run.status]} ${isRunning ? 'orch-working-pulse' : ''}`}>
+                        <BadgeWeb
+                          size="sm"
+                          capitalize
+                          className={`${statusTone[run.status]} ${isRunning ? 'orch-working-pulse' : ''}`}
+                        >
                           {run.status.replaceAll('_', ' ')}
-                        </span>
+                        </BadgeWeb>
                       </div>
                       <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
-                        <span className={`badge badge-xs ${badgeToneForPhase(run.phase)}`}>
+                        <BadgeWeb size="xs" className={badgeToneForPhase(run.phase)}>
                           phase {truncate(resolvePhaseLabel(run.phase), 18)}
-                        </span>
-                        <span className={`badge badge-xs ${badgeToneForIterationCount(run.iterations)}`}>
+                        </BadgeWeb>
+                        <BadgeWeb size="xs" className={badgeToneForIterationCount(run.iterations)}>
                           iter {run.iterations}
-                        </span>
-                        <span className={`badge badge-xs ${badgeToneForCostUsd(run.costUsd)}`}>
+                        </BadgeWeb>
+                        <BadgeWeb size="xs" className={badgeToneForCostUsd(run.costUsd)}>
                           ${formatMoney(run.costUsd)}
-                        </span>
-                        <span className={`badge badge-xs ${badgeToneForPrNumber(run.prNumber)}`}>
+                        </BadgeWeb>
+                        <BadgeWeb size="xs" className={badgeToneForPrNumber(run.prNumber)}>
                           {run.prNumber !== null ? `PR #${run.prNumber}` : 'no PR'}
-                        </span>
+                        </BadgeWeb>
                         <span className="max-w-full text-[11px] text-base-content/65 sm:ml-auto">
                           {formatRunTime(run)}
                         </span>
@@ -151,14 +158,15 @@ export function RunsPanel({
 
             {canLoadMore && (
               <div className="mt-4 flex justify-center">
-                <button
+                <ButtonWeb
                   type="button"
-                  className="btn btn-sm btn-outline"
+                  variant="outline"
+                  size="sm"
                   onClick={onLoadMore}
                   disabled={isLoadingMore}
                 >
                   {isLoadingMore ? 'Loading...' : 'Load more'}
-                </button>
+                </ButtonWeb>
               </div>
             )}
           </>

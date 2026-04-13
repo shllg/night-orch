@@ -1,4 +1,6 @@
 import { type ReactElement, useEffect, useMemo, useRef, useState } from 'react'
+import { BadgeWeb } from '../../../src/components/badge/badge.web.js'
+import { ButtonWeb } from '../../../src/components/button/button.web.js'
 
 import { describeRunEvent, formatTimestamp, truncate } from '../lib/format.js'
 import { STATUS_BADGE_TONE } from '../lib/run-tone.js'
@@ -70,16 +72,17 @@ export function IssueDetailPage({
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <button
+            <ButtonWeb
               type="button"
-              className={`btn btn-sm ${autoScroll ? 'btn-primary' : 'btn-ghost'}`}
+              tone={autoScroll ? 'primary' : 'ghost'}
+              size="sm"
               onClick={() => setAutoScroll((current) => !current)}
             >
               Auto-scroll {autoScroll ? 'on' : 'off'}
-            </button>
-            <button type="button" className="btn btn-sm btn-ghost" onClick={onBack}>
+            </ButtonWeb>
+            <ButtonWeb type="button" tone="ghost" size="sm" onClick={onBack}>
               Back to issues
-            </button>
+            </ButtonWeb>
           </div>
         </div>
 
@@ -94,13 +97,15 @@ export function IssueDetailPage({
                 {truncate(resolveIssueTitle(run.issueTitle), 200)}
               </p>
               <div className="mt-2 flex flex-wrap gap-2 text-xs text-base-content/80">
-                <span className={`badge badge-sm ${STATUS_BADGE_TONE[run.status]}`}>{run.status.replaceAll('_', ' ')}</span>
-                <span className="badge badge-sm">phase {truncate(run.phase?.trim() || '-', 28)}</span>
-                <span className="badge badge-sm">iter {run.iterations}</span>
-                <span className="badge badge-sm">${run.costUsd.toFixed(2)}</span>
-                <span className="badge badge-sm">
+                <BadgeWeb size="sm" className={STATUS_BADGE_TONE[run.status]}>
+                  {run.status.replaceAll('_', ' ')}
+                </BadgeWeb>
+                <BadgeWeb size="sm">phase {truncate(run.phase?.trim() || '-', 28)}</BadgeWeb>
+                <BadgeWeb size="sm">iter {run.iterations}</BadgeWeb>
+                <BadgeWeb size="sm">${run.costUsd.toFixed(2)}</BadgeWeb>
+                <BadgeWeb size="sm">
                   {run.prNumber !== null ? `PR #${run.prNumber}` : 'no PR'}
-                </span>
+                </BadgeWeb>
               </div>
               {run.lastError && (
                 <p className="mt-2 whitespace-pre-wrap break-words rounded-md border border-error/30 bg-error/10 px-2 py-1 text-xs text-error">

@@ -1,4 +1,5 @@
 import { type ReactElement, useCallback, useEffect, useState } from 'react'
+import { ButtonWeb } from '../../../src/components/button/button.web.js'
 import {
   currentSubscription,
   fetchPushConfig,
@@ -130,28 +131,30 @@ export function PushNotificationSettings(): ReactElement {
         </div>
         <div className="flex gap-2">
           {subscribed ? (
-            <button
+            <ButtonWeb
               type="button"
               disabled={busy}
               onClick={() => {
                 void handleDisable()
               }}
-              className="btn btn-sm btn-ghost"
+              tone="ghost"
+              size="sm"
             >
               {busy ? 'Disabling…' : 'Disable'}
-            </button>
+            </ButtonWeb>
           ) : (
-            <button
+            <ButtonWeb
               type="button"
               disabled={busy || permission === 'denied'}
               onClick={() => {
                 void handleEnable()
               }}
-              className="btn btn-sm btn-primary"
+              tone="primary"
+              size="sm"
               title={permission === 'denied' ? 'Notifications are blocked for this site in browser settings' : undefined}
             >
               {busy ? 'Subscribing…' : 'Enable notifications'}
-            </button>
+            </ButtonWeb>
           )}
         </div>
       </div>

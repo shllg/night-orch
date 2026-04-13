@@ -4,16 +4,31 @@ import { buildButtonViewModel } from './view-model.js'
 
 export function ButtonWeb(props: ButtonProps): ReactElement {
   const button = buildButtonViewModel(props)
+  const {
+    children,
+    tone: _tone,
+    variant: _variant,
+    size: _size,
+    shape: _shape,
+    fullWidth: _fullWidth,
+    'aria-label': nativeAriaLabel,
+    ariaLabel,
+    ...nativeProps
+  } = props
+  void _tone
+  void _variant
+  void _size
+  void _shape
+  void _fullWidth
 
   return (
     <button
+      {...nativeProps}
       type={props.type ?? 'button'}
       className={button.webClassName}
-      disabled={props.disabled}
-      aria-label={props.ariaLabel}
-      onClick={props.onClick}
+      aria-label={ariaLabel ?? nativeAriaLabel}
     >
-      {props.children}
+      {children}
     </button>
   )
 }

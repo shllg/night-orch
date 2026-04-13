@@ -26,4 +26,22 @@ describe('ButtonWeb', () => {
     expect(html).toContain('btn-circle')
     expect(html).toContain('aria-label="Close dialog"')
   })
+
+  it('preserves native aria-label and lets ariaLabel override it', () => {
+    const nativeOnlyHtml = renderToStaticMarkup(React.createElement(ButtonWeb, {
+      tone: 'neutral',
+      'aria-label': 'Native label',
+      children: 'run',
+    }))
+    expect(nativeOnlyHtml).toContain('aria-label="Native label"')
+
+    const customOverrideHtml = renderToStaticMarkup(React.createElement(ButtonWeb, {
+      tone: 'neutral',
+      'aria-label': 'Native label',
+      ariaLabel: 'Custom label',
+      children: 'run',
+    }))
+    expect(customOverrideHtml).toContain('aria-label="Custom label"')
+    expect(customOverrideHtml).not.toContain('aria-label="Native label"')
+  })
 })
