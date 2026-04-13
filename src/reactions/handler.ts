@@ -9,6 +9,7 @@ import { resolveIssueRepo } from '../utils/issue-repo.js'
 import { logger } from '../utils/logger.js'
 import { createFollowupAttempt, AttemptTerminatedError, AttemptNotFoundError } from '../state/attempts.js'
 import { recordUserAction } from '../state/run-log-events.js'
+import { clearResumeDecisionArtifacts } from '../loop/checkpoint.js'
 
 export interface ReactionHandlerDeps {
   db: Database.Database
@@ -60,7 +61,7 @@ export async function handleReaction(
         intent: 'rebase',
         resetBranch: false,
         phaseData: {
-          ...existingPhaseData,
+          ...clearResumeDecisionArtifacts(existingPhaseData),
           issueRepo,
           reactionContext: reaction.context,
           reactionType: reaction.type,
@@ -94,7 +95,7 @@ export async function handleReaction(
       lastError: null,
       endedAt: null,
       phaseData: {
-        ...existingPhaseData,
+        ...clearResumeDecisionArtifacts(existingPhaseData),
         reactionContext: reaction.context,
         reactionType: reaction.type,
         reactionSummary: reaction.summary,

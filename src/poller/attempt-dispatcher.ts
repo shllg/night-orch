@@ -41,6 +41,7 @@ import {
   applyRecoveryPlan,
   classifyInfraError,
 } from './error-recovery.js'
+import { clearResumeDecisionArtifacts } from '../loop/checkpoint.js'
 import { PollerNotifier } from './notify-dispatcher.js'
 import {
   coerceAgentName,
@@ -274,7 +275,7 @@ export async function dispatchAttempt(
       branchSlug: slug,
       worktreePath,
       phaseData: {
-        ...(run.phaseData ?? {}),
+        ...clearResumeDecisionArtifacts(run.phaseData),
         issueRepo,
       },
       endedAt: null,

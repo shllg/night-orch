@@ -83,6 +83,29 @@ class LiveMetricsService implements MetricsService {
   }
 
   async start(): Promise<void> {
+    const maxRetries = 5
+    const baseDelayMs = 1000
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        await this.tryListen()
+        return
+      } catch (err) {
+        const isAddrInUse = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'EADDRINUSE'
+        if (!isAddrInUse || attempt === maxRetries) {
+          throw err
+        }
+        const delay = baseDelayMs * Math.pow(2, attempt)
+        logger.warn(
+          { port: this.config.port, attempt: attempt + 1, maxRetries, delayMs: delay },
+          'Metrics port in use — retrying',
+        )
+        await new Promise<void>((r) => setTimeout(r, delay))
+      }
+    }
+  }
+
+  private async tryListen(): Promise<void> {
     const server = startMetricsServer(this.metrics, this.config.host, this.config.port)
     this.server = server
     await new Promise<void>((resolve, reject) => {
