@@ -133,6 +133,19 @@ function makeForge(issue: ForgeIssue): ForgeAdapter {
   } as unknown as ForgeAdapter
 }
 
+function makePhaseDataWithDecisionArtifacts(): Record<string, unknown> {
+  return {
+    issueRepo: 'org/repo',
+    __decisionOutcomes: {
+      decide: { action: 'error', reason: 'stale terminal state' },
+    },
+    __stepOutputs: {
+      blockMessage: 'obsolete block state',
+      keep: 'retain me',
+    },
+  }
+}
+
 describe('dispatchAttempt review_ready replay guard', () => {
   let tmpDir: string
   let db: Database.Database
@@ -303,6 +316,7 @@ describe('dispatchAttempt review_ready replay guard', () => {
       status: 'blocked',
       endedAt: '2026-04-13T00:00:00Z',
       lastError: 'verify failed',
+      phaseData: makePhaseDataWithDecisionArtifacts(),
     })
 
     const result = await dispatchAttempt({
@@ -334,5 +348,11 @@ describe('dispatchAttempt review_ready replay guard', () => {
 
     expect(result.outcome).toBe('processed')
     expect(mockExecuteLoop).toHaveBeenCalledTimes(1)
+    const replayed = runManager.getById(run.id)
+    expect(replayed?.phaseData?.__decisionOutcomes).toBeUndefined()
+    expect(replayed?.phaseData?.issueRepo).toBe('org/repo')
+    const stepOutputs = replayed?.phaseData?.__stepOutputs as Record<string, unknown> | undefined
+    expect(stepOutputs?.blockMessage).toBeUndefined()
+    expect(stepOutputs?.keep).toBe('retain me')
   })
 })

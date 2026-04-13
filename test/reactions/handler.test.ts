@@ -49,6 +49,19 @@ function makeReaction(type: Reaction['type']): Reaction {
   }
 }
 
+function makePhaseDataWithDecisionArtifacts(): Record<string, unknown> {
+  return {
+    issueRepo: 'foo/bar',
+    __decisionOutcomes: {
+      decide: { action: 'block', reason: 'stale terminal state' },
+    },
+    __stepOutputs: {
+      blockMessage: 'obsolete block message',
+      keep: 'retain me',
+    },
+  }
+}
+
 describe('handleReaction', () => {
   let tmpDir: string
   let db: Database.Database
@@ -65,7 +78,7 @@ describe('handleReaction', () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  function seedReviewReadyRun(): string {
+  function seedReviewReadyRun(phaseData: Record<string, unknown> = { issueRepo: 'foo/bar' }): string {
     const row = runs.create({
       repo: 'foo/bar',
       issueNumber: 7,
@@ -78,13 +91,13 @@ describe('handleReaction', () => {
       status: 'review_ready',
       branchName: 'feature/x',
       prNumber: 42,
-      phaseData: { issueRepo: 'foo/bar' },
+      phaseData,
     })
     return row.id
   }
 
   it('merge_conflict reaction creates a new attempt with intent=rebase and terminates the previous one', async () => {
-    const prevId = seedReviewReadyRun()
+    const prevId = seedReviewReadyRun(makePhaseDataWithDecisionArtifacts())
     const forge = makeForge()
 
     await handleReaction(makeReaction('merge_conflict'), { db, forge, runManager: runs, repoConfig })
@@ -100,6 +113,11 @@ describe('handleReaction', () => {
     expect(newRun!.status).toBe('queued')
     expect(newRun!.branchName).toBe('feature/x')
     expect(newRun!.prNumber).toBe(42)
+    expect(newRun!.phaseData?.__decisionOutcomes).toBeUndefined()
+    expect(newRun!.phaseData?.issueRepo).toBe('foo/bar')
+    const stepOutputs = newRun!.phaseData?.__stepOutputs as Record<string, unknown> | undefined
+    expect(stepOutputs?.blockMessage).toBeUndefined()
+    expect(stepOutputs?.keep).toBe('retain me')
 
     const controlPayload = db
       .prepare('SELECT control_payload FROM runs WHERE id = ?')
@@ -116,7 +134,7 @@ describe('handleReaction', () => {
   })
 
   it('non-merge_conflict reactions flip the same run in place to queued', async () => {
-    const prevId = seedReviewReadyRun()
+    const prevId = seedReviewReadyRun(makePhaseDataWithDecisionArtifacts())
     const forge = makeForge()
 
     await handleReaction(makeReaction('ci_failure'), { db, forge, runManager: runs, repoConfig })
@@ -125,6 +143,10 @@ describe('handleReaction', () => {
     expect(same!.id).toBe(prevId)
     expect(same!.status).toBe('queued')
     expect(same!.phaseData?.reactionType).toBe('ci_failure')
+    expect(same!.phaseData?.__decisionOutcomes).toBeUndefined()
+    const stepOutputs = same!.phaseData?.__stepOutputs as Record<string, unknown> | undefined
+    expect(stepOutputs?.blockMessage).toBeUndefined()
+    expect(stepOutputs?.keep).toBe('retain me')
 
     const term = db.prepare('SELECT terminated_at FROM runs WHERE id = ?').get(prevId) as {
       terminated_at: string | null

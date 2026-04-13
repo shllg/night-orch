@@ -3,7 +3,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { mergeConfig, type UserConfig } from 'vite'
 
 const config: StorybookConfig = {
-  stories: ['../src/components/**/*.stories.@(ts|tsx)'],
+  stories: ['../src/components/**/*.stories.@(ts|tsx)', '../web/src/components/**/*.stories.@(ts|tsx)'],
   addons: ['@storybook/addon-a11y'],
   framework: {
     name: '@storybook/react-vite',

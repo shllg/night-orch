@@ -9,6 +9,7 @@ import { resolveIssueRepo } from '../utils/issue-repo.js'
 import { logger } from '../utils/logger.js'
 import { createFollowupAttempt, AttemptTerminatedError, AttemptNotFoundError } from '../state/attempts.js'
 import { recordUserAction } from '../state/run-log-events.js'
+import { clearResumeDecisionArtifacts } from '../loop/checkpoint.js'
 
 export interface ReactionHandlerDeps {
   db: Database.Database
@@ -51,7 +52,7 @@ export async function handleReaction(
   }
 
   const issueRepo = resolveIssueRepo(run.phaseData, reaction.repo)
-  const existingPhaseData = run.phaseData ?? {}
+  const existingPhaseData = clearResumeDecisionArtifacts(run.phaseData)
 
   if (reaction.type === 'merge_conflict') {
     try {

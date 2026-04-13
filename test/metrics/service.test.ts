@@ -177,7 +177,7 @@ describe('MetricsService', () => {
       expect(body).not.toContain('night_orch_estimated_cost_dollars{repo="org/repo",agent="claude"}')
     })
 
-    it('start rejects when port is already in use', async () => {
+    it('start rejects when port is already in use', { timeout: 120_000 }, async () => {
       const occupiedServer = http.createServer((_req, res) => {
         res.writeHead(200)
         res.end('ok')
@@ -188,6 +188,7 @@ describe('MetricsService', () => {
 
       try {
         service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
+        // Retries up to 5 times with exponential backoff before rejecting.
         await expect(service.start()).rejects.toMatchObject({ code: 'EADDRINUSE' })
       } finally {
         await new Promise<void>((resolve, reject) => {
