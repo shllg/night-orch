@@ -239,6 +239,34 @@ describe('startWebServer', () => {
     await expect(index.text()).resolves.toContain('<!doctype html>')
   })
 
+  it('exposes /healthz with metrics readiness details', async () => {
+    server = await startWebServer(
+      deps,
+      {
+        host: '127.0.0.1',
+        port: 0,
+        frontendDistPath: frontendDir,
+      },
+    )
+
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Unexpected address type')
+    }
+    baseUrl = `http://127.0.0.1:${address.port}`
+
+    const healthz = await fetch(`${baseUrl}/healthz`)
+    expect(healthz.status).toBe(200)
+    await expect(healthz.json()).resolves.toMatchObject({
+      ok: true,
+      metrics: {
+        enabled: false,
+        ready: false,
+        endpoint: null,
+      },
+    })
+  })
+
   it('reads and mutates runtime settings through web APIs', async () => {
     server = await startWebServer(
       deps,

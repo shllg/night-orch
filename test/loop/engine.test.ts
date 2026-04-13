@@ -4,6 +4,7 @@ import { DEFAULT_WORKFLOW } from '../../src/loop/workflow.js'
 import type { RunContext } from '../../src/loop/types.js'
 import type { Config } from '../../src/config/schema.js'
 import type { WorkerAdapter, WorkerTaskResult } from '../../src/workers/types.js'
+import { createMetricsService } from '../../src/metrics/service.js'
 import { initDatabase } from '../../src/state/db.js'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
@@ -477,6 +478,54 @@ describe('executeLoop', () => {
 
     expect(result.estimatedCostUsd).toBeGreaterThan(0)
     expect(result.terminalStatus).toBe('publish')
+  })
+
+  it('records estimated cost metric with workerType labels', async () => {
+    const metrics = createMetricsService({ enabled: false, host: '127.0.0.1', port: 9090 })
+    const addEstimatedCostSpy = vi.spyOn(metrics, 'addEstimatedCost')
+
+    const deps: LoopDependencies = {
+      db,
+      config: makeConfig(),
+      adapters: {
+        planner: makeMockAdapter([makePlannerResult()]),
+        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: makeMockAdapter([makeReviewerResult('APPROVED')]),
+      },
+      workflow: DEFAULT_WORKFLOW,
+      metrics,
+    }
+
+    const result = await executeLoop(makeCtx(), deps)
+
+    expect(result.terminalStatus).toBe('publish')
+    expect(addEstimatedCostSpy).toHaveBeenCalledWith('org/repo', 'claude', expect.any(Number))
+  })
+
+  it('records estimated cost metric with unknown label when workerType is missing', async () => {
+    const metrics = createMetricsService({ enabled: false, host: '127.0.0.1', port: 9090 })
+    const addEstimatedCostSpy = vi.spyOn(metrics, 'addEstimatedCost')
+
+    const config = makeConfig()
+    const defaultProfile = config.workerProfiles['claude'] as unknown as { type?: string }
+    defaultProfile.type = undefined
+
+    const deps: LoopDependencies = {
+      db,
+      config,
+      adapters: {
+        planner: makeMockAdapter([makePlannerResult()]),
+        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: makeMockAdapter([makeReviewerResult('APPROVED')]),
+      },
+      workflow: DEFAULT_WORKFLOW,
+      metrics,
+    }
+
+    const result = await executeLoop(makeCtx(), deps)
+
+    expect(result.terminalStatus).toBe('publish')
+    expect(addEstimatedCostSpy).toHaveBeenCalledWith('org/repo', 'unknown', expect.any(Number))
   })
 
   it('subscription model bypasses over-budget checks in executeLoop', async () => {

@@ -338,13 +338,37 @@ The web server validates the `Host` header against allowed hostnames.
 
 ### Grafana shows "no data"
 
-Verify Prometheus can scrape the metrics endpoint:
+Use this order so you distinguish "no runs yet" from a broken scrape quickly:
+
+```bash
+night-orch doctor
+```
+
+Doctor now probes the metrics `/healthz` endpoint and reports one of:
+- `ok` (endpoint alive)
+- `not-ready` (startup in progress)
+- `connection-refused` (likely no `night-orch run` process)
+- `timeout` (handler/network stall)
+- `disabled-runtime` (runtime override disabled metrics)
+
+Then verify the process model:
+
+- `night-orch run` always owns metrics.
+- `night-orch web` in default attach mode does **not** bind `:9090`.
+- `night-orch web --standalone` binds metrics itself.
+
+If you run attach-mode web without a companion `run` daemon, Grafana panels stay empty.
+
+Next verify Prometheus target health:
 
 ```bash
 curl http://127.0.0.1:9091/api/v1/targets
 ```
 
-If the target is down, check that the scrape target port in `prometheus.yml`
-matches the night-orch metrics port (default: 9090).
-Also ensure `metrics.host` in your night-orch config is reachable from Docker
-(`0.0.0.0` for the default monitoring stack).
+If the target is down:
+
+- Confirm Prometheus scrape target matches the daemon metrics port (default `9090`).
+- Confirm `metrics.host` is reachable from Prometheus. For the default Docker stack this should be `0.0.0.0`.
+- If your scrape config uses `host.docker.internal`, ensure your runtime supports it. On Linux/non-Docker-Desktop setups you may need an explicit `extra_hosts` mapping or a concrete host IP instead.
+- Re-check your compose port mapping in `docker-compose.example.yaml` (line 5): `127.0.0.1:9091:9090` maps host `9091` to container `9090` (Prometheus UI), not to night-orch metrics.
+- Ensure reverse proxies do not intercept/rewrite `:9090`; Prometheus should scrape night-orch directly, not through Caddy/nginx routes meant for web UI traffic.

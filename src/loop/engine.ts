@@ -767,6 +767,10 @@ function applyEstimatedWorkerCost(
   // so Prometheus scrapes see the distribution of reported-cli vs
   // fallback rows. Best-effort — metric failures never block a run.
   try { metrics?.incCostTokenSource(tokenSource) } catch { /* best-effort */ }
+  if (estimatedCost > 0) {
+    const agent = pricingIdentity?.workerType ?? 'unknown'
+    try { metrics?.addEstimatedCost(ctx.repo, agent, estimatedCost) } catch { /* best-effort */ }
+  }
   if (estimatedCost <= 0) {
     return { ctx, budget }
   }

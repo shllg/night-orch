@@ -449,6 +449,11 @@ Requires `acpx` installed as a dependency (`pnpm add acpx`).
 | `port` | positive int | `9090` |
 | `host` | string | `0.0.0.0` |
 
+Notes:
+
+- For the default Docker-based monitoring stack, keep `metrics.host: 0.0.0.0` so Prometheus can scrape the daemon from its container network.
+- `metrics.enabled` is runtime-overridable (`night-orch settings set metrics.enabled ...`). `night-orch status` reports when runtime state diverges from YAML.
+
 ## `observability`
 
 | Key | Type | Default | Notes |

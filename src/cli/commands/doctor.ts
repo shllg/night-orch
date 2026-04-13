@@ -8,6 +8,7 @@ import { logger } from '../../utils/logger.js'
 import type { Config } from '../../config/schema.js'
 import { parseCommandSpec } from '../../utils/command.js'
 import { normalizePathForSubprocess } from '../../workers/env.js'
+import { resolveConfigWithRuntimeSettings } from '../../settings/runtime.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -48,6 +49,8 @@ export async function doctorCommand(globalOpts?: GlobalOpts): Promise<void> {
     printResults(results)
     return
   }
+
+  let runtimeConfig: Config = config
 
   // If --project specified, run project-specific validation for that repo
   if (globalOpts?.project) {
@@ -182,16 +185,20 @@ export async function doctorCommand(globalOpts?: GlobalOpts): Promise<void> {
     results.push({ name: 'Worktree root', passed: false, message: 'Parent directory not writable' })
   }
 
-  // 7. DB writable
+  // 7. DB writable + runtime-setting resolve
+  let runtimeDb: ReturnType<typeof initDatabase> | null = null
   try {
-    const db = initDatabase(config.storage.dbPath)
-    db.close()
+    runtimeDb = initDatabase(config.storage.dbPath)
+    runtimeConfig = resolveConfigWithRuntimeSettings(config, runtimeDb)
     results.push({ name: 'Database', passed: true, message: `Initialized at ${config.storage.dbPath}` })
   } catch (err) {
     results.push({ name: 'Database', passed: false, message: (err as Error).message })
   }
 
-  // 8. Verify commands
+  // 8. Metrics endpoint probe
+  results.push(await probeMetrics(runtimeConfig))
+
+  // 9. Verify commands
   for (const repo of config.repos) {
     for (const verifyCmd of repo.verify) {
       try {
@@ -212,7 +219,7 @@ export async function doctorCommand(globalOpts?: GlobalOpts): Promise<void> {
     }
   }
 
-  // 9. Optional: firejail
+  // 10. Optional: firejail
   const usesFirejail = Object.values(config.workerProfiles).some(
     (p) => p.runtimeWrapper?.includes('firejail'),
   )
@@ -225,7 +232,7 @@ export async function doctorCommand(globalOpts?: GlobalOpts): Promise<void> {
     }
   }
 
-  // 10. Direct-LLM provider probe — sends a 1-token completion to
+  // 11. Direct-LLM provider probe — sends a 1-token completion to
   //     catch bad API keys and wrong model slugs at startup instead
   //     of on the first triage/reviewer call in production.
   const aiInternal = config.ai.internal
@@ -300,6 +307,9 @@ export async function doctorCommand(globalOpts?: GlobalOpts): Promise<void> {
     }
   }
 
+  if (runtimeDb) {
+    runtimeDb.close()
+  }
   printResults(results)
 }
 
@@ -331,6 +341,95 @@ async function checkGitBranch(repoPath: string, branch: string): Promise<boolean
   } catch {
     return false
   }
+}
+
+async function probeMetrics(config: Config): Promise<CheckResult> {
+  if (!config.metrics.enabled) {
+    return {
+      name: 'Metrics probe',
+      passed: false,
+      optional: true,
+      message: 'disabled-runtime — metrics.enabled is false at runtime',
+    }
+  }
+
+  const probeHost = config.metrics.host === '0.0.0.0' ? '127.0.0.1' : config.metrics.host
+  const probeUrl = `http://${formatHostForUrl(probeHost)}:${config.metrics.port}/healthz`
+  const timeoutMs = 3_000
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const response = await fetch(probeUrl, { signal: controller.signal })
+    if (response.status !== 200) {
+      return {
+        name: 'Metrics probe',
+        passed: false,
+        message: `not-ready — ${probeUrl} returned HTTP ${response.status}`,
+      }
+    }
+
+    const payload = await response.json() as { ready?: boolean }
+    if (payload.ready === true) {
+      return {
+        name: 'Metrics probe',
+        passed: true,
+        message: `ok — ${probeUrl}`,
+      }
+    }
+
+    return {
+      name: 'Metrics probe',
+      passed: false,
+      message: `not-ready — ${probeUrl} reports ready=false`,
+    }
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') {
+      return {
+        name: 'Metrics probe',
+        passed: false,
+        message: `timeout — ${probeUrl} did not respond within ${timeoutMs}ms`,
+      }
+    }
+    const code = errorCode(err)
+    if (code === 'ECONNREFUSED') {
+      return {
+        name: 'Metrics probe',
+        passed: false,
+        message: "connection-refused — metrics server not running — is `night-orch run` launched?",
+      }
+    }
+    return {
+      name: 'Metrics probe',
+      passed: false,
+      message: `error — ${(err as Error).message}`,
+    }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+function formatHostForUrl(host: string): string {
+  if (host.includes(':') && !host.startsWith('[') && !host.endsWith(']')) {
+    return `[${host}]`
+  }
+  return host
+}
+
+function errorCode(err: unknown): string | null {
+  if (isErrnoShape(err)) return err.code
+  if (typeof err === 'object' && err !== null && 'cause' in err) {
+    const cause = (err as { cause?: unknown }).cause
+    if (isErrnoShape(cause)) return cause.code
+  }
+  return null
+}
+
+function isErrnoShape(value: unknown): value is { code: string } {
+  return typeof value === 'object'
+    && value !== null
+    && 'code' in value
+    && typeof (value as { code?: unknown }).code === 'string'
 }
 
 function printResults(results: CheckResult[]): void {

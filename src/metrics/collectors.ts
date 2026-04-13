@@ -1,6 +1,9 @@
 import { Counter, Histogram, Gauge, Registry } from 'prom-client'
+import { getBuildInfo } from '../utils/build-info.js'
 
 export function createMetricsRegistry() {
+  const buildVersion = getBuildInfo().version
+  const buildCommit = process.env['GIT_SHA']?.trim() || 'unknown'
   const registry = new Registry()
 
   const runsTotal = new Counter({
@@ -127,6 +130,14 @@ export function createMetricsRegistry() {
     registers: [registry],
   })
 
+  const buildInfo = new Gauge({
+    name: 'night_orch_build_info',
+    help: 'Build metadata for metrics scrape diagnostics',
+    labelNames: ['version', 'commit'] as const,
+    registers: [registry],
+  })
+  buildInfo.set({ version: buildVersion, commit: buildCommit }, 1)
+
   /**
    * R4f: counts cost-ledger entries by their provenance tag. The
    * default production configuration should only ever increment the
@@ -193,6 +204,7 @@ export function createMetricsRegistry() {
     agentDuration,
     verifyDuration,
     estimatedCost,
+    buildInfo,
     costTokenSourceTotal,
     checkpointQuarantineRows,
     circuitBreakerTripsTotal,

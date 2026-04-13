@@ -73,8 +73,11 @@ export async function webCommand(
     metrics = createMetricsService(runtimeConfig.metrics)
     try {
       await metrics.start()
+      if (metrics.endpoint) {
+        logger.info({ host: metrics.endpoint.host, port: metrics.endpoint.port }, 'Metrics endpoint ready')
+      }
     } catch (err) {
-      logger.warn({ err }, 'Failed to start metrics server — continuing without metrics')
+      logger.error({ err }, 'Failed to start metrics server — continuing without metrics')
       metrics = undefined
     }
   }
@@ -176,6 +179,11 @@ export async function webCommand(
 
   if (!standalone) {
     logger.info({ host, port }, 'Starting web control surface (attach mode)')
+    if (runtimeConfig.metrics.enabled) {
+      logger.info('Metrics are served by the night-orch run process, not this web process')
+    } else {
+      logger.info('Metrics are disabled at runtime')
+    }
     await new Promise<void>(() => {})
     return
   }

@@ -66,6 +66,7 @@ describe('Metric definitions', () => {
       'night_orch_phase_duration_seconds',
       'night_orch_agent_duration_seconds',
       'night_orch_verify_duration_seconds',
+      'night_orch_build_info',
     ]
 
     for (const name of required) {

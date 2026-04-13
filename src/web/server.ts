@@ -12,6 +12,7 @@ import {
 import { logger } from '../utils/logger.js'
 import { sanitizeError } from '../utils/sanitize-error.js'
 import { nowUtcIso } from '../utils/time.js'
+import { resolveConfigWithRuntimeSettings } from '../settings/runtime.js'
 import {
   buildDashboardSnapshot,
 } from './snapshots.js'
@@ -152,6 +153,24 @@ export async function startWebServer(
   const httpServer = createServer(async (req, res) => {
     try {
       const requestUrl = getRequestUrl(req)
+
+      if (requestUrl.pathname === '/healthz') {
+        const runtimeConfig = resolveConfigWithRuntimeSettings(deps.config, deps.db)
+        writeJson(res, 200, {
+          ok: true,
+          metrics: {
+            enabled: runtimeConfig.metrics.enabled,
+            ready: deps.metrics?.ready ?? false,
+            endpoint: runtimeConfig.metrics.enabled
+              ? (deps.metrics?.endpoint ?? {
+                host: runtimeConfig.metrics.host,
+                port: runtimeConfig.metrics.port,
+              })
+              : null,
+          },
+        })
+        return
+      }
 
       if (requestUrl.pathname.startsWith('/api/')) {
         if (!isAllowedRequestHost(req, security)) {

@@ -44,6 +44,8 @@ describe('MetricsService', () => {
   describe('disabled', () => {
     it('all methods are no-ops, no server started', async () => {
       service = createMetricsService({ enabled: false, host: '127.0.0.1', port })
+      expect(service.ready).toBe(false)
+      expect(service.endpoint).toBeNull()
 
       // Methods should not throw
       service.incRunsTotal('completed')
@@ -59,6 +61,7 @@ describe('MetricsService', () => {
       service.setActiveRuns(1)
       service.setDailyCost(5.0)
       service.setEligibleIssues('org/repo', 3)
+      service.addEstimatedCost('org/repo', 'unknown', 1.5)
 
       // No server running — connection should fail
       await expect(getMetrics(port)).rejects.toThrow()
@@ -74,7 +77,10 @@ describe('MetricsService', () => {
   describe('enabled', () => {
     it('server starts on configured port', async () => {
       service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
+      expect(service.ready).toBe(false)
+      expect(service.endpoint).toEqual({ host: '127.0.0.1', port })
       await service.start()
+      expect(service.ready).toBe(true)
 
       // Small delay for server to be ready
 
@@ -98,6 +104,24 @@ describe('MetricsService', () => {
 
       const { status } = await httpGet(port, '/nonexistent')
       expect(status).toBe(404)
+    })
+
+    it('/healthz returns readiness payload', async () => {
+      service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
+      await service.start()
+
+      const { status, body } = await httpGet(port, '/healthz')
+      expect(status).toBe(200)
+      const payload = JSON.parse(body) as {
+        ready: boolean
+        registrySize: number
+        version: string
+        startedAt: string
+      }
+      expect(payload.ready).toBe(true)
+      expect(payload.registrySize).toBeGreaterThan(0)
+      expect(payload.version).toMatch(/\S+/)
+      expect(payload.startedAt).toMatch(/\d{4}-\d{2}-\d{2}T/)
     })
 
     it('counter increment reflected in output', async () => {
@@ -134,11 +158,23 @@ describe('MetricsService', () => {
     it('graceful stop closes server', async () => {
       service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
       await service.start()
+      expect(service.ready).toBe(true)
 
       await service.stop()
+      expect(service.ready).toBe(false)
 
       // Connection should fail after stop
       await expect(getMetrics(port)).rejects.toThrow()
+    })
+
+    it('addEstimatedCost(0) is a no-op', async () => {
+      service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
+      await service.start()
+
+      service.addEstimatedCost('org/repo', 'claude', 0)
+
+      const body = await getMetrics(port)
+      expect(body).not.toContain('night_orch_estimated_cost_dollars{repo="org/repo",agent="claude"}')
     })
 
     it('start rejects when port is already in use', async () => {

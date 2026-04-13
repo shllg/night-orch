@@ -49,8 +49,11 @@ export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
     metrics = createMetricsService(runtimeConfig.metrics)
     try {
       await metrics.start()
+      if (metrics.endpoint) {
+        logger.info({ host: metrics.endpoint.host, port: metrics.endpoint.port }, 'Metrics endpoint ready')
+      }
     } catch (err) {
-      logger.warn({ err }, 'Failed to start metrics server — continuing without metrics')
+      logger.error({ err }, 'Failed to start metrics server — continuing without metrics')
       metrics = undefined
     }
   }

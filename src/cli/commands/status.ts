@@ -143,9 +143,16 @@ export async function statusCommand(globalOpts?: GlobalOpts): Promise<void> {
   }
 
   // Configured repos
+  const metricsEnabledOverridden = config.metrics.enabled !== baseConfig.metrics.enabled
+  const metricsSummary = config.metrics.enabled
+    ? `http://${config.metrics.host}:${config.metrics.port}/metrics`
+    : 'disabled'
+  const metricsRuntimeAnnotation = metricsEnabledOverridden
+    ? ` (runtime override from YAML: ${baseConfig.metrics.enabled ? 'enabled' : 'disabled'})`
+    : ''
   console.log(`\n  Configured repos: ${config.repos.map((r) => r.repo).join(', ')}`)
   console.log(`  Poll interval:    ${config.github.pollIntervalSeconds}s`)
-  console.log(`  Metrics:          ${config.metrics.enabled ? `http://${config.metrics.host}:${config.metrics.port}/metrics` : 'disabled'}`)
+  console.log(`  Metrics:          ${metricsSummary}${metricsRuntimeAnnotation}`)
   console.log('')
 
   db.close()

@@ -14,6 +14,8 @@ export interface MetricsService {
   start(): Promise<void>
   stop(): Promise<void>
   getRegistry(): Registry
+  readonly ready: boolean
+  readonly endpoint: { host: string; port: number } | null
 
   incRunsTotal(status: 'completed' | 'blocked' | 'error'): void
   incAgentInvocations(role: 'planner' | 'coder' | 'reviewer', adapter: 'claude' | 'codex'): void
@@ -33,6 +35,7 @@ export interface MetricsService {
   setActiveRuns(count: number): void
   setDailyCost(costUsd: number): void
   setEligibleIssues(repo: string, count: number): void
+  addEstimatedCost(repo: string, agent: string, usd: number): void
 }
 
 class NoopMetricsService implements MetricsService {
@@ -40,6 +43,8 @@ class NoopMetricsService implements MetricsService {
 
   async start(): Promise<void> { /* no-op */ }
   async stop(): Promise<void> { /* no-op */ }
+  get ready(): boolean { return false }
+  get endpoint(): { host: string; port: number } | null { return null }
 
   getRegistry(): Registry {
     if (!this.emptyRegistry) {
@@ -64,6 +69,7 @@ class NoopMetricsService implements MetricsService {
   setActiveRuns(): void { /* no-op */ }
   setDailyCost(): void { /* no-op */ }
   setEligibleIssues(): void { /* no-op */ }
+  addEstimatedCost(): void { /* no-op */ }
 }
 
 class LiveMetricsService implements MetricsService {
@@ -115,6 +121,14 @@ class LiveMetricsService implements MetricsService {
 
   getRegistry(): Registry {
     return this.metrics.registry
+  }
+
+  get ready(): boolean {
+    return this.server?.listening ?? false
+  }
+
+  get endpoint(): { host: string; port: number } | null {
+    return { host: this.config.host, port: this.config.port }
   }
 
   incRunsTotal(status: 'completed' | 'blocked' | 'error'): void {
@@ -181,6 +195,11 @@ class LiveMetricsService implements MetricsService {
 
   setEligibleIssues(repo: string, count: number): void {
     try { this.metrics.eligibleIssues.set({ repo }, count) } catch { /* best-effort */ }
+  }
+
+  addEstimatedCost(repo: string, agent: string, usd: number): void {
+    if (usd <= 0) return
+    try { this.metrics.estimatedCost.inc({ repo, agent }, usd) } catch { /* best-effort */ }
   }
 }
 

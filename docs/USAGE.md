@@ -540,7 +540,7 @@ Options: `--config`, `--trust-workspace`, `--dry-run`, `--log-level`
 
 Start the embedded web control surface. Serves the React/Tailwind frontend, a REST API under `/api/*`, and a WebSocket stream endpoint at `/ws`.
 
-By default, `web` runs in attach mode: no poll loop, no metrics server, and no embedded MCP server are started in the web process. Manual web operations (`poll`, `sync`, `cleanup`, `retry`, `continue`, `rebase`, `delete entry`, `labels-init`, runtime settings set/clear) remain available and execute in the web process. Queued issue actions also signal any running daemon that uses the same database so the next poll cycle starts without waiting for the regular interval.
+By default, `web` runs in attach mode: no poll loop, no metrics server, and no embedded MCP server are started in the web process. Manual web operations (`poll`, `sync`, `cleanup`, `retry`, `continue`, `rebase`, `delete entry`, `labels-init`, runtime settings set/clear) remain available and execute in the web process. Queued issue actions also signal any running daemon that uses the same database so the next poll cycle starts without waiting for the regular interval. Attach mode logs an explicit reminder that metrics are expected from the `night-orch run` daemon, not from the web process.
 Use `--standalone` to run poller + metrics + embedded MCP in the same process as the web server.
 Dashboard-level quick actions for `refresh`, `poll`, `sync`, and `cleanup` are in the sticky header; the Issues-page Operations panel is reserved for Deploy controls.
 Issue-specific actions (`retry`, `continue`, `rebase`, `delete entry`) are launched from each issue's detail page and require a confirmation dialog before execution. The detail page now includes a per-action strategy selector (`repo default`, `merge`, `rebase`) for manual retry/continue/rebase operations. Project labels initialization (`labels-init`) is launched from each project's detail page using the `Bootstrap Labels` action and also requires confirmation. `Delete entry` also supports a force toggle for active/shared-state cleanup scenarios.
@@ -567,13 +567,17 @@ Interactive setup wizard. Guides you through creating a config file.
 
 ### `night-orch doctor`
 
-Run diagnostic checks: config validity, environment variables, forge authentication, CLI binaries, repo paths, base branches, worktree root, database, verify commands.
+Run diagnostic checks: config validity, environment variables, forge authentication, CLI binaries, repo paths, base branches, worktree root, database, verify commands, and a metrics endpoint probe (`/healthz`).
+
+The metrics probe classifies common failures (`ok`, `not-ready`, `connection-refused`, `timeout`). If metrics are disabled by runtime override, doctor reports `disabled-runtime` as an optional check so accidental toggles stay visible without failing the full command.
 
 Use `--project <owner/name>` to validate a specific target project's readiness: repo accessibility, base branch, forge auth, labels, worker profiles, and verify commands.
 
 ### `night-orch status`
 
 Show current state: active runs, active leases, daily cost against budget, recent run history.
+
+The metrics line includes a runtime-override annotation when effective `metrics.enabled` differs from YAML.
 
 ### `night-orch tui`
 
@@ -705,7 +709,7 @@ View costs/usage:
 
 ## Prometheus Metrics
 
-When `metrics.enabled: true`, night-orch exposes metrics at `http://<host>:<port>/metrics`. A ready-to-import Grafana dashboard lives at [`grafana/dashboard.json`](../grafana/dashboard.json) — it includes a dedicated "Architecture health — Phase 4 gate" row for the operator-health counters below.
+When `metrics.enabled: true`, night-orch exposes metrics at `http://<host>:<port>/metrics` and health metadata at `http://<host>:<port>/healthz`. A ready-to-import Grafana dashboard lives at [`grafana/dashboard.json`](../grafana/dashboard.json) — it includes a dedicated "Architecture health — Phase 4 gate" row for the operator-health counters below.
 
 Core run metrics:
 
@@ -728,6 +732,7 @@ Core run metrics:
 | `night_orch_errors_total` | counter | Errors by repo + error_type |
 | `night_orch_daily_cost_usd` | gauge | Today's spend |
 | `night_orch_estimated_cost_dollars` | counter | Estimated cost rate per repo/agent |
+| `night_orch_build_info{version,commit}` | gauge | Constant `1` build marker for scrape diagnostics |
 
 Architecture health (Phase 4 gate) metrics — expose the stability
 invariants from the immutable-attempts refactor. Alert if any of

@@ -2,7 +2,7 @@ import { loadConfig, resolveConfigPath, ConfigError } from '../../config/loader.
 import { initDatabase } from '../../state/db.js'
 import { startMCPStdio } from '../../mcp/server.js'
 import { createForgeAdapter } from '../../forge/factory.js'
-import { createMetricsService } from '../../metrics/service.js'
+import { createMetricsService, type MetricsService } from '../../metrics/service.js'
 import { createLogger, logger } from '../../utils/logger.js'
 import type { ForgeAdapter } from '../../forge/types.js'
 import { resolveConfigWithRuntimeSettings } from '../../settings/runtime.js'
@@ -42,10 +42,25 @@ export async function mcpCommand(globalOpts?: GlobalOpts): Promise<void> {
 
   const db = initDatabase(baseConfig.storage.dbPath)
   const runtimeConfig = resolveConfigWithRuntimeSettings(baseConfig, db)
-  const metrics = runtimeConfig.metrics.enabled ? createMetricsService(runtimeConfig.metrics) : null
-
-  if (metrics) {
-    await metrics.start()
+  let metrics: MetricsService | null = null
+  if (runtimeConfig.metrics) {
+    metrics = createMetricsService(runtimeConfig.metrics)
+    try {
+      await metrics.start()
+      if (metrics.endpoint) {
+        mcpLogger.info({ host: metrics.endpoint.host, port: metrics.endpoint.port }, 'Metrics endpoint ready')
+      }
+    } catch (err) {
+      const maybeErr = err as NodeJS.ErrnoException
+      if (maybeErr.code === 'EADDRINUSE') {
+        mcpLogger.info(
+          "Metrics bind failed — if 'night-orch run' is already running, this is expected (run owns :9090).",
+        )
+      } else {
+        mcpLogger.warn({ err }, 'Failed to start metrics server — continuing without metrics')
+      }
+      metrics = null
+    }
   }
 
   const forgeAdapters = new Map<string, ForgeAdapter>()
