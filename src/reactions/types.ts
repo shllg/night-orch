@@ -44,4 +44,10 @@ export interface ReactionCursor {
   lastReviewId: number
   lastCommentId: number
   lastCheckConclusion: string | null
+  /**
+   * Last observed mergeable state of the PR. `null` means never scanned.
+   * `merge_conflict` reactions fire only on edge transitions into
+   * 'conflicting' — not on every scan of a persistently conflicting PR.
+   */
+  lastMergeableState: 'mergeable' | 'conflicting' | 'unknown' | null
 }

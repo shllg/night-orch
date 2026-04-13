@@ -22,6 +22,7 @@ const EMPTY_CURSOR: ReactionCursor = {
   lastReviewId: 0,
   lastCommentId: 0,
   lastCheckConclusion: null,
+  lastMergeableState: null,
 }
 
 const CONTINUABLE_STATUSES = new Set(['blocked', 'review_ready', 'error'])

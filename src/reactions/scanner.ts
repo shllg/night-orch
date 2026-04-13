@@ -7,6 +7,7 @@ const EMPTY_CURSOR: ReactionCursor = {
   lastReviewId: 0,
   lastCommentId: 0,
   lastCheckConclusion: null,
+  lastMergeableState: null,
 }
 
 /**
@@ -31,19 +32,26 @@ export async function scanForReactions(
   const now = nowUtcIso()
 
   // 0. Check mergeability (conflicting PRs should trigger rebase flow).
+  //    Edge-deduped via cursor — emit only on transition into 'conflicting'
+  //    so a persistently conflicting PR doesn't re-queue on every scan.
   if (forge.getPR) {
     try {
       const pr = await forge.getPR(repo, prNumber)
-      if (pr.state === 'open' && pr.mergeable === false) {
-        reactions.push({
-          type: 'merge_conflict',
-          repo,
-          prNumber,
-          issueNumber,
-          summary: 'PR has merge conflicts with base branch',
-          context: 'PR cannot be merged cleanly. Rebase onto the latest base branch, resolve conflicts, then rerun verify.',
-          detectedAt: now,
-        })
+      if (pr.state === 'open') {
+        const mergeableState: 'mergeable' | 'conflicting' | 'unknown' =
+          pr.mergeable === true ? 'mergeable' : pr.mergeable === false ? 'conflicting' : 'unknown'
+        if (mergeableState === 'conflicting' && cursor.lastMergeableState !== 'conflicting') {
+          reactions.push({
+            type: 'merge_conflict',
+            repo,
+            prNumber,
+            issueNumber,
+            summary: 'PR has merge conflicts with base branch',
+            context: 'PR cannot be merged cleanly. Rebase onto the latest base branch, resolve conflicts, then rerun verify.',
+            detectedAt: now,
+          })
+        }
+        newCursor.lastMergeableState = mergeableState
       }
     } catch (err) {
       logger.debug({ repo, prNumber, err }, 'Failed to check mergeability for reaction scan')

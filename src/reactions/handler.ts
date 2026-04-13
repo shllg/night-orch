@@ -7,6 +7,8 @@ import { buildLabelConfig } from '../labels/config.js'
 import type { RepoConfig } from '../config/schema.js'
 import { resolveIssueRepo } from '../utils/issue-repo.js'
 import { logger } from '../utils/logger.js'
+import { createFollowupAttempt, AttemptTerminatedError, AttemptNotFoundError } from '../state/attempts.js'
+import { recordUserAction } from '../state/run-log-events.js'
 
 export interface ReactionHandlerDeps {
   db: Database.Database
@@ -16,17 +18,16 @@ export interface ReactionHandlerDeps {
 }
 
 /**
- * Handle a reaction by transitioning the PR's issue back to queued
- * so the next poll cycle picks it up as a follow-up run.
- *
- * The reaction context is stored in the DB so the follow-up run
- * can include it in the coder's prompt.
+ * Handle a reaction by queuing a follow-up run. Merge-conflict reactions
+ * create a new attempt with `intent='rebase'` so the poller drives the
+ * rebase-and-re-verify flow; all other reaction types flip the current
+ * run in place back to `queued` and seed reaction context on phase data.
  */
 export async function handleReaction(
   reaction: Reaction,
   deps: ReactionHandlerDeps,
 ): Promise<void> {
-  const { forge, runManager, repoConfig } = deps
+  const { db, forge, runManager, repoConfig } = deps
 
   logger.info(
     { repo: reaction.repo, prNumber: reaction.prNumber, issueNumber: reaction.issueNumber, type: reaction.type },
@@ -49,23 +50,60 @@ export async function handleReaction(
     return
   }
 
-  // Store the reaction context on the run so the follow-up iteration can use it
+  const issueRepo = resolveIssueRepo(run.phaseData, reaction.repo)
   const existingPhaseData = run.phaseData ?? {}
-  runManager.update(run.id, {
-    status: 'queued',
-    lastError: null,
-    endedAt: null,
-    phaseData: {
-      ...existingPhaseData,
-      reactionContext: reaction.context,
-      reactionType: reaction.type,
-      reactionSummary: reaction.summary,
-    },
-  })
+
+  if (reaction.type === 'merge_conflict') {
+    try {
+      const result = createFollowupAttempt(db, {
+        previousAttemptId: run.id,
+        intent: 'rebase',
+        resetBranch: false,
+        phaseData: {
+          ...existingPhaseData,
+          issueRepo,
+          reactionContext: reaction.context,
+          reactionType: reaction.type,
+          reactionSummary: reaction.summary,
+        },
+        controlPayload: {
+          issueRepo,
+          checkAfter: true,
+          requestedAt: new Date().toISOString(),
+          preserveBranchState: true,
+        },
+      })
+      recordUserAction(db, {
+        runId: result.attemptId,
+        kind: 'rebase',
+        actor: 'reaction:merge_conflict',
+      })
+    } catch (err) {
+      if (err instanceof AttemptTerminatedError || err instanceof AttemptNotFoundError) {
+        logger.debug(
+          { repo: reaction.repo, issueNumber: reaction.issueNumber, runId: run.id },
+          'Previous attempt already terminated — skipping merge_conflict reaction',
+        )
+        return
+      }
+      throw err
+    }
+  } else {
+    runManager.update(run.id, {
+      status: 'queued',
+      lastError: null,
+      endedAt: null,
+      phaseData: {
+        ...existingPhaseData,
+        reactionContext: reaction.context,
+        reactionType: reaction.type,
+        reactionSummary: reaction.summary,
+      },
+    })
+  }
 
   // Transition labels back to ready so the poller picks it up
   try {
-    const issueRepo = resolveIssueRepo(run.phaseData, reaction.repo)
     const issue = await forge.getIssue(issueRepo, reaction.issueNumber)
     await transitionLabels(
       forge,

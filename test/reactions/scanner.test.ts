@@ -29,6 +29,7 @@ const emptyCursor: ReactionCursor = {
   lastReviewId: 0,
   lastCommentId: 0,
   lastCheckConclusion: null,
+  lastMergeableState: null,
 }
 
 describe('scanForReactions', () => {
@@ -152,5 +153,84 @@ describe('scanForReactions', () => {
     const conflictReaction = result.reactions.find((r) => r.type === 'merge_conflict')
     expect(conflictReaction).toBeDefined()
     expect(conflictReaction?.summary).toContain('merge conflicts')
+    expect(result.cursor.lastMergeableState).toBe('conflicting')
+  })
+
+  it('does not re-react when PR is already known to be conflicting', async () => {
+    const forge = makeForge({
+      getPR: vi.fn().mockResolvedValue({
+        number: 1,
+        title: 'Test PR',
+        body: '',
+        state: 'open',
+        mergeable: false,
+        headBranch: 'feature',
+        headSha: 'abc123',
+        baseBranch: 'main',
+        url: 'https://example.invalid/pr/1',
+      }),
+    })
+
+    const cursor: ReactionCursor = { ...emptyCursor, lastMergeableState: 'conflicting' }
+    const result = await scanForReactions(forge, 'org/repo', 1, 42, 'bot', cursor)
+
+    const conflictReactions = result.reactions.filter((r) => r.type === 'merge_conflict')
+    expect(conflictReactions).toHaveLength(0)
+    expect(result.cursor.lastMergeableState).toBe('conflicting')
+  })
+
+  it('re-reacts on transition from mergeable back to conflicting', async () => {
+    const forge = makeForge({
+      getPR: vi.fn().mockResolvedValue({
+        number: 1,
+        title: 'Test PR',
+        body: '',
+        state: 'open',
+        mergeable: false,
+        headBranch: 'feature',
+        headSha: 'abc123',
+        baseBranch: 'main',
+        url: 'https://example.invalid/pr/1',
+      }),
+    })
+
+    const cursor: ReactionCursor = { ...emptyCursor, lastMergeableState: 'mergeable' }
+    const result = await scanForReactions(forge, 'org/repo', 1, 42, 'bot', cursor)
+
+    const conflictReactions = result.reactions.filter((r) => r.type === 'merge_conflict')
+    expect(conflictReactions).toHaveLength(1)
+  })
+
+  it('clears merge_conflict cursor when PR becomes mergeable again', async () => {
+    const forge = makeForge({
+      getPR: vi.fn().mockResolvedValue({
+        number: 1,
+        title: 'Test PR',
+        body: '',
+        state: 'open',
+        mergeable: true,
+        headBranch: 'feature',
+        headSha: 'abc123',
+        baseBranch: 'main',
+        url: 'https://example.invalid/pr/1',
+      }),
+    })
+
+    const cursor: ReactionCursor = { ...emptyCursor, lastMergeableState: 'conflicting' }
+    const result = await scanForReactions(forge, 'org/repo', 1, 42, 'bot', cursor)
+
+    expect(result.reactions.filter((r) => r.type === 'merge_conflict')).toHaveLength(0)
+    expect(result.cursor.lastMergeableState).toBe('mergeable')
+  })
+
+  it('leaves lastMergeableState null when PR cannot be fetched', async () => {
+    const forge = makeForge({
+      getPR: vi.fn().mockRejectedValue(new Error('boom')),
+    })
+
+    const result = await scanForReactions(forge, 'org/repo', 1, 42, 'bot', emptyCursor)
+
+    expect(result.reactions.filter((r) => r.type === 'merge_conflict')).toHaveLength(0)
+    expect(result.cursor.lastMergeableState).toBeNull()
   })
 })
