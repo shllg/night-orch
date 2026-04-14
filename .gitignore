@@ -16,3 +16,4 @@ node_modules/
 *.db-wal
 *.db-shm
 .claude/hook-state/
+.playwright-mcp/*
