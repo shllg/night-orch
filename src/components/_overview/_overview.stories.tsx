@@ -1,8 +1,15 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import type { ReactNode } from 'react'
-import { ButtonWeb } from '../button/button.web.js'
+import { AlertWeb } from '../alert/alert.web.js'
 import { BadgeWeb } from '../badge/badge.web.js'
+import { ButtonWeb } from '../button/button.web.js'
+import { CollapsibleWeb } from '../collapsible/collapsible.web.js'
+import { NumberInputWeb } from '../number-input/number-input.web.js'
+import { SelectWeb } from '../select/select.web.js'
+import { TabsWeb } from '../tabs/tabs.web.js'
+import { TextAreaWeb } from '../textarea/textarea.web.js'
 import { TextInputWeb } from '../text-input/text-input.web.js'
+import { useState } from 'react'
 import type { Size, Tone } from '../shared-types.js'
 
 const meta = {
@@ -40,6 +47,23 @@ function Section({ eyebrow, title, children }: { eyebrow: string; title: string;
         {children}
       </div>
     </section>
+  )
+}
+
+function TabsPreview(): ReactNode {
+  const [active, setActive] = useState('overview')
+  return (
+    <TabsWeb
+      variant="box"
+      tabs={[
+        { id: 'overview', label: 'Overview' },
+        { id: 'runs', label: 'Runs' },
+        { id: 'settings', label: 'Settings' },
+      ]}
+      activeId={active}
+      onChange={setActive}
+      ariaLabel="Dashboard sections"
+    />
   )
 }
 
@@ -160,28 +184,70 @@ export const DesignSystem: Story = {
               <BadgeWeb tone="neutral" variant="outline">outline</BadgeWeb>
             </div>
           </div>
-          <div className="space-y-3 md:col-span-2">
-            <p className="text-xs font-semibold uppercase tracking-wider text-base-content/55">Inputs</p>
-            <div className="grid max-w-xl gap-2">
+          <div className="space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wider text-base-content/55">Text input / Number</p>
+            <div className="grid gap-2">
               <TextInputWeb placeholder="owner/repo" fullWidth size="sm" />
               <TextInputWeb placeholder="error state" tone="error" fullWidth size="sm" />
-              <TextInputWeb placeholder="disabled" fullWidth size="sm" disabled />
+              <NumberInputWeb defaultValue={3} min={0} max={10} step={1} size="sm" fullWidth />
             </div>
+          </div>
+          <div className="space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wider text-base-content/55">Select</p>
+            <SelectWeb
+              fullWidth
+              size="sm"
+              options={[
+                { value: 'claude', label: 'Claude' },
+                { value: 'codex', label: 'Codex' },
+                { value: 'gemini', label: 'Gemini' },
+              ]}
+              defaultValue="claude"
+              ariaLabel="Agent"
+            />
+          </div>
+          <div className="space-y-3 md:col-span-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-base-content/55">Textarea</p>
+            <TextAreaWeb placeholder="Describe the change…" fullWidth rows={3} />
+          </div>
+          <div className="space-y-3 md:col-span-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-base-content/55">Tabs</p>
+            <TabsPreview />
+          </div>
+          <div className="space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wider text-base-content/55">Alerts</p>
+            <div className="grid gap-2">
+              <AlertWeb tone="info" title="Heads up">Neutral status message.</AlertWeb>
+              <AlertWeb tone="warning" title="Budget at 80%">Approaching monthly cap.</AlertWeb>
+              <AlertWeb tone="error" role="alert" title="Push failed">Run 42 could not push its branch.</AlertWeb>
+            </div>
+          </div>
+          <div className="space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wider text-base-content/55">Collapsible</p>
+            <CollapsibleWeb title="Run details" defaultOpen>
+              Logs, metadata, and checkpoints go here.
+            </CollapsibleWeb>
           </div>
         </div>
       </Section>
 
       <Section eyebrow="Components" title="Primitive index">
         <ul className="grid gap-1.5 text-sm text-base-content/80 sm:grid-cols-2">
-          <li>• Button — <code className="text-base-content/55">src/components/button/</code></li>
+          <li>• Alert — <code className="text-base-content/55">src/components/alert/</code></li>
           <li>• Badge — <code className="text-base-content/55">src/components/badge/</code></li>
+          <li>• Button — <code className="text-base-content/55">src/components/button/</code></li>
           <li>• Card — <code className="text-base-content/55">src/components/card/</code></li>
-          <li>• TextInput — <code className="text-base-content/55">src/components/text-input/</code></li>
-          <li>• Modal — <code className="text-base-content/55">src/components/modal/</code></li>
+          <li>• Collapsible — <code className="text-base-content/55">src/components/collapsible/</code></li>
           <li>• IssueRow — <code className="text-base-content/55">src/components/issue-row/</code></li>
+          <li>• Modal — <code className="text-base-content/55">src/components/modal/</code></li>
+          <li>• NumberInput — <code className="text-base-content/55">src/components/number-input/</code></li>
+          <li>• Select — <code className="text-base-content/55">src/components/select/</code></li>
+          <li>• Tabs — <code className="text-base-content/55">src/components/tabs/</code></li>
+          <li>• TextArea — <code className="text-base-content/55">src/components/textarea/</code></li>
+          <li>• TextInput — <code className="text-base-content/55">src/components/text-input/</code></li>
         </ul>
         <p className="mt-4 text-xs text-base-content/55">
-          Upcoming: Select, NumberInput, TextArea, Alert, Tabs, Collapsible, Nav, LogLine.
+          Upcoming: Nav (menu + dock), LogLine.
         </p>
       </Section>
     </Board>
