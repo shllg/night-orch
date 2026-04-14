@@ -54,6 +54,9 @@ describe('MetricsService', () => {
       service.incVerifyRuns('pass')
       service.incPROperations('created')
       service.incNotifications('console', 'sent')
+      service.incRebaseConflict()
+      service.incRebaseAutoResolved()
+      service.incRebaseAutoResolveFailed('error')
       service.observeRunDuration(10)
       service.observePhaseDuration('plan', 5)
       service.observeAgentDuration('planner', 'claude', 3)
@@ -133,6 +136,20 @@ describe('MetricsService', () => {
 
       const body = await getMetrics(port)
       expect(body).toContain('night_orch_runs_total{status="completed"} 2')
+    })
+
+    it('rebase auto-resolve counters are reflected in output', async () => {
+      service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
+      await service.start()
+
+      service.incRebaseConflict()
+      service.incRebaseAutoResolved()
+      service.incRebaseAutoResolveFailed('validation_failed')
+
+      const body = await getMetrics(port)
+      expect(body).toContain('night_orch_rebase_conflict_total 1')
+      expect(body).toContain('night_orch_rebase_auto_resolved_total 1')
+      expect(body).toContain('night_orch_rebase_auto_resolve_failed_total{reason="validation_failed"} 1')
     })
 
     it('histogram observation reflected in output', async () => {

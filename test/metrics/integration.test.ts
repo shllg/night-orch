@@ -39,6 +39,9 @@ describe('Metrics integration', () => {
     service.incVerifyRuns('pass')
     service.incPROperations('created')
     service.incNotifications('console', 'sent')
+    service.incRebaseConflict()
+    service.incRebaseAutoResolved()
+    service.incRebaseAutoResolveFailed('error')
     service.observeRunDuration(300)
     service.observePhaseDuration('plan', 45)
     service.observeAgentDuration('planner', 'claude', 60)
@@ -58,6 +61,9 @@ describe('Metrics integration', () => {
     expect(body).toContain('night_orch_verify_runs_total{result="pass"} 1')
     expect(body).toContain('night_orch_pr_operations_total{type="created"} 1')
     expect(body).toContain('night_orch_notifications_total{channel="console",result="sent"} 1')
+    expect(body).toContain('night_orch_rebase_conflict_total 1')
+    expect(body).toContain('night_orch_rebase_auto_resolved_total 1')
+    expect(body).toContain('night_orch_rebase_auto_resolve_failed_total{reason="error"} 1')
 
     // Verify histograms
     expect(body).toContain('night_orch_run_duration_seconds_count 1')

@@ -106,6 +106,28 @@ cost:
   #       cacheReadUsdPerMillionTokens: 0.125
   #       minuteUsd: 0.01
 
+# Optional direct-LLM features used by night-orch itself.
+# Leave provider/model/apiKeyEnv unset to keep the internal AI layer disabled.
+# ai:
+#   internal:
+#     provider: anthropic
+#     model: claude-3-5-sonnet-20241022
+#     apiKeyEnv: ANTHROPIC_API_KEY
+#     features:
+#       conflictResolver: true
+#     enable:
+#       triage: false
+#       reviewerParseFallback: false
+#       prBody: false
+
+# Optional bounded AI-assisted resolver for queued rebase conflicts.
+# If disabled or unavailable, rebase conflicts still fall back to the
+# normal merge_conflict block path.
+# autoResolveConflicts:
+#   enabled: true
+#   maxAttempts: 2
+#   maxFiles: 5
+
 workerProfiles:
   claude-default:
     type: claude

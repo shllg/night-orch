@@ -369,15 +369,21 @@ Validation notes:
 
 Phase 3: direct-LLM API layer for night-orch's **internal** AI
 tasks — triage refinement, PR body summaries, reviewer parse
-salvage. This does NOT replace the Claude Code / Codex / opencode
-CLIs used for actual code-editing (planner, coder, reviewer); those
-keep running on the CLI path because they rely on the agentic
-tool-use loop that the direct API doesn't have.
+salvage, and a bounded rebase-conflict resolver. This does NOT
+replace the Claude Code / Codex / opencode CLIs used for actual
+code-editing (planner, coder, reviewer); those keep running on the
+CLI path because they rely on the agentic tool-use loop that the
+direct API doesn't have. The conflict resolver is the narrow
+exception: it operates on one conflicted file at a time, validates
+the returned file, and falls back to the normal human block path on
+any failure.
 
 When no `ai.internal.enable.*` flag is set the entire layer is a
 no-op and every consumer falls back to its pre-Phase-3 behavior
 (rule-based triage, template-only PR body, fail-closed reviewer
-parser).
+parser). The conflict resolver is gated separately by
+`autoResolveConflicts.enabled` and
+`ai.internal.features.conflictResolver`.
 
 ### `ai.internal`
 
@@ -388,6 +394,7 @@ parser).
 | `apiKeyEnv` | string \| `null` | `null` | Env var name holding the API key. Refuses literal keys in YAML. |
 | `timeoutMs` | positive int | `30000` | Per-request timeout. |
 | `maxTokens` | positive int | `1024` | Default max tokens per call. Each consumer may override. |
+| `features.conflictResolver` | boolean | `true` | Enables the internal-AI conflict resolver feature when `autoResolveConflicts.enabled` is also `true`. If provider/model/API key are missing at runtime, the resolver quietly falls back to the existing human block path and `doctor` reports it as unavailable. |
 | `enable.triage` | boolean | `false` | LLM refines rule-based triage classification. |
 | `enable.reviewerParseFallback` | boolean | `false` | When the primary reviewer JSON parser fails, ask the LLM to salvage a structured verdict (CHANGES_REQUIRED or BLOCKED only — APPROVED is never inferred from free text). |
 | `enable.prBody` | boolean | `false` | Prepends a 2-3 sentence plain-English summary to PR body bodies. The structured template still renders below. |
@@ -410,9 +417,9 @@ fields from every log record.
 
 **Cost tracking**: every AI call records through the same R4 cost
 ledger as CLI workers, tagged `tokenSource='measured_api'` and
-`workerType='internal-ai'`. The `/api/cost/health` endpoint surfaces
-these as a distinct funding source so operators can see direct-API
-spend alongside CLI spend.
+`workerType='internal-ai'` or `workerType='internal-ai-conflict-resolver'`.
+The `/api/cost/health` endpoint surfaces these as distinct funding
+sources so operators can see direct-API spend alongside CLI spend.
 
 Example:
 
@@ -422,10 +429,41 @@ ai:
     provider: anthropic
     model: claude-3-5-sonnet-20241022
     apiKeyEnv: ANTHROPIC_API_KEY
+    features:
+      conflictResolver: true
     enable:
       triage: true
       reviewerParseFallback: true
       prBody: true
+```
+
+## `autoResolveConflicts`
+
+Controls the bounded AI-assisted resolver that runs only after a
+queued `rebase` operation hits textual conflicts.
+
+If resolution succeeds, night-orch continues the rebase, force-pushes
+the branch, and then follows the existing verify contract:
+- verify passes: the run returns to `review_ready`
+- verify fails: the coder loop runs as usual
+
+If resolution fails, validation fails, the provider is unavailable,
+or the feature is disabled, night-orch aborts the rebase and blocks
+the run with the existing `merge_conflict` reason.
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `true` | Master switch for the automated resolver pass. |
+| `maxAttempts` | int 1-5 | `2` | Maximum number of `resolve -> git add -> git rebase --continue` cycles before falling back to the human block path. |
+| `maxFiles` | int 1-20 | `5` | Maximum number of conflicted files eligible for one automated attempt. Larger conflict sets skip auto-resolution and block immediately. |
+
+Example:
+
+```yaml
+autoResolveConflicts:
+  enabled: true
+  maxAttempts: 2
+  maxFiles: 5
 ```
 
 ## `workerProfiles`

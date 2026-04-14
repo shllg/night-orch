@@ -184,6 +184,25 @@ export function createMetricsRegistry() {
     registers: [registry],
   })
 
+  const rebaseConflictTotal = new Counter({
+    name: 'night_orch_rebase_conflict_total',
+    help: 'Rebase operations that encountered at least one textual conflict',
+    registers: [registry],
+  })
+
+  const rebaseAutoResolvedTotal = new Counter({
+    name: 'night_orch_rebase_auto_resolved_total',
+    help: 'Rebase conflicts auto-resolved successfully',
+    registers: [registry],
+  })
+
+  const rebaseAutoResolveFailedTotal = new Counter({
+    name: 'night_orch_rebase_auto_resolve_failed_total',
+    help: 'Rebase conflicts that failed auto-resolution by reason',
+    labelNames: ['reason'] as const,
+    registers: [registry],
+  })
+
   return {
     registry,
     runsTotal,
@@ -208,6 +227,9 @@ export function createMetricsRegistry() {
     costTokenSourceTotal,
     checkpointQuarantineRows,
     circuitBreakerTripsTotal,
+    rebaseConflictTotal,
+    rebaseAutoResolvedTotal,
+    rebaseAutoResolveFailedTotal,
   }
 }
 

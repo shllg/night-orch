@@ -1077,6 +1077,50 @@ describe('pollOnce', () => {
     expect(run.block_reason).toBe('merge_conflict')
   })
 
+  it('does not enter the coder loop when executeRebase returns an error', async () => {
+    mockDiscoverEligibleIssues.mockResolvedValue([
+      {
+        issue: { number: 13, nodeId: '', title: 'Follow-up', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        triage: { level: 'standard', reason: '' },
+      },
+    ])
+    mockExecuteRebase.mockResolvedValueOnce({
+      rebased: false,
+      verifyPassed: false,
+      conflict: false,
+      error: 'push failed',
+    })
+
+    const runManager = new RunManager(db)
+    const existing = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 13,
+      issueNodeId: '',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(existing.id, {
+      status: 'queued',
+      phaseData: {
+        reactionType: 'merge_conflict',
+      },
+    })
+
+    const config = makeConfig(join(tmpDir, 'test.db'))
+    const result = await pollOnce(config, db, false)
+
+    expect(result.processed).toBe(0)
+    expect(result.errors).toBe(1)
+    expect(mockExecuteLoop).not.toHaveBeenCalled()
+
+    const run = db
+      .prepare('SELECT status, last_error FROM runs WHERE id = ?')
+      .get(existing.id) as { status: string; last_error: string | null }
+    expect(run.status).toBe('error')
+    expect(run.last_error).toBe('push failed')
+  })
+
   it('processes one issue per repo in parallel by default', async () => {
     const config = makeConfig(join(tmpDir, 'test.db'))
     config.repos = [

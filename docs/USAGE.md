@@ -615,7 +615,7 @@ Options: `--immediate` (process now instead of queuing), `--strategy merge|rebas
 
 ### `night-orch rebase <repo> <issue>`
 
-Queue an explicit git rebase of the PR branch onto the latest base branch, then run verify commands to check if code adjustments are needed. If verify fails after a successful rebase, the issue is automatically re-queued for the coder to fix. If the rebase conflicts, the run blocks and waits for either `continue` or `retry`.
+Queue an explicit git rebase of the PR branch onto the latest base branch, then run verify commands to check if code adjustments are needed. If verify fails after a successful rebase, the issue is automatically re-queued for the coder to fix. When `autoResolveConflicts.enabled` and `ai.internal.features.conflictResolver` are both on, night-orch attempts one bounded AI-assisted conflict resolution pass before blocking. If the resolver fails, the run falls back to the normal `merge_conflict` block path and waits for either `continue` or `retry`.
 
 Options: `--strategy merge|rebase` (override the action strategy for this manual rebase request). `merge` merges the latest base branch into the work branch; `rebase` replays commits and is still the default behavior for explicit rebase runs. Successful queueing also signals any running daemon that uses the same database to wake for the next cycle immediately.
 

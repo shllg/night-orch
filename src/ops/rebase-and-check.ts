@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 import type { ForgeAdapter } from '../forge/types.js'
-import type { RepoConfig } from '../config/schema.js'
+import type { Config, RepoConfig } from '../config/schema.js'
 import { autoRebase, type RebaseConflictAnalysis, type RebaseTarget } from './rebase.js'
 import type { UpdateStrategy } from '../git/worktree.js'
 import { runVerifyCommands, allVerifyPassed } from '../loop/verifier.js'
@@ -13,6 +13,10 @@ import { buildLabelConfig } from '../labels/config.js'
 import { upsertBotComment, markerTag } from '../forge/bot-comment.js'
 import { resolveIssueRepo } from '../utils/issue-repo.js'
 import { logger } from '../utils/logger.js'
+import { CostTracker } from '../loop/cost.js'
+import type { MetricsService } from '../metrics/service.js'
+import { createConflictResolver } from './conflict-resolver.js'
+import type { ConflictResolutionMetadata } from './conflict-types.js'
 
 const STATUS_MARKER = markerTag('status')
 
@@ -129,7 +133,22 @@ export async function executeRebase(
   verifyCommands: Array<string | string[]>,
   checkAfter = true,
   strategy: UpdateStrategy = 'rebase',
-): Promise<{ rebased: boolean; verifyPassed: boolean; conflict: boolean; conflictAnalysis?: RebaseConflictAnalysis; error?: string }> {
+  options: {
+    issueTitle?: string
+    issueBody?: string
+    config?: Config
+    db?: Database.Database
+    runId?: string
+    metrics?: MetricsService
+  } = {},
+): Promise<{
+  rebased: boolean
+  verifyPassed: boolean
+  conflict: boolean
+  conflictAnalysis?: RebaseConflictAnalysis
+  resolution?: ConflictResolutionMetadata
+  error?: string
+}> {
   const target: RebaseTarget = {
     repo,
     issueNumber,
@@ -139,10 +158,35 @@ export async function executeRebase(
     worktreePath,
   }
 
-  const rebaseResult = await autoRebase(target, repoLocalPath, strategy)
+  const resolverEnabled = Boolean(
+    options.config
+      && options.db
+      && options.issueTitle
+      && typeof options.issueBody === 'string'
+      && options.config.autoResolveConflicts.enabled
+      && options.config.ai.internal.features.conflictResolver,
+  )
+  const resolver = resolverEnabled
+    ? createConflictResolver({
+        config: options.config!,
+        costTracker: new CostTracker(options.db!),
+        runId: options.runId,
+      })
+    : null
+
+  const rebaseResult = await autoRebase(target, repoLocalPath, strategy, {
+    resolver: resolver ?? undefined,
+    context: resolver && options.issueTitle
+      ? {
+          issueTitle: options.issueTitle,
+          issueBody: options.issueBody ?? '',
+        }
+      : undefined,
+    metrics: options.metrics,
+  })
 
   if (rebaseResult.result === 'up_to_date') {
-    return { rebased: false, verifyPassed: true, conflict: false }
+    return { rebased: false, verifyPassed: true, conflict: false, resolution: rebaseResult.resolution }
   }
 
   if (rebaseResult.result === 'conflict') {
@@ -151,20 +195,32 @@ export async function executeRebase(
       verifyPassed: false,
       conflict: true,
       conflictAnalysis: rebaseResult.conflictAnalysis,
+      resolution: rebaseResult.resolution,
     }
   }
 
   if (rebaseResult.result === 'error') {
-    return { rebased: false, verifyPassed: false, conflict: false, error: rebaseResult.error }
+    return {
+      rebased: false,
+      verifyPassed: false,
+      conflict: false,
+      resolution: rebaseResult.resolution,
+      error: rebaseResult.error,
+    }
   }
 
   // Rebased successfully — run verify
   if (!checkAfter || verifyCommands.length === 0) {
-    return { rebased: true, verifyPassed: true, conflict: false }
+    return { rebased: true, verifyPassed: true, conflict: false, resolution: rebaseResult.resolution }
   }
 
   const verifyResults = await runVerifyCommands(worktreePath, verifyCommands, buildVerifierEnv())
-  return { rebased: true, verifyPassed: allVerifyPassed(verifyResults), conflict: false }
+  return {
+    rebased: true,
+    verifyPassed: allVerifyPassed(verifyResults),
+    conflict: false,
+    resolution: rebaseResult.resolution,
+  }
 }
 
 async function commentStatus(

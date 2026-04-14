@@ -149,7 +149,7 @@ function buildUserPrompt(ctx: PromptContext): string {
  * Sanitize issue body to mitigate prompt injection.
  * Strips HTML tags, truncates to max length.
  */
-function sanitizeIssueBody(body: string): string {
+export function sanitizeIssueBody(body: string): string {
   const sanitized = sanitizeUntrustedText(body)
   if (sanitized.length <= MAX_ISSUE_BODY_LENGTH) return sanitized
   return sanitized.slice(0, MAX_ISSUE_BODY_LENGTH) + '\n\n[... truncated ...]'

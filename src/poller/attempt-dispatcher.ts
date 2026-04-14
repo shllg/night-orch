@@ -330,6 +330,8 @@ export async function dispatchAttempt(
     if (isRebaseRun) {
       const rebaseOutcome = await handleRebaseRun({
         forge,
+        config,
+        db,
         repoConfig,
         issueRepo,
         discoveredIssue,
@@ -341,6 +343,7 @@ export async function dispatchAttempt(
         botUser,
         controlPayload,
         updateStrategyOverride,
+        metrics,
       })
       if (rebaseOutcome !== 'continue-to-loop') {
         outcome = rebaseOutcome
@@ -628,6 +631,8 @@ function computeImmediateFollowup(
 
 interface HandleRebaseRunParams {
   forge: ForgeAdapter
+  config: Config
+  db: Database.Database
   repoConfig: Config['repos'][number]
   issueRepo: string
   discoveredIssue: DiscoveredIssue
@@ -639,6 +644,7 @@ interface HandleRebaseRunParams {
   botUser: string
   controlPayload: Record<string, unknown> | null
   updateStrategyOverride?: UpdateStrategy
+  metrics?: MetricsService
 }
 
 type RebaseOutcome = 'continue-to-loop' | 'processed' | 'errored'
@@ -646,6 +652,8 @@ type RebaseOutcome = 'continue-to-loop' | 'processed' | 'errored'
 async function handleRebaseRun(params: HandleRebaseRunParams): Promise<RebaseOutcome> {
   const {
     forge,
+    config,
+    db,
     repoConfig,
     issueRepo,
     discoveredIssue,
@@ -657,6 +665,7 @@ async function handleRebaseRun(params: HandleRebaseRunParams): Promise<RebaseOut
     botUser,
     controlPayload,
     updateStrategyOverride,
+    metrics,
   } = params
 
   logger.info(
@@ -674,6 +683,14 @@ async function handleRebaseRun(params: HandleRebaseRunParams): Promise<RebaseOut
     verifyCommands,
     controlPayload?.['checkAfter'] !== false,
     updateStrategyOverride ?? 'rebase',
+    {
+      issueTitle: discoveredIssue.issue.title,
+      issueBody: discoveredIssue.issue.body,
+      config,
+      db,
+      runId,
+      metrics,
+    },
   )
 
   if (rebaseResult.conflict) {
@@ -688,6 +705,9 @@ async function handleRebaseRun(params: HandleRebaseRunParams): Promise<RebaseOut
         conflictSummary: rebaseResult.conflictAnalysis?.summary ?? 'Rebase conflicted with the latest base branch changes.',
         conflictFiles: rebaseResult.conflictAnalysis?.files ?? [],
         conflictExcerpts: rebaseResult.conflictAnalysis?.excerpts ?? [],
+        resolutionAttempted: rebaseResult.resolution?.attempted ?? false,
+        resolutionOutcome: rebaseResult.resolution?.outcome ?? null,
+        resolvedFiles: rebaseResult.resolution?.files ?? [],
         requestedAt: nowUtcIso(),
       },
       lastError: rebaseResult.conflictAnalysis?.summary
@@ -725,6 +745,40 @@ async function handleRebaseRun(params: HandleRebaseRunParams): Promise<RebaseOut
     await pollerNotifier.blocked(repoConfig.repo, discoveredIssue.issue, {
       summary: 'Rebase failed due to merge conflicts',
       blockingReason: 'merge_conflict',
+    })
+    return 'errored'
+  }
+
+  if (rebaseResult.error) {
+    runManager.update(runId, {
+      status: 'error',
+      operationIntent: 'rebase',
+      lastError: rebaseResult.error,
+      endedAt: nowUtcIso(),
+    })
+    const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
+    await transitionLabels(
+      forge,
+      issueRepo,
+      discoveredIssue.issue.number,
+      latestIssue.labels,
+      'running',
+      'error',
+      buildLabelConfig(repoConfig, latestIssue.labels),
+    )
+    await postStatusComment({
+      forge,
+      issueRepo,
+      issueNumber: discoveredIssue.issue.number,
+      botUser,
+      body: formatStatusComment({
+        blockReason: rebaseResult.error,
+        nextStep: 'Retry the rebase after fixing the underlying git or push error.',
+      }),
+      warnMessage: 'Failed to post rebase error status comment',
+    })
+    await pollerNotifier.error(repoConfig.repo, discoveredIssue.issue, {
+      summary: rebaseResult.error,
     })
     return 'errored'
   }

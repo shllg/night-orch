@@ -26,6 +26,9 @@ export interface MetricsService {
   incCostTokenSource(source: 'reported_cli' | 'measured_api' | 'estimated_duration' | 'fallback_zero'): void
   setCheckpointQuarantineRows(count: number): void
   incCircuitBreakerTrip(repo: string): void
+  incRebaseConflict(): void
+  incRebaseAutoResolved(): void
+  incRebaseAutoResolveFailed(reason: 'unresolved' | 'validation_failed' | 'error'): void
 
   observeRunDuration(durationSeconds: number): void
   observePhaseDuration(phase: string, durationSeconds: number): void
@@ -62,6 +65,9 @@ class NoopMetricsService implements MetricsService {
   incCostTokenSource(): void { /* no-op */ }
   setCheckpointQuarantineRows(): void { /* no-op */ }
   incCircuitBreakerTrip(): void { /* no-op */ }
+  incRebaseConflict(): void { /* no-op */ }
+  incRebaseAutoResolved(): void { /* no-op */ }
+  incRebaseAutoResolveFailed(): void { /* no-op */ }
   observeRunDuration(): void { /* no-op */ }
   observePhaseDuration(): void { /* no-op */ }
   observeAgentDuration(): void { /* no-op */ }
@@ -190,6 +196,20 @@ class LiveMetricsService implements MetricsService {
 
   incCircuitBreakerTrip(repo: string): void {
     try { this.metrics.circuitBreakerTripsTotal.inc({ repo }) } catch { /* best-effort */ }
+  }
+
+  incRebaseConflict(): void {
+    try { this.metrics.rebaseConflictTotal.inc() } catch { /* best-effort */ }
+  }
+
+  incRebaseAutoResolved(): void {
+    try { this.metrics.rebaseAutoResolvedTotal.inc() } catch { /* best-effort */ }
+  }
+
+  incRebaseAutoResolveFailed(
+    reason: 'unresolved' | 'validation_failed' | 'error',
+  ): void {
+    try { this.metrics.rebaseAutoResolveFailedTotal.inc({ reason }) } catch { /* best-effort */ }
   }
 
   observeRunDuration(durationSeconds: number): void {

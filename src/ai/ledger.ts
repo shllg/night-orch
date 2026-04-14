@@ -12,7 +12,8 @@ import { logger } from '../utils/logger.js'
  * `nightorch_cost_token_source_total` Prometheus counter. The
  * consumer passes in a `runId` and a `stepId` so the row gets
  * attributed to the right attempt and phase, tagged
- * `worker_type='internal-ai'` and `token_source='measured_api'`.
+ * `worker_type='internal-ai'` (or a more specific internal subtype)
+ * and `token_source='measured_api'`.
  *
  * The wrapper also handles the "call from somewhere that doesn't
  * have a runId" case — discovery-time triage classifies issues
@@ -87,7 +88,7 @@ export class LedgerRecordingAiClient implements AiClient {
         response.usage,
         {
           stepId: ctx.stepId,
-          workerType: 'internal-ai',
+          workerType: ctx.workerType?.trim() || 'internal-ai',
           tokenSource: 'measured_api',
         },
       )
@@ -132,6 +133,9 @@ export interface AiCallContext {
   /** Short phase/step identifier — `'triage'`, `'pr-body'`,
    * `'reviewer-salvage'`, etc. */
   stepId: string
+  /** Optional subtype for cost attribution when one internal AI
+   * feature needs to stand apart in reports. */
+  workerType?: string
 }
 
 /**

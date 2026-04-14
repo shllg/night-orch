@@ -57,11 +57,15 @@ function makeConfig() {
       worktreeRoot: '/tmp/night-orch-worktrees',
     },
     metrics: { enabled: true, host: '0.0.0.0', port: 9090 },
+    autoResolveConflicts: { enabled: true, maxAttempts: 2, maxFiles: 5 },
     ai: {
       internal: {
         provider: null,
         model: null,
         apiKeyEnv: null,
+        features: {
+          conflictResolver: true,
+        },
         enable: {
           triage: false,
           reviewerParseFallback: false,
@@ -156,5 +160,22 @@ describe('doctorCommand metrics probe', () => {
     const output = await runDoctorAndCaptureOutput()
     expect(globalThis.fetch).not.toHaveBeenCalled()
     expect(output).toContain('Metrics probe (optional): disabled-runtime — metrics.enabled is false at runtime')
+  })
+
+  it('reports conflict resolver as unavailable when enabled without provider config', async () => {
+    const output = await runDoctorAndCaptureOutput()
+    expect(output).toContain("Conflict resolver: unavailable: internal AI provider is not configured")
+  })
+
+  it('reports conflict resolver as disabled when feature gate is off', async () => {
+    const disabledConfig = {
+      ...makeConfig(),
+      autoResolveConflicts: { enabled: false, maxAttempts: 2, maxFiles: 5 },
+    }
+    mockLoadConfig.mockReturnValue(disabledConfig)
+    mockResolveConfigWithRuntimeSettings.mockReturnValue(disabledConfig)
+
+    const output = await runDoctorAndCaptureOutput()
+    expect(output).toContain('Conflict resolver (optional): disabled')
   })
 })

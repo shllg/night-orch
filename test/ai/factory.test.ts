@@ -14,6 +14,9 @@ function makeConfig(overrides: Partial<Config['ai']['internal']> = {}): Config {
         apiKeyEnv: null,
         timeoutMs: 30_000,
         maxTokens: 1024,
+        features: {
+          conflictResolver: true,
+        },
         enable: {
           triage: false,
           reviewerParseFallback: false,

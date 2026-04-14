@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { autoRebase, type RebaseTarget } from '../../src/ops/rebase.js'
+import {
+  autoRebase,
+  classifyConflictFileBuffer,
+  findConflictSourceIneligibility,
+  type RebaseTarget,
+} from '../../src/ops/rebase.js'
 
 vi.mock('execa', () => ({
   execa: vi.fn(),
@@ -152,5 +157,38 @@ describe('autoRebase', () => {
 
     const result = await autoRebase(target, '/tmp/repo')
     expect(result.result).toBe('error')
+  })
+})
+
+describe('rebase conflict source guards', () => {
+  it('classifies unreadable, binary, and oversized worktree files', () => {
+    expect(classifyConflictFileBuffer(null)).toBe('unreadable')
+    expect(classifyConflictFileBuffer(Buffer.from([0, 1, 2]))).toBe('binary')
+    expect(classifyConflictFileBuffer(Buffer.from('x'.repeat(200_001)))).toBe('oversized')
+    expect(classifyConflictFileBuffer(Buffer.from('export const ok = true\n'))).toBeNull()
+  })
+
+  it('rejects binary or oversized stage content before resolver invocation', () => {
+    expect(findConflictSourceIneligibility({
+      path: 'src/binary.ts',
+      mergedWithMarkers: '<<<<<<< ours\nok\n=======\nok\n>>>>>>> theirs\n',
+      base: '',
+      ours: 'contains\0binary',
+      theirs: '',
+    })).toEqual({
+      path: 'src/binary.ts',
+      reason: 'binary',
+    })
+
+    expect(findConflictSourceIneligibility({
+      path: 'src/huge.ts',
+      mergedWithMarkers: 'x'.repeat(200_001),
+      base: '',
+      ours: '',
+      theirs: '',
+    })).toEqual({
+      path: 'src/huge.ts',
+      reason: 'oversized',
+    })
   })
 })

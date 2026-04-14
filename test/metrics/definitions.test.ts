@@ -67,6 +67,9 @@ describe('Metric definitions', () => {
       'night_orch_agent_duration_seconds',
       'night_orch_verify_duration_seconds',
       'night_orch_build_info',
+      'night_orch_rebase_conflict_total',
+      'night_orch_rebase_auto_resolved_total',
+      'night_orch_rebase_auto_resolve_failed_total',
     ]
 
     for (const name of required) {

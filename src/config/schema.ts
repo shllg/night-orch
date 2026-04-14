@@ -425,6 +425,12 @@ const MetricsSchema = z.object({
   host: z.string().default('0.0.0.0'),
 })
 
+const AutoResolveConflictsSchema = z.object({
+  enabled: z.boolean().default(true),
+  maxAttempts: z.number().int().min(1).max(5).default(2),
+  maxFiles: z.number().int().min(1).max(20).default(5),
+}).default({})
+
 // --- Observability schema ---
 
 const ObservabilitySchema = z.object({
@@ -460,6 +466,12 @@ const AiEnableSchema = z.object({
   prBody: z.boolean().default(false),
 }).default({})
 
+const AiFeaturesSchema = z.object({
+  /** Allow the direct-LLM layer to attempt a bounded rebase-conflict
+   * resolution pass before blocking for human intervention. */
+  conflictResolver: z.boolean().default(true),
+}).default({})
+
 const AiInternalSchema = z.object({
   provider: z.enum(['anthropic', 'openrouter', 'openai']).nullable().default(null),
   model: z.string().nullable().default(null),
@@ -473,6 +485,7 @@ const AiInternalSchema = z.object({
   timeoutMs: z.number().int().positive().default(30_000),
   /** Default max tokens per call. */
   maxTokens: z.number().int().positive().default(1024),
+  features: AiFeaturesSchema,
   enable: AiEnableSchema,
 }).default({})
 
@@ -538,6 +551,8 @@ export const ConfigSchema = z.object({
   cost: CostSchema.default({}),
 
   ai: AiSchema,
+
+  autoResolveConflicts: AutoResolveConflictsSchema,
 
   workerProfiles: z.record(WorkerProfileSchema).default({}),
 

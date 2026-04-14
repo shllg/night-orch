@@ -100,10 +100,37 @@ describe('ConfigSchema', () => {
       expect(result.data.security.maxDailyCostUsd).toBe(50)
       expect(result.data.cost.model).toBe('pay-per-use')
       expect(result.data.metrics.host).toBe('0.0.0.0')
+      expect(result.data.autoResolveConflicts.enabled).toBe(true)
+      expect(result.data.autoResolveConflicts.maxAttempts).toBe(2)
+      expect(result.data.autoResolveConflicts.maxFiles).toBe(5)
+      expect(result.data.ai.internal.features.conflictResolver).toBe(true)
+      expect(result.data.ai.internal.provider).toBeNull()
       expect(result.data.repos[0]?.maxConcurrentRuns).toBe(1)
       expect(result.data.repos[0]?.baseBranch).toBe('main')
       expect(result.data.repos[0]?.branchPrefix).toBe('orch')
       expect(result.data.notifications.events.onPrUpdated).toBe(true)
+    }
+  })
+
+  it('does not require provider credentials when only conflictResolver defaults are present', () => {
+    const minimal = {
+      version: 1,
+      github: {
+        tokenEnv: 'GITHUB_TOKEN',
+      },
+      repos: [
+        {
+          repo: 'org/repo',
+          localPath: '/tmp/repo',
+        },
+      ],
+    }
+    const result = ConfigSchema.safeParse(minimal)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.ai.internal.provider).toBeNull()
+      expect(result.data.ai.internal.features.conflictResolver).toBe(true)
+      expect(result.data.autoResolveConflicts.enabled).toBe(true)
     }
   })
 

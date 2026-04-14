@@ -1,10 +1,13 @@
 /**
  * Phase 3: direct-LLM API layer for night-orch's internal AI
  * tasks — triage classification, PR description generation, review
- * parse-failure salvage. NOT for code-editing work (planner, coder,
- * reviewer): those keep running on Claude Code / Codex / opencode
- * CLIs where the agentic tool-use loop and session-resume semantics
- * live.
+ * parse-failure salvage, and bounded rebase-conflict resolution.
+ * The conflict-resolution exception is intentionally narrow: it
+ * operates on a single conflicted file at a time, validates the
+ * returned file content, and falls back to the existing human block
+ * path on any failure. General code-editing work (planner, coder,
+ * reviewer) still runs on Claude Code / Codex / opencode CLIs where
+ * the agentic tool-use loop and session-resume semantics live.
  *
  * The AI layer exists because some night-orch-owned decisions are
  * pure text-to-structured-data transformations where spinning up a
@@ -13,9 +16,10 @@
  * rather than parsing CLI stdout).
  *
  * Usage flows through the R4 cost ledger identically to CLI worker
- * usage, tagged `tokenSource: 'measured_api'` and
- * `workerType: 'internal-ai'` so reports can distinguish the two
- * funding sources.
+ * usage, tagged `tokenSource: 'measured_api'` and a worker type of
+ * `internal-ai` or a narrower internal subtype such as
+ * `internal-ai-conflict-resolver`, so reports can distinguish the
+ * traffic from CLI workers and between internal AI features.
  */
 
 import type { ZodSchema } from 'zod'
