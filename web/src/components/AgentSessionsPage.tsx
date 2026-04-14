@@ -68,7 +68,7 @@ export function AgentSessionsPage({
             <label className="form-control gap-1.5">
               <span className="label-text text-xs uppercase tracking-wide text-base-content/65">Agent</span>
               <select
-                className="select select-bordered select-sm w-full"
+                className="select select-sm w-full"
                 value={createDraft.agent}
                 onChange={(event) => {
                   onCreateDraftChange({
@@ -86,7 +86,7 @@ export function AgentSessionsPage({
             <label className="form-control gap-1.5">
               <span className="label-text text-xs uppercase tracking-wide text-base-content/65">Profile (optional)</span>
               <select
-                className="select select-bordered select-sm w-full"
+                className="select select-sm w-full"
                 value={createDraft.profileName}
                 onChange={(event) => {
                   onCreateDraftChange({ profileName: event.target.value })
@@ -193,7 +193,7 @@ export function AgentSessionsPage({
 
               <form className="grid gap-2" onSubmit={onSendPrompt}>
                 <textarea
-                  className="textarea textarea-bordered min-h-[96px] w-full text-sm"
+                  className="textarea min-h-[96px] w-full text-sm"
                   placeholder="Ask the agent to inspect files, run diagnostics, or call MCP tools..."
                   value={promptDraft}
                   onChange={(event) => {

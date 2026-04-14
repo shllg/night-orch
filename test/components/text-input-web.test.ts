@@ -11,7 +11,7 @@ describe('TextInputWeb', () => {
     }))
 
     expect(html).toContain('type="text"')
-    expect(html).toContain('class="input input-bordered input-sm"')
+    expect(html).toContain('class="input input-sm"')
   })
 
   it('preserves native aria-label when ariaLabel is not provided', () => {

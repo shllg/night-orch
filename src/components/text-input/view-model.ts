@@ -16,7 +16,7 @@ const TONE_WEB_CLASS: Record<TextInputTone, string | null> = {
 export function buildTextInputViewModel(props: TextInputProps): TextInputViewModel {
   const tone = props.tone ?? 'neutral'
   const size = props.size ?? 'md'
-  const classes = ['input', 'input-bordered', TONE_WEB_CLASS[tone], SIZE_WEB_CLASS[size]]
+  const classes = ['input', TONE_WEB_CLASS[tone], SIZE_WEB_CLASS[size]]
 
   if (props.fullWidth) {
     classes.push('w-full')

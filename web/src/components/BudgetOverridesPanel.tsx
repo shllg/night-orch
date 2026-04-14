@@ -141,7 +141,7 @@ export function BudgetOverridesPanel({
               <label className="form-control">
                 <span className="label label-text text-xs">Repo</span>
                 <select
-                  className="select select-bordered select-xs w-48"
+                  className="select select-xs w-48"
                   value={issueDraft.repo}
                   onChange={(event) => onIssueDraftChange({ repo: event.target.value })}
                   disabled={issueBusy}

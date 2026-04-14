@@ -157,7 +157,7 @@ export function IssueDetailPage({
                     </span>
                   </div>
                   <select
-                    className="select select-bordered select-sm w-full bg-base-100/80"
+                    className="select select-sm w-full bg-base-100/80"
                     value={actionStrategy}
                     onChange={(event) => setActionStrategy(event.target.value as 'default' | UpdateStrategy)}
                   >

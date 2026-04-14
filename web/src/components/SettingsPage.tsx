@@ -213,7 +213,7 @@ export function SettingsPage({
               </p>
               {selectedSetting.type === 'boolean' ? (
                 <select
-                  className="select select-bordered w-full max-w-xs font-mono"
+                  className="select w-full max-w-xs font-mono"
                   value={normalizeBooleanDraft(selectedDraft)}
                   onChange={(event) => {
                     onDraftChange(selectedSetting.key, event.target.value)
@@ -239,7 +239,7 @@ export function SettingsPage({
                 />
               ) : selectedSetting.options && selectedSetting.options.length > 0 ? (
                 <select
-                  className="select select-bordered w-full max-w-xs font-mono"
+                  className="select w-full max-w-xs font-mono"
                   value={selectedDraft}
                   onChange={(event) => {
                     onDraftChange(selectedSetting.key, event.target.value)
@@ -255,7 +255,7 @@ export function SettingsPage({
                 </select>
               ) : selectedSetting.type === 'json' ? (
                 <textarea
-                  className="textarea textarea-bordered min-h-[160px] w-full font-mono text-xs"
+                  className="textarea min-h-[160px] w-full font-mono text-xs"
                   value={selectedDraft}
                   onChange={(event) => {
                     onDraftChange(selectedSetting.key, event.target.value)

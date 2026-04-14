@@ -10,7 +10,7 @@ describe('buildTextInputViewModel', () => {
     expect(model).toEqual({
       tone: 'neutral',
       size: 'md',
-      webClassName: 'input input-bordered',
+      webClassName: 'input',
     })
   })
 
@@ -26,7 +26,18 @@ describe('buildTextInputViewModel', () => {
     expect(model).toEqual({
       tone: 'warning',
       size: 'xs',
-      webClassName: 'input input-bordered input-warning input-xs w-full font-mono',
+      webClassName: 'input input-warning input-xs w-full font-mono',
     })
+  })
+
+  it('never emits DaisyUI v4 *-bordered classes', () => {
+    const toneCases = ['neutral', 'info', 'warning', 'error'] as const
+    const sizeCases = ['xs', 'sm', 'md'] as const
+    for (const tone of toneCases) {
+      for (const size of sizeCases) {
+        const model = buildTextInputViewModel({ tone, size })
+        expect(model.webClassName).not.toMatch(/\binput-bordered\b/)
+      }
+    }
   })
 })
