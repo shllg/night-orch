@@ -36,6 +36,10 @@ description = "Manually trigger a single poll cycle"
 run = "night-orch status --config ${NIGHT_ORCH_CONFIG:-config.yaml}"
 description = "Show active runs, recent history, costs"
 
+[tasks.demo]
+run = "pnpm web:build && pnpm dev demo --port ${NIGHT_ORCH_DEMO_PORT:-3250}"
+description = "Run web UI against synthetic demo data (no real config / forge / workers)"
+
 [tasks.monitoring-up]
 run = "night-orch monitoring up"
 description = "Start monitoring stack"

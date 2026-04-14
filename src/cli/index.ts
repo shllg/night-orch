@@ -39,6 +39,7 @@ import { deleteEntryCommand } from './commands/delete-entry.js'
 import { runInit } from './commands/init.js'
 import { runWatch } from './commands/watch.js'
 import { webCommand } from './commands/web.js'
+import { demoCommand } from './commands/demo.js'
 import { serveCommand } from './commands/serve.js'
 import { updateCommand } from './commands/update.js'
 import { continueCommand } from './commands/continue.js'
@@ -243,6 +244,20 @@ program
     standalone: opts.standalone,
     skipAuth: opts.skipAuth,
   }, cmd.parent?.opts()))
+
+program
+  .command('demo')
+  .description('Run web UI against synthetic demo data — no config, forge, or workers required')
+  .option('--host <host>', 'Web server bind host', '127.0.0.1')
+  .option('--port <port>', 'Web server port', '3200')
+  .option(
+    '--allowed-host <host>',
+    'Allowed Host/Origin hostname for web API + websocket requests (repeatable)',
+    collectOptionValue,
+    [] as string[],
+  )
+  .option('--keep-temp-dir', 'Leave the demo temp directory behind on shutdown (for debugging)')
+  .action((opts: { host?: string; port?: string; allowedHost?: string[]; keepTempDir?: boolean }) => demoCommand(opts))
 
 program
   .command('serve')

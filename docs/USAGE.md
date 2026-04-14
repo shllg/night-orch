@@ -55,9 +55,22 @@ night-orch run       # long-running daemon, polls all repos on interval
 night-orch web       # web UI/API server (attach mode by default)
 night-orch web --standalone  # run daemon + web UI in one process
 night-orch run-once  # single poll cycle (useful for testing)
+night-orch demo      # web UI against synthetic demo data (UI dev mode)
 ```
 
 The daemon polls each configured repo for issues labeled `orch:ready`, processes them through the AI pipeline, and creates PRs. It runs continuously until you stop it (Ctrl+C).
+
+### Demo mode (UI iteration)
+
+`night-orch demo` spins up the web UI against a self-contained, synthetic dataset. No real config, forge tokens, repos, or worker binaries are required — the command writes a throwaway config and SQLite DB to a temp directory, seeds varied demo runs / issues / events, and serves the REST + WebSocket API with auth and mutations disabled. Useful when iterating on the dashboard UI without running actual tasks.
+
+```bash
+night-orch demo --port 3250          # defaults: 127.0.0.1:3250
+pnpm web:build && night-orch demo    # ensure the SPA bundle exists first
+mise run demo                         # builds + runs, honors NIGHT_ORCH_DEMO_PORT
+```
+
+The temp directory is cleaned up on shutdown. Pass `--keep-temp-dir` to leave it behind for debugging.
 
 ### Remote web access + mobile
 
