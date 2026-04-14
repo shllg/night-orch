@@ -1,5 +1,7 @@
 import { type ReactElement } from 'react'
-import { ButtonWeb } from '../../../src/components/button/button.web.js'
+import { NavMenuWeb } from '../../../src/components/nav-menu/nav-menu.web.js'
+import { NavDockWeb } from '../../../src/components/nav-dock/nav-dock.web.js'
+import type { NavItem } from '../../../src/components/nav-menu/types.js'
 
 import { type DashboardPage } from '../types/dashboard.js'
 
@@ -27,61 +29,39 @@ const PAGES: PageDefinition[] = [
 ]
 
 export function DashboardNavigation({ activePage, onPageChange }: DashboardNavigationProps): ReactElement {
+  const sidebarItems: NavItem[] = PAGES.map((page) => ({
+    id: page.id,
+    label: page.label,
+    shortLabel: page.shortLabel,
+    icon: <page.Icon className="size-4 shrink-0" />,
+    isActive: activePage === page.id,
+    onClick: () => { onPageChange(page.id) },
+  }))
+
+  const dockItems: NavItem[] = PAGES.map((page) => ({
+    id: page.id,
+    label: page.label,
+    shortLabel: page.shortLabel,
+    icon: <page.Icon className="size-[1.1rem]" />,
+    isActive: activePage === page.id,
+    onClick: () => { onPageChange(page.id) },
+  }))
+
   return (
     <>
       <aside className="hidden md:block md:min-h-0">
-        <nav
-          className="sticky top-[4.55rem] flex h-[calc(100dvh-4.9rem)] min-h-[560px] w-20 flex-col gap-1 border-r border-base-300/70 bg-base-200/45 px-2 py-4 lg:w-56 lg:px-3"
-          aria-label="Dashboard pages"
-        >
-          {PAGES.map((page) => {
-            const isActive = activePage === page.id
-            return (
-              <ButtonWeb
-                key={page.id}
-                type="button"
-                onClick={() => onPageChange(page.id)}
-                aria-current={isActive ? 'page' : undefined}
-                ariaLabel={page.label}
-                title={page.label}
-                tone={isActive ? 'primary' : 'ghost'}
-                size="sm"
-                className={`h-11 w-full rounded-lg border border-transparent px-2 ${
-                  isActive
-                    ? 'text-primary-content'
-                    : 'bg-base-100/25 text-base-content/75 hover:bg-base-100/45 hover:text-base-content'
-                } justify-center lg:justify-start lg:gap-3 lg:px-3`}
-              >
-                <page.Icon className="size-4 shrink-0" />
-                <span className="hidden text-sm capitalize lg:inline">{page.label}</span>
-              </ButtonWeb>
-            )
-          })}
-        </nav>
+        <NavMenuWeb
+          items={sidebarItems}
+          ariaLabel="Dashboard pages"
+          className="sticky top-[4.55rem] h-[calc(100dvh-4.9rem)] min-h-[560px] w-20 border-r border-base-300/70 bg-base-200/45 px-2 py-4 lg:w-56 lg:px-3"
+        />
       </aside>
 
-      <nav
-        className="dock dock-sm shadow-nav-dock z-40 border-t border-base-300/70 bg-base-200/95 backdrop-blur md:hidden"
-        aria-label="Dashboard pages"
-      >
-        {PAGES.map((page) => {
-          const isActive = activePage === page.id
-          return (
-            <button
-              key={page.id}
-              type="button"
-              onClick={() => onPageChange(page.id)}
-              aria-label={page.label}
-              title={page.label}
-              className={isActive ? 'dock-active text-primary' : 'text-base-content/70'}
-              aria-current={isActive ? 'page' : undefined}
-            >
-              <page.Icon className="size-[1.1rem]" />
-              <span className="dock-label text-[11px] capitalize">{page.shortLabel}</span>
-            </button>
-          )
-        })}
-      </nav>
+      <NavDockWeb
+        items={dockItems}
+        ariaLabel="Dashboard pages"
+        className="shadow-nav-dock z-40 border-t border-base-300/70 bg-base-200/95 backdrop-blur md:hidden"
+      />
     </>
   )
 }

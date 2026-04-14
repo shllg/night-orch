@@ -4,6 +4,9 @@ import { AlertWeb } from '../alert/alert.web.js'
 import { BadgeWeb } from '../badge/badge.web.js'
 import { ButtonWeb } from '../button/button.web.js'
 import { CollapsibleWeb } from '../collapsible/collapsible.web.js'
+import { LogLineWeb } from '../log-line/log-line.web.js'
+import { NavDockWeb } from '../nav-dock/nav-dock.web.js'
+import { NavMenuWeb } from '../nav-menu/nav-menu.web.js'
 import { NumberInputWeb } from '../number-input/number-input.web.js'
 import { SelectWeb } from '../select/select.web.js'
 import { TabsWeb } from '../tabs/tabs.web.js'
@@ -64,6 +67,40 @@ function TabsPreview(): ReactNode {
       onChange={setActive}
       ariaLabel="Dashboard sections"
     />
+  )
+}
+
+function Dot({ ch }: { ch: string }): ReactNode {
+  return (
+    <span
+      className="flex size-5 items-center justify-center rounded-full bg-base-100/30 text-[10px] font-semibold uppercase"
+      aria-hidden
+    >
+      {ch}
+    </span>
+  )
+}
+
+function NavPreview(): ReactNode {
+  const [active, setActive] = useState('issues')
+  const items = [
+    { id: 'issues', label: 'issues', icon: <Dot ch="i" /> },
+    { id: 'stats', label: 'stats', icon: <Dot ch="s" /> },
+    { id: 'projects', label: 'projects', icon: <Dot ch="p" /> },
+    { id: 'settings', label: 'settings', icon: <Dot ch="c" /> },
+  ].map((it) => ({ ...it, isActive: it.id === active, onClick: () => { setActive(it.id) } }))
+
+  return (
+    <div className="grid gap-4 md:grid-cols-[14rem_1fr]">
+      <div className="rounded-xl border border-base-300/60 bg-base-200/45 px-3 py-4">
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-base-content/55">NavMenu (sidebar)</p>
+        <NavMenuWeb items={items} ariaLabel="Pages" />
+      </div>
+      <div className="max-w-[390px] rounded-xl border border-base-300/60 p-4">
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-base-content/55">NavDock (mobile)</p>
+        <NavDockWeb items={items} ariaLabel="Pages" />
+      </div>
+    </div>
   )
 }
 
@@ -228,6 +265,18 @@ export const DesignSystem: Story = {
               Logs, metadata, and checkpoints go here.
             </CollapsibleWeb>
           </div>
+          <div className="space-y-3 md:col-span-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-base-content/55">LogLine / stream row</p>
+            <div className="rounded-box border border-base-300/70 bg-base-100/80 p-3">
+              <LogLineWeb timestamp="14:03:20.001" source="system" message="phase_start: plan" />
+              <LogLineWeb timestamp="14:03:21.400" source="agent" role="claude" message="Reading issue body and discussing approach." />
+              <LogLineWeb timestamp="14:03:22.552" source="system" message="phase_complete: plan (1.55s)" />
+            </div>
+          </div>
+          <div className="space-y-3 md:col-span-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-base-content/55">Navigation</p>
+            <NavPreview />
+          </div>
         </div>
       </Section>
 
@@ -239,7 +288,10 @@ export const DesignSystem: Story = {
           <li>• Card — <code className="text-base-content/55">src/components/card/</code></li>
           <li>• Collapsible — <code className="text-base-content/55">src/components/collapsible/</code></li>
           <li>• IssueRow — <code className="text-base-content/55">src/components/issue-row/</code></li>
+          <li>• LogLine — <code className="text-base-content/55">src/components/log-line/</code></li>
           <li>• Modal — <code className="text-base-content/55">src/components/modal/</code></li>
+          <li>• NavDock — <code className="text-base-content/55">src/components/nav-dock/</code></li>
+          <li>• NavMenu — <code className="text-base-content/55">src/components/nav-menu/</code></li>
           <li>• NumberInput — <code className="text-base-content/55">src/components/number-input/</code></li>
           <li>• Select — <code className="text-base-content/55">src/components/select/</code></li>
           <li>• Tabs — <code className="text-base-content/55">src/components/tabs/</code></li>
@@ -247,7 +299,7 @@ export const DesignSystem: Story = {
           <li>• TextInput — <code className="text-base-content/55">src/components/text-input/</code></li>
         </ul>
         <p className="mt-4 text-xs text-base-content/55">
-          Upcoming: Nav (menu + dock), LogLine.
+          All primitives shipped. Layout work follows next.
         </p>
       </Section>
     </Board>

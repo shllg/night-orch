@@ -1,5 +1,6 @@
 import { type ReactElement } from 'react'
 
+import { LogLineWeb } from '../../../src/components/log-line/log-line.web.js'
 import { describeRunEvent, formatTimestamp } from '../lib/format.js'
 import { type RunEvent, type RunSummary } from '../types/dashboard.js'
 
@@ -36,17 +37,15 @@ export function RunEventStream({ selectedRunId, selectedRun, runEvents }: RunEve
             <span>No events yet for this run.</span>
           </div>
         ) : (
-          <div className="mt-3 max-h-80 overflow-y-auto rounded-box border border-base-300/70 bg-base-100/80 p-3 pr-1 font-mono text-xs">
+          <div className="mt-3 max-h-80 overflow-y-auto rounded-box border border-base-300/70 bg-base-100/80 p-3 pr-1">
             {runEvents.slice(-150).map((event) => (
-              <div key={event.id} className="grid grid-cols-[auto_auto_1fr] gap-x-3 gap-y-1 border-b border-base-300/30 py-1 last:border-b-0">
-                <span className="text-base-content/55">{formatTimestamp(event.timestamp)}</span>
-                <span className={event.source === 'system' ? 'text-secondary' : 'text-info'}>
-                  {event.source === 'system' ? 'system' : event.role ?? 'agent'}
-                </span>
-                <span className="min-w-0 break-words text-base-content/85">
-                  {describeRunEvent(event)}
-                </span>
-              </div>
+              <LogLineWeb
+                key={event.id}
+                timestamp={formatTimestamp(event.timestamp)}
+                source={event.source === 'system' ? 'system' : 'agent'}
+                role={event.source === 'system' ? undefined : event.role ?? undefined}
+                message={describeRunEvent(event)}
+              />
             ))}
           </div>
         )}
