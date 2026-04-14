@@ -175,17 +175,31 @@ async function copyErrorText(value: string): Promise<void> {
   }
 
   const textArea = globalThis.document.createElement('textarea')
+  const previouslyFocusedElement = globalThis.document.activeElement instanceof HTMLElement
+    ? globalThis.document.activeElement
+    : null
   textArea.value = value
   textArea.setAttribute('readonly', 'true')
   textArea.style.position = 'fixed'
   textArea.style.opacity = '0'
   textArea.style.pointerEvents = 'none'
   globalThis.document.body.appendChild(textArea)
-  textArea.focus()
-  textArea.select()
+  let copied = false
+  try {
+    textArea.focus()
+    textArea.select()
+    copied = globalThis.document.execCommand('copy')
+  } finally {
+    globalThis.document.body.removeChild(textArea)
+    if (previouslyFocusedElement && typeof previouslyFocusedElement.focus === 'function') {
+      try {
+        previouslyFocusedElement.focus()
+      } catch {
+        // Ignore focus restore failures for detached/disabled elements.
+      }
+    }
+  }
 
-  const copied = globalThis.document.execCommand('copy')
-  globalThis.document.body.removeChild(textArea)
   if (!copied) {
     throw new Error('Copy failed')
   }
