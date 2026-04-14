@@ -124,14 +124,21 @@ describe('autoRebase integration', () => {
       },
     })
 
-    expect(result.result).toBe('rebased')
+    // Assert resolution metadata first so a failure prints the resolver outcome
+    // (error / validation_failed / unresolved) instead of the opaque 'conflict' string.
     expect(result.resolution).toEqual({
       attempted: true,
       outcome: 'resolved',
       files: ['conflict.ts'],
     })
+    expect(result.result).toBe('rebased')
     expect(readFileSync(join(repoPath, 'conflict.ts'), 'utf-8')).toContain('export const feature = "branch"')
     expect(git(repoPath, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('feature')
+    // Remote feature must match the locally-rebased tip — prior to the fix
+    // the resolved rebase was never pushed.
+    expect(git(remotePath, 'rev-parse', 'refs/heads/feature')).toBe(
+      git(repoPath, 'rev-parse', 'HEAD'),
+    )
   })
 
   it('aborts and returns conflict when validation fails', async () => {

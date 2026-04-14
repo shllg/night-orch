@@ -54,6 +54,15 @@ export interface AutoRebaseOptions {
 type RebaseLogger = Pick<typeof logger, 'info' | 'warn' | 'error'>
 const MAX_CONFLICT_SOURCE_CHARS = 200_000
 
+// Git emits "CONFLICT (content): ..." on stdout and "error: could not apply ..."
+// on stderr; which one carries the signal varies between git versions. Check both.
+function isRebaseConflictError(err: unknown): boolean {
+  const stdout = (err as { stdout?: string }).stdout ?? ''
+  const stderr = (err as { stderr?: string }).stderr ?? ''
+  const combined = `${stdout}\n${stderr}`
+  return combined.includes('CONFLICT') || combined.includes('could not apply')
+}
+
 /**
  * Update a branch to incorporate latest base branch changes and push.
  * Supports both merge and rebase strategies. Uses --force-with-lease for
@@ -72,6 +81,7 @@ export async function autoRebase(
   const { branchName, baseBranch, worktreePath } = target
   const log = logger.child({ repo: target.repo, issue: target.issueNumber, branch: branchName })
 
+  let resolutionMeta: ConflictResolutionMetadata | undefined
   try {
     // Fetch latest remote state
     await runGit(['fetch', 'origin'], {
@@ -103,15 +113,16 @@ export async function autoRebase(
         return { result: 'error' }
       }
     } else {
-      // Rebase strategy
+      // Rebase strategy. Pin non-interactive editors so rebase never pauses
+      // waiting on an editor across git versions.
       try {
         await runGit(['rebase', remoteRef], {
           cwd: worktreePath,
           timeout: 120_000,
+          env: { GIT_EDITOR: 'true', GIT_SEQUENCE_EDITOR: 'true' },
         })
       } catch (rebaseErr) {
-        const stderr = (rebaseErr as { stderr?: string }).stderr ?? ''
-        if (stderr.includes('CONFLICT') || stderr.includes('could not apply')) {
+        if (isRebaseConflictError(rebaseErr)) {
           options.metrics?.incRebaseConflict()
           log.warn({ baseBranch }, 'Rebase conflict — collecting conflict analysis before abort')
           let conflictAnalysis = await collectConflictAnalysis(worktreePath, baseBranch)
@@ -119,26 +130,28 @@ export async function autoRebase(
 
           if (resolution?.outcome === 'resolved') {
             options.metrics?.incRebaseAutoResolved()
-            return { result: 'rebased', resolution }
-          }
+            resolutionMeta = resolution
+            // Fall through to push the resolved rebase.
+          } else {
+            if (resolution?.attempted) {
+              options.metrics?.incRebaseAutoResolveFailed(resolution.outcome)
+              conflictAnalysis = await collectConflictAnalysis(worktreePath, baseBranch)
+            }
 
-          if (resolution?.attempted) {
-            options.metrics?.incRebaseAutoResolveFailed(resolution.outcome)
-            conflictAnalysis = await collectConflictAnalysis(worktreePath, baseBranch)
+            try {
+              await runGit(['rebase', '--abort'], { cwd: worktreePath, timeout: 30_000 })
+            } catch {
+              log.error('Failed to abort rebase')
+            }
+            return {
+              result: 'conflict',
+              conflictAnalysis,
+              resolution: resolution ?? { attempted: false, outcome: 'unresolved' },
+            }
           }
-
-          try {
-            await runGit(['rebase', '--abort'], { cwd: worktreePath, timeout: 30_000 })
-          } catch {
-            log.error('Failed to abort rebase')
-          }
-          return {
-            result: 'conflict',
-            conflictAnalysis,
-            resolution: resolution ?? { attempted: false, outcome: 'unresolved' },
-          }
+        } else {
+          throw rebaseErr
         }
-        throw rebaseErr
       }
     }
 
@@ -149,7 +162,9 @@ export async function autoRebase(
     })
 
     log.info({ baseBranch, strategy }, 'Updated and pushed successfully')
-    return { result: 'rebased' }
+    return resolutionMeta
+      ? { result: 'rebased', resolution: resolutionMeta }
+      : { result: 'rebased' }
   } catch (err) {
     log.error({ err }, 'Auto-update failed')
     return { result: 'error', error: err instanceof Error ? err.message : String(err) }
@@ -238,7 +253,7 @@ async function attemptConflictResolution(
       await runGit(['rebase', '--continue'], {
         cwd: worktreePath,
         timeout: 120_000,
-        env: { GIT_EDITOR: 'true' },
+        env: { GIT_EDITOR: 'true', GIT_SEQUENCE_EDITOR: 'true' },
       })
       log.info(
         {
@@ -253,8 +268,7 @@ async function attemptConflictResolution(
         files: resolution.files.map((file) => file.path),
       }
     } catch (continueErr) {
-      const stderr = (continueErr as { stderr?: string }).stderr ?? ''
-      if (!stderr.includes('CONFLICT') && !stderr.includes('could not apply')) {
+      if (!isRebaseConflictError(continueErr)) {
         log.warn({ attempt, err: continueErr }, 'git rebase --continue failed after resolver write')
         return {
           attempted: true,
