@@ -1,4 +1,5 @@
 import { type ReactElement } from 'react'
+import { AlertWeb } from '../../../src/components/alert/alert.web.js'
 
 import { type UpdateStatus } from '../types/dashboard.js'
 import { ActionButton } from './ActionButton.js'
@@ -34,11 +35,9 @@ export function OperationsPanel({
       <div className="card-body p-4 sm:p-5">
         <h2 className="card-title text-lg">Operations</h2>
         {!operationsEnabled && (
-          <div className="alert alert-warning mt-1 text-xs">
-            <span>
-              Operations are disabled by server policy for this web instance.
-            </span>
-          </div>
+          <AlertWeb tone="warning" className="mt-1 text-xs">
+            Operations are disabled by server policy for this web instance.
+          </AlertWeb>
         )}
 
         <div className="mt-4 rounded-box border border-base-300/70 bg-base-100/60 p-3">

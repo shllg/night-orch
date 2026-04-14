@@ -1,6 +1,10 @@
 import { type ReactElement } from 'react'
+import { AlertWeb } from '../../../src/components/alert/alert.web.js'
 import { BadgeWeb } from '../../../src/components/badge/badge.web.js'
 import { ButtonWeb } from '../../../src/components/button/button.web.js'
+import { SelectWeb } from '../../../src/components/select/select.web.js'
+import { TabsWeb } from '../../../src/components/tabs/tabs.web.js'
+import type { TabItem } from '../../../src/components/tabs/types.js'
 
 import { formatMoney, formatRunTime, truncate } from '../lib/format.js'
 import {
@@ -56,31 +60,28 @@ export function RunsPanel({
                 Repo Filter
               </span>
             </div>
-            <select
-              className="select select-sm w-full bg-base-100/80"
+            <SelectWeb
+              size="sm"
+              fullWidth
+              className="bg-base-100/80"
               value={selectedRepo}
-              onChange={(event) => onSelectedRepoChange(event.target.value)}
-            >
-              <option value="all">All repos</option>
-              {repos.map((repo) => (
-                <option key={repo} value={repo}>{repo}</option>
-              ))}
-            </select>
+              onSelect={onSelectedRepoChange}
+              options={[
+                { value: 'all', label: 'All repos' },
+                ...repos.map((repo) => ({ value: repo, label: repo })),
+              ]}
+            />
           </label>
         </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {RUN_VIEW_FILTERS.map((view) => (
-            <ButtonWeb
-              key={view.value}
-              type="button"
-              onClick={() => onRunsViewChange(view.value)}
-              size="xs"
-              tone={runsView === view.value ? 'primary' : 'ghost'}
-            >
-              {view.label}
-            </ButtonWeb>
-          ))}
-        </div>
+        <TabsWeb
+          className="mt-3"
+          variant="box"
+          size="xs"
+          tabs={RUN_VIEW_TABS}
+          activeId={runsView}
+          onChange={(id) => { onRunsViewChange(id as RunListView) }}
+          ariaLabel="Run filter"
+        />
 
         {isLoading ? (
           <div className="mt-4 space-y-2">
@@ -88,9 +89,9 @@ export function RunsPanel({
             <div className="skeleton h-20 w-full" />
           </div>
         ) : filteredRuns.length === 0 ? (
-          <div className="alert mt-4 border border-base-300/60 bg-base-100/70 text-sm">
-            <span>No runs for the current filter.</span>
-          </div>
+          <AlertWeb className="mt-4 text-sm" role="status">
+            No runs for the current filter.
+          </AlertWeb>
         ) : (
           <>
             <div className="mt-4 grid max-h-[540px] min-w-0 gap-3 overflow-x-hidden overflow-y-auto pr-1">
@@ -176,11 +177,11 @@ export function RunsPanel({
   )
 }
 
-const RUN_VIEW_FILTERS: Array<{ value: RunListView; label: string }> = [
-  { value: 'active', label: 'Active' },
-  { value: 'completed', label: 'Completed' },
-  { value: 'failed', label: 'Failed' },
-  { value: 'all', label: 'All' },
+const RUN_VIEW_TABS: TabItem[] = [
+  { id: 'active', label: 'Active' },
+  { id: 'completed', label: 'Completed' },
+  { id: 'failed', label: 'Failed' },
+  { id: 'all', label: 'All' },
 ]
 
 function resolveIssueTitle(issueTitle: string | null): string {

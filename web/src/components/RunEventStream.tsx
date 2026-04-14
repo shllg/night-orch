@@ -1,5 +1,6 @@
 import { type ReactElement } from 'react'
 
+import { AlertWeb } from '../../../src/components/alert/alert.web.js'
 import { LogLineWeb } from '../../../src/components/log-line/log-line.web.js'
 import { describeRunEvent, formatTimestamp } from '../lib/format.js'
 import { type RunEvent, type RunSummary } from '../types/dashboard.js'
@@ -25,17 +26,17 @@ export function RunEventStream({ selectedRunId, selectedRun, runEvents }: RunEve
         </div>
 
         {!selectedRunId ? (
-          <div className="alert mt-3 border border-base-300/60 bg-base-100/70 text-sm">
-            <span>Select a run to stream live events.</span>
-          </div>
+          <AlertWeb className="mt-3 text-sm" role="status">
+            Select a run to stream live events.
+          </AlertWeb>
         ) : selectedRun && !selectedRun.hasRun ? (
-          <div className="alert mt-3 border border-base-300/60 bg-base-100/70 text-sm">
-            <span>This issue is tracked but has no run yet.</span>
-          </div>
+          <AlertWeb className="mt-3 text-sm" role="status">
+            This issue is tracked but has no run yet.
+          </AlertWeb>
         ) : runEvents.length === 0 ? (
-          <div className="alert mt-3 border border-base-300/60 bg-base-100/70 text-sm">
-            <span>No events yet for this run.</span>
-          </div>
+          <AlertWeb className="mt-3 text-sm" role="status">
+            No events yet for this run.
+          </AlertWeb>
         ) : (
           <div className="mt-3 max-h-80 overflow-y-auto rounded-box border border-base-300/70 bg-base-100/80 p-3 pr-1">
             {runEvents.slice(-150).map((event) => (

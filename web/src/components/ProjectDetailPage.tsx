@@ -1,5 +1,7 @@
 import { type ReactElement } from 'react'
+import { AlertWeb } from '../../../src/components/alert/alert.web.js'
 import { ButtonWeb } from '../../../src/components/button/button.web.js'
+import { CollapsibleWeb } from '../../../src/components/collapsible/collapsible.web.js'
 
 import { formatTimestamp, truncate } from '../lib/format.js'
 import {
@@ -63,9 +65,9 @@ export function ProjectDetailPage({
       <section className="card border border-base-300/60 bg-base-200/60 shadow-panel backdrop-blur">
         <div className="card-body p-6">
           <h2 className="card-title text-2xl font-semibold text-base-content">Project Details</h2>
-          <div className="alert mt-3 border border-base-300/60 bg-base-100/70 text-sm">
-            <span>Project configuration is currently unavailable.</span>
-          </div>
+          <AlertWeb className="mt-3 text-sm" role="status">
+            Project configuration is currently unavailable.
+          </AlertWeb>
           <div className="mt-4">
             <ButtonWeb type="button" size="sm" tone="ghost" onClick={onBack}>
               Back to projects
@@ -92,9 +94,9 @@ export function ProjectDetailPage({
         </div>
 
         {!selectedProject ? (
-          <div className="alert mt-4 border border-base-300/60 bg-base-100/70 text-sm">
-            <span>Repository "{repo}" is not configured.</span>
-          </div>
+          <AlertWeb className="mt-4 text-sm" role="status">
+            Repository &quot;{repo}&quot; is not configured.
+          </AlertWeb>
         ) : (
           <ProjectDetailBody
             selectedProject={selectedProject}
@@ -198,9 +200,9 @@ function ProjectDetailBody({
             )}
           </div>
           {!operationsEnabled && (
-            <div className="alert alert-warning mt-3 text-xs">
-              <span>Operations are disabled by server policy for this web instance.</span>
-            </div>
+            <AlertWeb tone="warning" className="mt-3 text-xs">
+              Operations are disabled by server policy for this web instance.
+            </AlertWeb>
           )}
           <fieldset disabled={!operationsEnabled} className={`mt-3 ${!operationsEnabled ? 'opacity-60' : ''}`}>
             <ActionButton
@@ -266,16 +268,14 @@ function ProjectDetailBody({
         </div>
       </section>
 
-      <details className="collapse collapse-arrow rounded-box border border-base-300/70 bg-base-100/65">
-        <summary className="collapse-title py-3 text-sm font-semibold text-base-content">
-          Raw Sanitized Config
-        </summary>
-        <div className="collapse-content pt-0">
-          <pre className="overflow-x-auto rounded-md border border-base-300/70 bg-base-300/30 p-3 text-[11px] leading-relaxed text-base-content/85">
-            {JSON.stringify(selectedProject, null, 2)}
-          </pre>
-        </div>
-      </details>
+      <CollapsibleWeb
+        title="Raw Sanitized Config"
+        className="rounded-box bg-base-100/65"
+      >
+        <pre className="overflow-x-auto rounded-md border border-base-300/70 bg-base-300/30 p-3 text-[11px] leading-relaxed text-base-content/85">
+          {JSON.stringify(selectedProject, null, 2)}
+        </pre>
+      </CollapsibleWeb>
     </div>
   )
 }

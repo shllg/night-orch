@@ -1,4 +1,5 @@
 import { type ReactElement } from 'react'
+import { AlertWeb } from '../../../src/components/alert/alert.web.js'
 
 import { formatTimestamp } from '../lib/format.js'
 import { type ProjectsSnapshot } from '../types/dashboard.js'
@@ -32,9 +33,9 @@ export function ProjectsPage({ snapshot, isLoading, onOpenRepo }: ProjectsPagePr
       <section className="card border border-base-300/60 bg-base-200/60 shadow-panel backdrop-blur">
         <div className="card-body p-4 sm:p-6">
           <h2 className="card-title text-2xl font-semibold text-base-content">Projects</h2>
-          <div className="alert mt-3 border border-base-300/60 bg-base-100/70 text-sm">
-            <span>Project configuration is currently unavailable.</span>
-          </div>
+          <AlertWeb className="mt-3 text-sm" role="status">
+            Project configuration is currently unavailable.
+          </AlertWeb>
         </div>
       </section>
     )
@@ -51,9 +52,9 @@ export function ProjectsPage({ snapshot, isLoading, onOpenRepo }: ProjectsPagePr
         </div>
 
         {repos.length === 0 ? (
-          <div className="alert mt-4 border border-base-300/60 bg-base-100/70 text-sm">
-            <span>No repositories are configured.</span>
-          </div>
+          <AlertWeb className="mt-4 text-sm" role="status">
+            No repositories are configured.
+          </AlertWeb>
         ) : (
           <div className="mt-4 grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
             {repos.map((repo) => (

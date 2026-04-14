@@ -2,6 +2,9 @@ import { type ReactElement, useEffect, useMemo, useState } from 'react'
 import { BadgeWeb } from '../../../src/components/badge/badge.web.js'
 import { ButtonWeb } from '../../../src/components/button/button.web.js'
 import { ModalWeb } from '../../../src/components/modal/modal.web.js'
+import { NumberInputWeb } from '../../../src/components/number-input/number-input.web.js'
+import { SelectWeb } from '../../../src/components/select/select.web.js'
+import { TextAreaWeb } from '../../../src/components/textarea/textarea.web.js'
 import { TextInputWeb } from '../../../src/components/text-input/text-input.web.js'
 import type { RuntimeSettingSnapshot, RuntimeSettingValue } from '../types/dashboard.js'
 import { PushNotificationSettings } from './PushNotificationSettings.js'
@@ -212,20 +215,19 @@ export function SettingsPage({
                 Override value
               </p>
               {selectedSetting.type === 'boolean' ? (
-                <select
-                  className="select w-full max-w-xs font-mono"
+                <SelectWeb
+                  fullWidth
+                  className="max-w-xs font-mono"
                   value={normalizeBooleanDraft(selectedDraft)}
-                  onChange={(event) => {
-                    onDraftChange(selectedSetting.key, event.target.value)
-                  }}
+                  onSelect={(value) => { onDraftChange(selectedSetting.key, value) }}
                   disabled={!selectedOverwriteEnabled || selectedBusy || selectedReadOnly}
-                >
-                  <option value="true">true</option>
-                  <option value="false">false</option>
-                </select>
+                  options={[
+                    { value: 'true', label: 'true' },
+                    { value: 'false', label: 'false' },
+                  ]}
+                />
               ) : selectedSetting.type === 'number' ? (
-                <TextInputWeb
-                  type="number"
+                <NumberInputWeb
                   value={selectedDraft}
                   fullWidth
                   className="max-w-xs font-mono"
@@ -238,12 +240,11 @@ export function SettingsPage({
                   disabled={!selectedOverwriteEnabled || selectedBusy || selectedReadOnly}
                 />
               ) : selectedSetting.options && selectedSetting.options.length > 0 ? (
-                <select
-                  className="select w-full max-w-xs font-mono"
+                <SelectWeb
+                  fullWidth
+                  className="max-w-xs font-mono"
                   value={selectedDraft}
-                  onChange={(event) => {
-                    onDraftChange(selectedSetting.key, event.target.value)
-                  }}
+                  onSelect={(value) => { onDraftChange(selectedSetting.key, value) }}
                   disabled={!selectedOverwriteEnabled || selectedBusy || selectedReadOnly}
                 >
                   {selectedSetting.options.map((option) => (
@@ -252,10 +253,11 @@ export function SettingsPage({
                   {selectedSetting.allowNull ? (
                     <option value="null">null</option>
                   ) : null}
-                </select>
+                </SelectWeb>
               ) : selectedSetting.type === 'json' ? (
-                <textarea
-                  className="textarea min-h-[160px] w-full font-mono text-xs"
+                <TextAreaWeb
+                  fullWidth
+                  className="min-h-[160px] font-mono text-xs"
                   value={selectedDraft}
                   onChange={(event) => {
                     onDraftChange(selectedSetting.key, event.target.value)

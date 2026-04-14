@@ -1,6 +1,9 @@
 import { type FormEvent, type ReactElement } from 'react'
+import { AlertWeb } from '../../../src/components/alert/alert.web.js'
 import { BadgeWeb } from '../../../src/components/badge/badge.web.js'
 import { ButtonWeb } from '../../../src/components/button/button.web.js'
+import { SelectWeb } from '../../../src/components/select/select.web.js'
+import { TextAreaWeb } from '../../../src/components/textarea/textarea.web.js'
 import {
   type InteractiveAgentSessionDetail,
   type InteractiveAgentSessionEvent,
@@ -67,30 +70,31 @@ export function AgentSessionsPage({
           <form className="grid gap-3" onSubmit={onCreateSession}>
             <label className="form-control gap-1.5">
               <span className="label-text text-xs uppercase tracking-wide text-base-content/65">Agent</span>
-              <select
-                className="select select-sm w-full"
+              <SelectWeb
+                size="sm"
+                fullWidth
                 value={createDraft.agent}
-                onChange={(event) => {
+                onSelect={(value) => {
                   onCreateDraftChange({
-                    agent: event.target.value as InteractiveAgentType,
+                    agent: value as InteractiveAgentType,
                     profileName: '',
                   })
                 }}
                 disabled={isMutating}
-              >
-                <option value="claude">Claude</option>
-                <option value="codex">Codex</option>
-              </select>
+                options={[
+                  { value: 'claude', label: 'Claude' },
+                  { value: 'codex', label: 'Codex' },
+                ]}
+              />
             </label>
 
             <label className="form-control gap-1.5">
               <span className="label-text text-xs uppercase tracking-wide text-base-content/65">Profile (optional)</span>
-              <select
-                className="select select-sm w-full"
+              <SelectWeb
+                size="sm"
+                fullWidth
                 value={createDraft.profileName}
-                onChange={(event) => {
-                  onCreateDraftChange({ profileName: event.target.value })
-                }}
+                onSelect={(value) => { onCreateDraftChange({ profileName: value }) }}
                 disabled={isMutating}
               >
                 <option value="">Auto-select by type</option>
@@ -99,7 +103,7 @@ export function AgentSessionsPage({
                     {profile.name}
                   </option>
                 ))}
-              </select>
+              </SelectWeb>
             </label>
 
             <ButtonWeb type="submit" tone="primary" size="sm" disabled={isMutating}>
@@ -168,9 +172,9 @@ export function AgentSessionsPage({
               </div>
 
               {selectedSession.lastError && (
-                <div className="alert alert-error py-2 text-sm">
-                  <span>{selectedSession.lastError}</span>
-                </div>
+                <AlertWeb tone="error" role="alert" className="py-2 text-sm">
+                  {selectedSession.lastError}
+                </AlertWeb>
               )}
 
               <div className="rounded-lg border border-base-300/70 bg-base-100/60 p-2">
@@ -192,8 +196,10 @@ export function AgentSessionsPage({
               </div>
 
               <form className="grid gap-2" onSubmit={onSendPrompt}>
-                <textarea
-                  className="textarea min-h-[96px] w-full text-sm"
+                <TextAreaWeb
+                  size="sm"
+                  fullWidth
+                  className="min-h-[96px]"
                   placeholder="Ask the agent to inspect files, run diagnostics, or call MCP tools..."
                   value={promptDraft}
                   onChange={(event) => {

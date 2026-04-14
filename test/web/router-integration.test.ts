@@ -464,7 +464,7 @@ describe('dashboard router integration (real App)', () => {
       expect(router.state.location.pathname).toBe('/issues')
     })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Completed' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Completed' }))
 
     await waitFor(() => {
       expect(screen.getByText('First completed history run')).toBeDefined()

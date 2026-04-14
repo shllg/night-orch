@@ -1,6 +1,8 @@
 import { type ReactElement, useEffect, useMemo, useRef, useState } from 'react'
+import { AlertWeb } from '../../../src/components/alert/alert.web.js'
 import { BadgeWeb } from '../../../src/components/badge/badge.web.js'
 import { ButtonWeb } from '../../../src/components/button/button.web.js'
+import { SelectWeb } from '../../../src/components/select/select.web.js'
 
 import { describeRunEvent, formatTimestamp, formatTokenCount, truncate } from '../lib/format.js'
 import { STATUS_BADGE_TONE } from '../lib/run-tone.js'
@@ -87,9 +89,9 @@ export function IssueDetailPage({
         </div>
 
         {!run ? (
-          <div className="alert mt-4 border border-base-300/60 bg-base-100/70 text-sm">
-            <span>Run "{runId}" is not in the current dashboard snapshot.</span>
-          </div>
+          <AlertWeb className="mt-4 text-sm" role="status">
+            Run &quot;{runId}&quot; is not in the current dashboard snapshot.
+          </AlertWeb>
         ) : (
           <div className="mt-4 space-y-4">
             <section className="min-w-0 rounded-box border border-base-300/70 bg-base-100/70 px-3 py-3">
@@ -142,9 +144,9 @@ export function IssueDetailPage({
                 <p className="text-xs text-base-content/65">Each action requires confirmation.</p>
               </div>
               {!operationsEnabled && (
-                <div className="alert alert-warning mt-3 text-xs">
-                  <span>Operations are disabled by server policy for this web instance.</span>
-                </div>
+                <AlertWeb tone="warning" className="mt-3 text-xs">
+                  Operations are disabled by server policy for this web instance.
+                </AlertWeb>
               )}
               <fieldset
                 disabled={!operationsEnabled}
@@ -156,15 +158,18 @@ export function IssueDetailPage({
                       Update Strategy
                     </span>
                   </div>
-                  <select
-                    className="select select-sm w-full bg-base-100/80"
+                  <SelectWeb
+                    size="sm"
+                    fullWidth
+                    className="bg-base-100/80"
                     value={actionStrategy}
-                    onChange={(event) => setActionStrategy(event.target.value as 'default' | UpdateStrategy)}
-                  >
-                    <option value="default">Repo default</option>
-                    <option value="merge">Merge</option>
-                    <option value="rebase">Rebase</option>
-                  </select>
+                    onSelect={(value) => { setActionStrategy(value as 'default' | UpdateStrategy) }}
+                    options={[
+                      { value: 'default', label: 'Repo default' },
+                      { value: 'merge', label: 'Merge' },
+                      { value: 'rebase', label: 'Rebase' },
+                    ]}
+                  />
                 </label>
                 <ActionButton
                   busy={activeOperation === 'retry'}
@@ -204,13 +209,13 @@ export function IssueDetailPage({
             </section>
 
             {!run.hasRun ? (
-              <div className="alert border border-base-300/60 bg-base-100/70 text-sm">
-                <span>This issue is tracked but has no run yet.</span>
-              </div>
+              <AlertWeb className="text-sm" role="status">
+                This issue is tracked but has no run yet.
+              </AlertWeb>
             ) : visibleEvents.length === 0 ? (
-              <div className="alert border border-base-300/60 bg-base-100/70 text-sm">
-                <span>No events yet for this issue.</span>
-              </div>
+              <AlertWeb className="text-sm" role="status">
+                No events yet for this issue.
+              </AlertWeb>
             ) : (
               <section className="min-w-0 rounded-box border border-base-300/70 bg-base-100/70 px-3 py-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">

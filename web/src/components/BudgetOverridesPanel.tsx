@@ -1,7 +1,8 @@
 import { type FormEvent, type ReactElement } from 'react'
 import { BadgeWeb } from '../../../src/components/badge/badge.web.js'
 import { ButtonWeb } from '../../../src/components/button/button.web.js'
-import { TextInputWeb } from '../../../src/components/text-input/text-input.web.js'
+import { NumberInputWeb } from '../../../src/components/number-input/number-input.web.js'
+import { SelectWeb } from '../../../src/components/select/select.web.js'
 
 import { formatMoney } from '../lib/format.js'
 
@@ -79,8 +80,7 @@ export function BudgetOverridesPanel({
             >
               <label className="form-control">
                 <span className="label label-text text-xs">New cap (USD)</span>
-                <TextInputWeb
-                  type="number"
+                <NumberInputWeb
                   size="xs"
                   className="w-32 font-mono"
                   min={1}
@@ -140,10 +140,11 @@ export function BudgetOverridesPanel({
             >
               <label className="form-control">
                 <span className="label label-text text-xs">Repo</span>
-                <select
-                  className="select select-xs w-48"
+                <SelectWeb
+                  size="xs"
+                  className="w-48"
                   value={issueDraft.repo}
-                  onChange={(event) => onIssueDraftChange({ repo: event.target.value })}
+                  onSelect={(value) => { onIssueDraftChange({ repo: value }) }}
                   disabled={issueBusy}
                   required
                 >
@@ -151,12 +152,11 @@ export function BudgetOverridesPanel({
                   {repos.map((repo) => (
                     <option key={repo} value={repo}>{repo}</option>
                   ))}
-                </select>
+                </SelectWeb>
               </label>
               <label className="form-control">
                 <span className="label label-text text-xs">Issue #</span>
-                <TextInputWeb
-                  type="number"
+                <NumberInputWeb
                   size="xs"
                   className="w-24 font-mono"
                   min={1}
@@ -169,8 +169,7 @@ export function BudgetOverridesPanel({
               </label>
               <label className="form-control">
                 <span className="label label-text text-xs">Amount (USD)</span>
-                <TextInputWeb
-                  type="number"
+                <NumberInputWeb
                   size="xs"
                   className="w-28 font-mono"
                   min={0.1}

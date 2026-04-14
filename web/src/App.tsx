@@ -1,5 +1,6 @@
 import { type FormEvent, type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
+import { AlertWeb } from '../../src/components/alert/alert.web.js'
 import { ButtonWeb } from '../../src/components/button/button.web.js'
 
 import { BudgetOverridesPanel } from './components/BudgetOverridesPanel.js'
@@ -1226,14 +1227,14 @@ export function App({
 
       <div className="mx-auto flex w-full max-w-[1550px] flex-col gap-5 px-4 pb-24 pt-5 sm:px-6 md:pb-6 lg:px-8">
         {errorMessage && (
-          <div className="alert alert-error shadow-sm">
-            <span>{errorMessage}</span>
-          </div>
+          <AlertWeb tone="error" role="alert" className="shadow-sm">
+            {errorMessage}
+          </AlertWeb>
         )}
         {feedbackMessage && (
-          <div className="alert alert-info shadow-sm">
-            <span>{feedbackMessage}</span>
-          </div>
+          <AlertWeb tone="info" className="shadow-sm">
+            {feedbackMessage}
+          </AlertWeb>
         )}
 
         <div className="grid gap-5 md:grid-cols-[auto_minmax(0,1fr)] md:items-stretch md:gap-0">
