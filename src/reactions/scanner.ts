@@ -50,7 +50,7 @@ export async function scanForReactions(
             prNumber,
             issueNumber,
             summary: 'PR has merge conflicts with base branch',
-            context: 'PR cannot be merged cleanly. Rebase onto the latest base branch, resolve conflicts, then rerun verify.',
+            context: 'PR cannot be merged cleanly. Refresh the branch against the latest base branch, resolve conflicts, then rerun verify.',
             detectedAt: now,
           })
         }

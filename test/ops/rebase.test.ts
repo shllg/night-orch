@@ -60,6 +60,11 @@ describe('autoRebase', () => {
       mockExeca.mockResolvedValueOnce({ exitCode: 0 } as never)
       // merge-base --is-ancestor fails (not ancestor)
       mockExeca.mockRejectedValueOnce(new Error('exit code 1'))
+      // conflict snapshot refs
+      mockExeca.mockResolvedValueOnce({ stdout: 'branch-head-sha\n' } as never)
+      mockExeca.mockResolvedValueOnce({ stdout: 'base-head-sha\n' } as never)
+      // merge-tree preflight
+      mockExeca.mockResolvedValueOnce({ stdout: 'tree-oid\n' } as never)
       // merge succeeds
       mockExeca.mockResolvedValueOnce({ exitCode: 0 } as never)
       // push succeeds
@@ -67,15 +72,15 @@ describe('autoRebase', () => {
 
       const result = await autoRebase(target, '/tmp/repo', 'merge')
       expect(result.result).toBe('rebased')
-      expect(mockExeca).toHaveBeenCalledTimes(4)
+      expect(mockExeca).toHaveBeenCalledTimes(7)
       // Check merge command
-      expect(mockExeca).toHaveBeenNthCalledWith(3,
+      expect(mockExeca).toHaveBeenNthCalledWith(6,
         'git',
         ['merge', 'origin/main', '--no-edit'],
         expect.any(Object),
       )
       // Check push uses --force-with-lease
-      expect(mockExeca).toHaveBeenNthCalledWith(4,
+      expect(mockExeca).toHaveBeenNthCalledWith(7,
         'git',
         ['push', '--force-with-lease', 'origin', 'orch/1-fix'],
         expect.any(Object),
@@ -87,6 +92,11 @@ describe('autoRebase', () => {
       mockExeca.mockResolvedValueOnce({ exitCode: 0 } as never)
       // merge-base fails (not ancestor)
       mockExeca.mockRejectedValueOnce(new Error('exit code 1'))
+      // conflict snapshot refs
+      mockExeca.mockResolvedValueOnce({ stdout: 'branch-head-sha\n' } as never)
+      mockExeca.mockResolvedValueOnce({ stdout: 'base-head-sha\n' } as never)
+      // merge-tree preflight finds conflicting files
+      mockExeca.mockResolvedValueOnce({ stdout: 'tree-oid\nsrc/main.ts\nREADME.md\n' } as never)
       // merge fails with conflict
       mockExeca.mockRejectedValueOnce({ stderr: 'CONFLICT (content): Automatic merge failed' })
       // merge --abort succeeds
@@ -94,8 +104,11 @@ describe('autoRebase', () => {
 
       const result = await autoRebase(target, '/tmp/repo', 'merge')
       expect(result.result).toBe('conflict')
-      expect(mockExeca).toHaveBeenCalledTimes(4)
-      expect(mockExeca).toHaveBeenNthCalledWith(4,
+      expect(result.conflictAnalysis?.files).toEqual(['src/main.ts', 'README.md'])
+      expect(result.conflictAnalysis?.summary).toContain('Refresh against origin/main hit conflicts')
+      expect(result.conflictAnalysis?.summary).toContain('src/main.ts, README.md')
+      expect(mockExeca).toHaveBeenCalledTimes(7)
+      expect(mockExeca).toHaveBeenNthCalledWith(7,
         'git',
         ['merge', '--abort'],
         expect.any(Object),

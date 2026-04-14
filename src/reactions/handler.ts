@@ -20,9 +20,10 @@ export interface ReactionHandlerDeps {
 
 /**
  * Handle a reaction by queuing a follow-up run. Merge-conflict reactions
- * create a new attempt with `intent='rebase'` so the poller drives the
- * rebase-and-re-verify flow; all other reaction types flip the current
- * run in place back to `queued` and seed reaction context on phase data.
+ * create a new attempt with `intent='refresh'` so the poller performs a
+ * branch refresh using the repo's configured update strategy; all other
+ * reaction types flip the current run in place back to `queued` and seed
+ * reaction context on phase data.
  */
 export async function handleReaction(
   reaction: Reaction,
@@ -58,7 +59,7 @@ export async function handleReaction(
     try {
       const result = createFollowupAttempt(db, {
         previousAttemptId: run.id,
-        intent: 'rebase',
+        intent: 'refresh',
         resetBranch: false,
         phaseData: {
           ...clearResumeDecisionArtifacts(existingPhaseData),

@@ -76,6 +76,7 @@ function makeCtx(): RunContext {
       localPath: '/tmp/repo',
       baseBranch: 'main',
       branchPrefix: 'orch',
+      updateStrategy: 'merge',
       labels: { ready: ['orch:ready'], running: 'orch:running', blocked: ['orch:blocked'], reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry', planning: 'orch:planning' },
       planning: { prdDirectory: 'docs/prd' },
       defaults: { planner: 'claude', coder: 'claude', reviewer: 'claude', doneMode: 'pr-ready', notifyPriority: 'normal', prMentions: [] },

@@ -10,6 +10,7 @@ import type { AgentObservability } from '../events/observability.js'
 import type { RunContext } from '../loop/types.js'
 import type { EnvSetupResult } from '../environment/manager.js'
 import type { UpdateStrategy, WorktreeManager } from '../git/worktree.js'
+import type { VerifyResult } from '../workers/types.js'
 
 import { blocked } from '../loop/state.js'
 import { executeLoop } from '../loop/engine.js'
@@ -34,6 +35,7 @@ import { nowUtcIso } from '../utils/time.js'
 import { markerTag, upsertBotComment } from '../forge/bot-comment.js'
 import { formatStatusComment } from '../forge/status-comment.js'
 import { executeRebase } from '../ops/rebase-and-check.js'
+import { buildConflictSnapshot } from '../ops/conflict-snapshot.js'
 import { postPlanSummaryComment } from '../loop/plan-summary-comment.js'
 import { isPlanningIssue } from '../planning/mode.js'
 import { finalizeRunOutcome } from '../runner/run-finalizer.js'
@@ -300,14 +302,17 @@ export async function dispatchAttempt(
     const operationIntent = resolveOperationIntent(activeRun)
     const controlPayload = resolveControlPayload(activeRun)
     const updateStrategyOverride = resolveUpdateStrategyOverride(controlPayload)
+    const isRefreshRun = operationIntent === 'refresh'
     const isRebaseRun = operationIntent === 'rebase'
     const isContinueRun = operationIntent === 'continue'
     const isFreshRetry = operationIntent === 'retry'
     const followupPromptFeedback = extractFollowupPromptFeedback(activeRun?.phaseData)
+    let preLoopVerifyResults: VerifyResult[] = []
 
     // Check if prior run left tainted work that should be discarded
     const planningMode = isPlanningIssue(discoveredIssue.issue.labels, repoConfigForRun)
     const preserveBranchState = Boolean(controlPayload?.preserveBranchState)
+      || isRefreshRun
       || isRebaseRun
       || (isContinueRun && updateStrategyOverride === undefined)
     const resetToBase = isFreshRetry
@@ -316,7 +321,7 @@ export async function dispatchAttempt(
         && (planningMode || shouldResetBranch(runManager, repoConfig.repo, discoveredIssue.issue.number, run.id)))
 
     // Create worktree
-    await worktreeManager.ensure({
+    const ensuredWorktree = await worktreeManager.ensure({
       repoLocalPath: repoConfig.localPath,
       baseBranch: repoConfig.baseBranch,
       branchName: branch,
@@ -326,9 +331,28 @@ export async function dispatchAttempt(
       updateStrategy: updateStrategyOverride ?? repoConfig.updateStrategy,
     })
 
-    // Execute rebase if this is a rebase-queued run
-    if (isRebaseRun) {
-      const rebaseOutcome = await handleRebaseRun({
+    if (ensuredWorktree.rebaseConflict) {
+      const worktreeConflictOutcome = await handleWorktreeRefreshConflict({
+        forge,
+        repoConfig,
+        issueRepo,
+        issue: discoveredIssue.issue,
+        runId: run.id,
+        runManager,
+        pollerNotifier,
+        botUser,
+        branch,
+        strategy: updateStrategyOverride ?? repoConfig.updateStrategy,
+      })
+      return {
+        outcome: worktreeConflictOutcome,
+        immediateFollowupRepo: computeImmediateFollowup(runManager, runId),
+      }
+    }
+
+    // Execute explicit rebase or automatic branch refresh before entering the loop.
+    if (isRebaseRun || isRefreshRun) {
+      const refreshOutcome = await handleBranchRefreshRun({
         forge,
         config,
         db,
@@ -343,16 +367,18 @@ export async function dispatchAttempt(
         botUser,
         controlPayload,
         updateStrategyOverride,
+        operationIntent,
         metrics,
       })
-      if (rebaseOutcome !== 'continue-to-loop') {
-        outcome = rebaseOutcome
+      if (refreshOutcome.outcome !== 'continue-to-loop') {
+        outcome = refreshOutcome.outcome
         return {
           outcome,
           immediateFollowupRepo: computeImmediateFollowup(runManager, runId),
         }
       }
-      logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number }, 'Rebase done but verify failed — entering code loop to fix')
+      preLoopVerifyResults = refreshOutcome.verifyResults
+      logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, operationIntent }, 'Branch refresh completed but verify failed — entering code loop to fix')
     }
 
     if (repoConfigForRun.environment) {
@@ -396,7 +422,7 @@ export async function dispatchAttempt(
       plan: null,
       codeResult: null,
       diff: null,
-      verifyResults: [],
+      verifyResults: preLoopVerifyResults,
       reviewResult: null,
       reviewFindings: [],
       iteration: startingIteration,
@@ -406,7 +432,7 @@ export async function dispatchAttempt(
       terminalStatus: 'running',
       phaseHistory: [],
       dryRun: false,
-      runMode: isRebaseRun ? 'rebase' : isContinueRun || followupPromptFeedback ? 'followup' : 'fresh',
+      runMode: isRebaseRun ? 'rebase' : isRefreshRun ? 'refresh' : isContinueRun || followupPromptFeedback ? 'followup' : 'fresh',
       blockReason: null,
       prReviewFeedback: followupPromptFeedback,
       sessionIds: {},
@@ -627,9 +653,105 @@ function computeImmediateFollowup(
   return null
 }
 
-// --- Rebase flow extracted from the inline body for readability ---
+// --- Branch refresh flow extracted from the inline body for readability ---
 
-interface HandleRebaseRunParams {
+interface HandleWorktreeRefreshConflictParams {
+  forge: ForgeAdapter
+  repoConfig: Config['repos'][number]
+  issueRepo: string
+  issue: DiscoveredIssue['issue']
+  runId: string
+  runManager: RunManager
+  pollerNotifier: PollerNotifier
+  botUser: string
+  branch: string
+  strategy: UpdateStrategy
+}
+
+async function handleWorktreeRefreshConflict(
+  params: HandleWorktreeRefreshConflictParams,
+): Promise<'errored'> {
+  const {
+    forge,
+    repoConfig,
+    issueRepo,
+    issue,
+    runId,
+    runManager,
+    pollerNotifier,
+    botUser,
+    branch,
+    strategy,
+  } = params
+
+  const summary = `Refreshing ${branch} against origin/${repoConfig.baseBranch} conflicted before the loop could start.`
+  const snapshot = buildConflictSnapshot({
+    source: 'branch_refresh',
+    kind: strategy === 'rebase' ? 'rebase' : 'merge',
+    strategy,
+    summary,
+    branchName: branch,
+    baseBranch: repoConfig.baseBranch,
+  })
+
+  runManager.update(runId, {
+    status: 'blocked',
+    blockReason: 'merge_conflict',
+    operationIntent: 'refresh',
+    manualState: 'awaiting_rebase_resolution',
+    controlPayload: {
+      issueRepo,
+      preserveBranchState: true,
+      conflictSummary: summary,
+      conflictFiles: [],
+      conflictExcerpts: [],
+      conflictSnapshot: snapshot,
+      requestedAt: nowUtcIso(),
+    },
+    phaseData: {
+      issueRepo,
+      reactionType: 'refresh_conflict',
+      reactionSummary: 'Branch refresh conflicted before planning started',
+      reactionContext: summary,
+      reactionConflictSnapshot: snapshot,
+    },
+    lastError: summary,
+    endedAt: nowUtcIso(),
+  })
+  const latestIssue = await forge.getIssue(issueRepo, issue.number)
+  await transitionLabels(
+    forge,
+    issueRepo,
+    issue.number,
+    latestIssue.labels,
+    'running',
+    'blocked',
+    buildLabelConfig(repoConfig, latestIssue.labels),
+    blocked({
+      type: 'mergeConflict',
+      files: [],
+      summary,
+    }).reason,
+  )
+  await postStatusComment({
+    forge,
+    issueRepo,
+    issueNumber: issue.number,
+    botUser,
+    body: formatStatusComment({
+      blockReason: summary,
+      nextStep: 'Use /orch continue to resume with the preserved branch state, or /orch retry to rebuild from the latest base branch.',
+    }),
+    warnMessage: 'Failed to post worktree refresh conflict status comment',
+  })
+  await pollerNotifier.blocked(repoConfig.repo, issue, {
+    summary,
+    blockingReason: 'merge_conflict',
+  })
+  return 'errored'
+}
+
+interface HandleBranchRefreshRunParams {
   forge: ForgeAdapter
   config: Config
   db: Database.Database
@@ -643,13 +765,17 @@ interface HandleRebaseRunParams {
   pollerNotifier: PollerNotifier
   botUser: string
   controlPayload: Record<string, unknown> | null
+  operationIntent: 'refresh' | 'rebase'
   updateStrategyOverride?: UpdateStrategy
   metrics?: MetricsService
 }
 
-type RebaseOutcome = 'continue-to-loop' | 'processed' | 'errored'
+interface BranchRefreshOutcome {
+  outcome: 'continue-to-loop' | 'processed' | 'errored'
+  verifyResults: VerifyResult[]
+}
 
-async function handleRebaseRun(params: HandleRebaseRunParams): Promise<RebaseOutcome> {
+async function handleBranchRefreshRun(params: HandleBranchRefreshRunParams): Promise<BranchRefreshOutcome> {
   const {
     forge,
     config,
@@ -664,13 +790,20 @@ async function handleRebaseRun(params: HandleRebaseRunParams): Promise<RebaseOut
     pollerNotifier,
     botUser,
     controlPayload,
+    operationIntent,
     updateStrategyOverride,
     metrics,
   } = params
 
+  const strategy = operationIntent === 'rebase'
+    ? updateStrategyOverride ?? 'rebase'
+    : updateStrategyOverride ?? repoConfig.updateStrategy
+  const isExplicitRebase = operationIntent === 'rebase'
+  const modeLabel = isExplicitRebase ? 'rebase' : 'branch refresh'
+
   logger.info(
-    { repo: repoConfig.repo, issue: discoveredIssue.issue.number, runId },
-    'Executing rebase for queued rebase run',
+    { repo: repoConfig.repo, issue: discoveredIssue.issue.number, runId, operationIntent, strategy },
+    'Executing branch refresh run',
   )
   const verifyCommands = repoConfig.verify ?? []
   const rebaseResult = await executeRebase(
@@ -682,7 +815,7 @@ async function handleRebaseRun(params: HandleRebaseRunParams): Promise<RebaseOut
     discoveredIssue.issue.number,
     verifyCommands,
     controlPayload?.['checkAfter'] !== false,
-    updateStrategyOverride ?? 'rebase',
+    strategy,
     {
       issueTitle: discoveredIssue.issue.title,
       issueBody: discoveredIssue.issue.body,
@@ -694,24 +827,48 @@ async function handleRebaseRun(params: HandleRebaseRunParams): Promise<RebaseOut
   )
 
   if (rebaseResult.conflict) {
+    const summary = rebaseResult.conflictAnalysis?.summary
+      ?? `${isExplicitRebase ? 'Rebase' : 'Branch refresh'} failed due to merge conflicts.`
+    const snapshot = buildConflictSnapshot({
+      source: isExplicitRebase ? 'manual_rebase' : 'branch_refresh',
+      kind: strategy === 'rebase' ? 'rebase' : 'merge',
+      strategy,
+      summary,
+      branchName: branch,
+      baseBranch: repoConfig.baseBranch,
+      files: rebaseResult.conflictAnalysis?.files ?? [],
+      excerpts: rebaseResult.conflictAnalysis?.excerpts ?? [],
+      resolution: rebaseResult.resolution,
+      branchHeadSha: rebaseResult.conflictAnalysis?.branchHeadSha ?? null,
+      baseHeadSha: rebaseResult.conflictAnalysis?.baseHeadSha ?? null,
+    })
     runManager.update(runId, {
       status: 'blocked',
       blockReason: 'merge_conflict',
-      operationIntent: 'rebase',
+      operationIntent,
       manualState: 'awaiting_rebase_resolution',
       controlPayload: {
         issueRepo,
         preserveBranchState: true,
-        conflictSummary: rebaseResult.conflictAnalysis?.summary ?? 'Rebase conflicted with the latest base branch changes.',
+        conflictSummary: summary,
         conflictFiles: rebaseResult.conflictAnalysis?.files ?? [],
         conflictExcerpts: rebaseResult.conflictAnalysis?.excerpts ?? [],
         resolutionAttempted: rebaseResult.resolution?.attempted ?? false,
         resolutionOutcome: rebaseResult.resolution?.outcome ?? null,
         resolvedFiles: rebaseResult.resolution?.files ?? [],
+        conflictSnapshot: snapshot,
         requestedAt: nowUtcIso(),
       },
-      lastError: rebaseResult.conflictAnalysis?.summary
-        ?? 'Rebase failed due to merge conflicts. Continue will keep the branch and resolve them; retry will reset to base and re-implement.',
+      phaseData: {
+        issueRepo,
+        reactionType: isExplicitRebase ? 'rebase_conflict' : 'refresh_conflict',
+        reactionSummary: isExplicitRebase
+          ? 'Explicit rebase conflicted with latest base branch changes'
+          : 'Automatic branch refresh conflicted with latest base branch changes',
+        reactionContext: summary,
+        reactionConflictSnapshot: snapshot,
+      },
+      lastError: summary,
       endedAt: nowUtcIso(),
     })
     const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
@@ -726,8 +883,7 @@ async function handleRebaseRun(params: HandleRebaseRunParams): Promise<RebaseOut
       blocked({
         type: 'mergeConflict',
         files: rebaseResult.conflictAnalysis?.files ?? [],
-        summary: rebaseResult.conflictAnalysis?.summary
-          ?? 'Rebase failed due to merge conflicts',
+        summary,
       }).reason,
     )
     await postStatusComment({
@@ -736,23 +892,22 @@ async function handleRebaseRun(params: HandleRebaseRunParams): Promise<RebaseOut
       issueNumber: discoveredIssue.issue.number,
       botUser,
       body: formatStatusComment({
-        blockReason: rebaseResult.conflictAnalysis?.summary
-          ?? 'Rebase failed due to merge conflicts while replaying the branch onto the latest base.',
+        blockReason: summary,
         nextStep: 'Use /orch continue to keep the existing branch and resolve the conflicts, or /orch retry to reset the branch and re-implement from scratch.',
       }),
-      warnMessage: 'Failed to post rebase merge-conflict status comment',
+      warnMessage: 'Failed to post branch refresh merge-conflict status comment',
     })
     await pollerNotifier.blocked(repoConfig.repo, discoveredIssue.issue, {
-      summary: 'Rebase failed due to merge conflicts',
+      summary,
       blockingReason: 'merge_conflict',
     })
-    return 'errored'
+    return { outcome: 'errored', verifyResults: [] }
   }
 
   if (rebaseResult.error) {
     runManager.update(runId, {
       status: 'error',
-      operationIntent: 'rebase',
+      operationIntent,
       lastError: rebaseResult.error,
       endedAt: nowUtcIso(),
     })
@@ -773,18 +928,18 @@ async function handleRebaseRun(params: HandleRebaseRunParams): Promise<RebaseOut
       botUser,
       body: formatStatusComment({
         blockReason: rebaseResult.error,
-        nextStep: 'Retry the rebase after fixing the underlying git or push error.',
+        nextStep: `Retry the ${modeLabel} after fixing the underlying git or push error.`,
       }),
-      warnMessage: 'Failed to post rebase error status comment',
+      warnMessage: 'Failed to post branch refresh error status comment',
     })
     await pollerNotifier.error(repoConfig.repo, discoveredIssue.issue, {
       summary: rebaseResult.error,
     })
-    return 'errored'
+    return { outcome: 'errored', verifyResults: [] }
   }
 
   if (rebaseResult.rebased && rebaseResult.verifyPassed) {
-    logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number }, 'Rebase succeeded, verify passed — returning to review_ready')
+    logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, operationIntent }, 'Branch refresh succeeded, verify passed — returning to review_ready')
     runManager.update(runId, {
       status: 'review_ready',
       endedAt: nowUtcIso(),
@@ -801,9 +956,9 @@ async function handleRebaseRun(params: HandleRebaseRunParams): Promise<RebaseOut
       buildLabelConfig(repoConfig, latestIssue.labels),
     )
     await pollerNotifier.prReady(repoConfig.repo, discoveredIssue.issue, {
-      summary: 'Rebased successfully, verify passed',
+      summary: `${isExplicitRebase ? 'Rebased' : 'Refreshed'} successfully, verify passed`,
     })
-    return 'processed'
+    return { outcome: 'processed', verifyResults: rebaseResult.verifyResults ?? [] }
   }
 
   if (!rebaseResult.rebased && rebaseResult.verifyPassed) {
@@ -823,10 +978,13 @@ async function handleRebaseRun(params: HandleRebaseRunParams): Promise<RebaseOut
       'review_ready',
       buildLabelConfig(repoConfig, latestIssue.labels),
     )
-    return 'processed'
+    return { outcome: 'processed', verifyResults: rebaseResult.verifyResults ?? [] }
   }
 
-  return 'continue-to-loop'
+  return {
+    outcome: 'continue-to-loop',
+    verifyResults: rebaseResult.verifyResults ?? [],
+  }
 }
 
 function resolveUpdateStrategyOverride(

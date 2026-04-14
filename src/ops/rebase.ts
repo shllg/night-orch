@@ -5,6 +5,7 @@ import { mergeFromBranch } from '../git/repo.js'
 import { logger } from '../utils/logger.js'
 import type { UpdateStrategy } from '../git/worktree.js'
 import type { MetricsService } from '../metrics/service.js'
+import { resolveConflictSnapshotRefs } from './conflict-snapshot.js'
 import { validateConflictResolution } from './conflict-resolver-validate.js'
 import type {
   ConflictResolutionContext,
@@ -36,6 +37,8 @@ export interface RebaseConflictAnalysis {
   files: string[]
   summary: string
   excerpts: RebaseConflictExcerpt[]
+  branchHeadSha: string | null
+  baseHeadSha: string | null
 }
 
 export interface AutoRebaseResult {
@@ -104,11 +107,15 @@ export async function autoRebase(
     log.info({ baseBranch, strategy }, 'Base branch has moved ahead — updating')
 
     if (strategy === 'merge') {
+      const predictedConflictAnalysis = await predictMergeConflictAnalysis(worktreePath, baseBranch)
       const result = await mergeFromBranch(worktreePath, remoteRef)
       if (!result.success) {
         if (result.conflict) {
           log.warn({ baseBranch }, 'Merge conflict with base branch — aborting')
-          return { result: 'conflict' }
+          return {
+            result: 'conflict',
+            conflictAnalysis: predictedConflictAnalysis,
+          }
         }
         return { result: 'error' }
       }
@@ -168,6 +175,47 @@ export async function autoRebase(
   } catch (err) {
     log.error({ err }, 'Auto-update failed')
     return { result: 'error', error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+async function predictMergeConflictAnalysis(
+  worktreePath: string,
+  baseBranch: string,
+): Promise<RebaseConflictAnalysis> {
+  const refs = await resolveConflictSnapshotRefs(worktreePath, baseBranch)
+  const files = await predictMergeConflictFiles(worktreePath, baseBranch)
+  return {
+    files,
+    summary: formatRefreshConflictSummary(baseBranch, files),
+    excerpts: [],
+    branchHeadSha: refs.branchHeadSha,
+    baseHeadSha: refs.baseHeadSha,
+  }
+}
+
+async function predictMergeConflictFiles(
+  worktreePath: string,
+  baseBranch: string,
+): Promise<string[]> {
+  try {
+    const { stdout } = await runGit([
+      'merge-tree',
+      '--write-tree',
+      '--name-only',
+      '--no-messages',
+      'HEAD',
+      `origin/${baseBranch}`,
+    ], {
+      cwd: worktreePath,
+      timeout: 60_000,
+      reject: false,
+    })
+
+    const lines = stdout.split('\n').map((line) => line.trim()).filter(Boolean)
+    if (lines.length <= 1) return []
+    return lines.slice(1)
+  } catch {
+    return []
   }
 }
 
@@ -343,6 +391,7 @@ async function collectConflictAnalysis(
 ): Promise<RebaseConflictAnalysis> {
   const files = await listUnmergedFiles(worktreePath)
   const excerpts: RebaseConflictExcerpt[] = []
+  const refs = await resolveConflictSnapshotRefs(worktreePath, baseBranch)
 
   for (const filePath of files.slice(0, 5)) {
     excerpts.push({
@@ -358,6 +407,8 @@ async function collectConflictAnalysis(
     files,
     summary: formatConflictSummary(baseBranch, files),
     excerpts,
+    branchHeadSha: refs.branchHeadSha,
+    baseHeadSha: refs.baseHeadSha,
   }
 }
 
@@ -495,10 +546,18 @@ function truncateConflictText(value: string): string {
 }
 
 function formatConflictSummary(baseBranch: string, files: string[]): string {
+  return formatRefreshConflictSummary(baseBranch, files, `Rebase onto origin/${baseBranch}`)
+}
+
+function formatRefreshConflictSummary(
+  baseBranch: string,
+  files: string[],
+  prefix = `Refresh against origin/${baseBranch}`,
+): string {
   const listedFiles = files.slice(0, 5)
   const fileSummary = listedFiles.length > 0 ? `: ${listedFiles.join(', ')}` : ''
   return [
-    `Rebase onto origin/${baseBranch} hit conflicts in ${files.length} file(s)${fileSummary}.`,
+    `${prefix} hit conflicts in ${files.length} file(s)${fileSummary}.`,
     'Options: (a) resolve manually and continue, (b) continue with merge strategy, (c) abort and re-open the issue.',
   ].join(' ')
 }

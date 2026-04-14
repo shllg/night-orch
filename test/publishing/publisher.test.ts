@@ -67,6 +67,7 @@ function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
       localPath: '/tmp/repo',
       baseBranch: 'main',
       branchPrefix: 'orch',
+      updateStrategy: 'merge',
       labels: { ready: ['orch:ready'], running: 'orch:running', blocked: ['orch:blocked'], reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry' },
       defaults: { planner: 'claude', coder: 'claude', reviewer: 'claude', doneMode: 'pr-ready', notifyPriority: 'normal', prMentions: [] },
       verify: [],
@@ -125,7 +126,7 @@ describe('publishPR', () => {
 
     const result = await publishPR(makeCtx(), forge, db)
 
-    expect(mockPushBranch).toHaveBeenCalledWith('/tmp/wt', 'orch/1-fix-bug')
+    expect(mockPushBranch).toHaveBeenCalledWith('/tmp/wt', 'orch/1-fix-bug', 'merge')
     expect(forge.createPR).toHaveBeenCalledWith('org/repo', expect.objectContaining({
       headBranch: 'orch/1-fix-bug',
       baseBranch: 'main',

@@ -18,8 +18,8 @@ export type BlockReason =
   | 'auth_failure'
   | 'empty_diff'
 
-/** How this run was initiated: new work, PR feedback follow-up, or rebase after merge conflict. */
-export type RunMode = 'fresh' | 'followup' | 'rebase'
+/** How this run was initiated: new work, PR feedback follow-up, automatic refresh, or explicit rebase. */
+export type RunMode = 'fresh' | 'followup' | 'refresh' | 'rebase'
 
 export type LoopPhase = string
 

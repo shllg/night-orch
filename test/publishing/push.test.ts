@@ -49,35 +49,44 @@ describe('pushBranch', () => {
     )
   })
 
-  it('attempts rebase on rejected push (branch diverged)', async () => {
+  it('attempts merge reconciliation on rejected push by default', async () => {
     // First push fails with rejected
     mockExeca.mockRejectedValueOnce({ stderr: '! [rejected] orch/1-fix -> orch/1-fix (non-fast-forward)' })
-    // Rebase succeeds
+    // fetch succeeds
+    mockExeca.mockResolvedValueOnce({ exitCode: 0 } as never)
+    // merge succeeds
     mockExeca.mockResolvedValueOnce({ exitCode: 0 } as never)
     // Second push succeeds
     mockExeca.mockResolvedValueOnce({ exitCode: 0 } as never)
 
     await pushBranch('/tmp/wt', 'orch/1-fix')
 
-    expect(mockExeca).toHaveBeenCalledTimes(3)
+    expect(mockExeca).toHaveBeenCalledTimes(4)
     expect(mockExeca).toHaveBeenNthCalledWith(2,
       'git',
-      ['pull', '--rebase', 'origin', 'orch/1-fix'],
+      ['fetch', 'origin', 'orch/1-fix'],
       expect.any(Object),
     )
     expect(mockExeca).toHaveBeenNthCalledWith(3,
+      'git',
+      ['merge', 'origin/orch/1-fix', '--no-edit'],
+      expect.any(Object),
+    )
+    expect(mockExeca).toHaveBeenNthCalledWith(4,
       'git',
       ['push', '--force-with-lease', '-u', 'origin', 'orch/1-fix'],
       expect.any(Object),
     )
   })
 
-  it('throws MergeConflictError after rebase attempt hits conflicts', async () => {
+  it('throws MergeConflictError after merge reconciliation hits conflicts', async () => {
     // First push fails with rejected
     mockExeca.mockRejectedValueOnce({ stderr: '! [rejected] non-fast-forward' })
-    // Rebase fails with CONFLICT
+    // fetch succeeds
+    mockExeca.mockResolvedValueOnce({ exitCode: 0 } as never)
+    // merge fails with CONFLICT
     mockExeca.mockRejectedValueOnce({ stderr: 'CONFLICT: merge conflict in src/a.ts' })
-    // rebase --abort succeeds
+    // merge --abort succeeds
     mockExeca.mockResolvedValueOnce({ exitCode: 0 } as never)
 
     const err = await pushBranch('/tmp/wt', 'orch/1-fix').catch((e: unknown) => e) as MergeConflictError
@@ -86,14 +95,34 @@ describe('pushBranch', () => {
     expect(err.message).toMatch(/merge conflicts/)
   })
 
-  it('throws generic error after rebase attempt fails without conflicts', async () => {
+  it('can still use rebase reconciliation when explicitly requested', async () => {
     // First push fails with rejected
     mockExeca.mockRejectedValueOnce({ stderr: '! [rejected] non-fast-forward' })
-    // Rebase fails with non-conflict error
-    mockExeca.mockRejectedValueOnce({ stderr: 'fatal: cannot rebase' })
+    // fetch succeeds
+    mockExeca.mockResolvedValueOnce({ exitCode: 0 } as never)
+    // Rebase succeeds
+    mockExeca.mockResolvedValueOnce({ exitCode: 0 } as never)
+    // Second push succeeds
+    mockExeca.mockResolvedValueOnce({ exitCode: 0 } as never)
+
+    await expect(pushBranch('/tmp/wt', 'orch/1-fix', 'rebase')).resolves.toBeUndefined()
+    expect(mockExeca).toHaveBeenNthCalledWith(3,
+      'git',
+      ['rebase', 'origin/orch/1-fix'],
+      expect.any(Object),
+    )
+  })
+
+  it('throws generic error after reconciliation attempt fails without conflicts', async () => {
+    // First push fails with rejected
+    mockExeca.mockRejectedValueOnce({ stderr: '! [rejected] non-fast-forward' })
+    // fetch succeeds
+    mockExeca.mockResolvedValueOnce({ exitCode: 0 } as never)
+    // merge fails with non-conflict error
+    mockExeca.mockRejectedValueOnce({ stderr: 'fatal: cannot merge' })
 
     await expect(pushBranch('/tmp/wt', 'orch/1-fix')).rejects.toThrow(
-      /Push failed for orch\/1-fix after rebase attempt/,
+      /Push failed for orch\/1-fix after merge reconciliation attempt/,
     )
   })
 

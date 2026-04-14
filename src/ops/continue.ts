@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3'
 import type { ForgeAdapter, ForgeComment } from '../forge/types.js'
 import type { RepoConfig } from '../config/schema.js'
 import type { UpdateStrategy } from '../git/worktree.js'
+import { coerceConflictSnapshot, type ConflictSnapshot } from './conflict-types.js'
 import type { Reaction, ReactionCursor, ReactionType } from '../reactions/types.js'
 import { clearResumeDecisionArtifacts } from '../loop/checkpoint.js'
 import { RunManager } from '../state/runs.js'
@@ -99,6 +100,7 @@ export async function queueContinue(
             reactionType: followup.primaryType,
             reactionSummary: followup.summary,
             reactionContext: followup.context,
+            reactionConflictSnapshot: followup.conflictSnapshot,
             continueRequestedAt: nowUtcIso(),
           },
           controlPayload: {
@@ -223,6 +225,7 @@ interface FollowupContextPayload {
   primaryType: string
   summary: string
   context: string
+  conflictSnapshot: ConflictSnapshot | null
 }
 
 async function buildFollowupContext(params: BuildFollowupContextParams): Promise<FollowupContextPayload> {
@@ -247,8 +250,9 @@ async function buildFollowupContext(params: BuildFollowupContextParams): Promise
 
   if (manualState === 'awaiting_rebase_resolution') {
     const rebaseContext = formatRebaseResolutionContext(controlPayload)
+    const snapshot = coerceConflictSnapshot(controlPayload?.['conflictSnapshot'])
     sections.push(rebaseContext)
-    summaryParts.push('rebase conflict resolution')
+    summaryParts.push(snapshot?.source === 'branch_refresh' ? 'branch refresh conflict resolution' : 'rebase conflict resolution')
   }
 
   const reactions = await collectReactions({
@@ -289,14 +293,20 @@ async function buildFollowupContext(params: BuildFollowupContextParams): Promise
     primaryType: manualState === 'awaiting_rebase_resolution' ? 'rebase_conflict_resolution' : 'continue',
     summary,
     context: sections.join('\n\n'),
+    conflictSnapshot: coerceConflictSnapshot(controlPayload?.['conflictSnapshot']),
   }
 }
 
 function formatRebaseResolutionContext(controlPayload: Record<string, unknown> | null): string {
+  const snapshot = coerceConflictSnapshot(controlPayload?.['conflictSnapshot'])
+  const contextLabel = snapshot?.source === 'branch_refresh' ? 'Branch Refresh Conflict Analysis' : 'Rebase Conflict Analysis'
+  const guidance = snapshot?.source === 'branch_refresh'
+    ? 'A prior branch refresh attempt hit conflicts. Continue should keep the existing branch and reconcile the upstream changes instead of starting fresh.'
+    : 'A prior explicit rebase attempt hit conflicts. Continue should keep the existing branch and resolve the upstream changes manually instead of starting fresh.'
   const lines = [
-    '## Rebase Conflict Analysis',
+    `## ${contextLabel}`,
     '',
-    'A prior explicit rebase attempt hit conflicts. Continue should keep the existing branch and resolve the upstream changes manually instead of starting fresh.',
+    guidance,
   ]
 
   const summary = typeof controlPayload?.conflictSummary === 'string' ? controlPayload.conflictSummary.trim() : ''
@@ -323,9 +333,7 @@ function formatRebaseResolutionContext(controlPayload: Record<string, unknown> |
       const preview = typeof entry['preview'] === 'string' ? entry['preview'] : ''
       lines.push(`- ${path}`)
       if (preview.trim()) {
-        lines.push('```text')
-        lines.push(preview.trim())
-        lines.push('```')
+        lines.push(`  Preview: ${preview.trim()}`)
       }
     }
   }

@@ -386,7 +386,35 @@ describe('queueContinue', () => {
       manualState: 'awaiting_rebase_resolution',
       endedAt: '2026-02-01T12:00:00Z',
       controlPayload: {
-        conflictSummary: 'Rebase conflicted with upstream changes',
+        issueRepo: 'org/repo',
+        conflictSummary: 'Refresh against origin/main conflicted in src/app.ts',
+        conflictSnapshot: {
+          schemaVersion: 1,
+          capturedAt: '2026-02-01T11:59:00Z',
+          source: 'branch_refresh',
+          kind: 'merge',
+          strategy: 'merge',
+          summary: 'Refresh against origin/main conflicted in src/app.ts',
+          branchName: 'orch/65-test',
+          baseBranch: 'main',
+          branchHeadSha: 'branch-sha-1',
+          baseHeadSha: 'base-sha-1',
+          files: ['src/app.ts'],
+          excerpts: [
+            {
+              path: 'src/app.ts',
+              preview: '<<<<<<< ours',
+              ours: 'const mode = "ours"',
+              theirs: 'const mode = "theirs"',
+            },
+          ],
+          resolution: {
+            attempted: true,
+            outcome: 'failed',
+            summary: 'Resolver could not preserve both behaviors',
+            files: ['src/app.ts'],
+          },
+        },
       },
     })
 
@@ -402,6 +430,16 @@ describe('queueContinue', () => {
     const updated = runManager.getByRepoAndIssue('org/repo', 65)
     expect(updated?.controlPayload?.updateStrategy).toBe('merge')
     expect(updated?.controlPayload?.preserveBranchState).toBe(false)
+    expect(updated?.phaseData?.reactionType).toBe('rebase_conflict_resolution')
+    expect(updated?.phaseData?.reactionSummary).toContain('branch refresh conflict resolution')
+    expect(updated?.phaseData?.reactionContext).toContain('## Branch Refresh Conflict Analysis')
+    expect(updated?.phaseData?.reactionContext).toContain('Refresh against origin/main conflicted in src/app.ts')
+    expect(updated?.phaseData?.reactionConflictSnapshot).toMatchObject({
+      source: 'branch_refresh',
+      strategy: 'merge',
+      branchName: 'orch/65-test',
+      files: ['src/app.ts'],
+    })
 
     const eventRow = db.prepare(
       `SELECT source, role, event_type, data

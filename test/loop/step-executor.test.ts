@@ -639,6 +639,7 @@ describe('buildPromptContext', () => {
       type: 'human_review',
       summary: 'Continue requested with requested review changes',
       context: 'Please address the requested changes',
+      conflictSnapshot: null,
     })
   })
 })

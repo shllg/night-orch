@@ -111,7 +111,7 @@ Three responsibilities: fetch eligible issues from the forge (`discover.ts`), cl
 ### Git (`src/git/`)
 All git operations use `execa` (not `simple-git`). `worktree.ts` provides `ensure()` (create or reuse worktree with either fresh-reset or preserve-branch semantics), `remove()`, and `list()`. `slug.ts` generates and pins branch slugs in the DB so they survive issue title changes. `repo.ts` handles branch operations.
 
-> **Watch out:** automatic base updates and explicit `/orch rebase` are separate flows. Normal retries rebuild from the latest base branch, continues preserve the existing branch state, and explicit rebase captures conflict context for a later continue/retry decision.
+> **Watch out:** automatic base updates and explicit `/orch rebase` are separate flows. Normal retries rebuild from the latest base branch, merge-conflict reactions queue a dedicated branch refresh using the repo's `updateStrategy`, continues preserve the existing branch state, and explicit rebase captures conflict context for a later continue/retry decision. Any refresh/rebase conflict now blocks immediately with a durable conflict snapshot instead of relying on a lossy summary.
 
 ### Environment (`src/environment/`)
 Two modes: **shared** (validate existing services are running) and **dedicated** (spin up a Docker Compose stack per issue). `port.ts` allocates ports from configured ranges. `env-file.ts` generates `.env` files with marked override sections. `bootstrap.ts` runs setup commands.
@@ -152,7 +152,7 @@ The R6 decomposition of the old `src/runner/poller.ts` god object. `discovery-sc
 Phase 3 direct-LLM client layer for night-orch's **own** internal AI tasks — triage refinement, reviewer parse salvage, PR body generation, and the bounded rebase-conflict resolver. `anthropic.ts` (Messages API) and `openrouter.ts` (OpenAI-compat) are thin fetch wrappers with Zod-validated structured output. Most consumers gate on `ai.internal.enable.*`; the conflict resolver is additionally gated by `autoResolveConflicts.enabled` and `ai.internal.features.conflictResolver`. Token usage feeds the same cost ledger as CLI workers, tagged `token_source='measured_api'`. Code-editing roles (planner/coder/reviewer) **stay on the CLI path** — they rely on the agentic tool-use loop that direct APIs don't provide.
 
 ### Ops (`src/ops/`)
-Maintenance engines: `sync.ts` reconciles local state with forge (finds orphaned attempts, fixes label mismatches), `cleanup.ts` removes stale worktrees and archives old logs, `retry.ts` starts fresh retries from latest base (inserts a new attempt), `continue.ts` gathers fresh PR context and resumes the existing branch (inserts a new attempt), and `rebase-and-check.ts` manages explicit rebase flows plus post-rebase verification. On textual rebase conflicts, `rebase.ts` now collects full conflict sources, optionally runs one bounded AI-assisted resolution pass, validates the returned file content, and only then continues the rebase; unresolved cases still abort back to the canonical `merge_conflict` block path.
+Maintenance engines: `sync.ts` reconciles local state with forge (finds orphaned attempts, fixes label mismatches), `cleanup.ts` removes stale worktrees and archives old logs, `retry.ts` starts fresh retries from latest base (inserts a new attempt), `continue.ts` gathers fresh PR context and resumes the existing branch (inserts a new attempt), and `rebase-and-check.ts` manages explicit rebase flows plus post-rebase verification. Automatic merge-conflict reactions now enqueue a distinct refresh attempt that uses the repo's `updateStrategy`, and `continue.ts` preserves the resulting conflict snapshot across attempts so later coder prompts can see the original files, excerpts, and branch/base SHAs. On textual rebase conflicts, `rebase.ts` now collects full conflict sources, optionally runs one bounded AI-assisted resolution pass, validates the returned file content, and only then continues the rebase; unresolved cases still abort back to the canonical `merge_conflict` block path.
 
 ### State (`src/state/`)
 SQLite with WAL mode via `better-sqlite3`. `db.ts` handles init and migrations. `attempts.ts` manages the **immutable** attempts ledger (see below): every `retry`/`continue`/`rebase` inserts a new row chained to the previous one via `previous_attempt_id`, and terminated attempts are never mutated afterward. `runs.ts` preserves the legacy per-row update surface for callers that still query by run id. `leases.ts` provides atomic lease acquisition via `INSERT OR IGNORE`. `stats.ts` powers the Web/TUI dashboards.
@@ -260,7 +260,7 @@ All persistent state lives in SQLite (WAL mode). Here's what each table tracks a
 
 | Entity | Written by | Read by | Purpose |
 |--------|-----------|---------|---------|
-| `attempts` (formerly `runs`) | AttemptDispatcher, Loop Engine | Poller, Ops, Web, MCP, CLI | **Immutable per-attempt lifecycle** (queued → running → completed/blocked/error). Retry/continue/rebase INSERT new rows chained via `previous_attempt_id`. |
+| `attempts` (formerly `runs`) | AttemptDispatcher, Loop Engine | Poller, Ops, Web, MCP, CLI | **Immutable per-attempt lifecycle** (queued → running → completed/blocked/error). Retry/continue/rebase/refresh INSERT new rows chained via `previous_attempt_id`. |
 | `run_cost_entries` | Cost Recorder | Cost Query, Web, MCP | Append-only cost ledger with `token_source` provenance (`reported_cli`, `measured_api`, `estimated_duration`, `fallback_zero`). |
 | `checkpoints` | Loop Engine | Loop Engine (resume) | Phase artifacts for crash recovery, validated by Zod (R5). |
 | `checkpoint_quarantine` | Loop Engine | Operator, metrics | Rows rejected by the Zod validator — non-zero count is a Phase 4 gate alert. |
@@ -271,7 +271,7 @@ All persistent state lives in SQLite (WAL mode). Here's what each table tracks a
 | `mentions` | Mention Tracker | Mention Tracker | Per-commit dedup of PR mentions. |
 | `migrations` | DB init | DB init | Track applied schema migrations. |
 
-The single biggest data-model rule: **terminated attempts are read-only**. Setting `terminated_at` is a one-way latch. Retry/continue/rebase never mutate a prior attempt — they insert a new one with a fresh cost ledger and a `previous_attempt_id` pointer. This eliminates the entire "reset-counters" bug class that drove multiple FIX commits pre-Phase-1.
+The single biggest data-model rule: **terminated attempts are read-only**. Setting `terminated_at` is a one-way latch. Retry/continue/rebase/refresh never mutate a prior attempt — they insert a new one with a fresh cost ledger and a `previous_attempt_id` pointer. This eliminates the entire "reset-counters" bug class that drove multiple FIX commits pre-Phase-1.
 
 > **Watch out:** All SQL queries use parameterized statements (`?` placeholders). String interpolation in SQL is forbidden — it's a security vulnerability and a linting failure.
 

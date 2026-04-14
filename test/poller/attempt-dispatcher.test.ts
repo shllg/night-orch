@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import type Database from 'better-sqlite3'
 import type { Config } from '../../src/config/schema.js'
 import type { ForgeAdapter, ForgeIssue } from '../../src/forge/types.js'
+import type { WorktreeInfo } from '../../src/git/worktree.js'
 import { dispatchAttempt } from '../../src/poller/attempt-dispatcher.js'
 import { NotificationDispatcher } from '../../src/notify/dispatcher.js'
 import { initDatabase } from '../../src/state/db.js'
@@ -67,6 +68,7 @@ function makeConfig(dbPath: string): Config {
       maxConcurrentRuns: 1,
       baseBranch: 'main',
       branchPrefix: 'orch',
+      updateStrategy: 'merge',
       labels: {
         ready: ['orch:ready'],
         running: 'orch:running',
@@ -131,6 +133,17 @@ function makeForge(issue: ForgeIssue): ForgeAdapter {
     mergePR: vi.fn().mockResolvedValue(undefined),
     closePR: vi.fn().mockResolvedValue(undefined),
   } as unknown as ForgeAdapter
+}
+
+function makeWorktreeInfo(overrides: Partial<WorktreeInfo> = {}): WorktreeInfo {
+  return {
+    path: '/tmp/night-orch-test-worktree',
+    branchName: 'orch/1-fix-replay',
+    exists: true,
+    isClean: true,
+    rebaseConflict: false,
+    ...overrides,
+  }
 }
 
 describe('dispatchAttempt review_ready replay guard', () => {
@@ -271,7 +284,7 @@ describe('dispatchAttempt review_ready replay guard', () => {
       runManager,
       leaseManager,
       worktreeManager: {
-        ensure: vi.fn().mockResolvedValue(undefined),
+        ensure: vi.fn().mockResolvedValue(makeWorktreeInfo()),
         remove: vi.fn(),
         list: vi.fn(),
       },
@@ -319,7 +332,7 @@ describe('dispatchAttempt review_ready replay guard', () => {
       runManager,
       leaseManager,
       worktreeManager: {
-        ensure: vi.fn().mockResolvedValue(undefined),
+        ensure: vi.fn().mockResolvedValue(makeWorktreeInfo()),
         remove: vi.fn(),
         list: vi.fn(),
       },
@@ -334,5 +347,60 @@ describe('dispatchAttempt review_ready replay guard', () => {
 
     expect(result.outcome).toBe('processed')
     expect(mockExecuteLoop).toHaveBeenCalledTimes(1)
+  })
+
+  it('blocks immediately when worktree refresh conflicts before the loop starts', async () => {
+    const issue = makeIssue(['orch:ready'])
+    const forge = makeForge(issue)
+    const run = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 1,
+      issueNodeId: issue.nodeId,
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+
+    const result = await dispatchAttempt({
+      config,
+      db,
+      forge,
+      repoConfig: config.repos[0]!,
+      discoveredIssue: {
+        issue,
+        issueRepo: 'org/repo',
+        triage: { level: 'standard', reason: '' },
+        repoConfig: config.repos[0]!,
+      },
+      runManager,
+      leaseManager,
+      worktreeManager: {
+        ensure: vi.fn().mockResolvedValue(makeWorktreeInfo({ rebaseConflict: true })),
+        remove: vi.fn(),
+        list: vi.fn(),
+      },
+      notifier,
+      observability: {
+        record: vi.fn(),
+        closeRun: vi.fn().mockResolvedValue(undefined),
+      },
+      botUser: '',
+      usedPortsInPass: [],
+    })
+
+    expect(result).toEqual({ outcome: 'errored', immediateFollowupRepo: 'org/repo' })
+    expect(mockExecuteLoop).not.toHaveBeenCalled()
+
+    const updated = runManager.getById(run.id)
+    expect(updated?.status).toBe('blocked')
+    expect(updated?.manualState).toBe('awaiting_rebase_resolution')
+    expect(updated?.operationIntent).toBe('refresh')
+    expect(updated?.phaseData?.reactionType).toBe('refresh_conflict')
+    expect(updated?.controlPayload?.conflictSnapshot).toMatchObject({
+      source: 'branch_refresh',
+      strategy: 'merge',
+      branchName: 'orch/1-fix-replay',
+      baseBranch: 'main',
+    })
   })
 })

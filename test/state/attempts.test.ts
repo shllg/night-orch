@@ -278,6 +278,19 @@ describe('attempts immutability invariant', () => {
       expect(newRow.operationIntent).toBe('rebase')
     })
 
+    it('refresh preserves branch and uses refresh intent', () => {
+      const first = seedAttempt(108)
+      const result = createFollowupAttempt(db, {
+        previousAttemptId: first.id,
+        intent: 'refresh',
+        phaseData: null,
+        controlPayload: null,
+      })
+      const newRow = runs.getById(result.attemptId)!
+      expect(newRow.branchName).toBe('feat/x')
+      expect(newRow.operationIntent).toBe('refresh')
+    })
+
     it('stores phaseData and controlPayload as JSON on the new row', () => {
       const first = seedAttempt(105)
       const result = createFollowupAttempt(db, {

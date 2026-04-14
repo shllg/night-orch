@@ -7,6 +7,7 @@ import type { DiscoveredIssue } from '../discovery/discover.js'
 import type { ResolvedWorkflow } from '../loop/workflow.js'
 import type { RunContext } from '../loop/types.js'
 import type { BlockedReason } from '../loop/state.js'
+import { coerceConflictSnapshot, type ConflictSnapshot } from '../ops/conflict-types.js'
 import { assertNever, blockedReasonFromLegacy } from '../loop/state.js'
 import type { NotificationPayload } from '../notify/types.js'
 import type { ForgeAdapter } from '../forge/types.js'
@@ -303,6 +304,7 @@ export interface FollowupPromptFeedback {
   type: string
   summary: string
   context: string
+  conflictSnapshot?: ConflictSnapshot | null
 }
 
 export function extractFollowupPromptFeedback(
@@ -317,7 +319,8 @@ export function extractFollowupPromptFeedback(
   const summary = typeof phaseData['reactionSummary'] === 'string' && phaseData['reactionSummary'].trim().length > 0
     ? phaseData['reactionSummary']
     : 'Follow-up context available'
-  return { type, summary, context }
+  const conflictSnapshot = coerceConflictSnapshot(phaseData['reactionConflictSnapshot'])
+  return { type, summary, context, conflictSnapshot }
 }
 
 export function resolveOperationIntent(run: RunRecord | null | undefined): RunOperationIntent {
@@ -327,7 +330,8 @@ export function resolveOperationIntent(run: RunRecord | null | undefined): RunOp
   if (run.status === 'queued') {
     if (run.blockReason === 'merge_conflict') return 'retry'
     const reactionType = run.phaseData?.reactionType
-    if (reactionType === 'rebase' || reactionType === 'merge_conflict') return 'rebase'
+    if (reactionType === 'rebase') return 'rebase'
+    if (reactionType === 'merge_conflict' || reactionType === 'refresh') return 'refresh'
     if (typeof reactionType === 'string' && reactionType.trim().length > 0) return 'continue'
   }
 
@@ -367,7 +371,7 @@ function getIssueQueuePriority(
   const queuedRun = runManager.getLatestQueuedByIssue(repo, issueNumber)
   if (!queuedRun) return 3
   const operationIntent = resolveOperationIntent(queuedRun)
-  if (operationIntent === 'rebase') return 0
+  if (operationIntent === 'rebase' || operationIntent === 'refresh') return 0
   if (operationIntent === 'continue' || operationIntent === 'retry') return 1
   return 2
 }

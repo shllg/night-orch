@@ -7,13 +7,14 @@ import { nowUtcIso } from '../utils/time.js'
  * attempt for an issue; retry/continue/rebase/rediscover all INSERT a new
  * row linked to the previous attempt via `previous_attempt_id`.
  */
-export type AttemptIntent = 'initial' | 'retry' | 'continue' | 'rebase' | 'rediscover'
+export type AttemptIntent = 'initial' | 'retry' | 'continue' | 'rebase' | 'refresh' | 'rediscover'
 
 export const ATTEMPT_INTENTS: readonly AttemptIntent[] = [
   'initial',
   'retry',
   'continue',
   'rebase',
+  'refresh',
   'rediscover',
 ] as const
 
@@ -166,6 +167,7 @@ export interface CreateFollowupAttemptInput {
    *  - retry: true  (retry starts from base branch)
    *  - continue: false (continue reuses the prior branch + PR)
    *  - rebase: false (rebase reuses the prior branch)
+   *  - refresh: false (refresh reuses the prior branch)
    *  - rediscover: true (treated like a fresh discovery pass)
    */
   resetBranch?: boolean
@@ -208,6 +210,7 @@ function defaultResetBranch(intent: FollowupIntent): boolean {
       return true
     case 'continue':
     case 'rebase':
+    case 'refresh':
       return false
   }
 }

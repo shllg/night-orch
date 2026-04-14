@@ -13,7 +13,7 @@ import {
 } from '../loop/state.js'
 
 export type RunStatus = 'queued' | 'running' | 'blocked' | 'review_ready' | 'error' | 'completed'
-export type RunOperationIntent = 'auto' | 'continue' | 'retry' | 'rebase'
+export type RunOperationIntent = 'auto' | 'continue' | 'retry' | 'rebase' | 'refresh'
 export type RunManualState = 'none' | 'awaiting_rebase_resolution'
 
 export interface RunRecord {
@@ -625,7 +625,9 @@ function safeParseRecordJson(
 }
 
 function coerceOperationIntent(value: string | null | undefined): RunOperationIntent {
-  return value === 'continue' || value === 'retry' || value === 'rebase' ? value : 'auto'
+  return value === 'continue' || value === 'retry' || value === 'rebase' || value === 'refresh'
+    ? value
+    : 'auto'
 }
 
 function coerceManualState(value: string | null | undefined): RunManualState {

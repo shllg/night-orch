@@ -1,5 +1,6 @@
 import type { TriageLevel } from '../discovery/triage.js'
 import type { AgentEvent } from '../events/types.js'
+import type { ConflictSnapshot } from '../ops/conflict-types.js'
 
 export type AgentRole = 'planner' | 'coder' | 'reviewer'
 export type ReviewVerdict = 'APPROVED' | 'CHANGES_REQUIRED' | 'BLOCKED'
@@ -128,6 +129,7 @@ export interface PromptContext {
     type: string
     summary: string | null
     context: string
+    conflictSnapshot?: ConflictSnapshot | null
   } | null
   /** True when this coder invocation is a retry after producing no diff. */
   emptyDiffRetry?: boolean

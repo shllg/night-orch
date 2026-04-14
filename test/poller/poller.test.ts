@@ -1027,7 +1027,7 @@ describe('pollOnce', () => {
     expect(loopCtx.issueNumber).toBe(41)
   })
 
-  it('posts a blocked status comment when rebase conflicts', async () => {
+  it('posts a blocked status comment when branch refresh conflicts', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([
       {
         issue: { number: 13, nodeId: '', title: 'Follow-up', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
@@ -1064,7 +1064,7 @@ describe('pollOnce', () => {
     expect(mockExecuteLoop).not.toHaveBeenCalled()
 
     const statusComment = mockCommentOnIssue.mock.calls.find(
-      (call) => typeof call[2] === 'string' && call[2].includes('Rebase failed due to merge conflicts'),
+      (call) => typeof call[2] === 'string' && call[2].includes('Branch refresh failed due to merge conflicts'),
     )
     expect(statusComment).toBeDefined()
     expect(statusComment?.[2]).toContain('Use /orch continue')

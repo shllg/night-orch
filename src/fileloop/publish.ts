@@ -30,7 +30,7 @@ export async function publishFileLoopSession(args: {
     deferredNotes,
   })
 
-  await pushBranch(args.session.worktreePath, args.session.branch)
+  await pushBranch(args.session.worktreePath, args.session.branch, args.repoConfig.updateStrategy)
 
   if (!args.verifyPassed && args.onFailure === 'no-pr') {
     logger.warn({ repo: args.repoConfig.repo, sessionId: args.session.id }, 'Finalize verification failed and policy is no-pr')

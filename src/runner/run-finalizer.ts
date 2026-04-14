@@ -5,6 +5,7 @@ import type { ForgeAdapter } from '../forge/types.js'
 import type { RunManager } from '../state/runs.js'
 import { publishPR } from '../publishing/publisher.js'
 import { MergeConflictError } from '../publishing/push.js'
+import { buildConflictSnapshot } from '../ops/conflict-snapshot.js'
 import { transitionLabels } from '../labels/manager.js'
 import { buildLabelConfig } from '../labels/config.js'
 import { upsertBotComment } from '../forge/bot-comment.js'
@@ -109,10 +110,35 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
       const errorMessage = toErrorMessage(err)
 
       if (err instanceof MergeConflictError) {
+        const snapshot = buildConflictSnapshot({
+          source: 'publish_push',
+          kind: finalCtx.repoConfig.updateStrategy === 'rebase' ? 'rebase' : 'merge',
+          strategy: finalCtx.repoConfig.updateStrategy,
+          summary: err.message,
+          branchName: finalCtx.branchName,
+          baseBranch: finalCtx.repoConfig.baseBranch,
+        })
         runManager.update(runId, {
           status: 'blocked',
           iterationCount: finalCtx.iteration,
           blockReason: 'merge_conflict',
+          manualState: 'awaiting_rebase_resolution',
+          controlPayload: {
+            issueRepo,
+            preserveBranchState: true,
+            conflictSummary: err.message,
+            conflictFiles: [],
+            conflictExcerpts: [],
+            conflictSnapshot: snapshot,
+            requestedAt: nowUtcIso(),
+          },
+          phaseData: {
+            issueRepo,
+            reactionType: 'publish_conflict',
+            reactionSummary: 'Publish failed due to branch synchronization conflicts',
+            reactionContext: err.message,
+            reactionConflictSnapshot: snapshot,
+          },
           lastError: err.message,
           endedAt: nowUtcIso(),
         })

@@ -54,7 +54,7 @@ export async function publishPR(
 ): Promise<PublishResult> {
   // 1. Push branch
   try {
-    await pushBranch(ctx.worktreePath, ctx.branchName)
+    await pushBranch(ctx.worktreePath, ctx.branchName, ctx.repoConfig.updateStrategy)
   } catch (pushErr) {
     const sanitized = sanitizeError(pushErr)
     logger.error(

@@ -83,7 +83,7 @@ describe('handleReaction', () => {
     return row.id
   }
 
-  it('merge_conflict reaction creates a new attempt with intent=rebase and terminates the previous one', async () => {
+  it('merge_conflict reaction creates a new attempt with intent=refresh and terminates the previous one', async () => {
     const prevId = seedReviewReadyRun()
     const forge = makeForge()
 
@@ -100,6 +100,7 @@ describe('handleReaction', () => {
     expect(newRun!.status).toBe('queued')
     expect(newRun!.branchName).toBe('feature/x')
     expect(newRun!.prNumber).toBe(42)
+    expect(newRun!.operationIntent).toBe('refresh')
 
     const controlPayload = db
       .prepare('SELECT control_payload FROM runs WHERE id = ?')

@@ -43,7 +43,7 @@ function makeRun(overrides: Partial<RunRecord> = {}): RunRecord {
 
 describe('resolveOperationIntent', () => {
   it('returns explicit intents unchanged', () => {
-    const intents: RunOperationIntent[] = ['continue', 'retry', 'rebase']
+    const intents: RunOperationIntent[] = ['continue', 'retry', 'rebase', 'refresh']
     for (const intent of intents) {
       expect(resolveOperationIntent(makeRun({ operationIntent: intent }))).toBe(intent)
     }
@@ -54,7 +54,7 @@ describe('resolveOperationIntent', () => {
     expect(resolveOperationIntent(undefined)).toBe('auto')
   })
 
-  it('maps queued merge conflicts to retry', () => {
+  it('maps queued blocked merge conflicts to retry', () => {
     expect(
       resolveOperationIntent(
         makeRun({ status: 'queued', blockReason: 'merge_conflict' }),
@@ -62,7 +62,7 @@ describe('resolveOperationIntent', () => {
     ).toBe('retry')
   })
 
-  it('maps queued rebase followups to rebase', () => {
+  it('maps queued rebase followups to their refresh/rebase intents', () => {
     expect(
       resolveOperationIntent(
         makeRun({ status: 'queued', phaseData: { reactionType: 'rebase' } }),
@@ -72,7 +72,12 @@ describe('resolveOperationIntent', () => {
       resolveOperationIntent(
         makeRun({ status: 'queued', phaseData: { reactionType: 'merge_conflict' } }),
       ),
-    ).toBe('rebase')
+    ).toBe('refresh')
+    expect(
+      resolveOperationIntent(
+        makeRun({ status: 'queued', phaseData: { reactionType: 'refresh' } }),
+      ),
+    ).toBe('refresh')
   })
 
   it('maps other queued followup reactions to continue', () => {

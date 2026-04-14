@@ -22,6 +22,7 @@ import { createHash } from 'node:crypto'
 import { getRemediation } from '../workers/auth-check.js'
 import { logger } from '../utils/logger.js'
 import { buildPlanningPrdPath, isPlanningIssue } from '../planning/mode.js'
+import { coerceConflictSnapshot } from '../ops/conflict-types.js'
 
 export interface StepDependencies {
   adapters: Record<string, WorkerAdapter>
@@ -322,8 +323,9 @@ function parseFollowupContext(value: unknown): PromptContext['followup'] {
   const summary = typeof candidate['summary'] === 'string' && candidate['summary'].trim().length > 0
     ? candidate['summary']
     : null
+  const conflictSnapshot = coerceConflictSnapshot(candidate['conflictSnapshot'])
 
-  return { type, summary, context }
+  return { type, summary, context, conflictSnapshot }
 }
 
 /**

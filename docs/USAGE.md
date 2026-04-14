@@ -503,6 +503,8 @@ Each poll cycle scans `review_ready` PRs for new events. When a reaction is dete
 2. The issue is transitioned back to `queued` with reaction context
 3. On the next poll cycle, the next pass receives the reaction context and can address it
 
+Merge-conflict reactions are treated differently from ordinary review follow-ups. Instead of dropping straight into a generic continue pass, night-orch now queues a dedicated branch refresh attempt that respects the repo's `updateStrategy` (`merge` or `rebase`). If that refresh conflicts, the run blocks with a durable conflict snapshot so the later `/orch continue` pass sees the actual files, SHAs, and excerpts that caused the conflict.
+
 This happens automatically — no configuration needed beyond the standard setup. Reactions are identified by the content of the comment/review, not by its author, so feedback you post under the same GitHub identity that runs night-orch is still picked up. See [Single-user deployment](./single-user.md) for the details.
 
 ---
@@ -615,7 +617,7 @@ Options: `--immediate` (process now instead of queuing), `--strategy merge|rebas
 
 ### `night-orch rebase <repo> <issue>`
 
-Queue an explicit git rebase of the PR branch onto the latest base branch, then run verify commands to check if code adjustments are needed. If verify fails after a successful rebase, the issue is automatically re-queued for the coder to fix. When `autoResolveConflicts.enabled` and `ai.internal.features.conflictResolver` are both on, night-orch attempts one bounded AI-assisted conflict resolution pass before blocking. If the resolver fails, the run falls back to the normal `merge_conflict` block path and waits for either `continue` or `retry`.
+Queue an explicit git rebase of the PR branch onto the latest base branch, then run verify commands to check if code adjustments are needed. This is the manual, force-the-update path; automatic PR merge-conflict reactions use the repo's normal branch refresh strategy instead. If verify fails after a successful rebase, the issue is automatically re-queued for the coder to fix. When `autoResolveConflicts.enabled` and `ai.internal.features.conflictResolver` are both on, night-orch attempts one bounded AI-assisted conflict resolution pass before blocking. If the resolver fails, the run falls back to the normal `merge_conflict` block path and waits for either `continue` or `retry`.
 
 Options: `--strategy merge|rebase` (override the action strategy for this manual rebase request). `merge` merges the latest base branch into the work branch; `rebase` replays commits and is still the default behavior for explicit rebase runs. Successful queueing also signals any running daemon that uses the same database to wake for the next cycle immediately.
 
@@ -625,7 +627,7 @@ Also available as a comment command: `/orch rebase` (with `--check` by default).
 
 Queue a context-aware second pass for blocked/review-ready/errored work. Night-orch collects the latest PR context (review comments, CI failures, mergeability state) and resumes the existing branch with that context.
 
-After an explicit rebase conflicts, `/orch continue` keeps the current branch state and asks the agent to resolve the conflict. Use `/orch retry` instead when you want to discard the current branch state and restart from the latest base branch.
+After a branch refresh, explicit rebase, or publish/push reconciliation conflicts, `/orch continue` keeps the current branch state and asks the agent to resolve the conflict. The follow-up prompt now includes the preserved conflict snapshot rather than only a lossy text summary. Use `/orch retry` instead when you want to discard the current branch state and restart from the latest base branch.
 
 For review-ready issues, `continue`, `retry`, and `rebase` are the supported re-entry paths. Manually re-adding `orch:ready` does not start another pass.
 

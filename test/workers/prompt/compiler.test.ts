@@ -184,6 +184,49 @@ describe('compilePrompt', () => {
     expect(userPrompt).toContain('<context>CI')
   })
 
+  it('includes structured conflict snapshots without stripping excerpts', () => {
+    const ctx = makeContext({
+      followup: {
+        type: 'refresh_conflict',
+        summary: 'Branch refresh conflicted',
+        context: 'Refresh conflicted with upstream changes.',
+        conflictSnapshot: {
+          schemaVersion: 1,
+          capturedAt: '2026-04-14T00:00:00Z',
+          source: 'branch_refresh',
+          kind: 'merge',
+          strategy: 'merge',
+          summary: 'Refresh against origin/main hit conflicts in 1 file.',
+          branchName: 'orch/42-fix',
+          baseBranch: 'main',
+          branchHeadSha: 'abc123',
+          baseHeadSha: 'def456',
+          files: ['src/main.ts'],
+          excerpts: [{
+            path: 'src/main.ts',
+            preview: '<<<<<<< ours\nconst shared = 1\n=======\nconst shared = 2\n>>>>>>> theirs',
+            ours: 'const shared = 1',
+            theirs: 'const shared = 2',
+          }],
+          resolution: {
+            attempted: true,
+            outcome: 'unresolved',
+            files: ['src/main.ts'],
+          },
+        },
+      },
+    })
+
+    const { userPrompt } = compilePrompt(null, '', ctx)
+
+    expect(userPrompt).toContain('## Conflict Snapshot')
+    expect(userPrompt).toContain('<untrusted_conflict_snapshot>')
+    expect(userPrompt).toContain('<source>branch_refresh</source>')
+    expect(userPrompt).toContain('<file>src/main.ts</file>')
+    expect(userPrompt).toContain('&lt;&lt;&lt;&lt;&lt;&lt;&lt; ours')
+    expect(userPrompt).toContain('<resolver_attempt>')
+  })
+
   it('formats follow-up template substitutions as untrusted xml', () => {
     const ctx = makeContext({
       followup: {

@@ -5,6 +5,7 @@ import { autoRebase, type RebaseConflictAnalysis, type RebaseTarget } from './re
 import type { UpdateStrategy } from '../git/worktree.js'
 import { runVerifyCommands, allVerifyPassed } from '../loop/verifier.js'
 import { buildVerifierEnv } from '../workers/env.js'
+import type { VerifyResult } from '../workers/types.js'
 import { RunManager } from '../state/runs.js'
 import { createFollowupAttempt } from '../state/attempts.js'
 import { recordUserAction } from '../state/run-log-events.js'
@@ -144,6 +145,7 @@ export async function executeRebase(
 ): Promise<{
   rebased: boolean
   verifyPassed: boolean
+  verifyResults?: VerifyResult[]
   conflict: boolean
   conflictAnalysis?: RebaseConflictAnalysis
   resolution?: ConflictResolutionMetadata
@@ -186,13 +188,14 @@ export async function executeRebase(
   })
 
   if (rebaseResult.result === 'up_to_date') {
-    return { rebased: false, verifyPassed: true, conflict: false, resolution: rebaseResult.resolution }
+    return { rebased: false, verifyPassed: true, verifyResults: [], conflict: false, resolution: rebaseResult.resolution }
   }
 
   if (rebaseResult.result === 'conflict') {
     return {
       rebased: false,
       verifyPassed: false,
+      verifyResults: [],
       conflict: true,
       conflictAnalysis: rebaseResult.conflictAnalysis,
       resolution: rebaseResult.resolution,
@@ -203,6 +206,7 @@ export async function executeRebase(
     return {
       rebased: false,
       verifyPassed: false,
+      verifyResults: [],
       conflict: false,
       resolution: rebaseResult.resolution,
       error: rebaseResult.error,
@@ -211,13 +215,14 @@ export async function executeRebase(
 
   // Rebased successfully — run verify
   if (!checkAfter || verifyCommands.length === 0) {
-    return { rebased: true, verifyPassed: true, conflict: false, resolution: rebaseResult.resolution }
+    return { rebased: true, verifyPassed: true, verifyResults: [], conflict: false, resolution: rebaseResult.resolution }
   }
 
   const verifyResults = await runVerifyCommands(worktreePath, verifyCommands, buildVerifierEnv())
   return {
     rebased: true,
     verifyPassed: allVerifyPassed(verifyResults),
+    verifyResults,
     conflict: false,
     resolution: rebaseResult.resolution,
   }
