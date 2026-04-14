@@ -52,6 +52,14 @@ describe('autoRebase integration', () => {
     git(tmpDir, 'init', '--bare', remotePath)
     git(tmpDir, 'clone', remotePath, repoPath)
 
+    // Pin identity on the local repo so autoRebase's runGit (which does not
+    // inherit the test helper's per-invocation env) can still create commits
+    // during `git rebase --continue`. Without this, CI runners without a
+    // global git user fail with "Author identity unknown".
+    git(repoPath, 'config', 'user.name', 'night-orch')
+    git(repoPath, 'config', 'user.email', 'night-orch@example.com')
+    git(repoPath, 'config', 'commit.gpgsign', 'false')
+
     writeFileSync(join(repoPath, 'conflict.ts'), [
       'export const shared = "base"',
       'export const feature = "base"',
