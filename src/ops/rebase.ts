@@ -367,6 +367,15 @@ export async function collectFullConflictSources(
 
   for (const filePath of files) {
     const mergedBuffer = await readConflictFileBuffer(worktreePath, filePath)
+    if (!mergedBuffer) {
+      return {
+        sources,
+        skip: {
+          path: filePath,
+          reason: 'unreadable',
+        },
+      }
+    }
     const mergedStatus = classifyConflictFileBuffer(mergedBuffer)
     if (mergedStatus) {
       return {
