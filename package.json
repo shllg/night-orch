@@ -26,6 +26,7 @@
     "build": "pnpm web:build && tsc -p tsconfig.json",
     "install-global": "pnpm web:build && tsc -p tsconfig.json && pnpm link --global",
     "dev": "tsx src/cli/index.ts",
+    "dev:web-only": "pnpm web:build && night-orch demo --port 3250",
     "storybook": "storybook dev -p 6006",
     "storybook:build": "storybook build",
     "storybook:typecheck": "tsc -p .storybook/tsconfig.json --noEmit",

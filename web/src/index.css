@@ -1,4 +1,10 @@
 @import "tailwindcss";
+/* Shared design-system primitives live under src/components/ (outside
+   this web/ Vite root). Without this @source directive Tailwind v4
+   only scans web/src, so DaisyUI-emitted classes used exclusively by
+   shared primitives (btn, tabs, select, textarea, collapse, …)
+   would be missing from the built stylesheet. */
+@source "../../src/components";
 @plugin "daisyui" {
   logs: false;
 }
