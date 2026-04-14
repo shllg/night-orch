@@ -4,11 +4,13 @@ const SIZE_WEB_CLASS: Record<TextInputSize, string | null> = {
   xs: 'input-xs',
   sm: 'input-sm',
   md: null,
+  lg: 'input-lg',
 }
 
 const TONE_WEB_CLASS: Record<TextInputTone, string | null> = {
   neutral: null,
   info: 'input-info',
+  success: 'input-success',
   warning: 'input-warning',
   error: 'input-error',
 }

@@ -18,7 +18,7 @@ type Story = StoryObj<typeof meta>
 
 export const Default: Story = {}
 
-const TONES: TextInputTone[] = ['neutral', 'info', 'warning', 'error']
+const TONES: TextInputTone[] = ['neutral', 'info', 'success', 'warning', 'error']
 
 export const ToneStates: Story = {
   render: (args) => (
@@ -30,26 +30,36 @@ export const ToneStates: Story = {
           tone={tone}
           defaultValue={undefined}
           value={`tone: ${tone}`}
-          onChange={() => {
-            // Stories keep this controlled input read-only for matrix previews.
-          }}
+          onChange={() => {}}
         />
       ))}
+    </div>
+  ),
+}
+
+export const Disabled: Story = {
+  render: (args) => (
+    <div className="grid max-w-xl gap-2">
+      <TextInputWeb
+        {...args}
+        defaultValue={undefined}
+        value="disabled neutral"
+        disabled
+        onChange={() => {}}
+      />
       <TextInputWeb
         {...args}
         tone="error"
         defaultValue={undefined}
-        value="disabled"
+        value="disabled error"
         disabled
-        onChange={() => {
-          // Stories keep this controlled input read-only for matrix previews.
-        }}
+        onChange={() => {}}
       />
     </div>
   ),
 }
 
-const SIZES: TextInputSize[] = ['xs', 'sm', 'md']
+const SIZES: TextInputSize[] = ['xs', 'sm', 'md', 'lg']
 
 export const SizeMatrix: Story = {
   render: (args) => (
@@ -61,11 +71,31 @@ export const SizeMatrix: Story = {
           size={size}
           defaultValue={undefined}
           value={`size: ${size}`}
-          onChange={() => {
-            // Stories keep this controlled input read-only for matrix previews.
-          }}
+          onChange={() => {}}
         />
       ))}
+    </div>
+  ),
+}
+
+export const Mobile: Story = {
+  render: (args) => (
+    <div className="grid max-w-[390px] gap-2 rounded-xl border border-base-300/60 p-4">
+      <TextInputWeb
+        {...args}
+        size="md"
+        defaultValue={undefined}
+        value="mobile sized input"
+        onChange={() => {}}
+      />
+      <TextInputWeb
+        {...args}
+        tone="error"
+        size="md"
+        defaultValue={undefined}
+        value="invalid entry"
+        onChange={() => {}}
+      />
     </div>
   ),
 }

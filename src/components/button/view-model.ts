@@ -11,6 +11,8 @@ const TONE_WEB_CLASS: Record<ButtonTone, string> = {
   neutral: 'btn-neutral',
   primary: 'btn-primary',
   info: 'btn-info',
+  success: 'btn-success',
+  warning: 'btn-warning',
   error: 'btn-error',
   ghost: 'btn-ghost',
 }
@@ -19,6 +21,7 @@ const SIZE_WEB_CLASS: Record<ButtonSize, string | null> = {
   xs: 'btn-xs',
   sm: 'btn-sm',
   md: null,
+  lg: 'btn-lg',
 }
 
 const SHAPE_WEB_CLASS: Record<ButtonShape, string | null> = {
@@ -30,6 +33,8 @@ const TONE_TUI_COLOR: Record<ButtonTone, ButtonTuiColor> = {
   neutral: 'white',
   primary: 'blue',
   info: 'cyan',
+  success: 'green',
+  warning: 'yellow',
   error: 'red',
   ghost: 'gray',
 }

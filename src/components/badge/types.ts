@@ -1,15 +1,7 @@
 import type { HTMLAttributes, ReactNode } from 'react'
+import type { Tone } from '../shared-types.js'
 
-export type BadgeTone =
-  | 'neutral'
-  | 'primary'
-  | 'secondary'
-  | 'accent'
-  | 'info'
-  | 'success'
-  | 'warning'
-  | 'error'
-  | 'ghost'
+export type BadgeTone = Tone
 
 export type BadgeVariant = 'solid' | 'outline'
 export type BadgeSize = 'xs' | 'sm' | 'md'

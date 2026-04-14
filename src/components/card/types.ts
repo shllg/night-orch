@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
+import type { Tone } from '../shared-types.js'
 
-export type CardTone = 'neutral' | 'info' | 'success' | 'warning' | 'error'
+export type CardTone = Extract<Tone, 'neutral' | 'info' | 'success' | 'warning' | 'error'>
 
 export interface CardProps {
   title?: string

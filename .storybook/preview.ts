@@ -17,6 +17,11 @@ const preview: Preview = {
     controls: {
       expanded: true,
     },
+    options: {
+      storySort: {
+        order: ['00 — Overview', 'Components'],
+      },
+    },
   },
   decorators: [
     (Story) =>
