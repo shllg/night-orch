@@ -58,7 +58,7 @@ export function RunsPanel({
               </span>
             </div>
             <select
-              className="select select-bordered select-sm w-full bg-base-100/80"
+              className="select select-sm w-full bg-base-100/80"
               value={selectedRepo}
               onChange={(event) => onSelectedRepoChange(event.target.value)}
             >
