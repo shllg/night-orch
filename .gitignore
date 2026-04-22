@@ -17,3 +17,4 @@ node_modules/
 *.db-shm
 .claude/hook-state/
 .playwright-mcp/*
+.worktrees/
