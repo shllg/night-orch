@@ -5,7 +5,7 @@ import { CostTracker } from '../loop/cost.js'
 import { buildLabelConfig } from '../labels/config.js'
 import { transitionLabels } from '../labels/manager.js'
 import { LeaseManager } from '../state/leases.js'
-import { createFollowupAttempt } from '../state/attempts.js'
+import { AttemptChainLimitError, AttemptTerminatedError, createFollowupAttempt } from '../state/attempts.js'
 import { resolveIssueRepo } from '../utils/issue-repo.js'
 import { logger } from '../utils/logger.js'
 import { markerTag, upsertBotComment } from '../forge/bot-comment.js'
@@ -41,7 +41,8 @@ export async function scanCostBlockedRuns(
        FROM runs
        WHERE repo = ?
          AND status = 'blocked'
-         AND block_reason = 'cost_limit'`,
+         AND block_reason = 'cost_limit'
+         AND terminated_at IS NULL`,
     )
     .all(repoConfig.repo) as Array<{
       id: string
@@ -92,6 +93,7 @@ export async function scanCostBlockedRuns(
         previousAttemptId: runId,
         intent: 'continue',
         resetBranch: false,
+        maxSequenceNumber: config.loop.maxAttemptChainLength,
         phaseData,
         controlPayload: {
           source: 'cost_auto_resume',
@@ -106,7 +108,20 @@ export async function scanCostBlockedRuns(
         leaseManager.release(issueRepo, issueNumber)
       }
     })
-    transition()
+
+    try {
+      transition()
+    } catch (err) {
+      if (err instanceof AttemptChainLimitError || err instanceof AttemptTerminatedError) {
+        logger.warn(
+          { runId, repo: row.repo, issue: issueNumber, error: err.message },
+          'Cost-blocked run cannot auto-resume due to attempt-chain guard — keeping blocked',
+        )
+        stillBlocked++
+        continue
+      }
+      throw err
+    }
 
     // Transition labels blocked→queued
     try {

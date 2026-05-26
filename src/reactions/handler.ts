@@ -16,6 +16,7 @@ export interface ReactionHandlerDeps {
   forge: ForgeAdapter
   runManager: RunManager
   repoConfig: Pick<RepoConfig, 'labels' | 'kanban'>
+  maxAttemptChainLength?: number
 }
 
 /**
@@ -61,6 +62,9 @@ export async function handleReaction(
         previousAttemptId: run.id,
         intent: 'refresh',
         resetBranch: false,
+        ...(deps.maxAttemptChainLength !== undefined
+          ? { maxSequenceNumber: deps.maxAttemptChainLength }
+          : {}),
         phaseData: {
           ...clearResumeDecisionArtifacts(existingPhaseData),
           issueRepo,

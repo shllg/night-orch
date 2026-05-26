@@ -158,11 +158,16 @@ describe('runtime settings', () => {
 
   it('lists non-project runtime settings with base values by default', () => {
     const settings = listRuntimeSettings(baseConfig, db)
-    expect(settings).toHaveLength(56)
+    expect(settings).toHaveLength(61)
     expect(settings.map((s) => s.key)).toContain('security.maxCostPerRunUsd')
     expect(settings.map((s) => s.key)).toContain('github.tokenEnv')
     expect(settings.map((s) => s.key)).toContain('cost.subscriptionMetered')
     expect(settings.map((s) => s.key)).toContain('workerProfiles')
+    expect(settings.map((s) => s.key)).toContain('loop.maxAttemptChainLength')
+    expect(settings.map((s) => s.key)).toContain('loop.maxRunTokens')
+    expect(settings.map((s) => s.key)).toContain('loop.maxIssueTokens')
+    expect(settings.map((s) => s.key)).toContain('loop.maxDailyTokens')
+    expect(settings.map((s) => s.key)).toContain('loop.maxRunWallClockMinutes')
 
     const poll = settings.find((setting) => setting.key === 'github.pollIntervalSeconds')
     expect(poll).toMatchObject({

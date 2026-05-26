@@ -6,6 +6,7 @@ import type Database from 'better-sqlite3'
 import { initDatabase } from '../../src/state/db.js'
 import { RunManager } from '../../src/state/runs.js'
 import {
+  AttemptChainLimitError,
   AttemptNotFoundError,
   AttemptTerminatedError,
   assertMutable,
@@ -349,6 +350,31 @@ describe('attempts immutability invariant', () => {
       expect(chain.map((a) => a.sequenceNumber)).toEqual([1, 2, 3])
       expect(chain[2]!.previousAttemptId).toBe(second.attemptId)
       expect(chain[1]!.previousAttemptId).toBe(first.id)
+    })
+
+    it('blocks creation when attempt chain ceiling is reached', () => {
+      const first = seedAttempt(109)
+      const second = createFollowupAttempt(db, {
+        previousAttemptId: first.id,
+        intent: 'retry',
+        phaseData: null,
+        controlPayload: null,
+      })
+      const third = createFollowupAttempt(db, {
+        previousAttemptId: second.attemptId,
+        intent: 'retry',
+        phaseData: null,
+        controlPayload: null,
+      })
+
+      expect(() =>
+        createFollowupAttempt(db, {
+          previousAttemptId: third.attemptId,
+          intent: 'retry',
+          phaseData: null,
+          controlPayload: null,
+        }),
+      ).toThrow(AttemptChainLimitError)
     })
   })
 

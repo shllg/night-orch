@@ -29,6 +29,7 @@ export function resetIssueCost(
   db: Database.Database,
   repo: string,
   issueNumber: number,
+  options: { maxAttemptChainLength?: number } = {},
 ): CostResetResult {
   const runManager = new RunManager(db)
   const run = runManager.getByRepoAndIssue(repo, issueNumber)
@@ -42,6 +43,9 @@ export function resetIssueCost(
     previousAttemptId: run.id,
     intent: 'continue',
     resetBranch: false,
+    ...(options.maxAttemptChainLength !== undefined
+      ? { maxSequenceNumber: options.maxAttemptChainLength }
+      : {}),
     phaseData: run.phaseData,
     controlPayload: {
       source: 'cost_reset',

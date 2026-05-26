@@ -34,6 +34,7 @@ export interface QueueContinueOptions {
   dryRun?: boolean
   strategyOverride?: UpdateStrategy
   actor?: string
+  maxAttemptChainLength?: number
 }
 
 export async function queueContinue(
@@ -94,6 +95,9 @@ export async function queueContinue(
           previousAttemptId: run.id,
           intent: 'continue',
           resetBranch: false,
+          ...(options.maxAttemptChainLength !== undefined
+            ? { maxSequenceNumber: options.maxAttemptChainLength }
+            : {}),
           phaseData: {
             ...existingPhaseData,
             issueRepo,

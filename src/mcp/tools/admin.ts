@@ -42,7 +42,9 @@ export async function handleCostReset(
   deps: MCPDependencies,
 ): Promise<unknown> {
   assertMcpMutationAuth(args.authToken, deps)
-  const result = resetIssueCost(deps.db, args.repo, args.issueNumber)
+  const result = resetIssueCost(deps.db, args.repo, args.issueNumber, {
+    maxAttemptChainLength: deps.config.loop.maxAttemptChainLength,
+  })
   return {
     success: true,
     runId: result.newRunId,

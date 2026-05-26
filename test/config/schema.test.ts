@@ -95,6 +95,11 @@ describe('ConfigSchema', () => {
     if (result.success) {
       expect(result.data.github.pollIntervalSeconds).toBe(300)
       expect(result.data.loop.maxReviewIterations).toBe(4)
+      expect(result.data.loop.maxAttemptChainLength).toBe(3)
+      expect(result.data.loop.maxRunTokens).toBe(0)
+      expect(result.data.loop.maxIssueTokens).toBe(0)
+      expect(result.data.loop.maxDailyTokens).toBe(0)
+      expect(result.data.loop.maxRunWallClockMinutes).toBe(0)
       expect(result.data.fileLoop.enabled).toBe(false)
       expect(result.data.fileLoop.maxDurationMinutes).toBe(480)
       expect(result.data.security.maxDailyCostUsd).toBe(50)

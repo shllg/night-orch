@@ -539,6 +539,11 @@ export const ConfigSchema = z.object({
   loop: z.object({
     maxReviewIterations: z.number().positive().default(4),
     maxTotalAgentPasses: z.number().positive().default(10),
+    maxAttemptChainLength: z.number().int().min(1).max(20).default(3),
+    maxRunTokens: z.number().int().min(0).default(0),
+    maxIssueTokens: z.number().int().min(0).default(0),
+    maxDailyTokens: z.number().int().min(0).default(0),
+    maxRunWallClockMinutes: z.number().nonnegative().default(0),
     stopOnPlannerFailure: z.boolean().default(true),
     requireVerificationPass: z.boolean().default(true),
     reviewApprovalKeyword: z.string().default('APPROVED'),

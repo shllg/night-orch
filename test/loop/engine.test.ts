@@ -133,12 +133,22 @@ function makeConfig(): Config {
     loop: {
       maxReviewIterations: 4,
       maxTotalAgentPasses: 10,
+      maxAttemptChainLength: 3,
+      maxRunTokens: 0,
+      maxIssueTokens: 0,
+      maxDailyTokens: 0,
+      maxRunWallClockMinutes: 0,
       stopOnPlannerFailure: true,
       requireVerificationPass: true,
       reviewApprovalKeyword: 'APPROVED',
       reviewNeedsChangesKeyword: 'CHANGES_REQUIRED',
       blockOnAmbiguousReview: true,
+      maxAutoRetries: 3,
       maxEmptyDiffRetries: 2,
+      maxConsecutiveBlocks: 4,
+      decompose: false,
+      maxSubtasks: 5,
+      maxConcurrentSubtasks: 3,
     },
     security: { maxChangedFiles: 50, maxChangedLines: 5000, maxDailyCostUsd: 50, maxCostPerRunUsd: 10 },
     cost: {
@@ -562,6 +572,156 @@ describe('executeLoop', () => {
     expect(result.terminalStatus).toBe('publish')
     expect(result.blockReason).toBeNull()
     expect(result.estimatedCostUsd).toBe(250)
+  })
+
+  it('blocks before worker execution when run token budget is already exhausted', async () => {
+    db.prepare(
+      'UPDATE runs SET prompt_tokens = ?, completion_tokens = ?, cache_read_tokens = ? WHERE id = ?',
+    ).run(80, 30, 0, 'run-test-1')
+
+    const config = makeConfig()
+    config.loop.maxRunTokens = 100
+    const plannerAdapter = makeMockAdapter([makePlannerResult()])
+
+    const deps: LoopDependencies = {
+      db,
+      config,
+      adapters: {
+        planner: plannerAdapter,
+        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: makeMockAdapter([makeReviewerResult('APPROVED')]),
+      },
+      workflow: DEFAULT_WORKFLOW,
+    }
+
+    const result = await executeLoop(makeCtx(), deps)
+
+    expect(result.terminalStatus).toBe('blocked')
+    expect(result.blockReason).toBe('iteration_limit')
+    expect(result.stepOutputs['blockMessage']).toBe('Run token budget exceeded (110 >= 100 tokens)')
+    expect(plannerAdapter.runTask).not.toHaveBeenCalled()
+  })
+
+  it('blocks when cumulative issue token budget is exhausted across attempts', async () => {
+    db.prepare(
+      "INSERT INTO runs (id, repo, issue_number, status, terminated_at) VALUES ('run-prev', 'org/repo', 1, 'blocked', ?)",
+    ).run(new Date().toISOString())
+    db.prepare(
+      'UPDATE runs SET prompt_tokens = ?, completion_tokens = ?, cache_read_tokens = ? WHERE id = ?',
+    ).run(70, 40, 0, 'run-prev')
+
+    const config = makeConfig()
+    config.loop.maxIssueTokens = 100
+    const plannerAdapter = makeMockAdapter([makePlannerResult()])
+
+    const deps: LoopDependencies = {
+      db,
+      config,
+      adapters: {
+        planner: plannerAdapter,
+        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: makeMockAdapter([makeReviewerResult('APPROVED')]),
+      },
+      workflow: DEFAULT_WORKFLOW,
+    }
+
+    const result = await executeLoop(makeCtx(), deps)
+
+    expect(result.terminalStatus).toBe('blocked')
+    expect(result.blockReason).toBe('iteration_limit')
+    expect(result.stepOutputs['blockMessage']).toBe('Issue token budget exceeded (110 >= 100 tokens)')
+    expect(plannerAdapter.runTask).not.toHaveBeenCalled()
+  })
+
+  it('blocks when daily token budget is exhausted', async () => {
+    const today = new Date().toISOString().split('T')[0]!
+    db.prepare(
+      `INSERT INTO daily_costs (
+         date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens, total_cache_read_tokens
+       )
+       VALUES (?, 0, 0, 80, 30, 0)
+       ON CONFLICT(date) DO UPDATE SET
+         total_prompt_tokens = excluded.total_prompt_tokens,
+         total_completion_tokens = excluded.total_completion_tokens,
+         total_cache_read_tokens = excluded.total_cache_read_tokens`,
+    ).run(today)
+
+    const config = makeConfig()
+    config.loop.maxDailyTokens = 100
+    const plannerAdapter = makeMockAdapter([makePlannerResult()])
+
+    const deps: LoopDependencies = {
+      db,
+      config,
+      adapters: {
+        planner: plannerAdapter,
+        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: makeMockAdapter([makeReviewerResult('APPROVED')]),
+      },
+      workflow: DEFAULT_WORKFLOW,
+    }
+
+    const result = await executeLoop(makeCtx(), deps)
+
+    expect(result.terminalStatus).toBe('blocked')
+    expect(result.blockReason).toBe('iteration_limit')
+    expect(result.stepOutputs['blockMessage']).toBe('Daily token budget exceeded (110 >= 100 tokens)')
+    expect(plannerAdapter.runTask).not.toHaveBeenCalled()
+  })
+
+  it('blocks when run wall-clock budget is exceeded', async () => {
+    const startedAt = new Date(Date.now() - 90 * 60_000).toISOString()
+    db.prepare('UPDATE runs SET started_at = ? WHERE id = ?').run(startedAt, 'run-test-1')
+
+    const config = makeConfig()
+    config.loop.maxRunWallClockMinutes = 60
+    const plannerAdapter = makeMockAdapter([makePlannerResult()])
+
+    const deps: LoopDependencies = {
+      db,
+      config,
+      adapters: {
+        planner: plannerAdapter,
+        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: makeMockAdapter([makeReviewerResult('APPROVED')]),
+      },
+      workflow: DEFAULT_WORKFLOW,
+    }
+
+    const result = await executeLoop(makeCtx(), deps)
+
+    expect(result.terminalStatus).toBe('blocked')
+    expect(result.blockReason).toBe('iteration_limit')
+    expect(String(result.stepOutputs['blockMessage'])).toMatch(
+      /^Run wall-clock budget exceeded \(\d+\.\d >= 60 minutes\)$/,
+    )
+    expect(plannerAdapter.runTask).not.toHaveBeenCalled()
+  })
+
+  it('blocks immediately after a worker step crosses run token budget', async () => {
+    const config = makeConfig()
+    config.loop.maxRunTokens = 120
+    const plannerAdapter = makeMockAdapter([makePlannerResult()])
+    const coderAdapter = makeMockAdapter([makeCoderResult()])
+
+    const deps: LoopDependencies = {
+      db,
+      config,
+      adapters: {
+        planner: plannerAdapter,
+        coder: coderAdapter,
+        reviewer: makeMockAdapter([makeReviewerResult('APPROVED')]),
+      },
+      workflow: DEFAULT_WORKFLOW,
+    }
+
+    const result = await executeLoop(makeCtx(), deps)
+
+    expect(result.terminalStatus).toBe('blocked')
+    expect(result.blockReason).toBe('iteration_limit')
+    expect(result.stepOutputs['blockMessage']).toBe('Run token budget exceeded (150 >= 120 tokens)')
+    expect(plannerAdapter.runTask).toHaveBeenCalledTimes(1)
+    expect(coderAdapter.runTask).not.toHaveBeenCalled()
   })
 
   it('BLOCKED verdict → blocked', async () => {

@@ -283,11 +283,16 @@ async function executeCommentCommand(params: ExecuteCommentCommandParams): Promi
       })
     case 'continue':
       {
-        const result = await queueContinue(db, forge, repoConfig, issueNumber, botUser, { issueRepo })
+        const result = await queueContinue(db, forge, repoConfig, issueNumber, botUser, {
+          issueRepo,
+          maxAttemptChainLength: config.loop.maxAttemptChainLength,
+        })
         return result.queued ? { ok: true } : { ok: false, reason: result.reason }
       }
     case 'rebase': {
-      const result = await queueRebase(db, forge, repoConfig, issueNumber, botUser)
+      const result = await queueRebase(db, forge, repoConfig, issueNumber, botUser, {
+        maxAttemptChainLength: config.loop.maxAttemptChainLength,
+      })
       return result.queued ? { ok: true } : { ok: false, reason: result.reason }
     }
     case 'cancel':

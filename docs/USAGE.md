@@ -721,6 +721,21 @@ reason `cost_limit`. In `subscription` mode, USD is advisory and cost-based
 blocking is skipped. In `subscription-metered` mode, enforcement depends on
 `cost.subscriptionMetered.enforcePerRunLimit` / `enforceDailyLimit`.
 
+### Non-cost runaway budgets
+
+```yaml
+loop:
+  maxAttemptChainLength: 3    # hard cap on follow-up attempts per issue
+  maxRunTokens: 0             # 0 disables per-run token guard
+  maxIssueTokens: 0           # 0 disables per-issue cumulative token guard
+  maxDailyTokens: 0           # 0 disables UTC-day token guard
+  maxRunWallClockMinutes: 0   # 0 disables wall-clock guard
+```
+
+These controls are independent of USD accounting and are enforced in all cost
+models. When tripped, the run is blocked with a specific message naming the
+triggered guard (run/issue/daily tokens or wall-clock).
+
 ### Stuck-loop detection
 
 Night-orch detects when the loop is stuck by comparing verify output hashes across iterations. If two consecutive iterations produce identical verify failures (same tests failing the same way, after stripping timestamps and non-deterministic output), the run is blocked with a specific "Loop stuck" message instead of consuming more iterations. This prevents the common case where the LLM keeps attempting the same fix without making progress.

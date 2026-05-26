@@ -40,7 +40,7 @@ export async function queueRebase(
   repoConfig: RepoConfig,
   issueNumber: number,
   botUser: string,
-  options: { check?: boolean; strategyOverride?: UpdateStrategy; actor?: string } = {},
+  options: { check?: boolean; strategyOverride?: UpdateStrategy; actor?: string; maxAttemptChainLength?: number } = {},
 ): Promise<{ queued: boolean; reason: string }> {
   const runManager = new RunManager(db)
 
@@ -65,6 +65,9 @@ export async function queueRebase(
       previousAttemptId: run.id,
       intent: 'rebase',
       resetBranch: false,
+      ...(options.maxAttemptChainLength !== undefined
+        ? { maxSequenceNumber: options.maxAttemptChainLength }
+        : {}),
       phaseData: {
         ...existingPhaseData,
         issueRepo,

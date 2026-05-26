@@ -71,6 +71,7 @@ export async function continueCommand(
       dryRun,
       strategyOverride: strategy,
       actor: 'cli',
+      maxAttemptChainLength: config.loop.maxAttemptChainLength,
     })
 
     if (result.queued) {

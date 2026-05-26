@@ -45,6 +45,26 @@ export class AttemptNotFoundError extends Error {
 }
 
 /**
+ * Raised when creating a follow-up attempt would exceed the configured
+ * attempt chain ceiling for a single issue.
+ */
+export class AttemptChainLimitError extends Error {
+  readonly code = 'ATTEMPT_CHAIN_LIMIT'
+  constructor(
+    public readonly previousAttemptId: string,
+    public readonly currentSequenceNumber: number,
+    public readonly maxSequenceNumber: number,
+  ) {
+    super(
+      `Attempt chain limit reached: issue is already at attempt ${currentSequenceNumber}; max is ${maxSequenceNumber}`,
+    )
+    this.name = 'AttemptChainLimitError'
+  }
+}
+
+const DEFAULT_MAX_ATTEMPT_CHAIN_LENGTH = 3
+
+/**
  * Throws if the given attempt row does not exist or has `terminated_at` set.
  * Call this at the start of any write path that mutates an existing attempt
  * row to enforce the "terminal attempts are frozen" invariant.
@@ -177,6 +197,8 @@ export interface CreateFollowupAttemptInput {
   controlPayload: Record<string, unknown> | null
   /** Optional override timestamp for deterministic tests. */
   now?: string
+  /** Hard ceiling for attempts within an issue chain. Defaults to 3. */
+  maxSequenceNumber?: number
 }
 
 export interface CreateFollowupAttemptResult {
@@ -233,6 +255,9 @@ export function createFollowupAttempt(
 ): CreateFollowupAttemptResult {
   const now = input.now ?? nowUtcIso()
   const resetBranch = input.resetBranch ?? defaultResetBranch(input.intent)
+  const maxSequenceNumber = Number.isFinite(input.maxSequenceNumber)
+    ? Math.max(1, Math.floor(input.maxSequenceNumber as number))
+    : DEFAULT_MAX_ATTEMPT_CHAIN_LENGTH
 
   const tx = db.transaction((): CreateFollowupAttemptResult => {
     const prev = db
@@ -250,6 +275,9 @@ export function createFollowupAttempt(
     }
     if (prev.terminated_at !== null) {
       throw new AttemptTerminatedError(input.previousAttemptId)
+    }
+    if (prev.sequence_number >= maxSequenceNumber) {
+      throw new AttemptChainLimitError(prev.id, prev.sequence_number, maxSequenceNumber)
     }
 
     db.prepare('UPDATE runs SET terminated_at = ?, updated_at = ? WHERE id = ?').run(

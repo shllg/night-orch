@@ -94,6 +94,7 @@ export class RetryEngine {
           previousAttemptId: run.id,
           intent: 'retry',
           resetBranch: true,
+          maxSequenceNumber: this.config.loop.maxAttemptChainLength,
           phaseData: nextPhaseData,
           controlPayload: {
             issueRepo,

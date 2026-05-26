@@ -64,7 +64,7 @@ Registered keys are visible via `night-orch settings list` (or Web/TUI Settings/
 - `github`: `tokenEnv`, `apiBaseUrl`, `pollIntervalSeconds`, `appMentions`
 - `storage`: `dbPath` (read-only), `worktreeRoot`, `logsRoot`, `autoCleanup.enabled`, `autoCleanup.intervalMinutes`, `retention.worktreeAgeDays`, `retention.detailDays`, `retention.archiveDays`
 - `notifications`: `channels`, `events.onRunStarted`, `events.onBlocked`, `events.onPrReady`, `events.onPrUpdated`, `events.onError`, `events.onRetryExhausted`
-- `loop`: `maxReviewIterations`, `maxTotalAgentPasses`, `stopOnPlannerFailure`, `requireVerificationPass`, `reviewApprovalKeyword`, `reviewNeedsChangesKeyword`, `blockOnAmbiguousReview`, `maxAutoRetries`, `maxEmptyDiffRetries`, `maxConsecutiveBlocks`, `decompose`, `maxSubtasks`, `maxConcurrentSubtasks`
+- `loop`: `maxReviewIterations`, `maxTotalAgentPasses`, `maxAttemptChainLength`, `maxRunTokens`, `maxIssueTokens`, `maxDailyTokens`, `maxRunWallClockMinutes`, `stopOnPlannerFailure`, `requireVerificationPass`, `reviewApprovalKeyword`, `reviewNeedsChangesKeyword`, `blockOnAmbiguousReview`, `maxAutoRetries`, `maxEmptyDiffRetries`, `maxConsecutiveBlocks`, `decompose`, `maxSubtasks`, `maxConcurrentSubtasks`
 - `security`: `maxChangedFiles`, `maxChangedLines`, `maxDailyCostUsd`, `maxCostPerRunUsd`
 - `cost`: `model`, `subscriptionMetered`, `pricing.defaultModel`, `pricing.models`
 - `workerProfiles`
@@ -224,6 +224,11 @@ Discriminated by `type`:
 | --- | --- | --- | --- |
 | `maxReviewIterations` | positive number | `4` | Base max loop iterations before stop. |
 | `maxTotalAgentPasses` | positive number | `10` | Base max total worker passes. |
+| `maxAttemptChainLength` | int 1-20 | `3` | Hard cap on follow-up attempts per issue chain (`retry`/`continue`/`rebase`/`refresh`). |
+| `maxRunTokens` | int >= 0 | `0` | Non-cost runaway guard. Blocks when a single attempt reaches this total token count. |
+| `maxIssueTokens` | int >= 0 | `0` | Non-cost runaway guard. Blocks when cumulative tokens across attempts for the same issue reach this count. |
+| `maxDailyTokens` | int >= 0 | `0` | Non-cost runaway guard. Blocks when UTC-day cumulative tokens across all runs reach this count. |
+| `maxRunWallClockMinutes` | number >= 0 | `0` | Non-cost runaway guard. Blocks when elapsed wall-clock time for one run reaches this many minutes. |
 | `stopOnPlannerFailure` | boolean | `true` | If planner output fails, stop early instead of continuing. |
 | `requireVerificationPass` | boolean | `true` | If true, verification failures block completion. |
 | `reviewApprovalKeyword` | string | `APPROVED` | Expected reviewer verdict keyword. |
@@ -235,6 +240,8 @@ Discriminated by `type`:
 | `decompose` | boolean | `false` | Enable automatic issue decomposition into sub-tasks. |
 | `maxSubtasks` | int 1-10 | `5` | Maximum sub-tasks per decomposition. |
 | `maxConcurrentSubtasks` | int 1-10 | `3` | Max parallel sub-task worktrees. |
+
+`maxRunTokens`, `maxIssueTokens`, `maxDailyTokens`, and `maxRunWallClockMinutes` are disabled when set to `0`.
 
 Note: loop limits are later triage-adjusted per issue (trivial/standard/architectural), so these are base values.
 

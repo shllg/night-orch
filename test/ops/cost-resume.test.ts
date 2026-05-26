@@ -4,6 +4,7 @@ import { initDatabase } from '../../src/state/db.js'
 import { scanCostBlockedRuns } from '../../src/ops/cost-resume.js'
 import { CostTracker } from '../../src/loop/cost.js'
 import { transitionLabels } from '../../src/labels/manager.js'
+import { createFollowupAttempt } from '../../src/state/attempts.js'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -336,5 +337,41 @@ describe('scanCostBlockedRuns', () => {
     await scanCostBlockedRuns(db, config, forge, repoConfig, 'bot-user')
 
     expect(forge.commentOnIssue).not.toHaveBeenCalled() // bot-user is set, so upsertBotComment path
+  })
+
+  it('does not throw when a cost-blocked issue has reached attempt ceiling', async () => {
+    const forge = makeMockForge()
+    const first = insertRun(db, { status: 'blocked', block_reason: 'cost_limit', estimated_cost_usd: 20 })
+    const second = createFollowupAttempt(db, {
+      previousAttemptId: first,
+      intent: 'continue',
+      phaseData: null,
+      controlPayload: null,
+    })
+    db.prepare(
+      `UPDATE runs
+       SET status = 'blocked', block_reason = 'cost_limit', ended_at = ?, last_error = ?
+       WHERE id = ?`,
+    ).run(new Date().toISOString(), 'Cost limit exceeded', second.attemptId)
+
+    const third = createFollowupAttempt(db, {
+      previousAttemptId: second.attemptId,
+      intent: 'continue',
+      phaseData: null,
+      controlPayload: null,
+    })
+    db.prepare(
+      `UPDATE runs
+       SET status = 'blocked', block_reason = 'cost_limit', ended_at = ?, last_error = ?
+       WHERE id = ?`,
+    ).run(new Date().toISOString(), 'Cost limit exceeded', third.attemptId)
+
+    const config = makeConfig({ costModel: 'subscription' })
+    const repoConfig = config.repos[0]!
+
+    const result = await scanCostBlockedRuns(db, config, forge, repoConfig, 'bot')
+
+    expect(result.resumed).toBe(0)
+    expect(result.stillBlocked).toBe(1)
   })
 })

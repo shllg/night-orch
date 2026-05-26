@@ -31,7 +31,7 @@ import {
 } from './state.js'
 import { decideEmptyDiffRetry } from './decision.js'
 import { logger } from '../utils/logger.js'
-import { utcIsoFromMs } from '../utils/time.js'
+import { parseUtcTimestampMs, utcIsoFromMs } from '../utils/time.js'
 import type Database from 'better-sqlite3'
 import { buildPlanningPrdPath, isPlanningIssue } from '../planning/mode.js'
 import type { AgentEvent } from '../events/types.js'
@@ -118,6 +118,34 @@ export async function executeLoop(
 
     // Cost check before worker steps
     if (step.type === 'worker') {
+      const runawayBudget = checkRunawayBudget(db, costTracker, ctx, config.loop)
+      if (runawayBudget.overBudget) {
+        const blockMessage = describeRunawayBudgetBlock(runawayBudget)
+        logger.warn(
+          {
+            runId: ctx.runId,
+            limit: runawayBudget.limit,
+            actual: runawayBudget.actual,
+            threshold: runawayBudget.threshold,
+          },
+          'Runaway budget exceeded',
+        )
+        checkpoint.phaseBlocked(ctx.runId, step.id, blockMessage, ctx.iteration)
+        return recordPhase(
+          updateContext(ctx, {
+            currentPhase: 'blocked',
+            terminalStatus: 'blocked',
+            blockReason: 'iteration_limit',
+            stepOutputs: {
+              ...ctx.stepOutputs,
+              blockMessage,
+            },
+          }),
+          step.id,
+          'failure',
+        )
+      }
+
       const budget = costTracker.checkBudget(ctx.runId, config.security, config.cost)
       if (budget.overBudget) {
         const blockMessage = `${describeBudgetBlock(budget)}. ${costLimitRecoveryHint(budget.limit)}`
@@ -231,6 +259,36 @@ export async function executeLoop(
             currentPhase: 'blocked',
             terminalStatus: 'blocked',
             blockReason: 'cost_limit',
+            stepOutputs: {
+              ...ctx.stepOutputs,
+              blockMessage,
+            },
+          }),
+          step.id,
+          'failure',
+          {},
+          stepStartedAt,
+        )
+      }
+      const runawayBudget = checkRunawayBudget(db, costTracker, ctx, config.loop)
+      if (runawayBudget.overBudget) {
+        const blockMessage = describeRunawayBudgetBlock(runawayBudget)
+        logger.warn(
+          {
+            runId: ctx.runId,
+            phase: step.id,
+            limit: runawayBudget.limit,
+            actual: runawayBudget.actual,
+            threshold: runawayBudget.threshold,
+          },
+          'Runaway budget exceeded after recording worker cost',
+        )
+        checkpoint.phaseBlocked(ctx.runId, step.id, blockMessage, ctx.iteration)
+        return recordPhase(
+          updateContext(ctx, {
+            currentPhase: 'blocked',
+            terminalStatus: 'blocked',
+            blockReason: 'iteration_limit',
             stepOutputs: {
               ...ctx.stepOutputs,
               blockMessage,
@@ -678,6 +736,115 @@ function buildStepArtifacts(step: WorkflowStep, ctx: RunContext): Record<string,
     case 'decide':
       return {}
   }
+}
+
+interface RunawayBudgetStatus {
+  overBudget: boolean
+  limit?: 'run_tokens' | 'issue_tokens' | 'daily_tokens' | 'run_wall_clock'
+  actual?: number
+  threshold?: number
+}
+
+function checkRunawayBudget(
+  db: Database.Database,
+  costTracker: CostTracker,
+  ctx: RunContext,
+  loopConfig: Config['loop'],
+): RunawayBudgetStatus {
+  if (loopConfig.maxRunTokens > 0) {
+    const runTokens = costTracker.getRunTokenUsage(ctx.runId).totalTokens
+    if (runTokens >= loopConfig.maxRunTokens) {
+      return {
+        overBudget: true,
+        limit: 'run_tokens',
+        actual: runTokens,
+        threshold: loopConfig.maxRunTokens,
+      }
+    }
+  }
+
+  if (loopConfig.maxIssueTokens > 0) {
+    const issueTokens = getIssueChainTokenUsage(db, ctx.repo, ctx.issueNumber)
+    if (issueTokens >= loopConfig.maxIssueTokens) {
+      return {
+        overBudget: true,
+        limit: 'issue_tokens',
+        actual: issueTokens,
+        threshold: loopConfig.maxIssueTokens,
+      }
+    }
+  }
+
+  if (loopConfig.maxDailyTokens > 0) {
+    const dailyTokens = costTracker.getDailyTokenUsage().totalTokens
+    if (dailyTokens >= loopConfig.maxDailyTokens) {
+      return {
+        overBudget: true,
+        limit: 'daily_tokens',
+        actual: dailyTokens,
+        threshold: loopConfig.maxDailyTokens,
+      }
+    }
+  }
+
+  if (loopConfig.maxRunWallClockMinutes > 0) {
+    const startedAtMs = getRunStartedAtMs(db, ctx.runId)
+    if (Number.isFinite(startedAtMs)) {
+      const elapsedMinutes = (Date.now() - startedAtMs) / 60_000
+      if (elapsedMinutes >= loopConfig.maxRunWallClockMinutes) {
+        return {
+          overBudget: true,
+          limit: 'run_wall_clock',
+          actual: elapsedMinutes,
+          threshold: loopConfig.maxRunWallClockMinutes,
+        }
+      }
+    }
+  }
+
+  return { overBudget: false }
+}
+
+function describeRunawayBudgetBlock(status: RunawayBudgetStatus): string {
+  if (
+    !status.overBudget
+    || status.limit === undefined
+    || status.actual === undefined
+    || status.threshold === undefined
+  ) {
+    return 'Runaway budget exceeded'
+  }
+
+  switch (status.limit) {
+    case 'run_tokens':
+      return `Run token budget exceeded (${Math.floor(status.actual)} >= ${Math.floor(status.threshold)} tokens)`
+    case 'issue_tokens':
+      return `Issue token budget exceeded (${Math.floor(status.actual)} >= ${Math.floor(status.threshold)} tokens)`
+    case 'daily_tokens':
+      return `Daily token budget exceeded (${Math.floor(status.actual)} >= ${Math.floor(status.threshold)} tokens)`
+    case 'run_wall_clock':
+      return `Run wall-clock budget exceeded (${status.actual.toFixed(1)} >= ${status.threshold} minutes)`
+  }
+}
+
+function getIssueChainTokenUsage(
+  db: Database.Database,
+  repo: string,
+  issueNumber: number,
+): number {
+  const row = db.prepare(
+    `SELECT COALESCE(SUM(prompt_tokens + completion_tokens + cache_read_tokens), 0) AS total_tokens
+     FROM runs
+     WHERE repo = ? AND issue_number = ? AND parent_run_id IS NULL`,
+  ).get(repo, issueNumber) as { total_tokens: number | null } | undefined
+  return row?.total_tokens ?? 0
+}
+
+function getRunStartedAtMs(db: Database.Database, runId: string): number {
+  const row = db
+    .prepare('SELECT started_at FROM runs WHERE id = ?')
+    .get(runId) as { started_at: string | null } | undefined
+  return parseUtcTimestampMs(row?.started_at)
 }
 
 /**

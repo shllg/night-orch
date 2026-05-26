@@ -42,6 +42,11 @@ notifications:
 loop:
   maxReviewIterations: 4
   maxTotalAgentPasses: 10
+  maxAttemptChainLength: 3         # Hard cap on follow-up attempts per issue
+  maxRunTokens: 0                  # 0 disables per-attempt token budget
+  maxIssueTokens: 0                # 0 disables per-issue token budget
+  maxDailyTokens: 0                # 0 disables UTC-day token budget
+  maxRunWallClockMinutes: 0        # 0 disables per-run wall-clock budget
   stopOnPlannerFailure: true
   requireVerificationPass: true
   reviewApprovalKeyword: APPROVED

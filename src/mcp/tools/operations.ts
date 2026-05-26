@@ -104,6 +104,7 @@ export async function handleRebase(
     check: args.check,
     strategyOverride: args.strategy,
     actor: 'mcp',
+    maxAttemptChainLength: deps.config.loop.maxAttemptChainLength,
   })
   const trigger = result.queued ? triggerPoller(deps) : null
 
@@ -133,6 +134,7 @@ export async function handleContinue(
   const result = await queueContinue(deps.db, forge, repoConfig, args.issueNumber, botUser, {
     strategyOverride: args.strategy,
     actor: 'mcp',
+    maxAttemptChainLength: deps.config.loop.maxAttemptChainLength,
   })
   const trigger = result.queued ? triggerPoller(deps) : null
 
