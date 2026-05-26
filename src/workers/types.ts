@@ -100,6 +100,9 @@ export interface VerifyResult {
   stderr: string
   durationMs: number
   passed: boolean
+  required?: boolean
+  stageId?: string | null
+  onFailure?: 'block' | 'iterate' | 'warn'
 }
 
 /** Data passed to prompt templates. Assembled by the prompt compiler from RunContext. */

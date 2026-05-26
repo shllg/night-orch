@@ -358,12 +358,41 @@ workflows:
       - { type: decide, id: decide, onIterate: code }
 ```
 
+### DAG workflows
+
+You can also define a workflow as an explicit DAG:
+
+```yaml
+workflows:
+  dag-minimal:
+    dag:
+      entry: code
+      stages:
+        code:
+          type: worker
+          role: coder
+          next: smoke
+        smoke:
+          type: verify
+          profile: strict
+          stage: smoke
+          next: decide
+        decide:
+          type: decide
+          onIterate: code
+```
+
+Rules:
+- Define either `steps` or `dag` (not both)
+- `worker`/`verify` DAG stages must set `next`
+- DAG must terminate at a `decide` stage
+
 ### Step types
 
 | Type | Purpose |
 |------|---------|
 | `worker` | Invoke an AI agent (planner, coder, reviewer, or custom role) |
-| `verify` | Run configured test/lint/typecheck commands |
+| `verify` | Run configured verify commands (repo default or selected profile/stage) |
 | `decide` | Evaluate results and route to publish, iterate, or block (`requireReview: false` supports no-review flows) |
 
 ### Step options
@@ -372,8 +401,31 @@ workflows:
 - `continueFrom: plan` — continue the AI session from a prior step when both steps use the same agent (reduces token usage, improves context)
 - `prompt: path/to/template.md` — use a custom system prompt instead of the default
 - `requireReview: false` — allow verification-only decisioning for lightweight workflows
+- `profile: strict` + `stage: smoke` (verify step) — run a specific verification profile stage
 - `roles` (workflow-level) — per-workflow default role assignment (`planner`/`coder`/`reviewer`)
 - `agents` (workflow-level) — per-workflow worker profile overrides (same shape as `repos[].agents`)
+
+### Staged verification profiles
+
+```yaml
+verificationProfiles:
+  strict:
+    stages:
+      - id: smoke
+        commands:
+          - pnpm typecheck
+      - id: full
+        commands:
+          - pnpm test
+        required: false
+        onFailure: warn
+
+repos:
+  - repo: org/repo
+    verificationProfile: strict
+```
+
+Use `verificationProfile` on a repo as the default; per-step verify `profile`/`stage` can override it.
 
 ---
 

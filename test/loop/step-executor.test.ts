@@ -510,6 +510,31 @@ describe('executeVerifyStep', () => {
     expect(result.ctx.verifyResults).toBeDefined()
     expect(result.ctx.diff).toBe('diff --git a/file.ts b/file.ts\n+added')
   })
+
+  it('resolves commands from verification profile stage when selected', async () => {
+    const step: VerifyStep = { type: 'verify', id: 'verify-smoke', stage: 'smoke' }
+    const config = makeConfig()
+    config.verificationProfiles = {
+      strict: {
+        stages: [
+          { id: 'smoke', commands: ['pnpm typecheck'], required: true, onFailure: 'block' },
+          { id: 'full', commands: ['pnpm test'], required: false, onFailure: 'warn' },
+        ],
+      },
+    }
+    const deps: StepDependencies = { adapters: {}, config }
+    const ctx = makeCtx({
+      repoConfig: {
+        ...makeCtx().repoConfig,
+        verify: ['pnpm lint'],
+        verificationProfile: 'strict',
+      } as RunContext['repoConfig'],
+    })
+
+    const result = await executeVerifyStep(ctx, step, deps)
+
+    expect(result.ctx.verifyResults.map((entry) => entry.command)).toEqual(['pnpm typecheck'])
+  })
 })
 
 describe('executeDecideStep', () => {

@@ -7,6 +7,7 @@ import type { AgentEvent } from '../events/types.js'
 import { updateContext } from './context.js'
 import { decide } from './decision.js'
 import { runVerifyCommands } from './verifier.js'
+import { resolveVerifyCommands } from './verification-profile.js'
 import { compilePrompt } from '../workers/prompt/compiler.js'
 import { getDefaultTemplate, buildPlanningOnlyCoderTemplate } from '../workers/prompt/templates.js'
 import { buildWorkerEnv, buildVerifierEnv } from '../workers/env.js'
@@ -215,14 +216,25 @@ export async function executeWorkerStep(
  */
 export async function executeVerifyStep(
   ctx: RunContext,
-  _step: VerifyStep,
+  step: VerifyStep,
   deps: StepDependencies,
 ): Promise<StepResult> {
+  const plannedCommands = resolveVerifyCommands(deps.config, ctx.repoConfig, step)
   const verifyResults = await runVerifyCommands(
     ctx.worktreePath,
-    ctx.repoConfig.verify,
+    plannedCommands.map((entry) => entry.command),
     buildVerifierEnv(deps.envOverrides),
   )
+  const stagedResults = verifyResults.map((result, index) => {
+    const plan = plannedCommands[index]
+    if (!plan) return result
+    return {
+      ...result,
+      required: plan.required,
+      stageId: plan.stageId,
+      onFailure: plan.onFailure,
+    }
+  })
 
   // Verify metrics (duration + pass/fail) are recorded by the engine
   // after this step completes — recording here would double-count.
@@ -231,7 +243,7 @@ export async function executeVerifyStep(
 
   return {
     ctx: updateContext(ctx, {
-      verifyResults,
+      verifyResults: stagedResults,
       diff: diffResult.diff,
       diffError: diffResult.error,
     }),

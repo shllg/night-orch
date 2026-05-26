@@ -175,6 +175,56 @@ describe('ConfigSchema', () => {
     }
   })
 
+  it('accepts workflow DAG definitions', () => {
+    const raw = loadExampleConfig()
+    raw.workflows = {
+      dagFlow: {
+        dag: {
+          entry: 'code',
+          stages: {
+            code: { type: 'worker', role: 'coder', next: 'verify' },
+            verify: { type: 'verify', next: 'decide' },
+            decide: { type: 'decide', onIterate: 'code', requireReview: false },
+          },
+        },
+      },
+    }
+    raw.repos[0].workflow = 'dagFlow'
+
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts verificationProfiles with repo and workflow stage selection', () => {
+    const raw = loadExampleConfig()
+    raw.verificationProfiles = {
+      strict: {
+        stages: [
+          { id: 'smoke', commands: ['pnpm typecheck'], required: true },
+          { id: 'full', commands: ['pnpm test'], required: false, onFailure: 'warn' },
+        ],
+      },
+    }
+    raw.repos[0].verificationProfile = 'strict'
+    raw.workflows = {
+      profileFlow: {
+        steps: [
+          { type: 'worker', id: 'code', role: 'coder' },
+          { type: 'verify', id: 'verify-smoke', profile: 'strict', stage: 'smoke' },
+          { type: 'decide', id: 'decide', onIterate: 'code' },
+        ],
+      },
+    }
+    raw.repos[0].workflow = 'profileFlow'
+
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.repos[0]?.verificationProfile).toBe('strict')
+      expect(result.data.verificationProfiles.strict?.stages[1]?.onFailure).toBe('warn')
+    }
+  })
+
   it('rejects verify timeout overrides when timeoutSeconds is not positive', () => {
     const raw = loadExampleConfig()
     raw.repos[0].verify = [

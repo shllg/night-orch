@@ -22,9 +22,10 @@ export interface LoadedConfig {
 }
 
 const PROJECT_CONFIG_FILENAMES = ['.night-orch.yml', '.night-orch.yaml'] as const
-const PROJECT_TOP_LEVEL_KEYS = new Set<keyof Pick<ProjectConfig, 'workflows' | 'workerProfiles'>>([
+const PROJECT_TOP_LEVEL_KEYS = new Set<keyof Pick<ProjectConfig, 'workflows' | 'workerProfiles' | 'verificationProfiles'>>([
   'workflows',
   'workerProfiles',
+  'verificationProfiles',
 ])
 
 /**
@@ -200,7 +201,7 @@ function splitProjectConfig(projectConfig: ProjectConfig): {
   const repoOverride: Record<string, unknown> = {}
 
   for (const [key, value] of Object.entries(projectConfig)) {
-    if (PROJECT_TOP_LEVEL_KEYS.has(key as keyof Pick<ProjectConfig, 'workflows' | 'workerProfiles'>)) {
+    if (PROJECT_TOP_LEVEL_KEYS.has(key as keyof Pick<ProjectConfig, 'workflows' | 'workerProfiles' | 'verificationProfiles'>)) {
       topLevelOverride[key] = value
       continue
     }

@@ -58,6 +58,7 @@ import {
   shouldResetBranch,
   postStatusComment,
 } from '../runner/helpers.js'
+import { createWorkItemFromDiscoveredIssue } from '../work-items/types.js'
 import { missingCommentCommandIssues } from '../runner/comment-commands.js'
 import { reactionCursors } from '../runner/reaction-scan.js'
 import type { NotificationDispatcher } from '../notify/dispatcher.js'
@@ -413,6 +414,7 @@ export async function dispatchAttempt(
       issueRepo,
       issueNumber: discoveredIssue.issue.number,
       issue: discoveredIssue.issue,
+      workItem: createWorkItemFromDiscoveredIssue(discoveredIssue, repoConfigForRun, workflow),
       repoConfig: repoConfigForRun,
       roles,
       triageResult: discoveredIssue.triage,

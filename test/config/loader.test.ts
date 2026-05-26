@@ -202,6 +202,50 @@ workflow: project-fast
     expect(loaded.workflows['project-fast']?.steps).toHaveLength(2)
   })
 
+  it('merges project-local verificationProfiles into top-level config', () => {
+    const repoDir = join(tmpDir, 'repo')
+    mkdirSync(repoDir, { recursive: true })
+
+    const configPath = join(tmpDir, 'config.yaml')
+    writeFileSync(configPath, `version: 1
+github:
+  tokenEnv: GITHUB_TOKEN
+workerProfiles:
+  codex-default:
+    type: codex
+    command: codex
+verificationProfiles:
+  baseline:
+    stages:
+      - id: smoke
+        commands:
+          - pnpm typecheck
+repos:
+  - repo: org/repo
+    localPath: ${repoDir}
+    verificationProfile: baseline
+`)
+
+    writeFileSync(join(repoDir, '.night-orch.yml'), `verificationProfile: strict
+verificationProfiles:
+  strict:
+    stages:
+      - id: smoke
+        commands:
+          - pnpm lint
+      - id: full
+        commands:
+          - pnpm test
+        required: false
+        onFailure: warn
+`)
+
+    const loaded = loadConfig(configPath)
+    expect(loaded.repos[0]?.verificationProfile).toBe('strict')
+    expect(loaded.verificationProfiles['baseline']?.stages).toHaveLength(1)
+    expect(loaded.verificationProfiles['strict']?.stages).toHaveLength(2)
+  })
+
   it('loads .night-orch.yaml when .night-orch.yml is not present', () => {
     const repoDir = join(tmpDir, 'repo')
     mkdirSync(repoDir, { recursive: true })

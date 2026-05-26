@@ -80,6 +80,32 @@ describe('resolveWorkflow', () => {
     expect(result.steps[0]!.id).toBe('code')
   })
 
+  it('resolves DAG workflows into executable step order', () => {
+    const dagWorkflow = {
+      dag: {
+        entry: 'code',
+        stages: {
+          code: { type: 'worker' as const, role: 'coder', next: 'smoke' },
+          smoke: { type: 'verify' as const, next: 'decide' },
+          decide: { type: 'decide' as const, onIterate: 'code', requireReview: false },
+        },
+      },
+      roles: { coder: 'codex' as const },
+      agents: { codex: 'codex-fast' },
+    }
+    const result = resolveWorkflow(
+      makeRepoConfig({ workflow: 'dag-minimal' }),
+      makeConfig({ workflows: { 'dag-minimal': dagWorkflow as Config['workflows'][string] } }),
+      [],
+      'standard',
+    )
+
+    expect(result.steps.map((step) => step.id)).toEqual(['code', 'smoke', 'decide'])
+    expect(result.steps[1]).toMatchObject({ type: 'verify', id: 'smoke' })
+    expect(result.roles?.coder).toBe('codex')
+    expect(result.agents?.['codex']).toBe('codex-fast')
+  })
+
   it('returns triage-mapped workflow when configured', () => {
     const fastWorkflow = {
       steps: [

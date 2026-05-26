@@ -185,6 +185,18 @@ export async function validateProjectSetup(
     optional: true,
   })
 
+  if (repoConfig.verificationProfile) {
+    const profile = config.verificationProfiles[repoConfig.verificationProfile]
+    results.push({
+      name: `Verification profile: ${repoConfig.verificationProfile}`,
+      passed: !!profile,
+      message: profile
+        ? `${profile.stages.length} stage(s) configured`
+        : 'Configured verificationProfile not found in config.verificationProfiles',
+      category: 'verify',
+    })
+  }
+
   // 9. Verify binaries present on PATH
   for (const verifyCommand of repoConfig.verify) {
     const commandSpec = normalizeVerifyCommandSpec(verifyCommand)
@@ -218,8 +230,66 @@ export async function validateProjectSetup(
         category: 'environment',
       })
     } else {
-      for (const step of workflow.steps) {
-        if (step.type !== 'worker' || !step.prompt) continue
+      const verifyRefs = workflow.steps
+        ? workflow.steps.reduce<Array<{ id: string; profile?: string; stage?: string }>>((acc, step) => {
+            if (step.type === 'verify') {
+              acc.push({ id: step.id, profile: step.profile, stage: step.stage })
+            }
+            return acc
+          }, [])
+        : workflow.dag
+          ? Object.entries(workflow.dag.stages).reduce<Array<{ id: string; profile?: string; stage?: string }>>((acc, [id, stage]) => {
+              if (stage.type === 'verify') {
+                acc.push({ id, profile: stage.profile, stage: stage.stage })
+              }
+              return acc
+            }, [])
+          : []
+
+      for (const verifyRef of verifyRefs) {
+        const selectedProfile = verifyRef.profile ?? repoConfig.verificationProfile
+        if (!selectedProfile) continue
+
+        const profile = config.verificationProfiles[selectedProfile]
+        results.push({
+          name: `Workflow verify profile: ${verifyRef.id}`,
+          passed: !!profile,
+          message: profile
+            ? `Profile "${selectedProfile}" found`
+            : `Profile "${selectedProfile}" not found`,
+          category: 'verify',
+        })
+
+        if (profile && verifyRef.stage) {
+          const hasStage = profile.stages.some((stage) => stage.id === verifyRef.stage)
+          results.push({
+            name: `Workflow verify stage: ${verifyRef.id}`,
+            passed: hasStage,
+            message: hasStage
+              ? `Stage "${verifyRef.stage}" found in profile "${selectedProfile}"`
+              : `Stage "${verifyRef.stage}" not found in profile "${selectedProfile}"`,
+            category: 'verify',
+          })
+        }
+      }
+
+      const workerPromptRefs = workflow.steps
+        ? workflow.steps.reduce<Array<{ id: string; prompt: string }>>((acc, step) => {
+            if (step.type === 'worker' && step.prompt) {
+              acc.push({ id: step.id, prompt: step.prompt })
+            }
+            return acc
+          }, [])
+        : workflow.dag
+          ? Object.entries(workflow.dag.stages).reduce<Array<{ id: string; prompt: string }>>((acc, [id, stage]) => {
+              if (stage.type === 'worker' && stage.prompt) {
+                acc.push({ id, prompt: stage.prompt })
+              }
+              return acc
+            }, [])
+          : []
+
+      for (const step of workerPromptRefs) {
         results.push({
           name: `Workflow prompt: ${step.id}`,
           passed: existsSync(step.prompt),

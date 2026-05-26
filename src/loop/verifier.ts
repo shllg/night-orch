@@ -72,6 +72,16 @@ export function allVerifyPassed(results: VerifyResult[]): boolean {
   return results.every((r) => r.passed)
 }
 
+export function requiredVerifyResults(results: VerifyResult[]): VerifyResult[] {
+  return results.filter((result) => result.required !== false)
+}
+
+export function allRequiredVerifyPassed(results: VerifyResult[]): boolean {
+  const required = requiredVerifyResults(results)
+  if (required.length === 0) return true
+  return required.every((result) => result.passed)
+}
+
 function normalizeVerifyCommand(raw: VerifyCommandSpec): { command: CommandSpec; timeoutMs: number } {
   if (Array.isArray(raw) || typeof raw === 'string') {
     return { command: raw, timeoutMs: VERIFY_TIMEOUT_MS }

@@ -3,6 +3,7 @@ import type { Config } from '../config/schema.js'
 import { isPlanningIssue } from '../planning/mode.js'
 import { costLimitRecoveryHint } from './cost.js'
 import { blocked } from './state.js'
+import { allRequiredVerifyPassed } from './verifier.js'
 
 /**
  * Determine next action based on review verdict, verify results,
@@ -86,12 +87,12 @@ export function decide(
   }
 
   const review = ctx.reviewResult
-  const verifyCommandsConfigured = (ctx.repoConfig.verify?.length ?? 0) > 0
+  const verifyCommandsConfigured = (ctx.repoConfig.verify?.length ?? 0) > 0 || ctx.verifyResults.length > 0
   const verifyResultsAvailable = ctx.verifyResults.length > 0
-  const allVerifyPassed = verifyResultsAvailable && ctx.verifyResults.every((r) => r.passed)
+  const allRequiredPassed = verifyResultsAvailable && allRequiredVerifyPassed(ctx.verifyResults)
   const verificationSatisfied = loopConfig.requireVerificationPass
-    ? verifyCommandsConfigured && verifyResultsAvailable && allVerifyPassed
-    : ctx.verifyResults.length === 0 || allVerifyPassed
+    ? verifyCommandsConfigured && verifyResultsAvailable && allRequiredPassed
+    : ctx.verifyResults.length === 0 || allRequiredPassed
 
   // No review result = parse failure
   if (!review) {

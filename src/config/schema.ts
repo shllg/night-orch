@@ -95,6 +95,18 @@ const VerifyCommandSchema = z.union([
   }).strict(),
 ])
 
+export const VerificationStageSchema = z.object({
+  id: z.string(),
+  commands: z.array(VerifyCommandSchema).min(1),
+  timeoutSeconds: z.number().int().positive().optional(),
+  required: z.boolean().default(true),
+  onFailure: z.enum(['block', 'iterate', 'warn']).default('block'),
+})
+
+export const VerificationProfileSchema = z.object({
+  stages: z.array(VerificationStageSchema).min(1),
+})
+
 // --- Environment schemas ---
 
 const BootstrapFailureHintSchema = z.object({
@@ -285,6 +297,8 @@ const WorkflowVerifyStepSchema = z.object({
   type: z.literal('verify'),
   id: z.string(),
   skipWhen: z.string().optional(),
+  profile: z.string().optional(),
+  stage: z.string().optional(),
 })
 
 const WorkflowDecideStepSchema = z.object({
@@ -300,6 +314,64 @@ const WorkflowStepSchema = z.discriminatedUnion('type', [
   WorkflowDecideStepSchema,
 ])
 
+const WorkflowDagWorkerStageSchema = z.object({
+  type: z.literal('worker'),
+  role: z.string(),
+  skipWhen: z.string().optional(),
+  continueFrom: z.string().optional(),
+  prompt: z.string().optional(),
+  next: z.string().optional(),
+  retry: z.number().int().min(0).optional(),
+  timeoutSeconds: z.number().int().positive().optional(),
+  onError: z.enum(['continue', 'iterate', 'block']).optional(),
+})
+
+const WorkflowDagVerifyStageSchema = z.object({
+  type: z.literal('verify'),
+  skipWhen: z.string().optional(),
+  profile: z.string().optional(),
+  stage: z.string().optional(),
+  next: z.string().optional(),
+  retry: z.number().int().min(0).optional(),
+  timeoutSeconds: z.number().int().positive().optional(),
+  onError: z.enum(['continue', 'iterate', 'block']).optional(),
+})
+
+const WorkflowDagDecideStageSchema = z.object({
+  type: z.literal('decide'),
+  onIterate: z.string(),
+  requireReview: z.boolean().optional(),
+  retry: z.number().int().min(0).optional(),
+  timeoutSeconds: z.number().int().positive().optional(),
+  onError: z.enum(['continue', 'iterate', 'block']).optional(),
+})
+
+const WorkflowDagStageSchema = z.discriminatedUnion('type', [
+  WorkflowDagWorkerStageSchema,
+  WorkflowDagVerifyStageSchema,
+  WorkflowDagDecideStageSchema,
+])
+
+const WorkflowDagSchema = z.object({
+  entry: z.string(),
+  stages: z.record(WorkflowDagStageSchema),
+}).superRefine((value, ctx) => {
+  if (Object.keys(value.stages).length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['stages'],
+      message: 'Workflow DAG requires at least one stage',
+    })
+  }
+  if (!(value.entry in value.stages)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['entry'],
+      message: `Workflow DAG entry "${value.entry}" must reference an existing stage`,
+    })
+  }
+})
+
 const WorkflowRoleOverridesSchema = z.object({
   planner: z.enum(['claude', 'codex', 'opencode']).optional(),
   coder: z.enum(['claude', 'codex', 'opencode']).optional(),
@@ -307,9 +379,25 @@ const WorkflowRoleOverridesSchema = z.object({
 })
 
 export const WorkflowSchema = z.object({
-  steps: z.array(WorkflowStepSchema).min(1),
+  steps: z.array(WorkflowStepSchema).min(1).optional(),
+  dag: WorkflowDagSchema.optional(),
   roles: WorkflowRoleOverridesSchema.optional(),
   agents: z.record(z.string()).optional(),
+}).superRefine((value, ctx) => {
+  if (!value.steps && !value.dag) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['steps'],
+      message: 'Workflow must define either steps or dag',
+    })
+  }
+  if (value.steps && value.dag) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['steps'],
+      message: 'Workflow cannot define both steps and dag',
+    })
+  }
 })
 
 const WorkflowByTriageSchema = z.object({
@@ -350,6 +438,7 @@ const RepoConfigSchema = z.object({
   defaults: DefaultsSchema.default({}),
   environment: EnvironmentConfigSchema.optional(),
   verify: z.array(VerifyCommandSchema).default([]),
+  verificationProfile: z.string().optional(),
   prompts: PromptsSchema.optional(),
   planning: PlanningConfigSchema.default({}),
   fileLoop: RepoFileLoopConfigSchema.default({}),
@@ -569,6 +658,8 @@ export const ConfigSchema = z.object({
 
   workerProfiles: z.record(WorkerProfileSchema).default({}),
 
+  verificationProfiles: z.record(VerificationProfileSchema).default({}),
+
   metrics: MetricsSchema.default({}),
 
   observability: ObservabilitySchema.default({}),
@@ -676,6 +767,7 @@ export const ProjectConfigSchema = z.object({
   defaults: z.unknown().optional(),
   environment: z.unknown().optional(),
   verify: z.unknown().optional(),
+  verificationProfile: z.unknown().optional(),
   prompts: z.unknown().optional(),
   planning: z.unknown().optional(),
   fileLoop: z.unknown().optional(),
@@ -686,6 +778,7 @@ export const ProjectConfigSchema = z.object({
   mergeQueue: z.unknown().optional(),
   workflows: z.unknown().optional(),
   workerProfiles: z.unknown().optional(),
+  verificationProfiles: z.unknown().optional(),
 }).strict()
 
 export type Config = z.infer<typeof ConfigSchema>
@@ -696,3 +789,5 @@ export type CostModel = z.infer<typeof CostModelSchema>
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>
 export type FileLoopConfig = z.infer<typeof FileLoopConfigSchema>
 export type RepoFileLoopConfig = z.infer<typeof RepoFileLoopConfigSchema>
+export type VerificationProfile = z.infer<typeof VerificationProfileSchema>
+export type VerificationStage = z.infer<typeof VerificationStageSchema>

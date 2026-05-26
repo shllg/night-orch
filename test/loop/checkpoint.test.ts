@@ -265,6 +265,33 @@ describe('Checkpoint', () => {
       expect(resumed!.stepOutputs).toEqual({ 'custom-analysis': { score: 0.87 } })
     })
 
+    it('rehydrates verification stage metadata from verify artifacts', () => {
+      checkpoint.phaseCompleted('run-test-1', 'verify', {
+        verifyResults: [{
+          command: 'pnpm test',
+          exitCode: 1,
+          stdout: '',
+          stderr: 'failed',
+          durationMs: 100,
+          passed: false,
+          required: false,
+          stageId: 'full',
+          onFailure: 'warn',
+        }],
+        diff: 'diff --git a/a b/a',
+        diffError: null,
+        emptyDiffRetries: 0,
+      })
+
+      const resumed = checkpoint.resumeFromCheckpoint('run-test-1', makeBaseCtx())
+      expect(resumed?.verifyResults[0]).toMatchObject({
+        command: 'pnpm test',
+        required: false,
+        stageId: 'full',
+        onFailure: 'warn',
+      })
+    })
+
     it('returns empty defaults when phase_data JSON is corrupt (does not throw)', () => {
       db.prepare('UPDATE runs SET current_phase = ?, phase_data = ? WHERE id = ?').run(
         'plan',

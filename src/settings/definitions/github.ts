@@ -2,6 +2,7 @@ import { z } from 'zod'
 import {
   AppMentionSchema,
   NotificationChannelSchema,
+  VerificationProfileSchema,
   WorkflowSchema,
 } from '../../config/schema.js'
 import type { SettingDefinition } from '../registry.js'
@@ -16,6 +17,7 @@ import {
 const GithubAppMentionsOverrideSchema = z.record(AppMentionSchema)
 const NotificationsChannelsOverrideSchema = z.array(NotificationChannelSchema)
 const WorkflowsOverrideSchema = z.record(WorkflowSchema)
+const VerificationProfilesOverrideSchema = z.record(VerificationProfileSchema)
 
 export function githubDefinitions(): SettingDefinition[] {
   return [
@@ -279,6 +281,15 @@ export function githubDefinitions(): SettingDefinition[] {
       defaultValue: {},
       yamlPath: ['workflows'],
       normalize: (value) => validateJsonSettingShape(value, WorkflowsOverrideSchema, 'workflows'),
+    }),
+    jsonSetting({
+      key: 'verificationProfiles',
+      label: 'Verification Profiles',
+      description: 'Named staged verification profiles.',
+      details: 'Record of staged verify definitions used by repos/workflows to run smoke/full/nightly command sets.',
+      defaultValue: {},
+      yamlPath: ['verificationProfiles'],
+      normalize: (value) => validateJsonSettingShape(value, VerificationProfilesOverrideSchema, 'verificationProfiles'),
     }),
   ]
 }

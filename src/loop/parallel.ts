@@ -117,6 +117,15 @@ export async function executeParallelSubtasks(
             runId: subRun.id,
             branchName: subBranch,
             worktreePath: subWorktreePath,
+            workItem: parentCtx.workItem
+              ? {
+                  ...parentCtx.workItem,
+                  id: `${parentCtx.workItem.id}/sub-${index}`,
+                  title: subtask.title,
+                  body: subtask.description,
+                  dependencies: [...subtask.dependencies],
+                }
+              : undefined,
             plan: null,
             codeResult: null,
             diff: null,

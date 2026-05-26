@@ -211,6 +211,34 @@ commentCommands:
 #       - { type: worker, id: security, role: reviewer }
 #       - { type: worker, id: review, role: reviewer }
 #       - { type: decide, id: decide, onIterate: code }
+#   dag-minimal:
+#     dag:
+#       entry: code
+#       stages:
+#         code:
+#           type: worker
+#           role: coder
+#           next: verify
+#         verify:
+#           type: verify
+#           profile: strict
+#           stage: smoke
+#           next: decide
+#         decide:
+#           type: decide
+#           onIterate: code
+#
+# verificationProfiles:
+#   strict:
+#     stages:
+#       - id: smoke
+#         commands:
+#           - pnpm typecheck
+#       - id: full
+#         commands:
+#           - pnpm test
+#         required: false
+#         onFailure: warn
 
 repos:
   - repo: myorg/myrepo
@@ -275,6 +303,7 @@ repos:
       planner: claude
       coder: codex
       reviewer: claude
+    # verificationProfile: strict
       doneMode: pr-ready
       notifyPriority: normal
       prMentions:

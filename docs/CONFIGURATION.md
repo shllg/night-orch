@@ -35,7 +35,7 @@ If both files exist in the same repo, config load fails (ambiguous source).
 Project config is deep-merged into central config with **project values winning**:
 
 - Repo-scoped keys merge into that repo entry only.
-- `workflows` and `workerProfiles` merge into top-level maps.
+- `workflows`, `workerProfiles`, and `verificationProfiles` merge into top-level maps.
 - Objects merge recursively.
 - Arrays are replaced (not concatenated).
 
@@ -68,6 +68,7 @@ Registered keys are visible via `night-orch settings list` (or Web/TUI Settings/
 - `security`: `maxChangedFiles`, `maxChangedLines`, `maxDailyCostUsd`, `maxCostPerRunUsd`
 - `cost`: `model`, `subscriptionMetered`, `pricing.defaultModel`, `pricing.models`
 - `workerProfiles`
+- `verificationProfiles`
 - `metrics`: `enabled`, `port`, `host`
 - `observability`: `agentStreaming`, `eventRetention`, `sessionLogs`, `sessionLogRetention`
 - `mcp`: `enabled`, `transport`, `authTokenEnv`, `httpPort`, `httpHost`
@@ -97,7 +98,7 @@ Update surfaces:
   - string: `"pnpm test -- --run"`
   - array: `["pnpm", "test", "--", "--run"]`
 - `repos[].labels.ready` and `repos[].labels.blocked` accept either string or string array and are normalized to arrays.
-- Project config files (`repos[].localPath/.night-orch.yml` or `.yaml`) may define repo-scoped keys plus optional top-level `workflows` and `workerProfiles`.
+- Project config files (`repos[].localPath/.night-orch.yml` or `.yaml`) may define repo-scoped keys plus optional top-level `workflows`, `workerProfiles`, and `verificationProfiles`.
 
 ## Timestamp & Timezone Semantics
 
@@ -125,6 +126,7 @@ Update surfaces:
 | `commentCommands` | object | no | object with defaults | Issue comment command processing config. |
 | `repos` | array | yes | none | At least one repo is required. |
 | `workflows` | record | no | `{}` | Named workflow definitions for custom pipelines. |
+| `verificationProfiles` | record | no | `{}` | Named staged verification pipelines reusable across repos/workflows. |
 
 ## `github`
 
@@ -663,13 +665,14 @@ workflows:
 | Type | Fields | Description |
 | --- | --- | --- |
 | `worker` | `id`, `role`, `skipWhen?`, `continueFrom?`, `prompt?` | Invoke a worker adapter. Built-in roles: `planner`, `coder`, `reviewer`. |
-| `verify` | `id`, `skipWhen?` | Run configured verify commands. |
+| `verify` | `id`, `skipWhen?`, `profile?`, `stage?` | Run verify commands from `repos[].verify` or a named verification profile/stage. |
 | `decide` | `id`, `onIterate`, `requireReview?` | Evaluate review/verify results and route to publish, iterate (jump to `onIterate` step), or block. |
 
 - `skipWhen` — skip the step when the triage level matches (e.g., `trivial`)
 - `continueFrom` — continue the AI session from a prior step (e.g., coder continues planner's session). Session reuse is agent-specific; cross-agent handoffs (for example `planner=claude`, `coder=codex`) start a fresh session.
 - `prompt` — path to a custom system prompt template (overrides the default)
 - `requireReview` — default `true`; set to `false` for no-review workflows (for example lightweight triage paths)
+- `profile` / `stage` on verify steps — override repo-level verification profile selection for this step
 
 ### Workflow-Level Overrides
 
@@ -677,6 +680,61 @@ workflows:
 - `agents` — optional per-agent worker profile overrides (same shape as `repos[].agents`)
 
 Reference a workflow in `repos[].workflow` by name.
+
+### DAG Workflows
+
+Instead of `steps`, a workflow can define `dag` with explicit stage links:
+
+```yaml
+workflows:
+  dag-minimal:
+    dag:
+      entry: code
+      stages:
+        code:
+          type: worker
+          role: coder
+          next: verify
+        verify:
+          type: verify
+          profile: strict
+          stage: smoke
+          next: decide
+        decide:
+          type: decide
+          onIterate: code
+```
+
+Rules:
+- Define **either** `steps` or `dag` (not both).
+- `dag.entry` must exist in `dag.stages`.
+- `worker` and `verify` stages are non-terminal and must set `next`.
+- DAG workflows must terminate at a `decide` stage.
+
+## `verificationProfiles`
+
+Named staged verification command sets. Reusable from `repos[].verificationProfile` and workflow verify steps (`profile`/`stage`).
+
+```yaml
+verificationProfiles:
+  strict:
+    stages:
+      - id: smoke
+        commands:
+          - pnpm typecheck
+      - id: full
+        commands:
+          - pnpm test
+        required: false
+        onFailure: warn
+```
+
+Stage keys:
+- `id` — stage name referenced by workflow verify step `stage`.
+- `commands` — `CommandSpec[]` (`string`, `string[]`, or `{ command, timeoutSeconds }`).
+- `timeoutSeconds` — stage-level default timeout for commands without explicit timeout.
+- `required` — default `true`; when `false`, failures do not fail verification gating.
+- `onFailure` — `block` (default), `iterate`, or `warn` (reserved for policy routing/observability).
 
 ## `repos[]`
 
@@ -700,6 +758,7 @@ Reference a workflow in `repos[].workflow` by name.
 | `fileLoop` | object | no | `{}` | Per-repo overrides merged onto top-level `fileLoop`. |
 | `environment` | object | no | none | Shared/dedicated env setup. |
 | `verify` | `CommandSpec[]` | no | `[]` | Verify commands run in worktree. |
+| `verificationProfile` | string | no | none | Default named verification profile for verify steps in this repo. |
 | `prompts` | object | no | none | Optional custom system prompt template paths. |
 | `selectors` | object | no | object with defaults | Issue label inclusion/exclusion filters. |
 | `agents` | record | no | `{}` | Maps agent names to worker profile names. |
@@ -718,6 +777,7 @@ You can move repo-specific settings into a file inside the repository checkout:
 ```yaml
 # <repo>/.night-orch.yml
 workflow: project-fast
+verificationProfile: strict
 defaults:
   coder: codex
 environment:
@@ -729,7 +789,14 @@ workflows:
   project-fast:
     steps:
       - { type: worker, id: code, role: coder }
+      - { type: verify, id: smoke, stage: smoke }
       - { type: decide, id: decide, onIterate: code }
+
+verificationProfiles:
+  strict:
+    stages:
+      - id: smoke
+        commands: [pnpm typecheck]
 ```
 
 This file is merged with the matching `repos[]` entry from central config.

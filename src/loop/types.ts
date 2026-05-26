@@ -5,6 +5,7 @@ import type { TriageResult, TriageAdjustedLimits } from '../discovery/triage.js'
 import type { PlannerOutput, CoderOutput, ReviewerOutput, ReviewFinding, VerifyResult } from '../workers/types.js'
 import type { IterationSnapshot } from './progress.js'
 import type { BlockedState } from './state.js'
+import type { WorkItem } from '../work-items/types.js'
 
 /** Why a run was blocked — used for reporting and retry eligibility. */
 export type BlockReason =
@@ -44,6 +45,7 @@ export interface RunContext {
   readonly issueRepo?: string
   readonly issueNumber: number
   readonly issue: ForgeIssue
+  readonly workItem?: WorkItem
   readonly repoConfig: RepoConfig
   readonly roles: ResolvedRoles
   readonly triageResult: TriageResult

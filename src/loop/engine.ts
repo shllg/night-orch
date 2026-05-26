@@ -13,6 +13,7 @@ import { Checkpoint } from './checkpoint.js'
 import { FileRunArtifactWriter } from './run-artifacts.js'
 import { CostTracker, describeBudgetBlock, costLimitRecoveryHint, type BudgetStatus } from './cost.js'
 import { estimateWorkerCost } from './pricing.js'
+import { allRequiredVerifyPassed } from './verifier.js'
 import {
   WorkerAuthError,
   WorkerError,
@@ -306,7 +307,7 @@ export async function executeLoop(
       try {
         metrics?.observePhaseDuration('verify', stepDurationMs / 1000)
         metrics?.observeVerifyDuration(stepDurationMs / 1000)
-        const allPassed = ctx.verifyResults.length > 0 && ctx.verifyResults.every(r => r.passed)
+        const allPassed = ctx.verifyResults.length > 0 && allRequiredVerifyPassed(ctx.verifyResults)
         metrics?.incVerifyRuns(allPassed ? 'pass' : 'fail')
       } catch { /* best-effort */ }
     }
@@ -708,7 +709,7 @@ function determineStepSuccess(step: WorkflowStep, ctx: RunContext): boolean {
       if (step.role === 'reviewer') return ctx.reviewResult !== null
       return true
     case 'verify':
-      return ctx.verifyResults.length > 0 && ctx.verifyResults.every(r => r.passed)
+      return ctx.verifyResults.length > 0 && allRequiredVerifyPassed(ctx.verifyResults)
     case 'decide':
       return true
   }
