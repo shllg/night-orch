@@ -48,6 +48,7 @@
     "node": ">=24.0.0"
   },
   "dependencies": {
+    "@ai-hero/sandcastle": "^0.5.12",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@octokit/rest": "^22.0.1",
     "acpx": "^0.4.0",

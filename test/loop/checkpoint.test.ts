@@ -3,6 +3,7 @@ import {
   Checkpoint,
   extractDecisionOutcomes,
   findTerminalDecisionOutcome,
+  type CheckpointArtifactEventWriter,
   type PersistedDecisionOutcome,
 } from '../../src/loop/checkpoint.js'
 import { initDatabase } from '../../src/state/db.js'
@@ -92,6 +93,31 @@ describe('Checkpoint', () => {
 
       const row = db.prepare('SELECT iteration_count FROM runs WHERE id = ?').get('run-test-1') as { iteration_count: number | null }
       expect(row.iteration_count).toBe(3)
+    })
+
+    it('emits durable artifact event via configured writer', () => {
+      const calls: Array<{
+        runId: string
+        phase: string
+        eventType: string
+        data: Record<string, unknown> | null
+        timestamp: string
+      }> = []
+      const writer: CheckpointArtifactEventWriter = {
+        recordPhaseEvent(event) {
+          calls.push(event)
+        },
+      }
+      checkpoint = new Checkpoint(db, writer)
+
+      checkpoint.phaseStarted('run-test-1', 'plan')
+
+      expect(calls).toHaveLength(1)
+      expect(calls[0]?.runId).toBe('run-test-1')
+      expect(calls[0]?.phase).toBe('plan')
+      expect(calls[0]?.eventType).toBe('phase_started')
+      expect(calls[0]?.data).toBeNull()
+      expect(typeof calls[0]?.timestamp).toBe('string')
     })
   })
 

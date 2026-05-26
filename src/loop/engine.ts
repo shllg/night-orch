@@ -10,6 +10,7 @@ import { hashVerifyResults, assessProgress } from './progress.js'
 import { commitChanges } from './commit.js'
 import { executeStep, type StepDependencies } from './step-executor.js'
 import { Checkpoint } from './checkpoint.js'
+import { FileRunArtifactWriter } from './run-artifacts.js'
 import { CostTracker, describeBudgetBlock, costLimitRecoveryHint, type BudgetStatus } from './cost.js'
 import { estimateWorkerCost } from './pricing.js'
 import {
@@ -66,7 +67,10 @@ export async function executeLoop(
   deps: LoopDependencies,
 ): Promise<RunContext> {
   const { db, config, metrics } = deps
-  const checkpoint = new Checkpoint(db)
+  const artifactWriter = config.storage.logsRoot.trim().length > 0
+    ? new FileRunArtifactWriter(config.storage.logsRoot)
+    : undefined
+  const checkpoint = new Checkpoint(db, artifactWriter)
   const costTracker = new CostTracker(db)
 
   const resumedCtx = checkpoint.resumeFromCheckpoint(initialCtx.runId, initialCtx)

@@ -6,6 +6,18 @@ import { nowUtcIso } from '../utils/time.js'
 import { logger } from '../utils/logger.js'
 import { parsePhaseData } from './checkpoint-schema.js'
 
+export interface CheckpointArtifactEvent {
+  runId: string
+  phase: string
+  eventType: string
+  data: Record<string, unknown> | null
+  timestamp: string
+}
+
+export interface CheckpointArtifactEventWriter {
+  recordPhaseEvent(event: CheckpointArtifactEvent): void
+}
+
 /**
  * Sentinel key used to store an array of completed phase IDs in phase_data.
  * Used on resume to determine whether a phase was merely entered (started)
@@ -93,7 +105,10 @@ export function clearResumeDecisionArtifacts(
 export class Checkpoint {
   private runManager: RunManager
 
-  constructor(private db: Database.Database) {
+  constructor(
+    private db: Database.Database,
+    private artifactWriter?: CheckpointArtifactEventWriter,
+  ) {
     this.runManager = new RunManager(db)
   }
 
@@ -336,8 +351,15 @@ export class Checkpoint {
     phase: LoopPhase,
     data: Record<string, unknown> | null,
   ): void {
+    const now = nowUtcIso()
+    const artifactEvent: CheckpointArtifactEvent = {
+      runId,
+      phase,
+      eventType,
+      data,
+      timestamp: now,
+    }
     try {
-      const now = nowUtcIso()
       this.db
         .prepare(
           `INSERT INTO events (run_id, repo, issue_number, event_type, phase, data, created_at)
@@ -366,6 +388,17 @@ export class Checkpoint {
       // Best-effort event recording: checkpoint persistence must still succeed.
       // Log at debug so operators can diagnose silent drops without spamming.
       logger.debug({ runId, eventType, phase, err }, 'Failed to record phase event')
+    }
+
+    if (this.artifactWriter) {
+      try {
+        this.artifactWriter.recordPhaseEvent(artifactEvent)
+      } catch (err) {
+        logger.debug(
+          { runId, eventType, phase, err },
+          'Failed to record durable artifact event',
+        )
+      }
     }
   }
 }
