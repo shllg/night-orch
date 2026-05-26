@@ -1,12 +1,17 @@
 import type { WorkerAdapter, WorkerProfileInput } from './types.js'
 import { WorkerAdapterRegistry } from './registry.js'
-import { ClaudeWorkerAdapter } from './claude.js'
-import { CodexWorkerAdapter } from './codex.js'
 import { AcpWorkerAdapter } from './acp.js'
+import { SandcastleWorkerAdapter } from './sandcastle.js'
 
 const defaultRegistry = new WorkerAdapterRegistry()
-defaultRegistry.register('claude', () => new ClaudeWorkerAdapter())
-defaultRegistry.register('codex', () => new CodexWorkerAdapter())
+defaultRegistry.register('claude', (profile) => new SandcastleWorkerAdapter({
+  workerType: 'claude',
+  availabilityCommand: profile.command,
+}))
+defaultRegistry.register('codex', (profile) => new SandcastleWorkerAdapter({
+  workerType: 'codex',
+  availabilityCommand: profile.command,
+}))
 defaultRegistry.register('acp', () => new AcpWorkerAdapter())
 
 export function createWorkerAdapter(profile: WorkerProfileInput): WorkerAdapter {

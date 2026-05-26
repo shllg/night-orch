@@ -1,18 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { ClaudeWorkerAdapter } from '../../src/workers/claude.js'
-import { CodexWorkerAdapter } from '../../src/workers/codex.js'
+import type { AgentProvider, RunOptions, RunResult } from '@ai-hero/sandcastle'
+import { SandcastleWorkerAdapter, createStrictHostSandboxProvider, type SandcastleBindings } from '../../src/workers/sandcastle.js'
+import { AcpWorkerAdapter } from '../../src/workers/acp.js'
 import { createWorkerAdapter } from '../../src/workers/factory.js'
-import type { WorkerTaskInput, WorkerProfileInput } from '../../src/workers/types.js'
+import type { WorkerProfileInput, WorkerTaskInput } from '../../src/workers/types.js'
 
-// Mock timeout module
 vi.mock('../../src/workers/timeout.js', () => ({
   execWithTimeout: vi.fn(),
 }))
-vi.mock('../../src/workers/streaming-exec.js', () => ({
-  streamingExec: vi.fn(),
-}))
 
-// Suppress logger
 vi.mock('../../src/utils/logger.js', () => ({
   logger: {
     info: vi.fn(),
@@ -23,13 +19,8 @@ vi.mock('../../src/utils/logger.js', () => ({
 }))
 
 import { execWithTimeout } from '../../src/workers/timeout.js'
-import { streamingExec } from '../../src/workers/streaming-exec.js'
 
 const mockExecWithTimeout = vi.mocked(execWithTimeout)
-const mockStreamingExec = vi.mocked(streamingExec)
-const expectedDefaultPermissionMode = typeof process.getuid === 'function' && process.getuid() === 0
-  ? 'acceptEdits'
-  : 'bypassPermissions'
 
 const baseProfile: WorkerProfileInput = {
   type: 'claude',
@@ -48,190 +39,225 @@ function makeTaskInput(overrides: Partial<WorkerTaskInput> = {}): WorkerTaskInpu
     prompt: 'Plan the fix',
     profile: baseProfile,
     timeoutSeconds: 1800,
-    env: { PATH: '/usr/bin' },
+    env: { PATH: '/usr/bin', HOME: '/tmp' },
     ...overrides,
   }
 }
 
-describe('ClaudeWorkerAdapter', () => {
-  let adapter: ClaudeWorkerAdapter
+function makeAgentProvider(name: string): AgentProvider {
+  return {
+    name,
+    env: {},
+    captureSessions: false,
+    buildPrintCommand: () => ({ command: `${name} exec`, stdin: 'prompt' }),
+    parseStreamLine: () => [],
+  }
+}
 
+function makeBindings(overrides: Partial<SandcastleBindings> = {}): SandcastleBindings {
+  return {
+    run: (async (_options: RunOptions): Promise<RunResult> => ({
+      iterations: [],
+      stdout: '',
+      commits: [],
+      branch: 'main',
+    })),
+    claudeCode: (() => makeAgentProvider('claude-code')) as unknown as SandcastleBindings['claudeCode'],
+    codex: (() => makeAgentProvider('codex')) as unknown as SandcastleBindings['codex'],
+    ...overrides,
+  }
+}
+
+describe('SandcastleWorkerAdapter', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    adapter = new ClaudeWorkerAdapter()
   })
 
-  it('passes correct args to streamingExec', async () => {
-    mockStreamingExec.mockResolvedValue({
-      stdout: '```json\n{"objective": "Fix it"}\n```',
-      stderr: '',
-      exitCode: 0,
-      timedOut: false,
-      durationMs: 5000,
-    })
+  it('runs claude tasks through sandcastle with head branch strategy', async () => {
+    const run = vi.fn<NonNullable<SandcastleBindings['run']>>()
+      .mockResolvedValue({
+        iterations: [{ sessionId: 'claude-session-1', usage: { inputTokens: 120, cacheCreationInputTokens: 30, cacheReadInputTokens: 10, outputTokens: 45 } }],
+        stdout: '```json\n{"objective":"Plan the fix"}\n```',
+        commits: [],
+        branch: 'main',
+      })
+    const claudeCode = vi.fn().mockReturnValue(makeAgentProvider('claude-code'))
 
-    await adapter.runTask(makeTaskInput())
-
-    expect(mockStreamingExec).toHaveBeenCalledWith({
-      command: 'claude',
-      args: ['-p', '--output-format', 'json', '--max-turns', '50', '--append-system-prompt', expect.stringContaining('Do NOT use plan mode'), '--permission-mode', expectedDefaultPermissionMode],
-      cwd: '/tmp/worktree',
-      env: { PATH: '/usr/bin' },
-      timeoutMs: 1_800_000,
-      stdin: 'Plan the fix',
-      onStdoutLine: expect.any(Function),
-    })
-  })
-
-  it('does not override explicit permission args from profile config', async () => {
-    mockStreamingExec.mockResolvedValue({
-      stdout: '```json\n{"objective": "Fix it"}\n```',
-      stderr: '',
-      exitCode: 0,
-      timedOut: false,
-      durationMs: 5000,
-    })
-
-    const profileWithPermission = {
-      ...baseProfile,
-      args: ['-p', '--permission-mode', 'default'],
-    }
-
-    await adapter.runTask(makeTaskInput({ profile: profileWithPermission }))
-
-    const call = mockStreamingExec.mock.calls.at(-1)
-    expect(call).toBeDefined()
-    const args = (call?.[0].args ?? [])
-    expect(args.filter((arg) => arg === '--permission-mode')).toHaveLength(1)
-    expect(args).toContain('default')
-    expect(args).not.toContain('acceptEdits')
-    expect(args).not.toContain('bypassPermissions')
-  })
-
-  it('parses planner output for planner role', async () => {
-    mockStreamingExec.mockResolvedValue({
-      stdout: '```json\n{"objective": "Fix the login"}\n```',
-      stderr: '',
-      exitCode: 0,
-      timedOut: false,
-      durationMs: 5000,
-    })
-
-    const result = await adapter.runTask(makeTaskInput({ role: 'planner' }))
-
-    expect(result.parseError).toBeNull()
-    expect(result.parsed).not.toBeNull()
-    expect((result.parsed as { objective: string }).objective).toBe('Fix the login')
-  })
-
-  it('parses coder output for coder role', async () => {
-    mockStreamingExec.mockResolvedValue({
-      stdout: '```json\n{"summary": "Fixed the bug", "changedFiles": ["a.ts"]}\n```',
-      stderr: '',
-      exitCode: 0,
-      timedOut: false,
-      durationMs: 5000,
-    })
-
-    const result = await adapter.runTask(makeTaskInput({ role: 'coder' }))
-
-    expect(result.parseError).toBeNull()
-    expect(result.parsed).not.toBeNull()
-    expect((result.parsed as { summary: string }).summary).toBe('Fixed the bug')
-  })
-
-  it('parses reviewer output for reviewer role', async () => {
-    const reviewJson = JSON.stringify({
-      verdict: 'APPROVED',
-      summary: 'Looks good',
-      findings: [],
-      definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
-    })
-    mockStreamingExec.mockResolvedValue({
-      stdout: `\`\`\`json\n${reviewJson}\n\`\`\``,
-      stderr: '',
-      exitCode: 0,
-      timedOut: false,
-      durationMs: 5000,
-    })
-
-    const result = await adapter.runTask(makeTaskInput({ role: 'reviewer' }))
-
-    expect(result.parseError).toBeNull()
-    expect((result.parsed as { verdict: string }).verdict).toBe('APPROVED')
-  })
-
-  it('reports timeout', async () => {
-    mockStreamingExec.mockResolvedValue({
-      stdout: '',
-      stderr: 'killed',
-      exitCode: 143,
-      timedOut: true,
-      durationMs: 1_800_000,
+    const adapter = new SandcastleWorkerAdapter({
+      workerType: 'claude',
+      bindings: makeBindings({ run: run as SandcastleBindings['run'], claudeCode: claudeCode as SandcastleBindings['claudeCode'] }),
+      sandboxProviderFactory: createStrictHostSandboxProvider,
     })
 
     const result = await adapter.runTask(makeTaskInput())
+
+    expect(run).toHaveBeenCalledTimes(1)
+    const call = run.mock.calls[0]?.[0]
+    expect(call?.branchStrategy).toEqual({ type: 'head' })
+    expect(call?.cwd).toBe('/tmp/worktree')
+    expect(call?.prompt).toBe('Plan the fix')
+    expect(call?.maxIterations).toBe(1)
+    expect(result.exitCode).toBe(0)
+    expect(result.timedOut).toBe(false)
+    expect(result.sessionId).toBe('claude-session-1')
+    expect(result.tokenUsage).toEqual({ promptTokens: 150, completionTokens: 45, cacheReadTokens: 10 })
+    expect((result.parsed as { objective: string }).objective).toBe('Plan the fix')
+  })
+
+  it('extracts codex token usage from NDJSON output', async () => {
+    const ndjson = [
+      JSON.stringify({
+        type: 'response.completed',
+        usage: {
+          input_tokens: 321,
+          output_tokens: 123,
+        },
+      }),
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          type: 'agent_message',
+          text: '```json\\n{"objective":"Codex plan"}\\n```',
+        },
+      }),
+      JSON.stringify({
+        type: 'session',
+        thread_id: 'thread-123',
+      }),
+    ].join('\n')
+
+    const run = vi.fn<NonNullable<SandcastleBindings['run']>>()
+      .mockResolvedValue({
+        iterations: [],
+        stdout: ndjson,
+        commits: [],
+        branch: 'main',
+      })
+
+    const codex = vi.fn().mockReturnValue({
+      ...makeAgentProvider('codex'),
+      parseStreamLine: (line: string) => {
+        const parsed = JSON.parse(line) as Record<string, unknown>
+        if (parsed['type'] === 'item.completed') {
+          return [
+            { type: 'text' as const, text: 'text chunk' },
+            { type: 'result' as const, result: 'final result' },
+          ]
+        }
+        return []
+      },
+    } satisfies AgentProvider)
+
+    const adapter = new SandcastleWorkerAdapter({
+      workerType: 'codex',
+      bindings: makeBindings({ run: run as SandcastleBindings['run'], codex: codex as SandcastleBindings['codex'] }),
+      sandboxProviderFactory: createStrictHostSandboxProvider,
+    })
+
+    const result = await adapter.runTask(makeTaskInput({
+      profile: { ...baseProfile, type: 'codex', command: 'codex', args: ['exec', '--json'] },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(result.sessionId).toBe('thread-123')
+    expect(result.tokenUsage).toEqual({ promptTokens: 321, completionTokens: 123 })
+    expect((result.parsed as { objective: string }).objective).toBe('Codex plan')
+  })
+
+  it('passes worker env via sandbox provider and keeps agent env empty', async () => {
+    const run = vi.fn<NonNullable<SandcastleBindings['run']>>()
+      .mockResolvedValue({
+        iterations: [],
+        stdout: '```json\n{"objective":"Plan the fix"}\n```',
+        commits: [],
+        branch: 'main',
+      })
+    const claudeCode = vi.fn().mockReturnValue(makeAgentProvider('claude-code'))
+    const input = makeTaskInput({ env: { PATH: '/usr/bin', HOME: '/tmp', MISE_TRUSTED_CONFIG_PATHS: '/tmp/wt' } })
+
+    const adapter = new SandcastleWorkerAdapter({
+      workerType: 'claude',
+      bindings: makeBindings({ run: run as SandcastleBindings['run'], claudeCode: claudeCode as SandcastleBindings['claudeCode'] }),
+      sandboxProviderFactory: createStrictHostSandboxProvider,
+    })
+
+    await adapter.runTask(input)
+
+    const call = run.mock.calls[0]?.[0]
+    expect(call?.sandbox.env).toEqual(input.env)
+    expect(call?.agent.env).toEqual({})
+  })
+
+  it('passes continue session id as resumeSession for claude runs', async () => {
+    const run = vi.fn<NonNullable<SandcastleBindings['run']>>()
+      .mockResolvedValue({
+        iterations: [],
+        stdout: '```json\n{"objective":"Plan the fix"}\n```',
+        commits: [],
+        branch: 'main',
+      })
+
+    const adapter = new SandcastleWorkerAdapter({
+      workerType: 'claude',
+      bindings: makeBindings({ run: run as SandcastleBindings['run'] }),
+      sandboxProviderFactory: createStrictHostSandboxProvider,
+    })
+
+    await adapter.runTask(makeTaskInput({ continueSessionId: 'claude-session-42' }))
+
+    const call = run.mock.calls[0]?.[0]
+    expect(call?.resumeSession).toBe('claude-session-42')
+  })
+
+  it('injects codex resume subcommand when continue session id is provided', async () => {
+    const run = vi.fn<NonNullable<SandcastleBindings['run']>>()
+      .mockResolvedValue({
+        iterations: [],
+        stdout: '```json\n{"objective":"Plan the fix"}\n```',
+        commits: [],
+        branch: 'main',
+      })
+    const codex = vi.fn().mockReturnValue(makeAgentProvider('codex'))
+
+    const adapter = new SandcastleWorkerAdapter({
+      workerType: 'codex',
+      bindings: makeBindings({ run: run as SandcastleBindings['run'], codex: codex as SandcastleBindings['codex'] }),
+      sandboxProviderFactory: createStrictHostSandboxProvider,
+    })
+
+    await adapter.runTask(makeTaskInput({
+      profile: { ...baseProfile, type: 'codex', command: 'codex', args: ['exec', '--json'] },
+      continueSessionId: 'codex-thread-42',
+    }))
+
+    const call = run.mock.calls[0]?.[0]
+    const command = call?.agent.buildPrintCommand({
+      prompt: 'Plan the fix',
+      dangerouslySkipPermissions: true,
+    }).command
+    expect(command).toContain('resume codex-thread-42')
+  })
+
+  it('marks run as timed out when sandcastle run aborts', async () => {
+    const run: SandcastleBindings['run'] = (options) => new Promise((_resolve, reject) => {
+      options.signal?.addEventListener('abort', () => {
+        reject(options.signal?.reason ?? new Error('aborted'))
+      })
+    })
+
+    const adapter = new SandcastleWorkerAdapter({
+      workerType: 'codex',
+      bindings: makeBindings({ run }),
+      sandboxProviderFactory: createStrictHostSandboxProvider,
+    })
+
+    const result = await adapter.runTask(makeTaskInput({
+      timeoutSeconds: 0.01,
+      profile: { ...baseProfile, type: 'codex', command: 'codex', args: ['exec', '--json'] },
+    }))
 
     expect(result.timedOut).toBe(true)
-    expect(result.exitCode).toBe(143)
-  })
-
-  it('falls back to text plan when output has no JSON block', async () => {
-    mockStreamingExec.mockResolvedValue({
-      stdout: 'This is not JSON at all',
-      stderr: '',
-      exitCode: 0,
-      timedOut: false,
-      durationMs: 1000,
-    })
-
-    const result = await adapter.runTask(makeTaskInput())
-
-    expect(result.parsed).not.toBeNull()
-    expect((result.parsed as { objective: string }).objective).toBe('This is not JSON at all')
-    expect(result.parseError).toContain('fallback')
-  })
-
-  it('returns raw output regardless of parse success', async () => {
-    const rawOutput = 'Raw worker output here'
-    mockStreamingExec.mockResolvedValue({
-      stdout: rawOutput,
-      stderr: '',
-      exitCode: 0,
-      timedOut: false,
-      durationMs: 1000,
-    })
-
-    const result = await adapter.runTask(makeTaskInput())
-
-    expect(result.rawOutput).toBe(rawOutput)
-  })
-
-  it('extracts token usage from Claude result usage payload', async () => {
-    mockStreamingExec.mockResolvedValue({
-      stdout: JSON.stringify([
-        {
-          type: 'assistant',
-          message: {
-            content: [{ type: 'text', text: '```json\n{"objective":"Plan"}\n```' }],
-          },
-        },
-        {
-          type: 'result',
-          usage: {
-            input_tokens: 120,
-            output_tokens: 45,
-          },
-        },
-      ]),
-      stderr: '',
-      exitCode: 0,
-      timedOut: false,
-      durationMs: 1000,
-    })
-
-    const result = await adapter.runTask(makeTaskInput({ role: 'planner' }))
-    expect(result.tokenUsage).toEqual({ promptTokens: 120, completionTokens: 45 })
+    expect(result.exitCode).toBe(124)
   })
 
   it('checkAvailability returns available when command succeeds', async () => {
@@ -243,6 +269,7 @@ describe('ClaudeWorkerAdapter', () => {
       durationMs: 100,
     })
 
+    const adapter = new SandcastleWorkerAdapter({ workerType: 'claude', availabilityCommand: 'claude' })
     const { available, version } = await adapter.checkAvailability()
 
     expect(available).toBe(true)
@@ -258,6 +285,7 @@ describe('ClaudeWorkerAdapter', () => {
       durationMs: 100,
     })
 
+    const adapter = new SandcastleWorkerAdapter({ workerType: 'codex', availabilityCommand: 'codex' })
     const { available, version } = await adapter.checkAvailability()
 
     expect(available).toBe(false)
@@ -265,163 +293,20 @@ describe('ClaudeWorkerAdapter', () => {
   })
 })
 
-describe('CodexWorkerAdapter', () => {
-  let adapter: CodexWorkerAdapter
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    adapter = new CodexWorkerAdapter()
-  })
-
-  it('passes prompt via stdin (no --output-format)', async () => {
-    mockStreamingExec.mockResolvedValue({
-      stdout: '```json\n{"objective": "Fix it"}\n```',
-      stderr: '',
-      exitCode: 0,
-      timedOut: false,
-      durationMs: 5000,
-    })
-
-    const codexProfile = { ...baseProfile, type: 'codex' as const, command: 'codex' }
-    await adapter.runTask(makeTaskInput({ profile: codexProfile }))
-
-    expect(mockStreamingExec).toHaveBeenCalledWith(expect.objectContaining({
-      command: 'codex',
-      args: expect.arrayContaining(['-p', '--output-last-message']),
-      cwd: '/tmp/worktree',
-      env: { PATH: '/usr/bin' },
-      timeoutMs: 1_800_000,
-      stdin: 'Plan the fix',
-      onStdoutLine: expect.any(Function),
-    }))
-  })
-
-  it('applies runtime wrapper when configured', async () => {
-    mockStreamingExec.mockResolvedValue({
-      stdout: '```json\n{"objective":"wrapped"}\n```',
-      stderr: '',
-      exitCode: 0,
-      timedOut: false,
-      durationMs: 1000,
-    })
-
-    const wrappedProfile = {
-      ...baseProfile,
-      type: 'codex' as const,
-      command: 'codex',
-      runtimeWrapper: 'firejail --quiet',
-    }
-    await adapter.runTask(makeTaskInput({ profile: wrappedProfile }))
-
-    expect(mockStreamingExec).toHaveBeenCalledWith(expect.objectContaining({
-      command: 'firejail',
-      args: expect.arrayContaining(['--quiet', 'codex', '-p', '--output-last-message']),
-      stdin: 'Plan the fix',
-      onStdoutLine: expect.any(Function),
-    }))
-  })
-
-  it('parses output the same way as Claude adapter', async () => {
-    mockStreamingExec.mockResolvedValue({
-      stdout: '```json\n{"objective": "Codex plan"}\n```',
-      stderr: '',
-      exitCode: 0,
-      timedOut: false,
-      durationMs: 5000,
-    })
-
-    const result = await adapter.runTask(makeTaskInput({ role: 'planner' }))
-
-    expect(result.parseError).toBeNull()
-    expect((result.parsed as { objective: string }).objective).toBe('Codex plan')
-  })
-
-  it('uses `exec resume <sessionId>` when continueSessionId is provided', async () => {
-    mockStreamingExec.mockResolvedValue({
-      stdout: '```json\n{"objective": "Resume plan"}\n```',
-      stderr: '',
-      exitCode: 0,
-      timedOut: false,
-      durationMs: 5000,
-    })
-
-    const codexProfile = {
-      ...baseProfile,
-      type: 'codex' as const,
-      command: 'codex',
-      args: ['exec', '--json'],
-    }
-    await adapter.runTask(makeTaskInput({ profile: codexProfile, continueSessionId: 'session-123' }))
-
-    const call = mockStreamingExec.mock.calls[0]?.[0]
-    expect(call?.args).toEqual(expect.arrayContaining(['exec', 'resume', 'session-123', '--json']))
-    expect(call?.args).not.toContain('--resume')
-  })
-
-  it('skips resume when codex profile args do not include exec', async () => {
-    mockStreamingExec.mockResolvedValue({
-      stdout: '```json\n{"objective": "No resume fallback"}\n```',
-      stderr: '',
-      exitCode: 0,
-      timedOut: false,
-      durationMs: 5000,
-    })
-
-    const codexProfile = {
-      ...baseProfile,
-      type: 'codex' as const,
-      command: 'codex',
-      args: ['--json'],
-    }
-    await adapter.runTask(makeTaskInput({ profile: codexProfile, continueSessionId: 'session-123' }))
-
-    const call = mockStreamingExec.mock.calls[0]?.[0]
-    expect(call?.args).toEqual(expect.arrayContaining(['--json', '--output-last-message']))
-    expect(call?.args).not.toContain('resume')
-    expect(call?.args).not.toContain('--resume')
-  })
-
-  it('extracts token usage from Codex completion events', async () => {
-    mockStreamingExec.mockResolvedValue({
-      stdout: [
-        JSON.stringify({
-          type: 'response.completed',
-          usage: {
-            input_tokens: 321,
-            output_tokens: 123,
-          },
-        }),
-        JSON.stringify({
-          type: 'item.completed',
-          item: {
-            type: 'agent_message',
-            text: '```json\n{"objective":"Codex plan"}\n```',
-          },
-        }),
-      ].join('\n'),
-      stderr: '',
-      exitCode: 0,
-      timedOut: false,
-      durationMs: 2000,
-    })
-
-    const result = await adapter.runTask(makeTaskInput({
-      role: 'planner',
-      profile: { ...baseProfile, type: 'codex', command: 'codex' },
-    }))
-    expect(result.tokenUsage).toEqual({ promptTokens: 321, completionTokens: 123 })
-  })
-})
-
 describe('createWorkerAdapter (factory)', () => {
-  it('creates ClaudeWorkerAdapter for claude type', () => {
+  it('creates SandcastleWorkerAdapter for claude type', () => {
     const adapter = createWorkerAdapter(baseProfile)
-    expect(adapter).toBeInstanceOf(ClaudeWorkerAdapter)
+    expect(adapter).toBeInstanceOf(SandcastleWorkerAdapter)
   })
 
-  it('creates CodexWorkerAdapter for codex type', () => {
+  it('creates SandcastleWorkerAdapter for codex type', () => {
     const adapter = createWorkerAdapter({ ...baseProfile, type: 'codex' })
-    expect(adapter).toBeInstanceOf(CodexWorkerAdapter)
+    expect(adapter).toBeInstanceOf(SandcastleWorkerAdapter)
+  })
+
+  it('creates AcpWorkerAdapter for acp type', () => {
+    const adapter = createWorkerAdapter({ ...baseProfile, type: 'acp' })
+    expect(adapter).toBeInstanceOf(AcpWorkerAdapter)
   })
 
   it('throws for unknown worker type', () => {
