@@ -208,7 +208,8 @@ export async function doctorCommand(globalOpts?: GlobalOpts): Promise<void> {
   for (const repo of config.repos) {
     for (const verifyCmd of repo.verify) {
       try {
-        const { binary } = parseCommandSpec(verifyCmd)
+        const commandSpec = normalizeVerifyCommandSpec(verifyCmd)
+        const { binary } = parseCommandSpec(commandSpec)
         const found = await checkBinary(binary)
         if (found) {
           results.push({ name: `Verify: ${binary}`, passed: true, message: 'Found' })
@@ -457,6 +458,11 @@ function isErrnoShape(value: unknown): value is { code: string } {
     && value !== null
     && 'code' in value
     && typeof (value as { code?: unknown }).code === 'string'
+}
+
+function normalizeVerifyCommandSpec(command: string | string[] | { command: string | string[] }): string | string[] {
+  if (Array.isArray(command) || typeof command === 'string') return command
+  return command.command
 }
 
 function printResults(results: CheckResult[]): void {

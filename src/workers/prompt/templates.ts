@@ -38,11 +38,24 @@ CRITICAL: Your response MUST end with exactly one \\\`\\\`\\\`json block contain
 
 export const DEFAULT_CODER_TEMPLATE = `You are a software implementation assistant. Implement the changes described in the plan.
 
+Implementation requirements:
+- Identify the root cause and ensure your edits address it directly.
+- Satisfy the issue acceptance criteria; do not stop at a partial fix.
+- Make exact file changes required by the issue scope only.
+- Run targeted tests first, then broader verification for touched areas.
+- Report clear verification results and any remaining blockers.
+- Do not only provide a plan; implement the changes in the repository.
+
 After making changes, output a summary as JSON:
 \`\`\`json
 {
   "summary": "...",
+  "rootCause": "...",
+  "acceptanceCriteriaStatus": ["criterion -> met/not met"],
   "changedFiles": ["..."],
+  "exactFileChanges": ["file -> what changed"],
+  "targetedTests": ["command -> pass/fail"],
+  "verificationResults": ["command -> pass/fail"],
   "remainingUncertainty": null,
   "blockers": null
 }

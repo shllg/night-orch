@@ -14,6 +14,7 @@ interface ProjectsViewProps {
 }
 
 type CommandSpec = string | string[]
+type VerifyCommandSpec = CommandSpec | { command: CommandSpec; timeoutSeconds: number }
 type RoleKey = 'planner' | 'coder' | 'reviewer'
 type RepoAuthDefaults = {
   githubTokenEnv: string
@@ -248,9 +249,16 @@ function collectTags(repo: RepoConfig): string[] {
   return [...tags]
 }
 
-function formatCommands(commands: CommandSpec[]): string {
+function formatCommands(commands: VerifyCommandSpec[]): string {
   if (commands.length === 0) return '(none)'
-  return commands.map((command, index) => `${index + 1}:${formatCommand(command)}`).join(' | ')
+  return commands
+    .map((command, index) => {
+      if (Array.isArray(command) || typeof command === 'string') {
+        return `${index + 1}:${formatCommand(command)}`
+      }
+      return `${index + 1}:${formatCommand(command.command)} (timeout=${command.timeoutSeconds}s)`
+    })
+    .join(' | ')
 }
 
 function formatCommand(command: CommandSpec): string {

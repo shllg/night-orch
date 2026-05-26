@@ -192,8 +192,6 @@ export function sanitizeUntrustedText(value: string): string {
   return value
     .replace(/<[^>]*>/g, '')
     .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/```[\s\S]*?```/g, '[code-block removed]')
-    .replace(/`[^`]+`/g, '[inline-code removed]')
     .replace(/!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, '[image removed]')
     .replace(/\[([^\]]+)]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, '$1 [link removed]')
     .replace(/^#{1,6}\s+/gm, '')

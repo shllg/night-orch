@@ -111,6 +111,32 @@ describe('runVerifyCommands', () => {
     expect(mockExeca).toHaveBeenCalledWith('pnpm', ['lint'], expect.any(Object))
   })
 
+  it('uses default timeout when verify command does not override it', async () => {
+    mockExeca.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' } as never)
+
+    await runVerifyCommands('/tmp/wt', ['pnpm lint'])
+
+    expect(mockExeca).toHaveBeenCalledWith(
+      'pnpm',
+      ['lint'],
+      expect.objectContaining({ timeout: 60_000 }),
+    )
+  })
+
+  it('uses per-command timeout override when configured', async () => {
+    mockExeca.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' } as never)
+
+    await runVerifyCommands('/tmp/wt', [
+      { command: 'pnpm test', timeoutSeconds: 180 },
+    ])
+
+    expect(mockExeca).toHaveBeenCalledWith(
+      'pnpm',
+      ['test'],
+      expect.objectContaining({ timeout: 180_000 }),
+    )
+  })
+
   it('records duration', async () => {
     mockExeca.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' } as never)
 

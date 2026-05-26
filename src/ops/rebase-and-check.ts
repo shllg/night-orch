@@ -131,7 +131,7 @@ export async function executeRebase(
   baseBranch: string,
   repo: string,
   issueNumber: number,
-  verifyCommands: Array<string | string[]>,
+  verifyCommands: Array<string | string[] | { command: string | string[]; timeoutSeconds: number }>,
   checkAfter = true,
   strategy: UpdateStrategy = 'rebase',
   options: {

@@ -156,6 +156,30 @@ describe('ConfigSchema', () => {
     }
   })
 
+  it('accepts verify commands with per-command timeout overrides', () => {
+    const raw = loadExampleConfig()
+    raw.repos[0].verify = [
+      { command: 'pnpm test', timeoutSeconds: 180 },
+      ['pnpm', 'lint'],
+    ]
+
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.repos[0]?.verify[0]).toEqual({ command: 'pnpm test', timeoutSeconds: 180 })
+    }
+  })
+
+  it('rejects verify timeout overrides when timeoutSeconds is not positive', () => {
+    const raw = loadExampleConfig()
+    raw.repos[0].verify = [
+      { command: 'pnpm test', timeoutSeconds: 0 },
+    ]
+
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(false)
+  })
+
   it('accepts discord notification channel config', () => {
     const raw = loadExampleConfig()
     raw.notifications.channels = [

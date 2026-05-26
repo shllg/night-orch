@@ -87,6 +87,14 @@ const CommandSpecSchema = z.union([
   z.array(z.string()).min(1),
 ])
 
+const VerifyCommandSchema = z.union([
+  CommandSpecSchema,
+  z.object({
+    command: CommandSpecSchema,
+    timeoutSeconds: z.number().int().positive(),
+  }).strict(),
+])
+
 // --- Environment schemas ---
 
 const BootstrapFailureHintSchema = z.object({
@@ -341,7 +349,7 @@ const RepoConfigSchema = z.object({
   labelConfig: z.record(LabelPresentationSchema).default({}),
   defaults: DefaultsSchema.default({}),
   environment: EnvironmentConfigSchema.optional(),
-  verify: z.array(CommandSpecSchema).default([]),
+  verify: z.array(VerifyCommandSchema).default([]),
   prompts: PromptsSchema.optional(),
   planning: PlanningConfigSchema.default({}),
   fileLoop: RepoFileLoopConfigSchema.default({}),

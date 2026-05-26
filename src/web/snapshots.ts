@@ -44,6 +44,7 @@ interface SettingsSnapshotEntry extends RuntimeSettingSnapshot {
 }
 
 type CommandSpec = string | string[]
+type VerifyCommandSpec = CommandSpec | { command: CommandSpec; timeoutSeconds: number }
 type CommandWhen = 'always' | 'dedicated' | 'shared'
 
 interface ProjectsSnapshot {
@@ -143,7 +144,7 @@ interface ProjectRepoSummary {
       }>
     }>
   }
-  verify: CommandSpec[]
+  verify: VerifyCommandSpec[]
   prompts: {
     plannerSystem: boolean
     coderSystem: boolean
@@ -292,7 +293,7 @@ function sanitizeProjectRepo(repo: RepoConfig): ProjectRepoSummary {
       prMentions: [...repo.defaults.prMentions],
     },
     ...(repo.environment ? { environment: sanitizeEnvironment(repo.environment) } : {}),
-    verify: repo.verify.map((command) => copyCommandSpec(command)),
+    verify: repo.verify.map((command) => copyVerifyCommandSpec(command)),
     prompts: {
       plannerSystem: Boolean(repo.prompts?.plannerSystem),
       coderSystem: Boolean(repo.prompts?.coderSystem),
@@ -410,4 +411,15 @@ function copyCommandSpec(command: CommandSpec): CommandSpec {
     return [...command]
   }
   return command
+}
+
+function copyVerifyCommandSpec(command: VerifyCommandSpec): VerifyCommandSpec {
+  if (Array.isArray(command) || typeof command === 'string') {
+    return copyCommandSpec(command)
+  }
+
+  return {
+    command: copyCommandSpec(command.command),
+    timeoutSeconds: command.timeoutSeconds,
+  }
 }

@@ -318,4 +318,20 @@ describe('compilePrompt', () => {
     expect(userPrompt).toContain('[image removed]')
     expect(userPrompt).not.toContain('https://example.com')
   })
+
+  it('preserves fenced and inline code in issue body for reproducible context', () => {
+    const ctx = makeContext({
+      issue: {
+        number: 1,
+        title: 'Repro',
+        body: 'Run this:\n```sh\npnpm test -- --run test/foo.test.ts\n```\nThen try `--update`.',
+        labels: [],
+      },
+    })
+    const { userPrompt } = compilePrompt(null, '', ctx)
+
+    expect(userPrompt).toContain('```sh')
+    expect(userPrompt).toContain('pnpm test -- --run test/foo.test.ts')
+    expect(userPrompt).toContain('`--update`')
+  })
 })

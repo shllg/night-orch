@@ -95,6 +95,6 @@ describe('decomposeIssue', () => {
     expect(prompt).toContain('<title>Bad alert(1) title</title>')
     expect(prompt).toContain('[link removed]')
     expect(prompt).not.toContain('https://example.com')
-    expect(prompt).not.toContain('rm -rf /')
+    expect(prompt).toContain('rm -rf /')
   })
 })
