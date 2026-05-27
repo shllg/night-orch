@@ -47,6 +47,27 @@ export async function checkDiffSize(
   return { ok: true, stats, reason: null }
 }
 
+/**
+ * Early scope guard: check the coder's working-tree changes against the
+ * size limits *before* spending verify + review on an over-scoped diff.
+ *
+ * Unlike `checkDiffSize` (which the commit path runs on the staged
+ * index), this runs mid-loop when nothing is staged yet, so it first
+ * marks new files intent-to-add (`git add -N`) — a reversible, no-content
+ * operation — so untracked files count toward the diff. This catches the
+ * "157 changed files > 50" scope explosions at the code phase instead of
+ * only at commit time.
+ */
+export async function checkWorktreeScope(
+  worktreePath: string,
+  limits: { maxChangedFiles: number; maxChangedLines: number },
+): Promise<{ ok: boolean; stats: DiffStats; reason: string | null }> {
+  // Intent-to-add untracked files so `git diff` accounts for them.
+  // Reversible (no content staged); the commit path later runs `git add -A`.
+  await runGit(['add', '-A', '--intent-to-add'], { cwd: worktreePath, reject: false })
+  return checkDiffSize(worktreePath, limits, { staged: false })
+}
+
 function parseDiffStat(output: string): DiffStats {
   const lines = output.trim().split('\n')
   if (lines.length === 0 || output.trim() === '') {

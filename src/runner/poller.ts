@@ -17,6 +17,7 @@ import {
 } from '../events/observability.js'
 import { dispatchAttempt } from '../poller/attempt-dispatcher.js'
 import { discoverIssuesForRepo } from '../poller/discovery-scheduler.js'
+import { runPreflightDriftCheck } from '../loop/preflight.js'
 import { processRepoReactions } from '../poller/reaction-processor.js'
 import { FileLoopEngine } from '../fileloop/engine.js'
 
@@ -220,6 +221,31 @@ async function pollRepo(params: PollRepoParams): Promise<PollResult> {
         processed: repoProcessed,
         errors: repoErrors,
         immediateFollowupRepos: [],
+      }
+    }
+
+    // Preflight drift gate: when enabled, verify the base branch is green
+    // before dispatching fresh work. A red base means drift unrelated to
+    // any queued issue — dispatch onto it would fail every issue in series
+    // and inject stale-base reverts into diffs. Skipped for targeted runs
+    // (the operator explicitly asked for that one issue).
+    if (!targetIssue && repoConfig.preflight?.enabled) {
+      const preflight = await runPreflightDriftCheck({
+        config,
+        repoConfig,
+        worktreeManager,
+        worktreeRoot: config.storage.worktreeRoot,
+      })
+      if (!preflight.ok) {
+        logger.warn(
+          { repo: repoConfig.repo, reason: preflight.reason, failedCommand: preflight.failedCommand },
+          'Preflight drift gate blocked the batch — base branch is red; skipping all dispatch this cycle',
+        )
+        return {
+          processed: repoProcessed,
+          errors: repoErrors,
+          immediateFollowupRepos: [],
+        }
       }
     }
 

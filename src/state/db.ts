@@ -30,6 +30,7 @@ import { up as migration025 } from './migrations/025-cost-token-source.js'
 import { up as migration026 } from './migrations/026-checkpoint-quarantine.js'
 import { up as migration027 } from './migrations/027-push-subscriptions.js'
 import { up as migration028 } from './migrations/028-file-loop.js'
+import { up as migration029 } from './migrations/029-cost-theoretical.js'
 
 const MIGRATIONS = [
   { version: 1, name: '001-initial', up: migration001 },
@@ -60,6 +61,7 @@ const MIGRATIONS = [
   { version: 26, name: '026-checkpoint-quarantine', up: migration026 },
   { version: 27, name: '027-push-subscriptions', up: migration027 },
   { version: 28, name: '028-file-loop', up: migration028 },
+  { version: 29, name: '029-cost-theoretical', up: migration029 },
 ]
 
 export function initDatabase(dbPath: string): Database.Database {

@@ -25,8 +25,11 @@ import { IssueManager } from '../state/issues.js'
 import { utcDayKey } from '../utils/time.js'
 import { logger } from '../utils/logger.js'
 import {
+  evaluateSubscriptionQuota,
   resolveCostPolicy,
   type BudgetStatus,
+  type ResolvedCostPolicy,
+  type SubscriptionQuotaStatus,
 } from './cost/budget.js'
 import {
   normalizeTokenUsage,
@@ -40,9 +43,12 @@ import {
   getDailyCost,
   getDailyCostBreakdownByStep,
   getDailyCostBreakdownByWorker,
+  getDailyTheoreticalCost,
   getDailyTokenUsage,
+  getMonthlyTheoreticalCost,
   getRunCost,
   getRunCostBreakdownByStep,
+  getRunTheoreticalCost,
   getRunTokenUsage,
   verifyCostLedgerIntegrity,
   type StepCostBreakdown,
@@ -59,7 +65,7 @@ import {
 // Re-export the extracted types + helpers so callers that import from
 // './cost.js' continue to work unchanged after R4d.
 export { describeBudgetBlock, costLimitRecoveryHint } from './cost/budget.js'
-export type { BudgetStatus } from './cost/budget.js'
+export type { BudgetStatus, SubscriptionQuotaStatus } from './cost/budget.js'
 export type {
   CostRecordMetadata,
   TokenSource,
@@ -67,6 +73,19 @@ export type {
   TokenUsageTotals,
 } from './cost/recorder.js'
 export type { StepCostBreakdown, WorkerCostBreakdown } from './cost/query.js'
+
+/**
+ * Resolve the layer-2 theoretical cost to record. Defaults to the real
+ * `amountUsd` when callers don't supply one (correct for pay-per-use,
+ * where theoretical == real). Negative/NaN inputs collapse to the
+ * default so a bad caller can never write a nonsensical ledger value.
+ */
+function resolveTheoreticalUsd(theoreticalCostUsd: number | undefined, amountUsd: number): number {
+  if (typeof theoreticalCostUsd !== 'number' || !Number.isFinite(theoreticalCostUsd) || theoreticalCostUsd < 0) {
+    return amountUsd
+  }
+  return Number(theoreticalCostUsd.toFixed(6))
+}
 
 export class CostTracker {
   private issueManager: IssueManager
@@ -95,6 +114,7 @@ export class CostTracker {
     const costStepId = metadata.stepId?.trim() ? metadata.stepId : null
     const costWorkerType = metadata.workerType?.trim() ? metadata.workerType : null
     const tokenSource: TokenSource = metadata.tokenSource ?? 'reported_cli'
+    const theoreticalUsd = resolveTheoreticalUsd(metadata.theoreticalCostUsd, amountUsd)
     const tx = this.db.transaction((
       id: string,
       date: string,
@@ -111,6 +131,7 @@ export class CostTracker {
         costStepId,
         costWorkerType,
         tokenSource,
+        theoreticalUsd,
       )
     })
 
@@ -140,6 +161,7 @@ export class CostTracker {
     const costStepId = metadata.stepId?.trim() ? metadata.stepId : null
     const costWorkerType = metadata.workerType?.trim() ? metadata.workerType : null
     const tokenSource: TokenSource = metadata.tokenSource ?? 'reported_cli'
+    const theoreticalUsd = resolveTheoreticalUsd(metadata.theoreticalCostUsd, amountUsd)
 
     const tx = this.db.transaction((
       id: string,
@@ -159,6 +181,7 @@ export class CostTracker {
         costStepId,
         costWorkerType,
         tokenSource,
+        theoreticalUsd,
       )
       return this.checkBudget(id, securityLimits, policyInput)
     })
@@ -218,6 +241,39 @@ export class CostTracker {
     costPolicyInput: Config['cost']['model'] | Config['cost'] | undefined = 'pay-per-use',
   ): BudgetStatus {
     const policy = resolveCostPolicy(costPolicyInput)
+
+    // Subscription quota: once cumulative theoretical (layer-2) spend
+    // for the period exceeds the included allowance, billing has swapped
+    // to usage-based. Warn always; when `enforce`, apply the daily cap
+    // against the overage so a blown quota can block new work even
+    // though the *real* charge column reads $0 under the subscription.
+    const quotaStatus = this.evaluateQuota(policy)
+    if (quotaStatus?.exhausted) {
+      this.logSubscriptionMeteredWarningOnce(
+        `${runId}:quota:${quotaStatus.period}:${this.quotaPeriodKey(quotaStatus.period)}`,
+        {
+          runId,
+          includedUsd: quotaStatus.includedUsd,
+          theoreticalUsd: quotaStatus.theoreticalUsd,
+          overageUsd: quotaStatus.overageUsd,
+          period: quotaStatus.period,
+        },
+        'subscription quota exhausted — billing has swapped to usage-based',
+      )
+      if (quotaStatus.onExhausted === 'enforce') {
+        const override = this.getRunBudgetOverride(runId)
+        const dailyCapOverride = this.getDailyCapOverride()
+        const effectiveDailyLimit = dailyCapOverride ?? limits.maxDailyCostUsd
+        if (override === null && quotaStatus.overageUsd >= effectiveDailyLimit) {
+          return {
+            overBudget: true,
+            limit: 'daily',
+            actualUsd: quotaStatus.overageUsd,
+            limitUsd: effectiveDailyLimit,
+          }
+        }
+      }
+    }
 
     if (policy.model === 'subscription') {
       return { overBudget: false }
@@ -355,6 +411,43 @@ export class CostTracker {
 
   resetDailyCosts(date: string = utcDayKey()): { previousCostUsd: number } {
     return resetDailyCosts(this.db, date)
+  }
+
+  getDailyTheoreticalCost(): number {
+    return getDailyTheoreticalCost(this.db)
+  }
+
+  getRunTheoreticalCost(runId: string): number {
+    return getRunTheoreticalCost(this.db, runId)
+  }
+
+  /**
+   * Evaluate the configured subscription quota against cumulative
+   * theoretical spend for its period. Returns null when no quota is
+   * configured or the billing model isn't subscription-based (quota only
+   * makes sense when real charges are normalized away).
+   */
+  getSubscriptionQuotaStatus(
+    costPolicyInput: Config['cost']['model'] | Config['cost'] | undefined = 'pay-per-use',
+  ): SubscriptionQuotaStatus | null {
+    return this.evaluateQuota(resolveCostPolicy(costPolicyInput))
+  }
+
+  private evaluateQuota(policy: ResolvedCostPolicy): SubscriptionQuotaStatus | null {
+    const quota = policy.subscriptionQuota
+    if (!quota) return null
+    if (policy.model !== 'subscription' && policy.model !== 'subscription-metered') return null
+    const periodTheoretical =
+      quota.period === 'day'
+        ? this.getDailyTheoreticalCost()
+        : getMonthlyTheoreticalCost(this.db, this.quotaPeriodKey('month'))
+    return evaluateSubscriptionQuota(quota, periodTheoretical)
+  }
+
+  /** Period key for warning dedup + month lookup: `YYYY-MM-DD` or `YYYY-MM`. */
+  private quotaPeriodKey(period: 'day' | 'month'): string {
+    const day = utcDayKey()
+    return period === 'day' ? day : day.slice(0, 7)
   }
 
   private logSubscriptionMeteredWarningOnce(

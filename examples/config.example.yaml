@@ -95,6 +95,14 @@ cost:
   #   advisoryThresholdUsd: null
   #   enforcePerRunLimit: false
   #   enforceDailyLimit: false
+  # Optional: subscription quota tracking. Compares cumulative *theoretical*
+  # (tokens x list-price) spend for the period against the included
+  # allowance; once exhausted, billing swaps to usage-based. Only applies
+  # when model is subscription / subscription-metered.
+  # subscriptionQuota:
+  #   includedUsd: 200       # included allowance in theoretical USD
+  #   period: month          # day | month
+  #   onExhausted: warn      # warn | enforce (enforce applies maxDailyCostUsd to the overage)
   # Optional: model-aware pricing overrides.
   # If omitted, built-in defaults are used for advisory/estimated USD.
   # pricing:
@@ -338,6 +346,12 @@ repos:
       - pnpm lint
       - pnpm typecheck
       - pnpm test
+    # Optional: preflight drift gate. Verify the base branch is green
+    # before dispatching fresh work; if base is already red, skip the
+    # whole batch this cycle instead of failing every issue in series.
+    # preflight:
+    #   enabled: true
+    #   commands: [pnpm typecheck]   # cheap smoke check against base HEAD
     prompts:
       plannerSystem: .night-orch/prompts/planner-system.md
       coderSystem: .night-orch/prompts/coder-system.md

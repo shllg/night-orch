@@ -53,6 +53,14 @@ export interface CostRecordMetadata {
    * row should pass the explicit value.
    */
   tokenSource?: TokenSource
+  /**
+   * Layer-2 theoretical cost (tokens × list price) for this entry. When
+   * omitted, defaults to the real `costUsd` — correct for pay-per-use
+   * where the two are identical. Subscription callers must pass the
+   * computed metered price so quota-overflow detection has a basis even
+   * though the real charge is $0.
+   */
+  theoreticalCostUsd?: number
 }
 
 export function normalizeTokenUsage(tokenUsage: TokenUsageInput | undefined): TokenUsageTotals {
@@ -87,6 +95,7 @@ export function persistCostRecord(
   costStepId: string | null,
   costWorkerType: string | null,
   tokenSource: TokenSource,
+  theoreticalUsd: number = usdAmount,
 ): void {
   const runUsageInsert = db
     .prepare(
@@ -99,14 +108,15 @@ export function persistCostRecord(
 
   db
     .prepare(
-      `INSERT INTO daily_costs (date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens, total_cache_read_tokens)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO daily_costs (date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens, total_cache_read_tokens, total_theoretical_cost_usd)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(date) DO UPDATE SET
          total_cost_usd = total_cost_usd + excluded.total_cost_usd,
          run_count = run_count + excluded.run_count,
          total_prompt_tokens = total_prompt_tokens + excluded.total_prompt_tokens,
          total_completion_tokens = total_completion_tokens + excluded.total_completion_tokens,
-         total_cache_read_tokens = total_cache_read_tokens + excluded.total_cache_read_tokens`,
+         total_cache_read_tokens = total_cache_read_tokens + excluded.total_cache_read_tokens,
+         total_theoretical_cost_usd = total_theoretical_cost_usd + excluded.total_theoretical_cost_usd`,
     )
     .run(
       date,
@@ -115,6 +125,7 @@ export function persistCostRecord(
       usage.promptTokens,
       usage.completionTokens,
       usage.cacheReadTokens,
+      theoreticalUsd,
     )
 
   db
@@ -123,10 +134,11 @@ export function persistCostRecord(
        SET estimated_cost_usd = estimated_cost_usd + ?,
            prompt_tokens = prompt_tokens + ?,
            completion_tokens = completion_tokens + ?,
-           cache_read_tokens = cache_read_tokens + ?
+           cache_read_tokens = cache_read_tokens + ?,
+           theoretical_cost_usd = theoretical_cost_usd + ?
        WHERE id = ?`,
     )
-    .run(usdAmount, usage.promptTokens, usage.completionTokens, usage.cacheReadTokens, runId)
+    .run(usdAmount, usage.promptTokens, usage.completionTokens, usage.cacheReadTokens, theoreticalUsd, runId)
 
   if (costStepId !== null) {
     db
@@ -139,9 +151,10 @@ export function persistCostRecord(
            prompt_tokens,
            completion_tokens,
            cache_read_tokens,
-           token_source
+           token_source,
+           theoretical_cost_usd
          )
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         runId,
@@ -152,6 +165,7 @@ export function persistCostRecord(
         usage.completionTokens,
         usage.cacheReadTokens,
         tokenSource,
+        theoreticalUsd,
       )
   }
 

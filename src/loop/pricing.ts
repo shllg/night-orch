@@ -123,6 +123,34 @@ export function estimateWorkerCost(input: EstimateWorkerCostInput): EstimateWork
   }
 }
 
+/**
+ * Layer-2 theoretical cost: what this worker call WOULD cost on metered
+ * pay-per-use pricing, computed from the same resolved model pricing but
+ * WITHOUT the subscription `$0` short-circuit. Always priced from tokens
+ * (or duration when tokens are absent), regardless of `cost.model`.
+ *
+ * Recorded alongside the real (layer-3) cost so reports can surface
+ * subscription savings and drive `cost.subscriptionQuota` overflow
+ * detection even when the real charge is $0.
+ */
+export function estimateTheoreticalCostUsd(input: EstimateWorkerCostInput): number {
+  const configuredPricing = input.cost?.pricing
+  const configuredDefaultModel = normalizeModelKey(configuredPricing?.defaultModel) ?? DEFAULT_MODEL_KEY
+  const modelKey = resolveModelKey(input.identity, configuredDefaultModel)
+  const resolved = resolveModelPricing(
+    configuredPricing?.models ?? {},
+    modelKey,
+    configuredDefaultModel,
+    DEFAULT_PAY_PER_USE_PRICING,
+  )
+  const profileMinuteUsd = normalizeMinuteUsd(input.identity.fallbackMinuteUsd)
+  const minuteUsd = profileMinuteUsd ?? resolved.pricing.minuteUsd
+  const usd = input.tokenUsage !== undefined
+    ? estimateTokenCost(input.tokenUsage, resolved.pricing)
+    : estimateDurationCost(input.durationMs, minuteUsd)
+  return Number(Math.max(0, usd).toFixed(6))
+}
+
 function resolveModelKey(identity: PricingIdentity, defaultModel: string): string {
   return (
     normalizeModelKey(identity.pricingModel) ??

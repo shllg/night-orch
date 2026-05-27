@@ -8,11 +8,12 @@ import { findTerminalDecisionOutcome } from './checkpoint.js'
 import { updateContext, recordPhase } from './context.js'
 import { hashVerifyResults, assessProgress } from './progress.js'
 import { commitChanges } from './commit.js'
+import { checkWorktreeScope } from './diff-guard.js'
 import { executeStep, type StepDependencies } from './step-executor.js'
 import { Checkpoint } from './checkpoint.js'
 import { FileRunArtifactWriter } from './run-artifacts.js'
 import { CostTracker, describeBudgetBlock, costLimitRecoveryHint, type BudgetStatus } from './cost.js'
-import { estimateWorkerCost } from './pricing.js'
+import { estimateTheoreticalCostUsd, estimateWorkerCost } from './pricing.js'
 import { allRequiredVerifyPassed } from './verifier.js'
 import {
   WorkerAuthError,
@@ -300,6 +301,34 @@ export async function executeLoop(
           {},
           stepStartedAt,
         )
+      }
+      // Plan-time scope guard: block over-scoped coder output *before*
+      // spending verify + review on it. Production saw 157-file diffs
+      // caught only at commit time; this fails fast at the code phase.
+      if (step.role === 'coder') {
+        const scope = await checkWorktreeScope(ctx.worktreePath, config.security)
+        if (!scope.ok) {
+          const blockMessage = `Scope guard: ${scope.reason}`
+          logger.warn(
+            { runId: ctx.runId, phase: step.id, stats: scope.stats },
+            'Scope guard tripped after coder step — blocking before review',
+          )
+          checkpoint.phaseBlocked(ctx.runId, step.id, blockMessage, ctx.iteration)
+          return recordPhase(
+            updateContext(ctx, {
+              currentPhase: 'blocked',
+              terminalStatus: 'blocked',
+              stepOutputs: {
+                ...ctx.stepOutputs,
+                blockMessage,
+              },
+            }),
+            step.id,
+            'failure',
+            {},
+            stepStartedAt,
+          )
+        }
       }
       try { metrics?.observePhaseDuration(step.id, stepDurationMs / 1000) } catch { /* best-effort */ }
     }
@@ -897,6 +926,22 @@ function applyEstimatedWorkerCost(
     costModel: costConfig?.model,
   })
   const estimatedCost = estimate.usd
+  // Layer-2 theoretical cost: priced from the same model regardless of
+  // billing mode. Equals `estimatedCost` under pay-per-use; under a
+  // subscription it's the metered price the work *would* have cost,
+  // which drives subscription-quota overflow detection.
+  const theoreticalCost = estimateTheoreticalCostUsd({
+    cost: costConfig,
+    identity: {
+      role,
+      workerType: pricingIdentity?.workerType,
+      pricingModel: pricingIdentity?.pricingModel,
+      fallbackMinuteUsd: pricingIdentity?.fallbackMinuteUsd,
+    },
+    durationMs,
+    tokenUsage,
+    costModel: costConfig?.model,
+  })
 
   if (estimate.usedDefaultModelFallback && pricingIdentity?.pricingModel) {
     logger.warn(
@@ -931,6 +976,7 @@ function applyEstimatedWorkerCost(
       stepId,
       workerType: pricingIdentity?.workerType ?? null,
       tokenSource,
+      theoreticalCostUsd: theoreticalCost,
     },
     securityConfig,
     costConfig,

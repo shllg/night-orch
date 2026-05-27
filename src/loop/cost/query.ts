@@ -54,6 +54,34 @@ export function getRunCost(db: Database.Database, runId: string): number {
   return row?.estimated_cost_usd ?? 0
 }
 
+/** Layer-2 theoretical cost accrued today (UTC). */
+export function getDailyTheoreticalCost(db: Database.Database): number {
+  const today = utcDayKey()
+  const row = db
+    .prepare('SELECT total_theoretical_cost_usd FROM daily_costs WHERE date = ?')
+    .get(today) as { total_theoretical_cost_usd: number } | undefined
+  return row?.total_theoretical_cost_usd ?? 0
+}
+
+/** Layer-2 theoretical cost summed across all days in the given UTC month (`YYYY-MM`). */
+export function getMonthlyTheoreticalCost(db: Database.Database, month: string): number {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(total_theoretical_cost_usd), 0) AS total
+       FROM daily_costs WHERE substr(date, 1, 7) = ?`,
+    )
+    .get(month) as { total: number } | undefined
+  return row?.total ?? 0
+}
+
+/** Layer-2 theoretical cost accrued by a single run. */
+export function getRunTheoreticalCost(db: Database.Database, runId: string): number {
+  const row = db
+    .prepare('SELECT theoretical_cost_usd FROM runs WHERE id = ?')
+    .get(runId) as { theoretical_cost_usd: number } | undefined
+  return row?.theoretical_cost_usd ?? 0
+}
+
 export function getDailyTokenUsage(db: Database.Database): TokenUsageTotals {
   const today = utcDayKey()
   const row = db

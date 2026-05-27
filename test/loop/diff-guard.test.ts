@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { checkDiffSize } from '../../src/loop/diff-guard.js'
+import { checkDiffSize, checkWorktreeScope } from '../../src/loop/diff-guard.js'
 
 vi.mock('execa', () => ({
   execa: vi.fn(),
@@ -116,5 +116,45 @@ describe('checkDiffSize', () => {
         env: expect.objectContaining({ LC_ALL: 'C' }),
       }),
     )
+  })
+})
+
+describe('checkWorktreeScope', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('intent-adds untracked files then blocks when over the file limit', async () => {
+    mockExeca
+      .mockResolvedValueOnce({ stdout: '' } as never) // git add -A --intent-to-add
+      .mockResolvedValueOnce({ stdout: ' 60 files changed, 100 insertions(+)\n' } as never) // git diff
+
+    const result = await checkWorktreeScope('/tmp/wt', defaultLimits)
+
+    expect(result.ok).toBe(false)
+    expect(result.reason).toContain('Too many changed files')
+    expect(mockExeca).toHaveBeenNthCalledWith(
+      1,
+      'git',
+      ['add', '-A', '--intent-to-add'],
+      expect.objectContaining({ cwd: '/tmp/wt' }),
+    )
+    expect(mockExeca).toHaveBeenNthCalledWith(
+      2,
+      'git',
+      ['diff', '--stat', '--stat-width=300', 'HEAD'],
+      expect.objectContaining({ cwd: '/tmp/wt' }),
+    )
+  })
+
+  it('passes when the working tree is within limits', async () => {
+    mockExeca
+      .mockResolvedValueOnce({ stdout: '' } as never)
+      .mockResolvedValueOnce({ stdout: ' 2 files changed, 5 insertions(+)\n' } as never)
+
+    const result = await checkWorktreeScope('/tmp/wt', defaultLimits)
+
+    expect(result.ok).toBe(true)
+    expect(result.stats.changedFiles).toBe(2)
   })
 })

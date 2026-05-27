@@ -353,6 +353,24 @@ whichever matches the scope of the situation:
 | `enforcePerRunLimit` | boolean | `false` | When true, applies `security.maxCostPerRunUsd` as a hard block in `subscription-metered`. |
 | `enforceDailyLimit` | boolean | `false` | When true, applies `security.maxDailyCostUsd` as a hard block in `subscription-metered`. |
 
+### Cost accounting layers
+
+Night-orch tracks three distinct numbers so a subscription `$0` real cost never hides real usage:
+
+1. **Tokens** — raw prompt/completion/cache counts. The runaway rail (`loop.maxRunTokens`/`maxIssueTokens`/`maxDailyTokens`) reads these, independent of money.
+2. **Theoretical cost** — `tokens × cost.pricing`, computed for every worker call **regardless of billing model**. This is what the work *would* cost on metered pricing; recorded even when the real charge is `$0`. Stored per run, per day, and per ledger entry.
+3. **Real cost** — subscription-normalized USD. `$0` inside a subscription quota; `> 0` once metered or overflowed. Drives the USD caps (`security.maxCostPerRunUsd`/`maxDailyCostUsd`).
+
+### `cost.subscriptionQuota`
+
+Optional. Models a subscription's included allowance and what happens once it is exhausted (billing swaps to usage-based). Compares cumulative **theoretical** spend for the period against `includedUsd`. Only applies when `cost.model` is `subscription` or `subscription-metered`.
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `includedUsd` | positive number | — (required when set) | Included allowance in theoretical USD for the period. |
+| `period` | `day` or `month` | `month` | Window over which theoretical spend is summed. |
+| `onExhausted` | `warn` or `enforce` | `warn` | `warn` logs once per period and keeps running; `enforce` treats the overage as metered spend and applies `security.maxDailyCostUsd` against it, so a blown quota can block new work even though the real charge column reads `$0`. |
+
 ### `cost.pricing`
 
 | Key | Type | Default | Notes |
@@ -759,6 +777,7 @@ Stage keys:
 | `environment` | object | no | none | Shared/dedicated env setup. |
 | `verify` | `CommandSpec[]` | no | `[]` | Verify commands run in worktree. |
 | `verificationProfile` | string | no | none | Default named verification profile for verify steps in this repo. |
+| `preflight` | object | no | `{ enabled: false }` | Preflight drift gate — verify the base branch is green before dispatching fresh work. See below. |
 | `prompts` | object | no | none | Optional custom system prompt template paths. |
 | `selectors` | object | no | object with defaults | Issue label inclusion/exclusion filters. |
 | `agents` | record | no | `{}` | Maps agent names to worker profile names. |
@@ -769,6 +788,27 @@ Stage keys:
 Poll execution model:
 - Repos are polled in parallel.
 - Each repo runs up to `maxConcurrentRuns` issues at once (default `1`).
+
+### `repos[].preflight`
+
+Before dispatching fresh work in a poll cycle, optionally run a fast check against the repo's **base branch HEAD**. If the base is already red (drift not caused by any queued issue), the whole batch is skipped for that cycle — preventing every issue from failing in series and injecting unrelated stale-base reverts into diffs. Runs in a dedicated, hard-reset base worktree; never touches in-flight issue branches. Skipped for targeted (`/orch run <issue>`) runs.
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `false` | Turn the gate on for this repo. |
+| `stage` | string | none | Stage id within the repo's `verificationProfile` to run as the gate. |
+| `commands` | `CommandSpec[]` | none | Explicit commands; overrides `stage`/`verify` resolution. |
+
+Command resolution cascade: `commands` → the named `stage` of the repo's `verificationProfile` → the repo's `verify[]`. Only `block`/`iterate` (non-`warn`) required stage commands gate the batch.
+
+```yaml
+repos:
+  - repo: org/app
+    verify: [pnpm typecheck, pnpm test]
+    preflight:
+      enabled: true
+      commands: [pnpm typecheck]   # cheap smoke check against base HEAD
+```
 
 ### Project-local repo overrides
 

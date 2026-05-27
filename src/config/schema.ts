@@ -107,6 +107,24 @@ export const VerificationProfileSchema = z.object({
   stages: z.array(VerificationStageSchema).min(1),
 })
 
+/**
+ * Preflight drift gate. Before dispatching fresh work in a poll cycle,
+ * run a fast check against the repo's base branch HEAD. If the base is
+ * already red (drift not caused by any queued issue), the whole batch is
+ * skipped for that cycle instead of letting every issue fail in series
+ * and inject unrelated stale-base reverts into diffs.
+ *
+ * Command resolution cascade: `commands` (explicit) → the named `stage`
+ * of the repo's `verificationProfile` → the repo's `verify[]`.
+ */
+const PreflightSchema = z.object({
+  enabled: z.boolean().default(false),
+  /** Stage id within the repo's verificationProfile to run as the gate. */
+  stage: z.string().optional(),
+  /** Explicit commands to run; overrides stage/verify resolution. */
+  commands: z.array(VerifyCommandSchema).optional(),
+}).default({})
+
 // --- Environment schemas ---
 
 const BootstrapFailureHintSchema = z.object({
@@ -439,6 +457,7 @@ const RepoConfigSchema = z.object({
   environment: EnvironmentConfigSchema.optional(),
   verify: z.array(VerifyCommandSchema).default([]),
   verificationProfile: z.string().optional(),
+  preflight: PreflightSchema.default({}),
   prompts: PromptsSchema.optional(),
   planning: PlanningConfigSchema.default({}),
   fileLoop: RepoFileLoopConfigSchema.default({}),
@@ -493,10 +512,28 @@ export const SubscriptionMeteredSchema = z.object({
   enforceDailyLimit: z.boolean().default(false),
 }).default({})
 
+/**
+ * Subscription quota tracking. A subscription plan includes a fixed
+ * amount of usage before billing swaps to usage-based (metered).
+ * `includedUsd` is that included allowance expressed in theoretical
+ * (layer-2) dollars. When cumulative theoretical cost for the `period`
+ * exceeds it, the quota is exhausted and real charges begin:
+ *  - `warn`    → log once per period; keep running (default).
+ *  - `enforce` → treat the overage as metered spend and apply
+ *                `security.maxDailyCostUsd` against it, so a blown
+ *                quota can actually block new work.
+ */
+export const SubscriptionQuotaSchema = z.object({
+  includedUsd: z.number().positive(),
+  period: z.enum(['day', 'month']).default('month'),
+  onExhausted: z.enum(['warn', 'enforce']).default('warn'),
+})
+
 const CostSchema = z.object({
   model: CostModelSchema.default('pay-per-use'),
   pricing: CostPricingSchema.optional(),
   subscriptionMetered: SubscriptionMeteredSchema,
+  subscriptionQuota: SubscriptionQuotaSchema.optional(),
   /**
    * R4a escape hatch: when `false` (default), worker invocations that
    * return without parseable token usage cause the attempt to be

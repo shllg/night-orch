@@ -18,9 +18,49 @@ export interface SubscriptionMeteredPolicy {
   enforceDailyLimit: boolean
 }
 
+export interface SubscriptionQuotaConfig {
+  includedUsd: number
+  period: 'day' | 'month'
+  onExhausted: 'warn' | 'enforce'
+}
+
 export interface ResolvedCostPolicy {
   model: Config['cost']['model']
   subscriptionMetered: SubscriptionMeteredPolicy
+  subscriptionQuota: SubscriptionQuotaConfig | null
+}
+
+/** Result of comparing period theoretical spend against the included quota. */
+export interface SubscriptionQuotaStatus {
+  exhausted: boolean
+  includedUsd: number
+  theoreticalUsd: number
+  /** Theoretical spend beyond the included allowance (0 until exhausted). */
+  overageUsd: number
+  period: 'day' | 'month'
+  onExhausted: 'warn' | 'enforce'
+}
+
+/**
+ * Pure comparison of cumulative theoretical (layer-2) spend for a period
+ * against the included subscription allowance. The recorder/checkBudget
+ * path supplies `periodTheoreticalUsd`; this helper only decides whether
+ * the quota is blown and by how much.
+ */
+export function evaluateSubscriptionQuota(
+  quota: SubscriptionQuotaConfig,
+  periodTheoreticalUsd: number,
+): SubscriptionQuotaStatus {
+  const theoreticalUsd = Number.isFinite(periodTheoreticalUsd) ? Math.max(0, periodTheoreticalUsd) : 0
+  const overageUsd = Math.max(0, theoreticalUsd - quota.includedUsd)
+  return {
+    exhausted: theoreticalUsd >= quota.includedUsd,
+    includedUsd: quota.includedUsd,
+    theoreticalUsd,
+    overageUsd,
+    period: quota.period,
+    onExhausted: quota.onExhausted,
+  }
 }
 
 /**
@@ -78,11 +118,13 @@ export function resolveCostPolicy(
         enforcePerRunLimit: false,
         enforceDailyLimit: false,
       },
+      subscriptionQuota: null,
     }
   }
 
   const model = input?.model ?? 'pay-per-use'
   const subscriptionMetered = input?.subscriptionMetered
+  const quota = input?.subscriptionQuota
   return {
     model,
     subscriptionMetered: {
@@ -90,5 +132,12 @@ export function resolveCostPolicy(
       enforcePerRunLimit: subscriptionMetered?.enforcePerRunLimit ?? false,
       enforceDailyLimit: subscriptionMetered?.enforceDailyLimit ?? false,
     },
+    subscriptionQuota: quota
+      ? {
+          includedUsd: quota.includedUsd,
+          period: quota.period,
+          onExhausted: quota.onExhausted,
+        }
+      : null,
   }
 }
