@@ -81,5 +81,35 @@ describe('bot-comment', () => {
       expect(result.created).toBe(true)
       expect(forge.commentOnIssue).toHaveBeenCalled()
     })
+
+    it('updates the newest bot comment when multiple marker comments exist', async () => {
+      const existing: ForgeComment[] = [
+        { id: 41, body: `${marker}\nOlder status`, user: 'bot', createdAt: '', updatedAt: '' },
+        { id: 42, body: `${marker}\nNewer status`, user: 'bot', createdAt: '', updatedAt: '' },
+      ]
+      const forge = makeMockForge(existing)
+      const result = await upsertBotComment(forge, 'org/repo', 1, marker, 'Latest status', 'bot')
+
+      expect(result.created).toBe(false)
+      expect(forge.updateComment).toHaveBeenCalledWith('org/repo', 42, `${marker}\nLatest status`)
+      expect(forge.commentOnIssue).not.toHaveBeenCalled()
+    })
+
+    it('falls back to creating a new comment when update target no longer exists', async () => {
+      const existing: ForgeComment[] = [
+        { id: 42, body: `${marker}\nOld status`, user: 'bot', createdAt: '', updatedAt: '' },
+      ]
+      const forge = {
+        listIssueComments: vi.fn().mockResolvedValue(existing),
+        updateComment: vi.fn().mockRejectedValue({ status: 404 }),
+        commentOnIssue: vi.fn().mockResolvedValue(undefined),
+      } as unknown as ForgeAdapter
+
+      const result = await upsertBotComment(forge, 'org/repo', 1, marker, 'Recovered status', 'bot')
+
+      expect(result.created).toBe(true)
+      expect(forge.updateComment).toHaveBeenCalledWith('org/repo', 42, `${marker}\nRecovered status`)
+      expect(forge.commentOnIssue).toHaveBeenCalledWith('org/repo', 1, `${marker}\nRecovered status`)
+    })
   })
 })

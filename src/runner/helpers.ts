@@ -323,6 +323,44 @@ export function extractFollowupPromptFeedback(
   return { type, summary, context, conflictSnapshot }
 }
 
+export function buildAttemptHistoryFollowup(
+  previousRun: RunRecord | null | undefined,
+): FollowupPromptFeedback | null {
+  if (!previousRun) return null
+  if (previousRun.status === 'queued' || previousRun.status === 'running' || previousRun.status === 'completed') {
+    return null
+  }
+
+  const statusSummary = previousRun.blockReason
+    ? `${previousRun.status} (${previousRun.blockReason})`
+    : previousRun.status
+
+  const lines = [
+    '## Previous Run State',
+    `Run ID: ${previousRun.id}`,
+    `Status: ${previousRun.status}`,
+  ]
+
+  if (previousRun.blockReason) {
+    lines.push(`Block reason: ${previousRun.blockReason}`)
+  }
+  if (previousRun.lastError) {
+    lines.push(`Last error: ${previousRun.lastError}`)
+  }
+  if (previousRun.iterationCount > 0) {
+    lines.push(`Iteration count: ${previousRun.iterationCount}`)
+  }
+  if (previousRun.prNumber !== null) {
+    lines.push(`PR number: #${previousRun.prNumber}`)
+  }
+
+  return {
+    type: 'previous_attempt',
+    summary: `Previous attempt ${previousRun.id} ended as ${statusSummary}`,
+    context: lines.join('\n'),
+  }
+}
+
 export function resolveOperationIntent(run: RunRecord | null | undefined): RunOperationIntent {
   if (!run) return 'auto'
   if (run.operationIntent !== 'auto') return run.operationIntent

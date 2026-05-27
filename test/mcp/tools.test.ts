@@ -272,7 +272,13 @@ describe('MCP Tools', () => {
     ) as {
       count: number
       triageCounts: Record<string, number>
-      items: Array<{ runId: string; triage: string; status: string }>
+      items: Array<{
+        runId: string
+        triage: string
+        status: string
+        recommendedCommand: string | null
+        availableCommands: string[]
+      }>
     }
 
     expect(result.count).toBe(4)
@@ -290,6 +296,22 @@ describe('MCP Tools', () => {
         expect.objectContaining({ runId: errored.id, triage: 'error', status: 'error' }),
       ]),
     )
+
+    const reviewReadyItem = result.items.find((item) => item.runId === reviewReady.id)
+    expect(reviewReadyItem?.recommendedCommand).toBe('/orch continue')
+    expect(reviewReadyItem?.availableCommands).toEqual(['/orch continue', '/orch retry'])
+
+    const needsHumanItem = result.items.find((item) => item.runId === needsHuman.id)
+    expect(needsHumanItem?.recommendedCommand).toBe('/orch continue')
+    expect(needsHumanItem?.availableCommands).toEqual(['/orch continue', '/orch retry'])
+
+    const blockedItem = result.items.find((item) => item.runId === blocked.id)
+    expect(blockedItem?.recommendedCommand).toBe('/orch continue')
+    expect(blockedItem?.availableCommands).toEqual(['/orch continue', '/orch retry'])
+
+    const erroredItem = result.items.find((item) => item.runId === errored.id)
+    expect(erroredItem?.recommendedCommand).toBe('/orch retry')
+    expect(erroredItem?.availableCommands).toEqual(['/orch retry'])
   })
 
   it('list-runs includes tracked issues with no run rows', async () => {

@@ -205,6 +205,39 @@ function classifyInboxTriage(row: Pick<InboxIssueRow, 'status' | 'block_reason' 
   return 'blocked'
 }
 
+function deriveInboxCommandHints(
+  row: Pick<InboxIssueRow, 'status' | 'block_reason' | 'manual_state'>,
+): {
+  recommendedCommand: string | null
+  availableCommands: string[]
+} {
+  if (row.status === 'error') {
+    return {
+      recommendedCommand: '/orch retry',
+      availableCommands: ['/orch retry'],
+    }
+  }
+
+  if (row.manual_state === 'awaiting_rebase_resolution' || row.block_reason === 'merge_conflict') {
+    return {
+      recommendedCommand: '/orch continue',
+      availableCommands: ['/orch continue', '/orch retry'],
+    }
+  }
+
+  if (row.status === 'review_ready' || row.status === 'blocked') {
+    return {
+      recommendedCommand: '/orch continue',
+      availableCommands: ['/orch continue', '/orch retry'],
+    }
+  }
+
+  return {
+    recommendedCommand: null,
+    availableCommands: [],
+  }
+}
+
 function parseSortableTs(value: string | null): number {
   if (!value) return Number.NEGATIVE_INFINITY
   const parsed = parseUtcTimestampMs(value)
@@ -446,6 +479,7 @@ export async function handleListInbox(
 
   const triaged = rows.map((row) => {
     const triage = classifyInboxTriage(row)
+    const commandHints = deriveInboxCommandHints(row)
     return {
       runId: row.run_id ?? `issue:${row.repo}#${row.issue_number}`,
       repo: row.repo,
@@ -463,6 +497,8 @@ export async function handleListInbox(
       reason: row.block_reason ?? row.last_error,
       manualState: row.manual_state ?? 'none',
       operationIntent: row.operation_intent ?? 'auto',
+      recommendedCommand: commandHints.recommendedCommand,
+      availableCommands: commandHints.availableCommands,
       updatedAt: row.updated_at,
     }
   })

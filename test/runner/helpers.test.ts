@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  buildAttemptHistoryFollowup,
   resolveOperationIntent,
   selectReplayableRun,
 } from '../../src/runner/helpers.js'
@@ -112,5 +113,37 @@ describe('selectReplayableRun', () => {
       expect(selectReplayableRun(makeRun({ status }))).toBeNull()
     }
     expect(selectReplayableRun(null)).toBeNull()
+  })
+})
+
+describe('buildAttemptHistoryFollowup', () => {
+  it('returns null when no prior run exists', () => {
+    expect(buildAttemptHistoryFollowup(null)).toBeNull()
+    expect(buildAttemptHistoryFollowup(undefined)).toBeNull()
+  })
+
+  it('returns null for completed runs', () => {
+    expect(buildAttemptHistoryFollowup(makeRun({ status: 'completed' }))).toBeNull()
+  })
+
+  it('builds follow-up context for blocked attempts', () => {
+    const followup = buildAttemptHistoryFollowup(makeRun({
+      id: 'run-prev',
+      status: 'blocked',
+      blockReason: 'merge_conflict',
+      lastError: 'Conflicts in src/app.ts',
+      iterationCount: 3,
+      prNumber: 88,
+    }))
+
+    expect(followup).not.toBeNull()
+    expect(followup?.type).toBe('previous_attempt')
+    expect(followup?.summary).toContain('run-prev')
+    expect(followup?.summary).toContain('blocked')
+    expect(followup?.context).toContain('## Previous Run State')
+    expect(followup?.context).toContain('Block reason: merge_conflict')
+    expect(followup?.context).toContain('Last error: Conflicts in src/app.ts')
+    expect(followup?.context).toContain('Iteration count: 3')
+    expect(followup?.context).toContain('PR number: #88')
   })
 })

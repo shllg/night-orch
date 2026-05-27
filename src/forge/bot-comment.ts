@@ -27,7 +27,14 @@ export function findBotComment(
   marker: string,
   botUser: string,
 ): ForgeComment | undefined {
-  return comments.find((c) => c.user === botUser && c.body.includes(marker))
+  let newest: ForgeComment | undefined
+  for (const comment of comments) {
+    if (comment.user !== botUser || !comment.body.includes(marker)) continue
+    if (!newest || compareCommentRecency(comment, newest) > 0) {
+      newest = comment
+    }
+  }
+  return newest
 }
 
 /**
@@ -49,10 +56,37 @@ export async function upsertBotComment(
   const fullBody = `${marker}\n${body}`
 
   if (existing) {
-    await forge.updateComment(repo, existing.id, fullBody)
-    return { created: false }
+    try {
+      await forge.updateComment(repo, existing.id, fullBody)
+      return { created: false }
+    } catch (err) {
+      if (!isCommentMissingError(err)) throw err
+      await forge.commentOnIssue(repo, issueNumber, fullBody)
+      return { created: true }
+    }
   }
 
   await forge.commentOnIssue(repo, issueNumber, fullBody)
   return { created: true }
+}
+
+function compareCommentRecency(a: ForgeComment, b: ForgeComment): number {
+  const aTs = parseCommentTimestamp(a)
+  const bTs = parseCommentTimestamp(b)
+  if (aTs !== bTs) return aTs - bTs
+  return a.id - b.id
+}
+
+function parseCommentTimestamp(comment: ForgeComment): number {
+  const updated = Date.parse(comment.updatedAt)
+  if (Number.isFinite(updated)) return updated
+  const created = Date.parse(comment.createdAt)
+  if (Number.isFinite(created)) return created
+  return Number.NEGATIVE_INFINITY
+}
+
+function isCommentMissingError(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false
+  const asStatus = err as { status?: unknown; response?: { status?: unknown } }
+  return asStatus.status === 404 || asStatus.response?.status === 404
 }

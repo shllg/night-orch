@@ -52,6 +52,7 @@ import {
   applyWorkflowRoleDefaults,
   resolveWorkerProfileForAgent,
   extractFollowupPromptFeedback,
+  buildAttemptHistoryFollowup,
   resolveControlPayload,
   resolveOperationIntent,
   selectReplayableRun,
@@ -307,7 +308,15 @@ export async function dispatchAttempt(
     const isRebaseRun = operationIntent === 'rebase'
     const isContinueRun = operationIntent === 'continue'
     const isFreshRetry = operationIntent === 'retry'
-    const followupPromptFeedback = extractFollowupPromptFeedback(activeRun?.phaseData)
+    let followupPromptFeedback = extractFollowupPromptFeedback(activeRun?.phaseData)
+    if (!followupPromptFeedback) {
+      const previousRun = runManager.getLatestFinishedByIssue(
+        repoConfig.repo,
+        discoveredIssue.issue.number,
+        run.id,
+      )
+      followupPromptFeedback = buildAttemptHistoryFollowup(previousRun)
+    }
     let preLoopVerifyResults: VerifyResult[] = []
 
     // Check if prior run left tainted work that should be discarded
