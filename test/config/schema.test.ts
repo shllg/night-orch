@@ -116,6 +116,7 @@ describe('ConfigSchema', () => {
       expect(result.data.repos[0]?.defaults.planner).toBe('claude')
       expect(result.data.repos[0]?.defaults.coder).toBe('codex')
       expect(result.data.repos[0]?.defaults.reviewer).toBe('codex')
+      expect(result.data.workerProfiles).toEqual({})
       expect(result.data.notifications.events.onPrUpdated).toBe(true)
     }
   })
@@ -287,6 +288,47 @@ describe('ConfigSchema', () => {
     raw.workerProfiles['claude-default'].workerTimeoutSeconds = -1
     const result = ConfigSchema.safeParse(raw)
     expect(result.success).toBe(false)
+  })
+
+  it('defaults worker profiles to host sandbox', () => {
+    const raw = loadExampleConfig()
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.workerProfiles['claude-default']?.sandbox).toEqual({
+        type: 'host',
+        mounts: [],
+        env: {},
+      })
+    }
+  })
+
+  it('accepts docker and podman worker sandbox config', () => {
+    const raw = loadExampleConfig()
+    raw.workerProfiles['codex-default'].sandbox = {
+      type: 'docker',
+      image: 'night-orch-agent:latest',
+      containerUid: 1000,
+      containerGid: 1000,
+      mounts: [
+        { hostPath: '~/.codex', sandboxPath: '/home/agent/.codex', readonly: true },
+      ],
+      env: { CODEX_HOME: '/home/agent/.codex' },
+      network: ['night-orch-test'],
+    }
+    raw.workerProfiles['claude-default'].sandbox = {
+      type: 'podman',
+      image: 'night-orch-agent:latest',
+      mounts: [],
+    }
+
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.workerProfiles['codex-default']?.sandbox.type).toBe('docker')
+      expect(result.data.workerProfiles['codex-default']?.sandbox.network).toEqual(['night-orch-test'])
+      expect(result.data.workerProfiles['claude-default']?.sandbox.type).toBe('podman')
+    }
   })
 
   it('validates security config defaults', () => {

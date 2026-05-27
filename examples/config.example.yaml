@@ -150,6 +150,8 @@ workerProfiles:
     args:
       - -p
     workerTimeoutSeconds: 1800
+    sandbox:
+      type: host
     env: {}
   codex-default:
     type: codex
@@ -160,6 +162,21 @@ workerProfiles:
       - exec
       - --json
     workerTimeoutSeconds: 1800
+    # Set sandbox.type to docker or podman to run the worker in a container.
+    # Auth/config directories must be mounted explicitly; forge/API tokens are
+    # still filtered out by the worker env whitelist.
+    sandbox:
+      type: host
+      # image: night-orch-agent:latest
+      # containerUid: 1000
+      # containerGid: 1000
+      # mounts:
+      #   - hostPath: ~/.codex
+      #     sandboxPath: /home/agent/.codex
+      #     readonly: false
+      # env:
+      #   CODEX_HOME: /home/agent/.codex
+      # network: night-orch-test
     env: {}
   # gemini-acp:
   #   type: acp

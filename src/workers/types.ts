@@ -30,6 +30,23 @@ export interface WorkerProfileInput {
   minimalEnv: boolean
   runtimeWrapper: string | null
   env: Record<string, string>
+  sandbox?: WorkerSandboxConfig
+}
+
+export interface WorkerSandboxMount {
+  hostPath: string
+  sandboxPath: string
+  readonly?: boolean
+}
+
+export interface WorkerSandboxConfig {
+  type: 'host' | 'docker' | 'podman'
+  image?: string
+  containerUid?: number
+  containerGid?: number
+  mounts: WorkerSandboxMount[]
+  env: Record<string, string>
+  network?: string | string[]
 }
 
 export interface TokenUsage {

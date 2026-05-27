@@ -119,6 +119,8 @@ Two modes: **shared** (validate existing services are running) and **dedicated**
 ### Workers (`src/workers/`)
 AI agents invoked as CLI subprocesses. `claude.ts` and `codex.ts` implement the `WorkerAdapter` interface. Prompt compilation (`prompt/compiler.ts`) assembles templates with runtime context and sanitizes untrusted issue content. Output parsing (`parsers/`) validates JSON responses with Zod.
 
+Workers run through Sandcastle. Each worker profile can use the strict host sandbox or a Docker/Podman sandbox. Container sandboxes are configured per profile so reliability can be compared per agent while keeping host execution available as a fallback.
+
 > **Watch out:** `env.ts` is a critical security file. It implements a whitelist+blacklist system that strips all tokens, secrets, and forge credentials from the worker's environment. If you add a new env var to workers, it must pass both the whitelist and the blacklist check.
 
 ### Loop Engine (`src/loop/`)
@@ -284,6 +286,7 @@ Night-orch has a hard security boundary between the **orchestrator** (trusted, h
 ### Token Isolation
 - The orchestrator holds `GITHUB_TOKEN` / `FORGEJO_TOKEN` for API access.
 - Workers **never** receive these tokens. `buildWorkerEnv()` in `src/workers/env.ts` applies a strict whitelist (PATH, HOME, LANG, NODE_ENV) and a blacklist pattern (`*TOKEN*`, `*SECRET*`, `*KEY*`, `*PASSWORD*`, `GITHUB_*`, `FORGEJO_*`).
+- Worker sandbox env goes through the same blacklist before being passed to Docker/Podman providers. Subscription CLI auth must be provided by explicit config-directory mounts, not by passing API keys into the container.
 - If you add a new env var to workers, you must update `ENV_WHITELIST` and verify it passes the blacklist.
 
 ### Prompt Injection Defense

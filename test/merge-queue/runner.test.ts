@@ -101,7 +101,7 @@ describe('processMergeQueue', () => {
     vi.mocked(finalizeMerge).mockRejectedValueOnce(new Error('push rejected'))
 
     db.prepare(
-      "INSERT INTO runs (id, repo, issue_number, status, pr_number) VALUES ('r1', 'org/repo', 1, 'review_ready', 100)",
+      "INSERT INTO runs (id, repo, issue_number, status, pr_number, last_error) VALUES ('r1', 'org/repo', 1, 'review_ready', 100, 'stale publish error')",
     ).run()
     db.prepare(
       `INSERT INTO merge_batches (id, repo, base_branch, base_sha, status, staging_branch, staging_sha, pr_numbers, approved_shas, merged_pr_numbers, retry_count)
@@ -140,8 +140,9 @@ describe('processMergeQueue', () => {
     expect(finalizeSpy.mock.calls[0]![4]).toEqual([100])
 
     // Only the merged run should transition to completed; the ejected one stays review_ready
-    const r1 = db.prepare("SELECT status FROM runs WHERE id = 'r1'").get() as { status: string }
+    const r1 = db.prepare("SELECT status, last_error FROM runs WHERE id = 'r1'").get() as { status: string; last_error: string | null }
     expect(r1.status).toBe('completed')
+    expect(r1.last_error).toBeNull()
     const r2 = db.prepare("SELECT status FROM runs WHERE id = 'r2'").get() as { status: string }
     expect(r2.status).toBe('review_ready')
   })

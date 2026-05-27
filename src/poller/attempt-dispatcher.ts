@@ -542,7 +542,7 @@ export async function dispatchAttempt(
 
         const allSucceeded = subResults.every((r) => r.success)
         if (allSucceeded) {
-          runManager.update(run.id, { status: 'review_ready', endedAt: nowUtcIso() })
+          runManager.update(run.id, { status: 'review_ready', lastError: null, endedAt: nowUtcIso() })
           const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
           await transitionLabels(
             forge,

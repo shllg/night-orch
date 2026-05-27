@@ -196,7 +196,7 @@ describe('SyncEngine', () => {
         url: '',
       }),
     })
-    const runId = insertRun(db, { status: 'review_ready', pr_number: 10, branch_name: 'orch/1-fix' })
+    const runId = insertRun(db, { status: 'review_ready', pr_number: 10, branch_name: 'orch/1-fix', last_error: 'stale publish error' })
 
     const engine = new SyncEngine(db, config, () => forge)
     const result = await engine.reconcile(false)
@@ -205,8 +205,9 @@ describe('SyncEngine', () => {
     expect(result.reconciledRuns[0]!.action).toBe('completed')
     expect(result.reconciledRuns[0]!.reason).toContain('review_ready')
 
-    const row = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as { status: string }
+    const row = db.prepare('SELECT status, last_error FROM runs WHERE id = ?').get(runId) as { status: string; last_error: string | null }
     expect(row.status).toBe('completed')
+    expect(row.last_error).toBeNull()
   })
 
   it('running run + stale pr_number + open branch PR → review_ready (no requeue)', async () => {
@@ -224,7 +225,7 @@ describe('SyncEngine', () => {
         url: '',
       }),
     })
-    const runId = insertRun(db, { status: 'running', pr_number: 10, branch_name: 'orch/1-fix' })
+    const runId = insertRun(db, { status: 'running', pr_number: 10, branch_name: 'orch/1-fix', last_error: 'stale verify error' })
 
     const engine = new SyncEngine(db, config, () => forge)
     const result = await engine.reconcile(false)
@@ -233,8 +234,9 @@ describe('SyncEngine', () => {
     expect(result.reconciledRuns[0]!.action).toBe('label_corrected')
     expect(result.reconciledRuns[0]!.reason).toContain('PR open but run stale')
 
-    const row = db.prepare('SELECT status FROM runs WHERE id = ?').get(runId) as { status: string }
+    const row = db.prepare('SELECT status, last_error FROM runs WHERE id = ?').get(runId) as { status: string; last_error: string | null }
     expect(row.status).toBe('review_ready')
+    expect(row.last_error).toBeNull()
   })
 
   it('blocked run + issue closed → completed', async () => {

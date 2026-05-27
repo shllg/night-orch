@@ -316,6 +316,7 @@ export class SyncEngine {
     if (!dryRun) {
       this.runManager.update(run.id, {
         status: 'completed',
+        lastError: null,
         endedAt: nowUtcIso(),
       })
       const issueRepo = resolveIssueRepoFromRun(run)
@@ -335,6 +336,7 @@ export class SyncEngine {
     if (!dryRun) {
       this.runManager.update(run.id, {
         status: 'completed',
+        lastError: null,
         endedAt: nowUtcIso(),
       })
       const issueRepo = resolveIssueRepoFromRun(run)
@@ -354,6 +356,7 @@ export class SyncEngine {
     if (!dryRun) {
       this.runManager.update(run.id, {
         status: 'review_ready',
+        lastError: null,
       })
       const issueRepo = resolveIssueRepoFromRun(run)
       this.leaseManager.release(issueRepo, run.issue_number)

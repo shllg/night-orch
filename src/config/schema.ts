@@ -69,6 +69,22 @@ export const AppMentionSchema = z.object({
 
 // --- Worker profile schema ---
 
+const WorkerSandboxMountSchema = z.object({
+  hostPath: z.string().min(1),
+  sandboxPath: z.string().min(1),
+  readonly: z.boolean().optional(),
+})
+
+const WorkerSandboxSchema = z.object({
+  type: z.enum(['host', 'docker', 'podman']).default('host'),
+  image: z.string().min(1).optional(),
+  containerUid: z.number().int().positive().optional(),
+  containerGid: z.number().int().positive().optional(),
+  mounts: z.array(WorkerSandboxMountSchema).default([]),
+  env: z.record(z.string()).default({}),
+  network: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]).optional(),
+})
+
 export const WorkerProfileSchema = z.object({
   type: z.string().min(1, 'Worker type must not be empty'),
   pricingModel: z.string().min(1).optional(),
@@ -80,6 +96,7 @@ export const WorkerProfileSchema = z.object({
   minimalEnv: z.boolean().default(true),
   runtimeWrapper: z.string().nullable().default(null),
   env: z.record(z.string()).default({}),
+  sandbox: WorkerSandboxSchema.default({ type: 'host' }),
 })
 
 const CommandSpecSchema = z.union([

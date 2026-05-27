@@ -58,10 +58,25 @@ const PATH_FALLBACK_DIRS = [
   '/bin',
 ]
 
-function isBlacklisted(key: string): boolean {
+export function isBlacklistedEnvKey(key: string): boolean {
   const upper = key.toUpperCase()
   if (ENV_BLACKLIST_EXACT.has(upper)) return true
   return ENV_BLACKLIST_PATTERNS.some((p) => p.test(key))
+}
+
+export function filterSafeEnv(
+  values: Record<string, string>,
+  warnMessage: string,
+): Record<string, string> {
+  const safe: Record<string, string> = {}
+  for (const [key, val] of Object.entries(values)) {
+    if (isBlacklistedEnvKey(key)) {
+      logger.warn({ key }, warnMessage)
+      continue
+    }
+    safe[key] = val
+  }
+  return safe
 }
 
 export function normalizePathForSubprocess(
@@ -114,20 +129,12 @@ export function buildWorkerEnv(
   }
 
   // Add profile-specific env overrides (but check blacklist)
-  for (const [key, val] of Object.entries(profile.env)) {
-    if (isBlacklisted(key)) {
-      logger.warn({ key }, 'Worker profile env contains blacklisted variable — skipped')
-      continue
-    }
+  for (const [key, val] of Object.entries(filterSafeEnv(profile.env, 'Worker profile env contains blacklisted variable — skipped'))) {
     result[key] = val
   }
 
   // Add runtime environment overrides (for dedicated env setup, etc.)
-  for (const [key, val] of Object.entries(overrides)) {
-    if (isBlacklisted(key)) {
-      logger.warn({ key }, 'Worker runtime env override contains blacklisted variable — skipped')
-      continue
-    }
+  for (const [key, val] of Object.entries(filterSafeEnv(overrides, 'Worker runtime env override contains blacklisted variable — skipped'))) {
     result[key] = val
   }
 
@@ -153,15 +160,11 @@ export function buildVerifierEnv(overrides: Record<string, string> = {}): Record
   const result: Record<string, string> = {}
   for (const key of VERIFIER_ENV_WHITELIST) {
     const val = process.env[key]
-    if (val !== undefined && !isBlacklisted(key)) {
+    if (val !== undefined && !isBlacklistedEnvKey(key)) {
       result[key] = val
     }
   }
-  for (const [key, val] of Object.entries(overrides)) {
-    if (isBlacklisted(key)) {
-      logger.warn({ key }, 'Verifier runtime env override contains blacklisted variable — skipped')
-      continue
-    }
+  for (const [key, val] of Object.entries(filterSafeEnv(overrides, 'Verifier runtime env override contains blacklisted variable — skipped'))) {
     result[key] = val
   }
   result['PATH'] = normalizePathForSubprocess(result['PATH'], result['HOME'] ?? process.env['HOME'])
@@ -197,15 +200,11 @@ export function buildBootstrapEnv(overrides: Record<string, string> = {}): Recor
   const result: Record<string, string> = {}
   for (const key of BOOTSTRAP_ENV_WHITELIST) {
     const val = process.env[key]
-    if (val !== undefined && !isBlacklisted(key)) {
+    if (val !== undefined && !isBlacklistedEnvKey(key)) {
       result[key] = val
     }
   }
-  for (const [key, val] of Object.entries(overrides)) {
-    if (isBlacklisted(key)) {
-      logger.warn({ key }, 'Bootstrap runtime env override contains blacklisted variable — skipped')
-      continue
-    }
+  for (const [key, val] of Object.entries(filterSafeEnv(overrides, 'Bootstrap runtime env override contains blacklisted variable — skipped'))) {
     result[key] = val
   }
   result['PATH'] = normalizePathForSubprocess(result['PATH'], result['HOME'] ?? process.env['HOME'])

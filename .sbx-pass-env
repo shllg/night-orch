@@ -1,9 +1,0 @@
-# Env vars re-exported into the sbx agent sandbox for THIS repo only.
-# Names only (values come from your op-env/mise-loaded shell). Safe to commit.
-# Consumed by ~/.local/bin/sbx (os-configs supply-chain package).
-#
-# Required by .mcp.json MCP servers (github / context7) — without these the
-# servers fail to start inside the sandbox (--clearenv strips them otherwise):
-GITHUB_PAT_NIGHT_ORCH
-CONTEXT7_API_KEY
-MAX_MCP_OUTPUT_TOKENS

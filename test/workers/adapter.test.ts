@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { AgentProvider, RunOptions, RunResult } from '@ai-hero/sandcastle'
 import { SandcastleWorkerAdapter, createStrictHostSandboxProvider, type SandcastleBindings } from '../../src/workers/sandcastle.js'
 import { AcpWorkerAdapter } from '../../src/workers/acp.js'
-import { createWorkerAdapter } from '../../src/workers/factory.js'
+import { createSandboxProviderFactory, createWorkerAdapter } from '../../src/workers/factory.js'
 import type { WorkerProfileInput, WorkerTaskInput } from '../../src/workers/types.js'
 
 vi.mock('../../src/workers/timeout.js', () => ({
@@ -30,6 +30,7 @@ const baseProfile: WorkerProfileInput = {
   minimalEnv: true,
   runtimeWrapper: null,
   env: {},
+  sandbox: { type: 'host', mounts: [], env: {} },
 }
 
 function makeTaskInput(overrides: Partial<WorkerTaskInput> = {}): WorkerTaskInput {
@@ -385,5 +386,52 @@ describe('createWorkerAdapter (factory)', () => {
     expect(() =>
       createWorkerAdapter({ ...baseProfile, type: 'unknown' }),
     ).toThrow('No adapter registered for worker type "unknown"')
+  })
+
+  it('creates docker sandbox providers with safe env and mounts', () => {
+    const factory = createSandboxProviderFactory({
+      ...baseProfile,
+      sandbox: {
+        type: 'docker',
+        image: 'night-orch-agent:latest',
+        containerUid: 1000,
+        containerGid: 1000,
+        mounts: [{ hostPath: '~/.codex', sandboxPath: '/home/agent/.codex', readonly: true }],
+        env: {
+          SAFE_VALUE: 'ok',
+          GITHUB_TOKEN: 'skip-me',
+        },
+        network: 'night-orch-test',
+      },
+    })
+
+    const provider = factory({ PATH: '/usr/bin', HOME: '/home/agent' })
+
+    expect(provider.tag).toBe('bind-mount')
+    expect(provider.name).toBe('docker')
+    expect(provider.env).toMatchObject({
+      PATH: '/usr/bin',
+      HOME: '/home/agent',
+      SAFE_VALUE: 'ok',
+    })
+    expect(provider.env).not.toHaveProperty('GITHUB_TOKEN')
+  })
+
+  it('creates podman sandbox providers', () => {
+    const factory = createSandboxProviderFactory({
+      ...baseProfile,
+      sandbox: {
+        type: 'podman',
+        image: 'night-orch-agent:latest',
+        mounts: [],
+        env: {},
+      },
+    })
+
+    const provider = factory({ PATH: '/usr/bin' })
+
+    expect(provider.tag).toBe('bind-mount')
+    expect(provider.name).toBe('podman')
+    expect(provider.env).toMatchObject({ PATH: '/usr/bin' })
   })
 })

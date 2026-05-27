@@ -75,6 +75,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
         iterationCount: finalCtx.iteration,
         prNumber: publishResult.prNumber,
         prTitle: publishResult.prTitle,
+        lastError: null,
         endedAt: nowUtcIso(),
       })
       runManager.setCostBudgetOverride(runId, null)

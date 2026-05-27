@@ -505,6 +505,8 @@ workerProfiles:
     type: claude
     command: claude
     args: ["-p"]
+    sandbox:
+      type: host
 ```
 
 ### `workerProfiles.<name>`
@@ -520,11 +522,52 @@ workerProfiles:
 | `minimalEnv` | boolean | no | `true` | Deprecated/ignored; worker env is always whitelist-based. |
 | `runtimeWrapper` | string or `null` | no | `null` | Wrapper command prepended before `command` (for sandbox wrappers, etc.). |
 | `env` | record string->string | no | `{}` | Extra env vars for worker process; blacklist still applies. |
+| `sandbox` | object | no | `{ type: "host" }` | Worker execution sandbox. Use `host` for current host execution, `docker` or `podman` for container isolation. |
 
 Worker `PATH` is normalized at runtime: if missing, `~/.local/bin`, `~/.local/share/pnpm`,
 `~/.local/share/mise/shims`, `/usr/local/bin`, `/usr/bin`, and `/bin` are appended.
 
 `repos[].agents` references these profile names. Unknown profile references fail config load.
+
+### `workerProfiles.<name>.sandbox`
+
+Sandbox settings choose where Sandcastle runs the worker CLI.
+
+| Key | Type | Required | Default | Notes |
+| --- | --- | --- | --- | --- |
+| `type` | `host`, `docker`, or `podman` | no | `host` | `host` uses night-orch's strict host sandbox provider. `docker` and `podman` use Sandcastle container providers. |
+| `image` | string | no | provider default | Container image name for Docker/Podman. Ignored for `host`. |
+| `containerUid` | positive integer | no | provider default | UID of the `agent` user inside the image. Must match the image. |
+| `containerGid` | positive integer | no | provider default | GID of the `agent` user inside the image. Must match the image. |
+| `mounts` | array | no | `[]` | Additional bind mounts with `hostPath`, `sandboxPath`, and optional `readonly`. Use this for Codex/Claude subscription auth config. |
+| `env` | record string->string | no | `{}` | Extra sandbox env. The same secret blacklist used by worker env applies; forge/API tokens are skipped. |
+| `network` | string or string[] | no | provider default | Docker/Podman network name(s). |
+
+Example Docker profile:
+
+```yaml
+workerProfiles:
+  codex-docker:
+    type: codex
+    command: codex
+    args: ["exec", "--json"]
+    sandbox:
+      type: docker
+      image: night-orch-agent:latest
+      containerUid: 1000
+      containerGid: 1000
+      mounts:
+        - hostPath: ~/.codex
+          sandboxPath: /home/agent/.codex
+      env:
+        CODEX_HOME: /home/agent/.codex
+      network: night-orch-test
+```
+
+Do not pass API keys, forge tokens, webhook URLs, or other secret env vars to workers or sandboxes.
+The worker env whitelist and sandbox env filter are designed to keep those values out. For
+subscription CLI auth, mount the relevant CLI config directory explicitly and keep container `HOME`
+and `XDG_*` paths aligned with the image.
 
 ### Authentication Considerations
 

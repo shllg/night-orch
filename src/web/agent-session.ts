@@ -506,6 +506,7 @@ function buildFallbackProfile(agent: InteractiveAgentType): WorkerProfile {
     minimalEnv: true,
     runtimeWrapper: null,
     env: {},
+    sandbox: { type: 'host', mounts: [], env: {} },
   }
 }
 

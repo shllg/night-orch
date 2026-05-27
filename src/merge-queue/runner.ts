@@ -214,7 +214,7 @@ function transitionMergedRuns(
   const endedAt = nowUtcIso()
   for (const row of rows) {
     try {
-      runManager.update(row.id, { status: 'completed', endedAt })
+      runManager.update(row.id, { status: 'completed', lastError: null, endedAt })
       logger.info(
         { repo, runId: row.id, prNumber: row.pr_number },
         'Transitioned run out of review_ready after successful merge',

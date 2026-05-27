@@ -11,6 +11,7 @@ import {
   type ExecResult,
   type RunOptions,
   type RunResult,
+  type SandboxProvider,
 } from '@ai-hero/sandcastle'
 import { execFile, spawn } from 'node:child_process'
 import { copyFile, mkdir } from 'node:fs/promises'
@@ -45,7 +46,7 @@ export interface SandcastleWorkerAdapterOptions {
   workerType: 'claude' | 'codex'
   availabilityCommand?: string
   bindings?: SandcastleBindings
-  sandboxProviderFactory?: (sandboxEnv: Record<string, string>) => BindMountSandboxProvider
+  sandboxProviderFactory?: (sandboxEnv: Record<string, string>) => SandboxProvider
 }
 
 const DEFAULT_BINDINGS: SandcastleBindings = {
@@ -58,7 +59,7 @@ export class SandcastleWorkerAdapter implements WorkerAdapter {
   private readonly workerType: 'claude' | 'codex'
   private readonly availabilityCommand: string
   private readonly bindings: SandcastleBindings
-  private readonly sandboxProviderFactory: (sandboxEnv: Record<string, string>) => BindMountSandboxProvider
+  private readonly sandboxProviderFactory: (sandboxEnv: Record<string, string>) => SandboxProvider
 
   constructor(options: SandcastleWorkerAdapterOptions) {
     this.workerType = options.workerType
