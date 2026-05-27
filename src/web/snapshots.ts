@@ -20,6 +20,7 @@ interface DashboardSnapshot {
   generatedAt: string
   status: unknown
   runs: unknown
+  inbox: unknown
   cost: unknown
   build: {
     version: string
@@ -181,9 +182,10 @@ export async function buildDashboardSnapshot(deps: MCPDependencies): Promise<Das
     ...deps,
     config: runtimeConfig,
   }
-  const [status, runs, cost] = await Promise.all([
+  const [status, runs, inbox, cost] = await Promise.all([
     handleToolCall('night-orch-status', {}, runtimeDeps),
     handleToolCall('night-orch-list-runs', { limit: 100 }, runtimeDeps),
+    handleToolCall('night-orch-list-inbox', { limit: 100 }, runtimeDeps),
     handleToolCall('night-orch-cost-report', { days: 7 }, runtimeDeps),
   ])
 
@@ -191,6 +193,7 @@ export async function buildDashboardSnapshot(deps: MCPDependencies): Promise<Das
     generatedAt: nowUtcIso(),
     status,
     runs,
+    inbox,
     cost,
     build: BUILD_INFO,
     config: {

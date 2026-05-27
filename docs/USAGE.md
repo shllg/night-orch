@@ -613,7 +613,9 @@ All commands can be run from any directory — night-orch reads its central conf
 
 Start the long-running poller daemon. Polls all configured repos on the configured interval, processes eligible issues, creates PRs. Also starts the embedded MCP HTTP/SSE server and Prometheus metrics endpoint.
 
-Options: `--config`, `--trust-workspace`, `--dry-run`, `--log-level`
+Options: `--config`, `--trust-workspace`, `--dry-run`, `--log-level`, `--ndjson`
+
+`--ndjson` emits one JSON object per line to stdout for each poll-cycle event (`poll_cycle_start`, `poll_cycle_result`, `poll_cycle_followup_scheduled`, `poll_cycle_error`).
 
 ### `night-orch web`
 
@@ -627,6 +629,7 @@ Issue detail pages render line-oriented issue history rather than only the curre
 The web client now keeps the websocket open across auth-token refreshes, uses heartbeat-based liveness detection, and reconnects with exponential backoff instead of a fixed 2-second loop.
 On narrow mobile viewports, the top-line dashboard metric cards render in a compact 2-column layout so the runs list stays the primary focus on the Issues page.
 The Issues page run list now includes history filters (`Active`, `Completed`, `Failed`, `All`) plus a `Load more` control for paginated archive browsing (20 runs per page).
+The web API now exposes `GET /api/inbox` for operator triage queues (`needs_human`, `review_ready`, `blocked`, `error`), and `/api/dashboard` includes the same inbox snapshot for clients that consume one aggregate payload.
 
 For mobile or server-hosted setups, use an external terminal client such as Terminus instead of expecting shell access through the browser UI.
 
@@ -638,7 +641,9 @@ Options: `--config`, `--trust-workspace`, `--dry-run`, `--log-level`, `--host`, 
 
 Execute a single poll cycle and exit. Useful for testing and CI.
 
-Options: `--config`, `--trust-workspace`, `--dry-run`, `--log-level`, `--repo`, `--issue`
+Options: `--config`, `--trust-workspace`, `--dry-run`, `--log-level`, `--ndjson`
+
+`--ndjson` emits one JSON object per line to stdout for run lifecycle events (`poll_start`, `poll_result`, `poll_error`).
 
 ### `night-orch init`
 

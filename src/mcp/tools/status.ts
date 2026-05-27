@@ -6,6 +6,7 @@ import { CostTracker } from '../../loop/cost.js'
 import { isIssueEligibleForRepo } from '../../discovery/discover.js'
 import { flushActiveAgentObservability } from '../../events/observability.js'
 import { loadRuns } from '../../cli/tui/data.js'
+import { parseUtcTimestampMs } from '../../utils/time.js'
 
 interface RunTimingRow {
   id: string
@@ -14,8 +15,34 @@ interface RunTimingRow {
 }
 
 type RunListView = 'active' | 'completed' | 'failed' | 'all'
+type InboxTriage = 'needs_human' | 'review_ready' | 'blocked' | 'error'
 
 const RUN_LIST_VIEWS: readonly RunListView[] = ['active', 'completed', 'failed', 'all']
+const INBOX_TRIAGE_VALUES: readonly InboxTriage[] = ['needs_human', 'review_ready', 'blocked', 'error']
+const INBOX_TRIAGE_SORT_ORDER: Record<InboxTriage, number> = {
+  needs_human: 0,
+  review_ready: 1,
+  blocked: 2,
+  error: 3,
+}
+
+interface InboxIssueRow {
+  repo: string
+  issue_number: number
+  issue_title: string | null
+  status: string
+  current_phase: string | null
+  iteration_count: number | null
+  estimated_cost_usd: number | null
+  last_error: string | null
+  block_reason: string | null
+  pr_number: number | null
+  pr_title: string | null
+  updated_at: string | null
+  run_id: string | null
+  manual_state: string | null
+  operation_intent: string | null
+}
 
 interface HistoryRunRow extends RunTimingRow {
   repo: string
@@ -159,6 +186,29 @@ function normalizeRunListView(view: string | undefined): RunListView | null {
   return RUN_LIST_VIEWS.includes(view as RunListView)
     ? (view as RunListView)
     : null
+}
+
+function normalizeInboxTriage(value: string | undefined): InboxTriage | 'all' | null {
+  if (!value) return 'all'
+  if (value === 'all') return 'all'
+  return INBOX_TRIAGE_VALUES.includes(value as InboxTriage)
+    ? (value as InboxTriage)
+    : null
+}
+
+function classifyInboxTriage(row: Pick<InboxIssueRow, 'status' | 'block_reason' | 'manual_state'>): InboxTriage {
+  if (row.status === 'review_ready') return 'review_ready'
+  if (row.status === 'error') return 'error'
+  if (row.block_reason === 'reviewer_blocked' || row.manual_state === 'awaiting_rebase_resolution') {
+    return 'needs_human'
+  }
+  return 'blocked'
+}
+
+function parseSortableTs(value: string | null): number {
+  if (!value) return Number.NEGATIVE_INFINITY
+  const parsed = parseUtcTimestampMs(value)
+  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY
 }
 
 function mapRunRow(
@@ -349,6 +399,110 @@ export async function handleListRuns(
     hasMore,
     nextOffset: hasMore ? offset + pageRows.length : null,
     view: view ?? null,
+  }
+}
+
+export async function handleListInbox(
+  args: { repo?: string; triage?: string; limit?: number; offset?: number },
+  deps: MCPDependencies,
+): Promise<unknown> {
+  const limit = normalizeListRunsLimit(args.limit)
+  const offset = normalizeListRunsOffset(args.offset)
+  const triageFilter = normalizeInboxTriage(args.triage)
+  if (triageFilter === null) {
+    throw new Error(`Invalid triage filter: ${args.triage}`)
+  }
+
+  const params: unknown[] = []
+  const where = [`i.status IN ('blocked', 'review_ready', 'error')`]
+  if (args.repo) {
+    where.push('i.repo = ?')
+    params.push(args.repo)
+  }
+
+  const rows = deps.db
+    .prepare(
+      `SELECT
+         i.repo,
+         i.issue_number,
+         i.issue_title,
+         i.status,
+         i.current_phase,
+         i.iteration_count,
+         i.estimated_cost_usd,
+         i.last_error,
+         i.block_reason,
+         i.pr_number,
+         i.pr_title,
+         i.updated_at,
+         r.id AS run_id,
+         r.manual_state,
+         r.operation_intent
+       FROM issues i
+       LEFT JOIN runs r ON r.id = i.current_run_id
+       WHERE ${where.join(' AND ')}`,
+    )
+    .all(...params) as InboxIssueRow[]
+
+  const triaged = rows.map((row) => {
+    const triage = classifyInboxTriage(row)
+    return {
+      runId: row.run_id ?? `issue:${row.repo}#${row.issue_number}`,
+      repo: row.repo,
+      issue: row.issue_number,
+      issueTitle: row.issue_title,
+      status: row.status,
+      triage,
+      phase: row.current_phase,
+      iterations: row.iteration_count ?? 0,
+      costUsd: row.estimated_cost_usd ?? 0,
+      prNumber: row.pr_number,
+      prTitle: row.pr_title,
+      blockReason: row.block_reason,
+      lastError: row.last_error,
+      reason: row.block_reason ?? row.last_error,
+      manualState: row.manual_state ?? 'none',
+      operationIntent: row.operation_intent ?? 'auto',
+      updatedAt: row.updated_at,
+    }
+  })
+
+  const triageCounts: Record<InboxTriage, number> = {
+    needs_human: 0,
+    review_ready: 0,
+    blocked: 0,
+    error: 0,
+  }
+
+  for (const item of triaged) {
+    triageCounts[item.triage] += 1
+  }
+
+  const filtered = triageFilter === 'all'
+    ? triaged
+    : triaged.filter((item) => item.triage === triageFilter)
+
+  filtered.sort((a, b) => {
+    const triageDelta = INBOX_TRIAGE_SORT_ORDER[a.triage] - INBOX_TRIAGE_SORT_ORDER[b.triage]
+    if (triageDelta !== 0) return triageDelta
+    const updatedDelta = parseSortableTs(b.updatedAt) - parseSortableTs(a.updatedAt)
+    if (updatedDelta !== 0) return updatedDelta
+    return b.issue - a.issue
+  })
+
+  const page = filtered.slice(offset, offset + limit)
+  const hasMore = offset + limit < filtered.length
+
+  return {
+    count: page.length,
+    total: filtered.length,
+    items: page,
+    triageCounts,
+    limit,
+    offset,
+    hasMore,
+    nextOffset: hasMore ? offset + page.length : null,
+    triage: triageFilter,
   }
 }
 

@@ -54,6 +54,17 @@ vi.mock('../../src/utils/logger.js', () => ({
 
 import { runOnceCommand } from '../../src/cli/commands/run-once.js'
 
+function parseNdjsonFromWriteCalls(
+  calls: Array<Parameters<typeof process.stdout.write>>,
+): Array<Record<string, unknown>> {
+  return calls
+    .map((call) => call[0])
+    .filter((chunk): chunk is string => typeof chunk === 'string')
+    .map((chunk) => chunk.trim())
+    .filter((chunk) => chunk.length > 0)
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+}
+
 describe('runOnceCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -89,5 +100,29 @@ describe('runOnceCommand', () => {
 
     expect(mockReleaseAll).toHaveBeenCalledWith()
     expect(mockSyncReconcile).toHaveBeenCalledWith(false)
+  })
+
+  it('emits ndjson events when ndjson mode is enabled', async () => {
+    mockPollOnce.mockResolvedValue({ processed: 3, errors: 1 })
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockReturnValue(true)
+
+    await runOnceCommand({ ndjson: true })
+
+    const events = parseNdjsonFromWriteCalls(stdoutSpy.mock.calls)
+    expect(events.map((event) => event['event'])).toEqual([
+      'poll_start',
+      'poll_result',
+    ])
+    expect(events[0]).toMatchObject({
+      event: 'poll_start',
+      mode: 'run-once',
+      dryRun: false,
+    })
+    expect(events[1]).toMatchObject({
+      event: 'poll_result',
+      mode: 'run-once',
+      processed: 3,
+      errors: 1,
+    })
   })
 })

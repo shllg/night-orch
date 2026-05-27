@@ -50,6 +50,7 @@ describe('MCP Tools', () => {
     expect(names).toContain('night-orch-status')
     expect(names).toContain('night-orch-run-detail')
     expect(names).toContain('night-orch-list-runs')
+    expect(names).toContain('night-orch-list-inbox')
     expect(names).toContain('night-orch-cost-report')
     expect(names).toContain('night-orch-retry')
     expect(names).toContain('night-orch-sync')
@@ -66,7 +67,7 @@ describe('MCP Tools', () => {
     expect(names).toContain('night-orch-daily-cost-override')
     expect(names).toContain('night-orch-cost-reset')
     expect(names).toContain('night-orch-daily-cost-reset')
-    expect(tools.length).toBe(23)
+    expect(tools.length).toBe(24)
   })
 
   it('settings tools list/set/clear runtime overrides', async () => {
@@ -220,6 +221,75 @@ describe('MCP Tools', () => {
       prNumber: 42,
       lastError: 'verify failed',
     })
+  })
+
+  it('list-inbox returns active human-action triage buckets', async () => {
+    const runManager = new RunManager(db)
+    const reviewReady = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 11,
+      issueNodeId: '',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(reviewReady.id, { status: 'review_ready', prNumber: 411 })
+
+    const needsHuman = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 12,
+      issueNodeId: '',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(needsHuman.id, { status: 'blocked', blockReason: 'reviewer_blocked' })
+
+    const blocked = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 13,
+      issueNodeId: '',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(blocked.id, { status: 'blocked', blockReason: 'merge_conflict' })
+
+    const errored = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 14,
+      issueNodeId: '',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(errored.id, { status: 'error', lastError: 'verify failed' })
+
+    const result = await handleToolCall(
+      'night-orch-list-inbox',
+      { repo: 'org/repo', limit: 20, offset: 0 },
+      deps,
+    ) as {
+      count: number
+      triageCounts: Record<string, number>
+      items: Array<{ runId: string; triage: string; status: string }>
+    }
+
+    expect(result.count).toBe(4)
+    expect(result.triageCounts).toMatchObject({
+      needs_human: 1,
+      review_ready: 1,
+      blocked: 1,
+      error: 1,
+    })
+    expect(result.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ runId: reviewReady.id, triage: 'review_ready', status: 'review_ready' }),
+        expect.objectContaining({ runId: needsHuman.id, triage: 'needs_human', status: 'blocked' }),
+        expect.objectContaining({ runId: blocked.id, triage: 'blocked', status: 'blocked' }),
+        expect.objectContaining({ runId: errored.id, triage: 'error', status: 'error' }),
+      ]),
+    )
   })
 
   it('list-runs includes tracked issues with no run rows', async () => {

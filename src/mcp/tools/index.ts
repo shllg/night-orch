@@ -1,7 +1,7 @@
 import type { MCPDependencies } from '../server.js'
 import { resolveConfigWithRuntimeSettings } from '../../settings/runtime.js'
 import { handleListSettings, handleSetSetting, handleClearSetting } from './settings.js'
-import { handleStatus, handleRunDetail, handleListRuns, handleCostReport, handleListIssues, handleStreamEvents } from './status.js'
+import { handleStatus, handleRunDetail, handleListRuns, handleListInbox, handleCostReport, handleListIssues, handleStreamEvents } from './status.js'
 import { handleRetry, handleSync, handleCleanup, handlePoll, handleRebase, handleContinue } from './operations.js'
 import { handleCostOverride, handleCostReset, handleDailyCostOverride, handleDailyCostReset, handleLabelsInit, handleDeleteEntry, handleUpdate } from './admin.js'
 import { handleFileLoop } from './file-loop.js'
@@ -81,6 +81,19 @@ export function registerTools(): ToolDefinition[] {
           repo: { type: 'string', description: 'Filter by repo (owner/name)' },
           status: { type: 'string', description: 'Filter by status', enum: ['queued', 'running', 'blocked', 'review_ready', 'error', 'completed'] },
           view: { type: 'string', description: 'Preset list view for web/history browsing', enum: ['active', 'completed', 'failed', 'all'] },
+          limit: { type: 'number', description: 'Max results (default: 20)', default: 20 },
+          offset: { type: 'number', description: 'Result offset for pagination (default: 0)', default: 0 },
+        },
+      },
+    },
+    {
+      name: 'night-orch-list-inbox',
+      description: 'List active issues that need operator attention, triaged into needs_human/review_ready/blocked/error buckets.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          repo: { type: 'string', description: 'Filter by repo (owner/name)' },
+          triage: { type: 'string', description: 'Filter by triage bucket', enum: ['needs_human', 'review_ready', 'blocked', 'error', 'all'], default: 'all' },
           limit: { type: 'number', description: 'Max results (default: 20)', default: 20 },
           offset: { type: 'number', description: 'Result offset for pagination (default: 0)', default: 0 },
         },
@@ -354,6 +367,8 @@ export async function handleToolCall(
       return handleRunDetail(args as { runId: string }, runtimeDeps)
     case 'night-orch-list-runs':
       return handleListRuns(args as { repo?: string; status?: string; limit?: number; offset?: number; view?: string }, runtimeDeps)
+    case 'night-orch-list-inbox':
+      return handleListInbox(args as { repo?: string; triage?: string; limit?: number; offset?: number }, runtimeDeps)
     case 'night-orch-cost-report':
       return handleCostReport(args as { days?: number }, runtimeDeps)
     case 'night-orch-retry':

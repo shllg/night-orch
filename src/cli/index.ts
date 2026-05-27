@@ -90,12 +90,14 @@ program
 program
   .command('run')
   .description('Headless long-running poller — poll GitHub on interval and process eligible issues')
-  .action((_opts, cmd) => runCommand(cmd.parent?.opts()))
+  .option('--ndjson', 'Emit machine-readable NDJSON events to stdout')
+  .action((opts, cmd) => runCommand({ ...cmd.parent?.opts(), ...opts }))
 
 program
   .command('run-once')
   .description('Single poll + process cycle — useful for testing')
-  .action((_opts, cmd) => runOnceCommand(cmd.parent?.opts()))
+  .option('--ndjson', 'Emit machine-readable NDJSON events to stdout')
+  .action((opts, cmd) => runOnceCommand({ ...cmd.parent?.opts(), ...opts }))
 
 program
   .command('doctor')

@@ -12,16 +12,19 @@ import type { Server } from 'node:http'
 import type { ForgeAdapter } from '../../forge/types.js'
 import { logger } from '../../utils/logger.js'
 import { resolveConfigWithRuntimeSettings } from '../../settings/runtime.js'
+import { createNdjsonWriter, ndjsonError } from '../ndjson.js'
 
 interface GlobalOpts {
   config?: string
   trustWorkspace?: boolean
   dryRun?: boolean
   logLevel?: string
+  ndjson?: boolean
 }
 
 export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
   const dryRun = globalOpts?.dryRun ?? false
+  const emitNdjson = createNdjsonWriter(globalOpts?.ndjson ?? false, 'run')
 
   let baseConfig
   try {
@@ -131,19 +134,31 @@ export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
 
   // Poll loop
   while (!shutdown.isShuttingDown) {
+    emitNdjson('poll_cycle_start', { dryRun })
     try {
       runtimeConfig = resolveConfigWithRuntimeSettings(baseConfig, db)
       const runPromise = pollOnce(runtimeConfig, db, dryRun, metrics)
       shutdown.trackRun(runPromise.then(() => {}))
       const pollResult = await runPromise
+      emitNdjson('poll_cycle_result', {
+        dryRun,
+        processed: pollResult.processed,
+        errors: pollResult.errors,
+        immediateFollowupRepos: pollResult.immediateFollowupRepos,
+      })
       if (pollResult.immediateFollowupRepos.length > 0) {
         const trigger = pollerControl.triggerPollCycle()
+        emitNdjson('poll_cycle_followup_scheduled', {
+          repos: pollResult.immediateFollowupRepos,
+          triggerState: trigger.state,
+        })
         logger.info(
           { repos: pollResult.immediateFollowupRepos, triggerState: trigger.state },
           'Run reached terminal state — scheduling immediate follow-up poll cycle',
         )
       }
     } catch (err) {
+      emitNdjson('poll_cycle_error', { dryRun, error: ndjsonError(err) })
       logger.error({ err }, 'Poll cycle failed')
     }
 

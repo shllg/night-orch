@@ -4,16 +4,19 @@ import { pollOnce } from '../../runner/poller.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { logger } from '../../utils/logger.js'
 import { resolveConfigWithRuntimeSettings } from '../../settings/runtime.js'
+import { createNdjsonWriter, ndjsonError } from '../ndjson.js'
 
 interface GlobalOpts {
   config?: string
   trustWorkspace?: boolean
   dryRun?: boolean
   logLevel?: string
+  ndjson?: boolean
 }
 
 export async function runOnceCommand(globalOpts?: GlobalOpts): Promise<void> {
   const dryRun = globalOpts?.dryRun ?? false
+  const emitNdjson = createNdjsonWriter(globalOpts?.ndjson ?? false, 'run-once')
 
   let baseConfig
   try {
@@ -57,13 +60,16 @@ export async function runOnceCommand(globalOpts?: GlobalOpts): Promise<void> {
       logger.warn({ err }, 'Startup sync failed — continuing')
     }
 
+    emitNdjson('poll_start', { dryRun })
     const result = await pollOnce(runtimeConfig, db, dryRun)
+    emitNdjson('poll_result', { dryRun, processed: result.processed, errors: result.errors })
     logger.info({ processed: result.processed, errors: result.errors }, 'Run-once complete')
 
     if (result.errors > 0) {
       process.exitCode = 1
     }
   } catch (err) {
+    emitNdjson('poll_error', { dryRun, error: ndjsonError(err) })
     logger.error({ err }, 'Run-once failed')
     process.exitCode = 1
   } finally {

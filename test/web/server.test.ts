@@ -912,6 +912,92 @@ describe('startWebServer', () => {
     expect(allRunsPayload.runs.map((run) => run.runId)).toContain(blocked.id)
   })
 
+  it('exposes operator inbox triage on /api/inbox and dashboard snapshot', async () => {
+    const runManager = new RunManager(db)
+
+    const reviewReady = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 81,
+      issueNodeId: 'node-81',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(reviewReady.id, {
+      status: 'review_ready',
+      prNumber: 381,
+      endedAt: '2026-04-06T10:00:00.000Z',
+    })
+
+    const needsHuman = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 82,
+      issueNodeId: 'node-82',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(needsHuman.id, {
+      status: 'blocked',
+      blockReason: 'reviewer_blocked',
+      endedAt: '2026-04-06T10:05:00.000Z',
+    })
+
+    server = await startWebServer(
+      deps,
+      {
+        host: '127.0.0.1',
+        port: 0,
+        frontendDistPath: frontendDir,
+      },
+    )
+
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Unexpected address type')
+    }
+    baseUrl = `http://127.0.0.1:${address.port}`
+
+    const inboxResponse = await fetch(`${baseUrl}/api/inbox?repo=org%2Frepo&limit=20&offset=0`)
+    expect(inboxResponse.status).toBe(200)
+    const inboxPayload = await inboxResponse.json() as {
+      count: number
+      triageCounts: Record<string, number>
+      items: Array<{ runId: string; triage: string; status: string }>
+    }
+    expect(inboxPayload.count).toBe(2)
+    expect(inboxPayload.triageCounts).toMatchObject({
+      needs_human: 1,
+      review_ready: 1,
+    })
+    expect(inboxPayload.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          runId: reviewReady.id,
+          triage: 'review_ready',
+          status: 'review_ready',
+        }),
+        expect.objectContaining({
+          runId: needsHuman.id,
+          triage: 'needs_human',
+          status: 'blocked',
+        }),
+      ]),
+    )
+
+    const dashboard = await fetch(`${baseUrl}/api/dashboard`)
+    expect(dashboard.status).toBe(200)
+    const dashboardPayload = await dashboard.json() as {
+      inbox: {
+        triageCounts: Record<string, number>
+      }
+    }
+    expect(dashboardPayload.inbox.triageCounts).toMatchObject({
+      needs_human: 1,
+      review_ready: 1,
+    })
+  })
+
   it('dashboard includes full stats snapshot fields for the web stats page', async () => {
     server = await startWebServer(
       deps,

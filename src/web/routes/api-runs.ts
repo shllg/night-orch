@@ -60,6 +60,16 @@ export const handleRunRoutes: RouteHandler = async (_req, res, method, pathname,
     return true
   }
 
+  if (method === 'GET' && pathname === '/api/inbox') {
+    const repo = searchParams.get('repo') ?? undefined
+    const triage = searchParams.get('triage') ?? undefined
+    const limit = toBoundedInt(searchParams.get('limit'), 20, 1, 500)
+    const offset = toBoundedInt(searchParams.get('offset'), 0, 0, 100_000)
+    const result = await handleToolCall('night-orch-list-inbox', { repo, triage, limit, offset }, runtimeDeps)
+    writeJson(res, 200, result)
+    return true
+  }
+
   if (method === 'GET' && pathname === '/api/cost') {
     const days = toBoundedInt(searchParams.get('days'), 7, 1, 30)
     const result = await handleToolCall('night-orch-cost-report', { days }, runtimeDeps)
