@@ -349,6 +349,54 @@ describe('dispatchAttempt review_ready replay guard', () => {
     expect(mockExecuteLoop).toHaveBeenCalledTimes(1)
   })
 
+  it('blocks immediately when worktree is dirty before the loop starts', async () => {
+    const issue = makeIssue(['orch:ready'])
+    const forge = makeForge(issue)
+    const run = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 1,
+      issueNodeId: issue.nodeId,
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+
+    const result = await dispatchAttempt({
+      config,
+      db,
+      forge,
+      repoConfig: config.repos[0]!,
+      discoveredIssue: {
+        issue,
+        issueRepo: 'org/repo',
+        triage: { level: 'standard', reason: '' },
+        repoConfig: config.repos[0]!,
+      },
+      runManager,
+      leaseManager,
+      worktreeManager: {
+        ensure: vi.fn().mockResolvedValue(makeWorktreeInfo({ isClean: false })),
+        remove: vi.fn(),
+        list: vi.fn(),
+      },
+      notifier,
+      observability: {
+        record: vi.fn(),
+        closeRun: vi.fn().mockResolvedValue(undefined),
+      },
+      botUser: '',
+      usedPortsInPass: [],
+    })
+
+    expect(result).toEqual({ outcome: 'errored', immediateFollowupRepo: 'org/repo' })
+    expect(mockExecuteLoop).not.toHaveBeenCalled()
+
+    const updated = runManager.getById(run.id)
+    expect(updated?.status).toBe('blocked')
+    expect(updated?.blockReason).toBe('verify_config')
+    expect(updated?.lastError).toContain('worktree is dirty')
+  })
+
   it('blocks immediately when worktree refresh conflicts before the loop starts', async () => {
     const issue = makeIssue(['orch:ready'])
     const forge = makeForge(issue)

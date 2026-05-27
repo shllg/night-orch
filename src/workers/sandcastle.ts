@@ -90,7 +90,7 @@ export class SandcastleWorkerAdapter implements WorkerAdapter {
     try {
       const agent = this.workerType === 'claude'
         ? buildClaudeAgent(input.profile.args, this.bindings.claudeCode)
-        : buildCodexAgent(input.profile.args, input.continueSessionId, this.bindings.codex)
+        : buildCodexAgent(input.profile.args, input.role, input.continueSessionId, this.bindings.codex)
 
       const runResult = await this.bindings.run({
         agent,
@@ -339,6 +339,7 @@ function buildClaudeAgent(
 
 function buildCodexAgent(
   args: string[],
+  role: WorkerTaskInput['role'],
   continueSessionId: string | null | undefined,
   builder: typeof codex,
 ): AgentProvider {
@@ -354,10 +355,16 @@ function buildCodexAgent(
     ...base,
     buildPrintCommand(options) {
       const command = base.buildPrintCommand(options)
-      if (!continueSessionId) return command
+      const modeHardenedCommand = hardenCodexCommandForRole(command.command, role)
+      if (!continueSessionId) {
+        return {
+          ...command,
+          command: modeHardenedCommand,
+        }
+      }
       return {
         ...command,
-        command: injectCodexResumeSubcommand(command.command, continueSessionId),
+        command: injectCodexResumeSubcommand(modeHardenedCommand, continueSessionId),
       }
     },
     parseStreamLine(line: string) {
@@ -372,6 +379,21 @@ function buildCodexAgent(
       return events
     },
   }
+}
+
+function hardenCodexCommandForRole(
+  command: string,
+  role: WorkerTaskInput['role'],
+): string {
+  if (!/^(?:\S+\s+)*codex\s+exec\b/.test(command)) return command
+
+  const sandboxMode = role === 'coder' ? 'workspace-write' : 'read-only'
+  const withoutBypass = command
+    .replace(/\s--dangerously-bypass-approvals-and-sandbox\b/g, '')
+    .replace(/\s--sandbox\s+(?:read-only|workspace-write|danger-full-access)\b/g, '')
+    .replace(/\s-s\s+(?:read-only|workspace-write|danger-full-access)\b/g, '')
+
+  return withoutBypass.replace(/\bcodex\s+exec\b/, `codex exec --sandbox ${sandboxMode}`)
 }
 
 function injectCodexResumeSubcommand(command: string, sessionId: string): string {

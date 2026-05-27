@@ -351,6 +351,50 @@ export async function dispatchAttempt(
       }
     }
 
+    if (!ensuredWorktree.isClean) {
+      const summary = `Cannot start run because worktree is dirty before loop start: ${worktreePath}`
+      runManager.update(run.id, {
+        status: 'blocked',
+        blockReason: 'verify_config',
+        operationIntent: resolveOperationIntent(activeRun),
+        lastError: summary,
+        endedAt: nowUtcIso(),
+      })
+      const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
+      await transitionLabels(
+        forge,
+        issueRepo,
+        discoveredIssue.issue.number,
+        latestIssue.labels,
+        'running',
+        'blocked',
+        buildLabelConfig(repoConfig, latestIssue.labels),
+        blocked({
+          type: 'verifyConfig',
+          detail: summary,
+        }).reason,
+      )
+      await postStatusComment({
+        forge,
+        issueRepo,
+        issueNumber: discoveredIssue.issue.number,
+        botUser,
+        body: formatStatusComment({
+          blockReason: summary,
+          nextStep: 'Use /orch retry to recreate a fresh worktree from the base branch.',
+        }),
+        warnMessage: 'Failed to post dirty worktree status comment',
+      })
+      await pollerNotifier.blocked(repoConfig.repo, discoveredIssue.issue, {
+        summary,
+        blockingReason: 'verify_config',
+      })
+      return {
+        outcome: 'errored',
+        immediateFollowupRepo: computeImmediateFollowup(runManager, runId),
+      }
+    }
+
     // Execute explicit rebase or automatic branch refresh before entering the loop.
     if (isRebaseRun || isRefreshRun) {
       const refreshOutcome = await handleBranchRefreshRun({

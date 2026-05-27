@@ -188,8 +188,8 @@ const LabelPresentationSchema = z.object({
 
 const DefaultsSchema = z.object({
   planner: z.enum(['claude', 'codex', 'opencode']).default('claude'),
-  coder: z.enum(['claude', 'codex', 'opencode']).default('claude'),
-  reviewer: z.enum(['claude', 'codex', 'opencode']).default('claude'),
+  coder: z.enum(['claude', 'codex', 'opencode']).default('codex'),
+  reviewer: z.enum(['claude', 'codex', 'opencode']).default('codex'),
   /** @deprecated Reserved — not read by the loop engine or notification dispatch. */
   doneMode: z.enum(['pr-ready', 'manual-only']).default('pr-ready'),
   /** @deprecated Reserved — not read by the notification dispatch. */

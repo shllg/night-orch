@@ -113,6 +113,9 @@ describe('ConfigSchema', () => {
       expect(result.data.repos[0]?.maxConcurrentRuns).toBe(1)
       expect(result.data.repos[0]?.baseBranch).toBe('main')
       expect(result.data.repos[0]?.branchPrefix).toBe('orch')
+      expect(result.data.repos[0]?.defaults.planner).toBe('claude')
+      expect(result.data.repos[0]?.defaults.coder).toBe('codex')
+      expect(result.data.repos[0]?.defaults.reviewer).toBe('codex')
       expect(result.data.notifications.events.onPrUpdated).toBe(true)
     }
   })

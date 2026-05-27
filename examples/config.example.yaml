@@ -302,7 +302,7 @@ repos:
     defaults:
       planner: claude
       coder: codex
-      reviewer: claude
+      reviewer: codex
     # verificationProfile: strict
       doneMode: pr-ready
       notifyPriority: normal

@@ -507,9 +507,11 @@ Night-orch supports multiple AI agent backends. Each role (planner, coder, revie
 
 | Type | Agent | Notes |
 |------|-------|-------|
-| `claude` | Claude Code CLI | Default. Uses `--output-format json`, session continuity via `--continue` |
-| `codex` | Codex CLI | Uses `--output-last-message`, session continuity via `--resume` |
+| `claude` | Claude Code CLI | Default planner in the standard role split. Uses `--output-format json`, session continuity via `--continue` |
+| `codex` | Codex CLI | Default coder/reviewer in the standard role split. Uses `--output-last-message`, session continuity via `--resume` |
 | `acp` | Any ACP agent | Via [acpx](https://github.com/openclaw/acpx) — supports Gemini, Claude, Codex, and 17+ agents |
+
+Role hardening for Codex runs is automatic: coder steps run with `--sandbox workspace-write`, while planner/reviewer steps run with `--sandbox read-only`.
 
 ### Configuring agents
 

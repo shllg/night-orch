@@ -238,6 +238,78 @@ describe('SandcastleWorkerAdapter', () => {
     expect(command).toContain('resume codex-thread-42')
   })
 
+  it('forces codex coder runs to workspace-write sandbox and strips bypass mode', async () => {
+    const run = vi.fn<NonNullable<SandcastleBindings['run']>>()
+      .mockResolvedValue({
+        iterations: [],
+        stdout: '```json\n{"summary":"implemented","changedFiles":[],"remainingUncertainty":null,"blockers":null}\n```',
+        commits: [],
+        branch: 'main',
+      })
+    const codex = vi.fn().mockReturnValue({
+      ...makeAgentProvider('codex'),
+      buildPrintCommand: () => ({
+        command: 'codex exec --json --dangerously-bypass-approvals-and-sandbox -m gpt-5-codex',
+        stdin: 'prompt',
+      }),
+    } satisfies AgentProvider)
+
+    const adapter = new SandcastleWorkerAdapter({
+      workerType: 'codex',
+      bindings: makeBindings({ run: run as SandcastleBindings['run'], codex: codex as SandcastleBindings['codex'] }),
+      sandboxProviderFactory: createStrictHostSandboxProvider,
+    })
+
+    await adapter.runTask(makeTaskInput({
+      role: 'coder',
+      profile: { ...baseProfile, type: 'codex', command: 'codex', args: ['exec', '--json'] },
+    }))
+
+    const call = run.mock.calls[0]?.[0]
+    const command = call?.agent.buildPrintCommand({
+      prompt: 'Plan the fix',
+      dangerouslySkipPermissions: true,
+    }).command ?? ''
+    expect(command).toContain('--sandbox workspace-write')
+    expect(command).not.toContain('--dangerously-bypass-approvals-and-sandbox')
+  })
+
+  it('forces codex reviewer runs to read-only sandbox and strips bypass mode', async () => {
+    const run = vi.fn<NonNullable<SandcastleBindings['run']>>()
+      .mockResolvedValue({
+        iterations: [],
+        stdout: '```json\n{"verdict":"APPROVED","summary":"looks good","findings":[],"definitionOfDoneCheck":{"issueAddressed":true,"testsPassing":true,"noBlockingFindings":true}}\n```',
+        commits: [],
+        branch: 'main',
+      })
+    const codex = vi.fn().mockReturnValue({
+      ...makeAgentProvider('codex'),
+      buildPrintCommand: () => ({
+        command: 'codex exec --json --dangerously-bypass-approvals-and-sandbox -m gpt-5-codex',
+        stdin: 'prompt',
+      }),
+    } satisfies AgentProvider)
+
+    const adapter = new SandcastleWorkerAdapter({
+      workerType: 'codex',
+      bindings: makeBindings({ run: run as SandcastleBindings['run'], codex: codex as SandcastleBindings['codex'] }),
+      sandboxProviderFactory: createStrictHostSandboxProvider,
+    })
+
+    await adapter.runTask(makeTaskInput({
+      role: 'reviewer',
+      profile: { ...baseProfile, type: 'codex', command: 'codex', args: ['exec', '--json'] },
+    }))
+
+    const call = run.mock.calls[0]?.[0]
+    const command = call?.agent.buildPrintCommand({
+      prompt: 'Plan the fix',
+      dangerouslySkipPermissions: true,
+    }).command ?? ''
+    expect(command).toContain('--sandbox read-only')
+    expect(command).not.toContain('--dangerously-bypass-approvals-and-sandbox')
+  })
+
   it('marks run as timed out when sandcastle run aborts', async () => {
     const run: SandcastleBindings['run'] = (options) => new Promise((_resolve, reject) => {
       options.signal?.addEventListener('abort', () => {

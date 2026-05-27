@@ -895,8 +895,8 @@ Constraint: each entry must include at least one of `color` or `description`.
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `planner` | `claude`, `codex`, or `opencode` | `claude` | Default planner role assignment. |
-| `coder` | `claude`, `codex`, or `opencode` | `claude` | Default coder role assignment. |
-| `reviewer` | `claude`, `codex`, or `opencode` | `claude` | Default reviewer role assignment. |
+| `coder` | `claude`, `codex`, or `opencode` | `codex` | Default coder role assignment. |
+| `reviewer` | `claude`, `codex`, or `opencode` | `codex` | Default reviewer role assignment. |
 | `doneMode` | `pr-ready` or `manual-only` | `pr-ready` | Reserved for workflow policy; currently not consumed in runtime logic. |
 | `notifyPriority` | `normal` or `high` | `normal` | Reserved for notification priority; currently not consumed in notifier routing. |
 | `prMentions` | string[] | `[]` | Mention aliases posted on PRs by default. |
