@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildAttemptHistoryFollowup,
+  deriveBranchPolicy,
   resolveOperationIntent,
   selectReplayableRun,
 } from '../../src/runner/helpers.js'
@@ -99,8 +100,8 @@ describe('resolveOperationIntent', () => {
 })
 
 describe('selectReplayableRun', () => {
-  it('returns replayable rows for blocked, review_ready, and error states', () => {
-    const replayable: RunStatus[] = ['blocked', 'review_ready', 'error']
+  it('returns replayable rows for blocked and error states', () => {
+    const replayable: RunStatus[] = ['blocked', 'error']
     for (const status of replayable) {
       const run = makeRun({ status })
       expect(selectReplayableRun(run)).toBe(run)
@@ -108,11 +109,115 @@ describe('selectReplayableRun', () => {
   })
 
   it('returns null for non-replayable states', () => {
-    const nonReplayable: RunStatus[] = ['queued', 'running', 'completed']
+    const nonReplayable: RunStatus[] = ['queued', 'running', 'review_ready', 'completed']
     for (const status of nonReplayable) {
       expect(selectReplayableRun(makeRun({ status }))).toBeNull()
     }
     expect(selectReplayableRun(null)).toBeNull()
+  })
+})
+
+describe('deriveBranchPolicy', () => {
+  it('maps refresh intent to preserve branch and refresh run mode', () => {
+    const policy = deriveBranchPolicy({
+      operationIntent: 'refresh',
+      controlPayload: null,
+      planningMode: false,
+      updateStrategyOverride: undefined,
+      shouldResetFromHistory: false,
+      hasFollowupPromptFeedback: false,
+    })
+
+    expect(policy).toEqual({
+      preserveBranchState: true,
+      resetToBase: false,
+      runMode: 'refresh',
+    })
+  })
+
+  it('maps explicit retry intent to reset from base with fresh mode', () => {
+    const policy = deriveBranchPolicy({
+      operationIntent: 'retry',
+      controlPayload: null,
+      planningMode: false,
+      updateStrategyOverride: undefined,
+      shouldResetFromHistory: false,
+      hasFollowupPromptFeedback: false,
+    })
+
+    expect(policy).toEqual({
+      preserveBranchState: false,
+      resetToBase: true,
+      runMode: 'fresh',
+    })
+  })
+
+  it('maps continue intent to followup mode and preserve when no strategy override exists', () => {
+    const policy = deriveBranchPolicy({
+      operationIntent: 'continue',
+      controlPayload: null,
+      planningMode: false,
+      updateStrategyOverride: undefined,
+      shouldResetFromHistory: false,
+      hasFollowupPromptFeedback: false,
+    })
+
+    expect(policy).toEqual({
+      preserveBranchState: true,
+      resetToBase: false,
+      runMode: 'followup',
+    })
+  })
+
+  it('respects control payload preserve override and followup feedback in auto mode', () => {
+    const policy = deriveBranchPolicy({
+      operationIntent: 'auto',
+      controlPayload: { preserveBranchState: true },
+      planningMode: false,
+      updateStrategyOverride: 'rebase',
+      shouldResetFromHistory: false,
+      hasFollowupPromptFeedback: true,
+    })
+
+    expect(policy).toEqual({
+      preserveBranchState: true,
+      resetToBase: false,
+      runMode: 'followup',
+    })
+  })
+
+  it('resets to base in auto mode when planning mode is enabled', () => {
+    const policy = deriveBranchPolicy({
+      operationIntent: 'auto',
+      controlPayload: null,
+      planningMode: true,
+      updateStrategyOverride: undefined,
+      shouldResetFromHistory: false,
+      hasFollowupPromptFeedback: false,
+    })
+
+    expect(policy).toEqual({
+      preserveBranchState: false,
+      resetToBase: true,
+      runMode: 'fresh',
+    })
+  })
+
+  it('resets to base in auto mode when prior run is tainted', () => {
+    const policy = deriveBranchPolicy({
+      operationIntent: 'auto',
+      controlPayload: null,
+      planningMode: false,
+      updateStrategyOverride: undefined,
+      shouldResetFromHistory: true,
+      hasFollowupPromptFeedback: false,
+    })
+
+    expect(policy).toEqual({
+      preserveBranchState: false,
+      resetToBase: true,
+      runMode: 'fresh',
+    })
   })
 })
 

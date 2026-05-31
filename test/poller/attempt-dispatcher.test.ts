@@ -8,6 +8,7 @@ import type { ForgeAdapter, ForgeIssue } from '../../src/forge/types.js'
 import type { WorktreeInfo } from '../../src/git/worktree.js'
 import { dispatchAttempt } from '../../src/poller/attempt-dispatcher.js'
 import { NotificationDispatcher } from '../../src/notify/dispatcher.js'
+import { createOrchestrationCache } from '../../src/runner/orchestration-cache.js'
 import { initDatabase } from '../../src/state/db.js'
 import { LeaseManager } from '../../src/state/leases.js'
 import { RunManager } from '../../src/state/runs.js'
@@ -146,13 +147,14 @@ function makeWorktreeInfo(overrides: Partial<WorktreeInfo> = {}): WorktreeInfo {
   }
 }
 
-describe('dispatchAttempt review_ready replay guard', () => {
+describe('dispatchAttempt', () => {
   let tmpDir: string
   let db: Database.Database
   let config: Config
   let runManager: RunManager
   let leaseManager: LeaseManager
   let notifier: NotificationDispatcher
+  let cache: ReturnType<typeof createOrchestrationCache>
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -162,6 +164,7 @@ describe('dispatchAttempt review_ready replay guard', () => {
     runManager = new RunManager(db)
     leaseManager = new LeaseManager(db)
     notifier = new NotificationDispatcher([], config.notifications.events)
+    cache = createOrchestrationCache()
     mockCreateWorkerAdapter.mockReturnValue({})
     mockExecuteLoop.mockResolvedValue({})
     mockFinalizeRunOutcome.mockResolvedValue('processed')
@@ -170,92 +173,6 @@ describe('dispatchAttempt review_ready replay guard', () => {
   afterEach(() => {
     db.close()
     rmSync(tmpDir, { recursive: true, force: true })
-  })
-
-  it('skips stale review_ready replays, reconciles labels, and becomes a no-op on the next pass', async () => {
-    const issue = makeIssue(['no:ready'])
-    const forge = makeForge(issue)
-    const run = runManager.create({
-      repo: 'org/repo',
-      issueNumber: 1,
-      issueNodeId: issue.nodeId,
-      planner: 'claude',
-      coder: 'claude',
-      reviewer: 'claude',
-    })
-    runManager.update(run.id, {
-      status: 'review_ready',
-      endedAt: '2026-04-13T00:00:00Z',
-      prNumber: 164,
-    })
-
-    const first = await dispatchAttempt({
-      config,
-      db,
-      forge,
-      repoConfig: config.repos[0]!,
-      discoveredIssue: {
-        issue,
-        issueRepo: 'org/repo',
-        triage: { level: 'standard', reason: '' },
-        repoConfig: config.repos[0]!,
-      },
-      runManager,
-      leaseManager,
-      worktreeManager: {
-        ensure: vi.fn(),
-        remove: vi.fn(),
-        list: vi.fn(),
-      },
-      notifier,
-      observability: {
-        record: vi.fn(),
-        closeRun: vi.fn().mockResolvedValue(undefined),
-      },
-      botUser: '',
-      usedPortsInPass: [],
-    })
-
-    expect(first).toEqual({ outcome: 'skipped', immediateFollowupRepo: null })
-    expect(mockExecuteLoop).not.toHaveBeenCalled()
-    expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 1, ['no:review-ready'])
-    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['no:ready'])
-    expect(issue.labels.sort()).toEqual(['no:review-ready'])
-
-    vi.mocked(forge.addLabels).mockClear()
-    vi.mocked(forge.removeLabels).mockClear()
-
-    const second = await dispatchAttempt({
-      config,
-      db,
-      forge,
-      repoConfig: config.repos[0]!,
-      discoveredIssue: {
-        issue,
-        issueRepo: 'org/repo',
-        triage: { level: 'standard', reason: '' },
-        repoConfig: config.repos[0]!,
-      },
-      runManager,
-      leaseManager,
-      worktreeManager: {
-        ensure: vi.fn(),
-        remove: vi.fn(),
-        list: vi.fn(),
-      },
-      notifier,
-      observability: {
-        record: vi.fn(),
-        closeRun: vi.fn().mockResolvedValue(undefined),
-      },
-      botUser: '',
-      usedPortsInPass: [],
-    })
-
-    expect(second).toEqual({ outcome: 'skipped', immediateFollowupRepo: null })
-    expect(mockExecuteLoop).not.toHaveBeenCalled()
-    expect(forge.addLabels).not.toHaveBeenCalled()
-    expect(forge.removeLabels).not.toHaveBeenCalled()
   })
 
   it('dispatches normally when a queued control run exists', async () => {
@@ -295,6 +212,7 @@ describe('dispatchAttempt review_ready replay guard', () => {
       },
       botUser: '',
       usedPortsInPass: [],
+      cache,
     })
 
     expect(result.outcome).toBe('processed')
@@ -343,6 +261,7 @@ describe('dispatchAttempt review_ready replay guard', () => {
       },
       botUser: '',
       usedPortsInPass: [],
+      cache,
     })
 
     expect(result.outcome).toBe('processed')
@@ -386,6 +305,7 @@ describe('dispatchAttempt review_ready replay guard', () => {
       },
       botUser: '',
       usedPortsInPass: [],
+      cache,
     })
 
     expect(result).toEqual({ outcome: 'errored', immediateFollowupRepo: 'org/repo' })
@@ -434,6 +354,7 @@ describe('dispatchAttempt review_ready replay guard', () => {
       },
       botUser: '',
       usedPortsInPass: [],
+      cache,
     })
 
     expect(result).toEqual({ outcome: 'errored', immediateFollowupRepo: 'org/repo' })

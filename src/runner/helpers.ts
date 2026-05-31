@@ -6,6 +6,7 @@ import type { ResolvedRoles } from '../discovery/roles.js'
 import type { DiscoveredIssue } from '../discovery/discover.js'
 import type { ResolvedWorkflow } from '../loop/workflow.js'
 import type { RunContext } from '../loop/types.js'
+import type { UpdateStrategy } from '../git/worktree.js'
 import type { BlockedReason } from '../loop/state.js'
 import { coerceConflictSnapshot, type ConflictSnapshot } from '../ops/conflict-types.js'
 import { assertNever, blockedReasonFromLegacy } from '../loop/state.js'
@@ -416,10 +417,60 @@ function getIssueQueuePriority(
 
 export function selectReplayableRun(run: RunRecord | null): RunRecord | null {
   if (!run) return null
-  if (run.status === 'blocked' || run.status === 'review_ready' || run.status === 'error') {
+  if (run.status === 'blocked' || run.status === 'error') {
     return run
   }
   return null
+}
+
+export interface BranchPolicy {
+  preserveBranchState: boolean
+  resetToBase: boolean
+  runMode: RunContext['runMode']
+}
+
+export interface DeriveBranchPolicyInput {
+  operationIntent: RunRecord['operationIntent']
+  controlPayload: Record<string, unknown> | null
+  planningMode: boolean
+  updateStrategyOverride: UpdateStrategy | undefined
+  shouldResetFromHistory: boolean
+  hasFollowupPromptFeedback: boolean
+}
+
+export function deriveBranchPolicy(input: DeriveBranchPolicyInput): BranchPolicy {
+  const {
+    operationIntent,
+    controlPayload,
+    planningMode,
+    updateStrategyOverride,
+    shouldResetFromHistory,
+    hasFollowupPromptFeedback,
+  } = input
+  const preserveBranchState = Boolean(controlPayload?.['preserveBranchState'])
+    || operationIntent === 'refresh'
+    || operationIntent === 'rebase'
+    || (operationIntent === 'continue' && updateStrategyOverride === undefined)
+
+  const resetToBase = operationIntent === 'retry'
+    || (
+      operationIntent === 'auto'
+      && (planningMode || shouldResetFromHistory)
+    )
+
+  const runMode: RunContext['runMode'] = operationIntent === 'rebase'
+    ? 'rebase'
+    : operationIntent === 'refresh'
+      ? 'refresh'
+      : operationIntent === 'continue' || hasFollowupPromptFeedback
+        ? 'followup'
+        : 'fresh'
+
+  return {
+    preserveBranchState,
+    resetToBase,
+    runMode,
+  }
 }
 
 export function shouldResetBranch(

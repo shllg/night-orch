@@ -132,19 +132,12 @@ export async function executeLoop(
           },
           'Runaway budget exceeded',
         )
-        checkpoint.phaseBlocked(ctx.runId, step.id, blockMessage, ctx.iteration)
-        return recordPhase(
-          updateContext(ctx, {
-            currentPhase: 'blocked',
-            terminalStatus: 'blocked',
-            blockReason: 'iteration_limit',
-            stepOutputs: {
-              ...ctx.stepOutputs,
-              blockMessage,
-            },
-          }),
+        return blockExit(
+          ctx,
+          checkpoint,
           step.id,
-          'failure',
+          runawayLimitToBlockReason(runawayBudget.limit),
+          blockMessage,
         )
       }
 
@@ -160,21 +153,12 @@ export async function executeLoop(
           },
           'Cost limit exceeded',
         )
-        // Emit paired phase_started/phase_completed with a blocked payload
-        // so the event stream remains consistent across block early-returns.
-        checkpoint.phaseBlocked(ctx.runId, step.id, blockMessage, ctx.iteration)
-        return recordPhase(
-          updateContext(ctx, {
-            currentPhase: 'blocked',
-            terminalStatus: 'blocked',
-            blockReason: 'cost_limit',
-            stepOutputs: {
-              ...ctx.stepOutputs,
-              blockMessage,
-            },
-          }),
+        return blockExit(
+          ctx,
+          checkpoint,
           step.id,
-          'failure',
+          'cost_limit',
+          blockMessage,
         )
       }
     }
@@ -206,20 +190,12 @@ export async function executeLoop(
           },
           `${step.id} worker error → blocking attempt`,
         )
-        checkpoint.phaseBlocked(ctx.runId, step.id, blockedState.message, ctx.iteration)
-        return recordPhase(
-          updateContext(ctx, {
-            currentPhase: 'blocked',
-            terminalStatus: 'blocked',
-            blockReason: blockedReasonToLegacy(reason),
-            stepOutputs: {
-              ...ctx.stepOutputs,
-              blockMessage: blockedState.message,
-            },
-          }),
+        return blockExit(
+          ctx,
+          checkpoint,
           step.id,
-          'failure',
-          {},
+          blockedReasonToLegacy(reason),
+          blockedState.message,
           stepStartedAt,
         )
       }
@@ -255,20 +231,12 @@ export async function executeLoop(
           },
           'Cost limit exceeded after recording worker cost',
         )
-        checkpoint.phaseBlocked(ctx.runId, step.id, blockMessage, ctx.iteration)
-        return recordPhase(
-          updateContext(ctx, {
-            currentPhase: 'blocked',
-            terminalStatus: 'blocked',
-            blockReason: 'cost_limit',
-            stepOutputs: {
-              ...ctx.stepOutputs,
-              blockMessage,
-            },
-          }),
+        return blockExit(
+          ctx,
+          checkpoint,
           step.id,
-          'failure',
-          {},
+          'cost_limit',
+          blockMessage,
           stepStartedAt,
         )
       }
@@ -285,20 +253,12 @@ export async function executeLoop(
           },
           'Runaway budget exceeded after recording worker cost',
         )
-        checkpoint.phaseBlocked(ctx.runId, step.id, blockMessage, ctx.iteration)
-        return recordPhase(
-          updateContext(ctx, {
-            currentPhase: 'blocked',
-            terminalStatus: 'blocked',
-            blockReason: 'iteration_limit',
-            stepOutputs: {
-              ...ctx.stepOutputs,
-              blockMessage,
-            },
-          }),
+        return blockExit(
+          ctx,
+          checkpoint,
           step.id,
-          'failure',
-          {},
+          runawayLimitToBlockReason(runawayBudget.limit),
+          blockMessage,
           stepStartedAt,
         )
       }
@@ -313,19 +273,12 @@ export async function executeLoop(
             { runId: ctx.runId, phase: step.id, stats: scope.stats },
             'Scope guard tripped after coder step — blocking before review',
           )
-          checkpoint.phaseBlocked(ctx.runId, step.id, blockMessage, ctx.iteration)
-          return recordPhase(
-            updateContext(ctx, {
-              currentPhase: 'blocked',
-              terminalStatus: 'blocked',
-              stepOutputs: {
-                ...ctx.stepOutputs,
-                blockMessage,
-              },
-            }),
+          return blockExit(
+            ctx,
+            checkpoint,
             step.id,
-            'failure',
-            {},
+            'verify_config',
+            blockMessage,
             stepStartedAt,
           )
         }
@@ -402,16 +355,12 @@ export async function executeLoop(
       if (emptyDiffDecision !== null) {
         if (emptyDiffDecision.action === 'block') {
           const blockMessage = emptyDiffDecision.state.message
-          checkpoint.phaseBlocked(ctx.runId, 'empty_diff_guard', blockMessage, ctx.iteration)
-          return recordPhase(
-            updateContext(ctx, {
-              currentPhase: 'blocked',
-              terminalStatus: 'blocked',
-              blockReason: blockedReasonToLegacy(emptyDiffDecision.state.reason),
-              stepOutputs: { ...ctx.stepOutputs, blockMessage },
-            }),
+          return blockExit(
+            ctx,
+            checkpoint,
             'empty_diff_guard',
-            'failure',
+            blockedReasonToLegacy(emptyDiffDecision.state.reason),
+            blockMessage,
           )
         }
 
@@ -503,17 +452,12 @@ export async function executeLoop(
             logger.warn({ reason: commitResult.reason }, 'Commit skipped')
             if (commitResult.blockRun) {
               const blockMessage = commitResult.reason ?? 'Commit blocked by repository policy'
-              return recordPhase(
-                updateContext(ctx, {
-                  currentPhase: 'blocked',
-                  terminalStatus: 'blocked',
-                  stepOutputs: {
-                    ...ctx.stepOutputs,
-                    blockMessage,
-                  },
-                }),
+              return blockExit(
+                ctx,
+                checkpoint,
                 'publish',
-                'failure',
+                'verify_config',
+                blockMessage,
               )
             }
           }
@@ -534,19 +478,14 @@ export async function executeLoop(
           const progress = assessProgress(verifyHash, ctx.iterationSnapshots)
           if (progress.status === 'stuck') {
             logger.warn({ runId: ctx.runId, iteration: ctx.iteration, verifyHash }, progress.reason)
-            return recordPhase(
+            return blockExit(
               updateContext(ctx, {
-                currentPhase: 'blocked',
-                terminalStatus: 'blocked',
-                blockReason: 'iteration_limit',
                 iterationSnapshots: updatedSnapshots,
-                stepOutputs: {
-                  ...ctx.stepOutputs,
-                  blockMessage: `Loop stuck: ${progress.reason}`,
-                },
               }),
+              checkpoint,
               'decision',
-              'failure',
+              'stuck_loop',
+              `Loop stuck: ${progress.reason}`,
             )
           }
 
@@ -575,18 +514,12 @@ export async function executeLoop(
         }
 
         case 'block':
-          return recordPhase(
-            updateContext(ctx, {
-              currentPhase: 'blocked',
-              terminalStatus: 'blocked',
-              blockReason: blockedReasonToLegacy(decision.state.reason),
-              stepOutputs: {
-                ...ctx.stepOutputs,
-                blockMessage: decision.reason,
-              },
-            }),
+          return blockExit(
+            ctx,
+            checkpoint,
             'decision',
-            'failure',
+            blockedReasonToLegacy(decision.state.reason),
+            decision.reason,
           )
 
         case 'error':
@@ -705,6 +638,32 @@ function getCheckpointPhaseData(
   } catch {
     return {}
   }
+}
+
+function blockExit(
+  ctx: RunContext,
+  checkpoint: Checkpoint,
+  phase: string,
+  blockReason: NonNullable<RunContext['blockReason']>,
+  blockMessage: string,
+  stepStartedAt?: string,
+): RunContext {
+  checkpoint.phaseBlocked(ctx.runId, phase, blockMessage, ctx.iteration)
+  return recordPhase(
+    updateContext(ctx, {
+      currentPhase: 'blocked',
+      terminalStatus: 'blocked',
+      blockReason,
+      stepOutputs: {
+        ...ctx.stepOutputs,
+        blockMessage,
+      },
+    }),
+    phase,
+    'failure',
+    {},
+    stepStartedAt,
+  )
 }
 
 function isStepCheckpointComplete(step: WorkflowStep, rawArtifacts: unknown): boolean {
@@ -854,6 +813,23 @@ function describeRunawayBudgetBlock(status: RunawayBudgetStatus): string {
       return `Daily token budget exceeded (${Math.floor(status.actual)} >= ${Math.floor(status.threshold)} tokens)`
     case 'run_wall_clock':
       return `Run wall-clock budget exceeded (${status.actual.toFixed(1)} >= ${status.threshold} minutes)`
+  }
+}
+
+function runawayLimitToBlockReason(
+  limit: RunawayBudgetStatus['limit'] | undefined,
+): NonNullable<RunContext['blockReason']> {
+  switch (limit) {
+    case 'run_tokens':
+      return 'run_token_limit'
+    case 'issue_tokens':
+      return 'issue_token_limit'
+    case 'daily_tokens':
+      return 'daily_token_limit'
+    case 'run_wall_clock':
+      return 'run_wall_clock_limit'
+    default:
+      return 'iteration_limit'
   }
 }
 

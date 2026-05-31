@@ -1,14 +1,11 @@
 import type { MCPDependencies } from '../server.js'
-import { resolve } from 'node:path'
-import { homedir } from 'node:os'
-import { writeFileSync, mkdirSync } from 'node:fs'
 import { setIssueCostOverride } from '../../ops/cost-override.js'
 import { setDailyCostCapOverride } from '../../ops/daily-cost-override.js'
 import { resetIssueCost } from '../../ops/cost-reset.js'
 import { resetDailyCostsAndResume } from '../../ops/daily-cost-reset.js'
 import { LabelsInitEngine, formatLabelsInitSummary } from '../../ops/labels-init.js'
 import { DeleteIssueEntryEngine } from '../../ops/delete-entry.js'
-import { nowUtcIso } from '../../utils/time.js'
+import { requestUpdateViaTriggerFile } from '../../supervisor/update-control.js'
 import { assertMcpMutationAuth } from './auth.js'
 
 export async function handleCostOverride(
@@ -151,10 +148,5 @@ export async function handleUpdate(
     return { accepted: true, method: 'ipc' }
   }
 
-  // Fallback: trigger file
-  const dataDir = resolve(homedir(), '.config', 'night-orch')
-  const triggerPath = resolve(dataDir, 'update-requested')
-  mkdirSync(dataDir, { recursive: true })
-  writeFileSync(triggerPath, nowUtcIso())
-  return { accepted: true, method: 'trigger-file' }
+  return requestUpdateViaTriggerFile()
 }

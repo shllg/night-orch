@@ -54,14 +54,14 @@ import {
   extractFollowupPromptFeedback,
   buildAttemptHistoryFollowup,
   resolveControlPayload,
+  deriveBranchPolicy,
   resolveOperationIntent,
   selectReplayableRun,
   shouldResetBranch,
   postStatusComment,
 } from '../runner/helpers.js'
 import { createWorkItemFromDiscoveredIssue } from '../work-items/types.js'
-import { missingCommentCommandIssues } from '../runner/comment-commands.js'
-import { reactionCursors } from '../runner/reaction-scan.js'
+import type { OrchestrationCache } from '../runner/orchestration-cache.js'
 import type { NotificationDispatcher } from '../notify/dispatcher.js'
 
 const STATUS_MARKER = markerTag('status')
@@ -100,6 +100,7 @@ export interface DispatchAttemptParams {
   observability: AgentObservability
   botUser: string
   usedPortsInPass: number[]
+  cache: OrchestrationCache
   metrics?: MetricsService
 }
 
@@ -124,6 +125,7 @@ export async function dispatchAttempt(
     observability,
     botUser,
     usedPortsInPass,
+    cache,
     metrics,
   } = params
   const pollerNotifier = new PollerNotifier(innerNotifier)
@@ -205,41 +207,6 @@ export async function dispatchAttempt(
       }
     }
 
-    if (replayableRun && !queuedRun && replayableRun.status === 'review_ready') {
-      logger.info(
-        { repo: repoConfig.repo, issue: discoveredIssue.issue.number, runId: replayableRun.id },
-        'Skipping review_ready run with no queued control action',
-      )
-      const labelCfg = buildLabelConfig(repoConfig, discoveredIssue.issue.labels)
-      const staleAdds = [labelCfg.reviewReady].filter(
-        (label) => !discoveredIssue.issue.labels.includes(label),
-      )
-      const staleRemoves = [
-        ...labelCfg.ready,
-        labelCfg.running,
-        labelCfg.blocked,
-        labelCfg.needsHuman,
-        labelCfg.error,
-        labelCfg.retry,
-      ].filter((label) => discoveredIssue.issue.labels.includes(label))
-      if (staleAdds.length > 0 || staleRemoves.length > 0) {
-        try {
-          if (staleAdds.length > 0) {
-            await forge.addLabels(issueRepo, discoveredIssue.issue.number, staleAdds)
-          }
-          if (staleRemoves.length > 0) {
-            await forge.removeLabels(issueRepo, discoveredIssue.issue.number, staleRemoves)
-          }
-        } catch (err) {
-          logger.warn(
-            { repo: repoConfig.repo, issue: discoveredIssue.issue.number, err },
-            'Failed to reconcile labels for skipped review_ready run',
-          )
-        }
-      }
-      return { outcome: 'skipped', immediateFollowupRepo: null }
-    }
-
     const activeRun = queuedRun ?? replayableRun
     const roles = activeRun
       ? {
@@ -304,10 +271,6 @@ export async function dispatchAttempt(
     const operationIntent = resolveOperationIntent(activeRun)
     const controlPayload = resolveControlPayload(activeRun)
     const updateStrategyOverride = resolveUpdateStrategyOverride(controlPayload)
-    const isRefreshRun = operationIntent === 'refresh'
-    const isRebaseRun = operationIntent === 'rebase'
-    const isContinueRun = operationIntent === 'continue'
-    const isFreshRetry = operationIntent === 'retry'
     let followupPromptFeedback = extractFollowupPromptFeedback(activeRun?.phaseData)
     if (!followupPromptFeedback) {
       const previousRun = runManager.getLatestFinishedByIssue(
@@ -321,14 +284,19 @@ export async function dispatchAttempt(
 
     // Check if prior run left tainted work that should be discarded
     const planningMode = isPlanningIssue(discoveredIssue.issue.labels, repoConfigForRun)
-    const preserveBranchState = Boolean(controlPayload?.preserveBranchState)
-      || isRefreshRun
-      || isRebaseRun
-      || (isContinueRun && updateStrategyOverride === undefined)
-    const resetToBase = isFreshRetry
-      || (operationIntent === 'auto'
-        && !isRebaseRun
-        && (planningMode || shouldResetBranch(runManager, repoConfig.repo, discoveredIssue.issue.number, run.id)))
+    const branchPolicy = deriveBranchPolicy({
+      operationIntent,
+      controlPayload,
+      planningMode,
+      updateStrategyOverride,
+      shouldResetFromHistory: shouldResetBranch(
+        runManager,
+        repoConfig.repo,
+        discoveredIssue.issue.number,
+        run.id,
+      ),
+      hasFollowupPromptFeedback: Boolean(followupPromptFeedback),
+    })
 
     // Create worktree
     const ensuredWorktree = await worktreeManager.ensure({
@@ -336,8 +304,8 @@ export async function dispatchAttempt(
       baseBranch: repoConfig.baseBranch,
       branchName: branch,
       worktreePath,
-      resetToBase,
-      preserveBranchState,
+      resetToBase: branchPolicy.resetToBase,
+      preserveBranchState: branchPolicy.preserveBranchState,
       updateStrategy: updateStrategyOverride ?? repoConfig.updateStrategy,
     })
 
@@ -365,7 +333,7 @@ export async function dispatchAttempt(
       runManager.update(run.id, {
         status: 'blocked',
         blockReason: 'verify_config',
-        operationIntent: resolveOperationIntent(activeRun),
+        operationIntent,
         lastError: summary,
         endedAt: nowUtcIso(),
       })
@@ -405,7 +373,7 @@ export async function dispatchAttempt(
     }
 
     // Execute explicit rebase or automatic branch refresh before entering the loop.
-    if (isRebaseRun || isRefreshRun) {
+    if (branchPolicy.runMode === 'rebase' || branchPolicy.runMode === 'refresh') {
       const refreshOutcome = await handleBranchRefreshRun({
         forge,
         config,
@@ -421,7 +389,7 @@ export async function dispatchAttempt(
         botUser,
         controlPayload,
         updateStrategyOverride,
-        operationIntent,
+        operationIntent: branchPolicy.runMode,
         metrics,
       })
       if (refreshOutcome.outcome !== 'continue-to-loop') {
@@ -487,7 +455,7 @@ export async function dispatchAttempt(
       terminalStatus: 'running',
       phaseHistory: [],
       dryRun: false,
-      runMode: isRebaseRun ? 'rebase' : isRefreshRun ? 'refresh' : isContinueRun || followupPromptFeedback ? 'followup' : 'fresh',
+      runMode: branchPolicy.runMode,
       blockReason: null,
       prReviewFeedback: followupPromptFeedback,
       sessionIds: {},
@@ -635,7 +603,7 @@ export async function dispatchAttempt(
     } catch (closeErr) {
       logger.debug({ runId: run.id, err: closeErr }, 'closeRun failed (best-effort)')
     }
-    cleanupRunCaches(repoConfig.repo, discoveredIssue.issue.number)
+    cleanupRunCaches(cache, repoConfig.repo, discoveredIssue.issue.number)
 
     return {
       outcome,
@@ -690,10 +658,10 @@ export async function dispatchAttempt(
  * Evict process-global reaction/comment caches keyed by (repo, issue)
  * once a run reaches a terminal state.
  */
-function cleanupRunCaches(repo: string, issueNumber: number): void {
+function cleanupRunCaches(cache: OrchestrationCache, repo: string, issueNumber: number): void {
   const key = `${repo}#${issueNumber}`
-  missingCommentCommandIssues.delete(key)
-  reactionCursors.delete(key)
+  cache.missingCommentCommandIssues.delete(key)
+  cache.reactionCursors.delete(key)
 }
 
 function computeImmediateFollowup(

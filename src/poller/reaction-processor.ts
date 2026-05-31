@@ -5,6 +5,7 @@ import type { LeaseManager } from '../state/leases.js'
 import type { RunManager } from '../state/runs.js'
 import { scanAndHandleReactions } from '../runner/reaction-scan.js'
 import { processCommentCommands } from '../runner/comment-commands.js'
+import type { OrchestrationCache } from '../runner/orchestration-cache.js'
 import { processMergeQueue } from '../merge-queue/runner.js'
 import { scanCostBlockedRuns } from '../ops/cost-resume.js'
 import { logger } from '../utils/logger.js'
@@ -32,12 +33,13 @@ export interface ProcessRepoReactionsParams {
   runManager: RunManager
   leaseManager: LeaseManager
   botUser: string
+  cache: OrchestrationCache
 }
 
 export async function processRepoReactions(
   params: ProcessRepoReactionsParams,
 ): Promise<void> {
-  const { config, db, forge, repoConfig, runManager, leaseManager, botUser } = params
+  const { config, db, forge, repoConfig, runManager, leaseManager, botUser, cache } = params
 
   try {
     await scanAndHandleReactions({
@@ -46,6 +48,7 @@ export async function processRepoReactions(
       runManager,
       repoConfig,
       maxAttemptChainLength: config.loop.maxAttemptChainLength,
+      cache,
     })
   } catch (err) {
     logger.warn({ repo: repoConfig.repo, err }, 'Reaction scan failed — continuing with issue discovery')
@@ -72,6 +75,7 @@ export async function processRepoReactions(
       leaseManager,
       repoConfig,
       botUser,
+      cache,
     })
   } catch (err) {
     logger.warn({ repo: repoConfig.repo, err }, 'Comment command processing failed — continuing')

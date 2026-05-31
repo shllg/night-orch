@@ -1,4 +1,5 @@
 import type { RouteHandler } from './context.js'
+import { deletePushSubscription, upsertPushSubscription } from '../../state/push-subscriptions.js'
 import { writeJson, readJsonBody } from '../server.js'
 
 /**
@@ -61,15 +62,11 @@ export const handlePushRoutes: RouteHandler = async (
     }
 
     try {
-      ctx.deps.db
-        .prepare(
-          `INSERT INTO push_subscriptions (endpoint, p256dh, auth)
-           VALUES (?, ?, ?)
-           ON CONFLICT(endpoint) DO UPDATE SET
-             p256dh = excluded.p256dh,
-             auth = excluded.auth`,
-        )
-        .run(body.endpoint, body.keys.p256dh, body.keys.auth)
+      upsertPushSubscription(ctx.deps.db, {
+        endpoint: body.endpoint,
+        p256dh: body.keys.p256dh,
+        auth: body.keys.auth,
+      })
       writeJson(res, 204, null)
     } catch (err) {
       writeJson(res, 500, {
@@ -87,7 +84,7 @@ export const handlePushRoutes: RouteHandler = async (
       writeJson(res, 400, { error: 'Request body must be {endpoint}' })
       return true
     }
-    ctx.deps.db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(body.endpoint)
+    deletePushSubscription(ctx.deps.db, body.endpoint)
     writeJson(res, 204, null)
     return true
   }

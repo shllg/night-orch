@@ -2,6 +2,7 @@ import type { Server } from 'node:http'
 import { loadConfigWithRaw, resolveConfigPath, ConfigError } from '../../config/loader.js'
 import { initDatabase } from '../../state/db.js'
 import { pollOnce } from '../../runner/poller.js'
+import { createOrchestrationCache } from '../../runner/orchestration-cache.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { ShutdownHandler } from '../../poller/shutdown.js'
 import { PollCycleController, resolveExternalPollTriggerPath } from '../../poller/control.js'
@@ -200,10 +201,11 @@ export async function webCommand(
   )
 
   // Poll loop
+  const orchestrationCache = createOrchestrationCache()
   while (!shutdown.isShuttingDown) {
     try {
       runtimeConfig = resolveConfigWithRuntimeSettings(baseConfig, db)
-      const runPromise = pollOnce(runtimeConfig, db, dryRun, metrics)
+      const runPromise = pollOnce(runtimeConfig, db, dryRun, metrics, undefined, orchestrationCache)
       shutdown.trackRun(runPromise.then(() => {}))
       const pollResult = await runPromise
       if (pollResult.immediateFollowupRepos.length > 0) {

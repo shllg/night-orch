@@ -6,6 +6,8 @@ import type { IssueManager } from '../state/issues.js'
 import type { MetricsService } from '../metrics/service.js'
 import { discoverEligibleIssues, type DiscoveredIssue } from '../discovery/discover.js'
 import { prioritizeDiscoveredIssues } from '../runner/helpers.js'
+import { buildLabelConfig } from '../labels/config.js'
+import { computeLabelMutation } from '../labels/transitions.js'
 import { logger } from '../utils/logger.js'
 
 /**
@@ -49,8 +51,15 @@ export async function discoverIssuesForRepo(
       })
     : prioritizeDiscoveredIssues(runManager, repoConfig.repo, discoveredAll)
 
+  const dispatchable = await filterDispatchableIssues({
+    discovered,
+    forge,
+    repoConfig,
+    runManager,
+  })
+
   issueManager.upsertDiscovered(
-    discovered.map((d) => ({
+    dispatchable.map((d) => ({
       repo: d.issueRepo || d.issue.repo || repoConfig.repo,
       issueNumber: d.issue.number,
       issueNodeId: d.issue.nodeId,
@@ -58,11 +67,70 @@ export async function discoverIssuesForRepo(
     })),
   )
 
-  try { metrics?.setEligibleIssues(repoConfig.repo, discovered.length) } catch { /* best-effort */ }
+  try { metrics?.setEligibleIssues(repoConfig.repo, dispatchable.length) } catch { /* best-effort */ }
 
-  if (discovered.length === 0) {
+  if (dispatchable.length === 0) {
     logger.debug({ repo: repoConfig.repo }, 'No eligible issues')
   }
 
-  return discovered
+  return dispatchable
+}
+
+interface FilterDispatchableIssuesParams {
+  discovered: DiscoveredIssue[]
+  forge: ForgeAdapter
+  repoConfig: Config['repos'][number]
+  runManager: RunManager
+}
+
+async function filterDispatchableIssues(
+  params: FilterDispatchableIssuesParams,
+): Promise<DiscoveredIssue[]> {
+  const { discovered, forge, repoConfig, runManager } = params
+  const out: DiscoveredIssue[] = []
+
+  for (const item of discovered) {
+    const queuedRun = runManager.getLatestQueuedByIssue(repoConfig.repo, item.issue.number)
+    if (queuedRun) {
+      out.push(item)
+      continue
+    }
+
+    const latestRun = runManager.getByRepoAndIssue(repoConfig.repo, item.issue.number)
+    if (!latestRun || latestRun.status !== 'review_ready') {
+      out.push(item)
+      continue
+    }
+
+    logger.info(
+      { repo: repoConfig.repo, issue: item.issue.number, runId: latestRun.id },
+      'Skipping review_ready run with no queued control action',
+    )
+
+    const labelCfg = buildLabelConfig(repoConfig, item.issue.labels)
+    const mutation = computeLabelMutation(
+      'review_ready',
+      'review_ready',
+      item.issue.labels,
+      labelCfg,
+    )
+
+    if (mutation.add.length > 0 || mutation.remove.length > 0) {
+      try {
+        if (mutation.add.length > 0) {
+          await forge.addLabels(item.issueRepo, item.issue.number, mutation.add)
+        }
+        if (mutation.remove.length > 0) {
+          await forge.removeLabels(item.issueRepo, item.issue.number, mutation.remove)
+        }
+      } catch (err) {
+        logger.warn(
+          { repo: item.issueRepo, issue: item.issue.number, err },
+          'Failed to reconcile labels for skipped review_ready run',
+        )
+      }
+    }
+  }
+
+  return out
 }

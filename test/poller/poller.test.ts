@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { pollOnce } from '../../src/runner/poller.js'
+import { createOrchestrationCache } from '../../src/runner/orchestration-cache.js'
 import { initDatabase } from '../../src/state/db.js'
 import type { Config } from '../../src/config/schema.js'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -738,8 +739,9 @@ describe('pollOnce', () => {
     })
 
     const config = makeConfig(join(tmpDir, 'test.db'))
-    await pollOnce(config, db, false)
-    await pollOnce(config, db, false)
+    const cache = createOrchestrationCache()
+    await pollOnce(config, db, false, undefined, undefined, cache)
+    await pollOnce(config, db, false, undefined, undefined, cache)
 
     const callsForIssue = mockListIssueComments.mock.calls.filter((call) => call[1] === 4040)
     expect(callsForIssue).toHaveLength(1)

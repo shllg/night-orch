@@ -1,11 +1,12 @@
-import { resolve } from 'node:path'
-import { homedir } from 'node:os'
-import { writeFileSync, mkdirSync } from 'node:fs'
-import { nowUtcIso } from '../../utils/time.js'
+import {
+  requestUpdateViaTriggerFile,
+  resolveNightOrchDataDir,
+  resolveUpdateTriggerPath,
+} from '../../supervisor/update-control.js'
 
 export async function updateCommand(globalOpts?: { dryRun?: boolean }): Promise<void> {
   const dryRun = globalOpts?.dryRun ?? false
-  const dataDir = resolve(homedir(), '.config', 'night-orch')
+  const dataDir = resolveNightOrchDataDir()
 
   // If running under supervisor (IPC channel available), send message
   if (typeof process.send === 'function') {
@@ -19,14 +20,13 @@ export async function updateCommand(globalOpts?: { dryRun?: boolean }): Promise<
   }
 
   // Fallback: create trigger file for supervisor to pick up
-  const triggerPath = resolve(dataDir, 'update-requested')
+  const triggerPath = resolveUpdateTriggerPath(dataDir)
   if (dryRun) {
     process.stdout.write(`Would create trigger file at ${triggerPath}\n`)
     return
   }
 
-  mkdirSync(dataDir, { recursive: true })
-  writeFileSync(triggerPath, nowUtcIso())
+  await requestUpdateViaTriggerFile(dataDir)
   process.stdout.write(
     `Update trigger written to ${triggerPath}\n` +
     'The supervisor will pick this up and start the update.\n',

@@ -20,6 +20,7 @@ import { discoverIssuesForRepo } from '../poller/discovery-scheduler.js'
 import { runPreflightDriftCheck } from '../loop/preflight.js'
 import { processRepoReactions } from '../poller/reaction-processor.js'
 import { FileLoopEngine } from '../fileloop/engine.js'
+import { createOrchestrationCache, type OrchestrationCache } from './orchestration-cache.js'
 
 /**
  * R6 wiring-only poller.
@@ -61,6 +62,7 @@ export async function pollOnce(
   dryRun: boolean,
   metrics?: MetricsService,
   targetIssue?: PollTargetIssue,
+  cache?: OrchestrationCache,
 ): Promise<PollResult> {
   const leaseManager = new LeaseManager(db)
   const runManager = new RunManager(db)
@@ -68,6 +70,7 @@ export async function pollOnce(
   const worktreeManager = createWorktreeManager()
   const fileLoopEngine = new FileLoopEngine(db, config, worktreeManager)
   const costTracker = new CostTracker(db)
+  const orchestrationCache = cache ?? createOrchestrationCache()
 
   let processed = 0
   let errors = 0
@@ -116,6 +119,7 @@ export async function pollOnce(
           dryRun,
           targetIssue,
           usedPortsInPass,
+          cache: orchestrationCache,
         }),
       ),
     )
@@ -150,6 +154,7 @@ interface PollRepoParams {
   dryRun: boolean
   targetIssue?: PollTargetIssue
   usedPortsInPass: number[]
+  cache: OrchestrationCache
 }
 
 async function pollRepo(params: PollRepoParams): Promise<PollResult> {
@@ -167,6 +172,7 @@ async function pollRepo(params: PollRepoParams): Promise<PollResult> {
     dryRun,
     targetIssue,
     usedPortsInPass,
+    cache,
   } = params
 
   let repoProcessed = 0
@@ -187,7 +193,7 @@ async function pollRepo(params: PollRepoParams): Promise<PollResult> {
     }
 
     await processRepoReactions({
-      config, db, forge, repoConfig, runManager, leaseManager, botUser,
+      config, db, forge, repoConfig, runManager, leaseManager, botUser, cache,
     })
 
     const discovered = await discoverIssuesForRepo({
@@ -272,6 +278,7 @@ async function pollRepo(params: PollRepoParams): Promise<PollResult> {
             observability,
             botUser,
             usedPortsInPass,
+            cache,
             metrics,
           })
 

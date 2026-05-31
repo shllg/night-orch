@@ -4,6 +4,7 @@ import { DEFAULT_WORKFLOW } from '../../src/loop/workflow.js'
 import type { RunContext } from '../../src/loop/types.js'
 import type { Config } from '../../src/config/schema.js'
 import type { WorkerAdapter, WorkerTaskResult } from '../../src/workers/types.js'
+import { hashVerifyResults } from '../../src/loop/progress.js'
 import { createMetricsService } from '../../src/metrics/service.js'
 import { initDatabase } from '../../src/state/db.js'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -363,6 +364,41 @@ describe('executeLoop', () => {
     expect(lastPhase.result).toBe('failure')
   })
 
+  it('stuck verify loop → blocked with stuck_loop reason', async () => {
+    const deps: LoopDependencies = {
+      db,
+      config: makeConfig(),
+      adapters: {
+        planner: makeMockAdapter([makePlannerResult()]),
+        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: makeMockAdapter([makeReviewerResult('CHANGES_REQUIRED')]),
+      },
+      workflow: DEFAULT_WORKFLOW,
+    }
+
+    const previousVerifyHash = hashVerifyResults([
+      {
+        command: 'pnpm test',
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        durationMs: 100,
+        passed: true,
+      },
+    ])
+
+    const result = await executeLoop(
+      makeCtx({
+        iterationSnapshots: [{ iteration: 1, verifyHash: previousVerifyHash }],
+      }),
+      deps,
+    )
+
+    expect(result.terminalStatus).toBe('blocked')
+    expect(result.blockReason).toBe('stuck_loop')
+    expect(String(result.stepOutputs['blockMessage'])).toMatch(/^Loop stuck:/)
+  })
+
   it('non-zero worker exit bubbles as transient error for poller auto-retry', async () => {
     const failedPlannerResult: WorkerTaskResult = {
       rawOutput: 'error',
@@ -584,7 +620,7 @@ describe('executeLoop', () => {
     const result = await executeLoop(makeCtx(), deps)
 
     expect(result.terminalStatus).toBe('blocked')
-    expect(result.blockReason).toBe('iteration_limit')
+    expect(result.blockReason).toBe('run_token_limit')
     expect(result.stepOutputs['blockMessage']).toBe('Run token budget exceeded (110 >= 100 tokens)')
     expect(plannerAdapter.runTask).not.toHaveBeenCalled()
   })
@@ -615,7 +651,7 @@ describe('executeLoop', () => {
     const result = await executeLoop(makeCtx(), deps)
 
     expect(result.terminalStatus).toBe('blocked')
-    expect(result.blockReason).toBe('iteration_limit')
+    expect(result.blockReason).toBe('issue_token_limit')
     expect(result.stepOutputs['blockMessage']).toBe('Issue token budget exceeded (110 >= 100 tokens)')
     expect(plannerAdapter.runTask).not.toHaveBeenCalled()
   })
@@ -651,7 +687,7 @@ describe('executeLoop', () => {
     const result = await executeLoop(makeCtx(), deps)
 
     expect(result.terminalStatus).toBe('blocked')
-    expect(result.blockReason).toBe('iteration_limit')
+    expect(result.blockReason).toBe('daily_token_limit')
     expect(result.stepOutputs['blockMessage']).toBe('Daily token budget exceeded (110 >= 100 tokens)')
     expect(plannerAdapter.runTask).not.toHaveBeenCalled()
   })
@@ -678,7 +714,7 @@ describe('executeLoop', () => {
     const result = await executeLoop(makeCtx(), deps)
 
     expect(result.terminalStatus).toBe('blocked')
-    expect(result.blockReason).toBe('iteration_limit')
+    expect(result.blockReason).toBe('run_wall_clock_limit')
     expect(String(result.stepOutputs['blockMessage'])).toMatch(
       /^Run wall-clock budget exceeded \(\d+\.\d >= 60 minutes\)$/,
     )
@@ -705,7 +741,7 @@ describe('executeLoop', () => {
     const result = await executeLoop(makeCtx(), deps)
 
     expect(result.terminalStatus).toBe('blocked')
-    expect(result.blockReason).toBe('iteration_limit')
+    expect(result.blockReason).toBe('run_token_limit')
     expect(result.stepOutputs['blockMessage']).toBe('Run token budget exceeded (150 >= 120 tokens)')
     expect(plannerAdapter.runTask).toHaveBeenCalledTimes(1)
     expect(coderAdapter.runTask).not.toHaveBeenCalled()

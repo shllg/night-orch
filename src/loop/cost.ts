@@ -247,150 +247,20 @@ export class CostTracker {
     // to usage-based. Warn always; when `enforce`, apply the daily cap
     // against the overage so a blown quota can block new work even
     // though the *real* charge column reads $0 under the subscription.
-    const quotaStatus = this.evaluateQuota(policy)
-    if (quotaStatus?.exhausted) {
-      this.logSubscriptionMeteredWarningOnce(
-        `${runId}:quota:${quotaStatus.period}:${this.quotaPeriodKey(quotaStatus.period)}`,
-        {
-          runId,
-          includedUsd: quotaStatus.includedUsd,
-          theoreticalUsd: quotaStatus.theoreticalUsd,
-          overageUsd: quotaStatus.overageUsd,
-          period: quotaStatus.period,
-        },
-        'subscription quota exhausted — billing has swapped to usage-based',
-      )
-      if (quotaStatus.onExhausted === 'enforce') {
-        const override = this.getRunBudgetOverride(runId)
-        const dailyCapOverride = this.getDailyCapOverride()
-        const effectiveDailyLimit = dailyCapOverride ?? limits.maxDailyCostUsd
-        if (override === null && quotaStatus.overageUsd >= effectiveDailyLimit) {
-          return {
-            overBudget: true,
-            limit: 'daily',
-            actualUsd: quotaStatus.overageUsd,
-            limitUsd: effectiveDailyLimit,
-          }
-        }
-      }
-    }
+    const quotaBlock = this.checkQuotaExhaustionBudget(runId, limits, policy)
+    if (quotaBlock) return quotaBlock
 
     if (policy.model === 'subscription') {
       return { overBudget: false }
     }
 
-    const override = this.getRunBudgetOverride(runId)
-    const runCost = this.getRunCost(runId)
-    const effectivePerRunLimit = override ?? limits.maxCostPerRunUsd
-    const runOverLimit = runCost >= effectivePerRunLimit
-
-    const dailyCost = this.getDailyCost()
-    const dailyCapOverride = this.getDailyCapOverride()
-    const effectiveDailyLimit = dailyCapOverride ?? limits.maxDailyCostUsd
-    const dailyOverLimit = dailyCost >= effectiveDailyLimit
+    const snapshot = this.buildBudgetSnapshot(runId, limits)
 
     if (policy.model === 'subscription-metered') {
-      const advisoryThreshold = policy.subscriptionMetered.advisoryThresholdUsd
-      if (advisoryThreshold !== null) {
-        if (runCost >= advisoryThreshold) {
-          this.logSubscriptionMeteredWarningOnce(
-            `${runId}:advisory:run:${advisoryThreshold}`,
-            {
-              runId,
-              thresholdUsd: advisoryThreshold,
-              runCostUsd: runCost,
-            },
-            'subscription-metered advisory threshold exceeded (run)',
-          )
-        }
-        if (dailyCost >= advisoryThreshold) {
-          this.logSubscriptionMeteredWarningOnce(
-            `${runId}:advisory:daily:${advisoryThreshold}:${utcDayKey()}`,
-            {
-              runId,
-              thresholdUsd: advisoryThreshold,
-              dailyCostUsd: dailyCost,
-            },
-            'subscription-metered advisory threshold exceeded (daily)',
-          )
-        }
-      }
-
-      if (runOverLimit && !policy.subscriptionMetered.enforcePerRunLimit) {
-        this.logSubscriptionMeteredWarningOnce(
-          `${runId}:soft:per-run:${effectivePerRunLimit}`,
-          {
-            runId,
-            runCostUsd: runCost,
-            effectivePerRunLimitUsd: effectivePerRunLimit,
-          },
-          'subscription-metered soft per-run limit exceeded',
-        )
-      }
-
-      if (runOverLimit && policy.subscriptionMetered.enforcePerRunLimit) {
-        return {
-          overBudget: true,
-          limit: 'per-run',
-          actualUsd: runCost,
-          limitUsd: effectivePerRunLimit,
-        }
-      }
-
-      if (override !== null) {
-        return { overBudget: false }
-      }
-
-      if (dailyOverLimit && !policy.subscriptionMetered.enforceDailyLimit) {
-        this.logSubscriptionMeteredWarningOnce(
-          `${runId}:soft:daily:${effectiveDailyLimit}:${utcDayKey()}`,
-          {
-            runId,
-            dailyCostUsd: dailyCost,
-            effectiveDailyLimitUsd: effectiveDailyLimit,
-          },
-          'subscription-metered soft daily limit exceeded',
-        )
-      }
-
-      if (dailyOverLimit && policy.subscriptionMetered.enforceDailyLimit) {
-        return {
-          overBudget: true,
-          limit: 'daily',
-          actualUsd: dailyCost,
-          limitUsd: effectiveDailyLimit,
-        }
-      }
-
-      return { overBudget: false }
+      return this.checkSubscriptionMeteredBudget(runId, policy, snapshot)
     }
 
-    if (runOverLimit) {
-      return {
-        overBudget: true,
-        limit: 'per-run',
-        actualUsd: runCost,
-        limitUsd: effectivePerRunLimit,
-      }
-    }
-
-    // Override grants a one-time bypass of the daily cap so a stuck
-    // run can make forward progress even if the day has already blown
-    // past the limit.
-    if (override !== null) {
-      return { overBudget: false }
-    }
-
-    if (dailyOverLimit) {
-      return {
-        overBudget: true,
-        limit: 'daily',
-        actualUsd: dailyCost,
-        limitUsd: effectiveDailyLimit,
-      }
-    }
-
-    return { overBudget: false }
+    return this.checkPayPerUseBudget(snapshot)
   }
 
   getRunBudgetOverride(runId: string): number | null {
@@ -450,6 +320,178 @@ export class CostTracker {
     return period === 'day' ? day : day.slice(0, 7)
   }
 
+  private checkQuotaExhaustionBudget(
+    runId: string,
+    limits: Config['security'],
+    policy: ResolvedCostPolicy,
+  ): BudgetStatus | null {
+    const quotaStatus = this.evaluateQuota(policy)
+    if (!quotaStatus?.exhausted) return null
+
+    this.logSubscriptionMeteredWarningOnce(
+      `${runId}:quota:${quotaStatus.period}:${this.quotaPeriodKey(quotaStatus.period)}`,
+      {
+        runId,
+        includedUsd: quotaStatus.includedUsd,
+        theoreticalUsd: quotaStatus.theoreticalUsd,
+        overageUsd: quotaStatus.overageUsd,
+        period: quotaStatus.period,
+      },
+      'subscription quota exhausted — billing has swapped to usage-based',
+    )
+
+    if (quotaStatus.onExhausted !== 'enforce') return null
+
+    const override = this.getRunBudgetOverride(runId)
+    const dailyCapOverride = this.getDailyCapOverride()
+    const effectiveDailyLimit = dailyCapOverride ?? limits.maxDailyCostUsd
+    if (override === null && quotaStatus.overageUsd >= effectiveDailyLimit) {
+      return {
+        overBudget: true,
+        limit: 'daily',
+        actualUsd: quotaStatus.overageUsd,
+        limitUsd: effectiveDailyLimit,
+      }
+    }
+    return null
+  }
+
+  private buildBudgetSnapshot(runId: string, limits: Config['security']): BudgetSnapshot {
+    const override = this.getRunBudgetOverride(runId)
+    const runCost = this.getRunCost(runId)
+    const dailyCost = this.getDailyCost()
+    const dailyCapOverride = this.getDailyCapOverride()
+    const effectivePerRunLimit = override ?? limits.maxCostPerRunUsd
+    const effectiveDailyLimit = dailyCapOverride ?? limits.maxDailyCostUsd
+
+    return {
+      override,
+      runCost,
+      dailyCost,
+      effectivePerRunLimit,
+      effectiveDailyLimit,
+      runOverLimit: runCost >= effectivePerRunLimit,
+      dailyOverLimit: dailyCost >= effectiveDailyLimit,
+    }
+  }
+
+  private checkSubscriptionMeteredBudget(
+    runId: string,
+    policy: ResolvedCostPolicy,
+    snapshot: BudgetSnapshot,
+  ): BudgetStatus {
+    this.logSubscriptionMeteredAdvisories(runId, policy, snapshot)
+
+    if (snapshot.runOverLimit && policy.subscriptionMetered.enforcePerRunLimit) {
+      return this.blockedByPerRunLimit(snapshot.runCost, snapshot.effectivePerRunLimit)
+    }
+
+    if (snapshot.override !== null) {
+      return { overBudget: false }
+    }
+
+    if (snapshot.dailyOverLimit && policy.subscriptionMetered.enforceDailyLimit) {
+      return this.blockedByDailyLimit(snapshot.dailyCost, snapshot.effectiveDailyLimit)
+    }
+
+    return { overBudget: false }
+  }
+
+  private logSubscriptionMeteredAdvisories(
+    runId: string,
+    policy: ResolvedCostPolicy,
+    snapshot: BudgetSnapshot,
+  ): void {
+    const advisoryThreshold = policy.subscriptionMetered.advisoryThresholdUsd
+    if (advisoryThreshold !== null) {
+      if (snapshot.runCost >= advisoryThreshold) {
+        this.logSubscriptionMeteredWarningOnce(
+          `${runId}:advisory:run:${advisoryThreshold}`,
+          {
+            runId,
+            thresholdUsd: advisoryThreshold,
+            runCostUsd: snapshot.runCost,
+          },
+          'subscription-metered advisory threshold exceeded (run)',
+        )
+      }
+      if (snapshot.dailyCost >= advisoryThreshold) {
+        this.logSubscriptionMeteredWarningOnce(
+          `${runId}:advisory:daily:${advisoryThreshold}:${utcDayKey()}`,
+          {
+            runId,
+            thresholdUsd: advisoryThreshold,
+            dailyCostUsd: snapshot.dailyCost,
+          },
+          'subscription-metered advisory threshold exceeded (daily)',
+        )
+      }
+    }
+
+    if (snapshot.runOverLimit && !policy.subscriptionMetered.enforcePerRunLimit) {
+      this.logSubscriptionMeteredWarningOnce(
+        `${runId}:soft:per-run:${snapshot.effectivePerRunLimit}`,
+        {
+          runId,
+          runCostUsd: snapshot.runCost,
+          effectivePerRunLimitUsd: snapshot.effectivePerRunLimit,
+        },
+        'subscription-metered soft per-run limit exceeded',
+      )
+    }
+
+    if (snapshot.override !== null) return
+
+    if (snapshot.dailyOverLimit && !policy.subscriptionMetered.enforceDailyLimit) {
+      this.logSubscriptionMeteredWarningOnce(
+        `${runId}:soft:daily:${snapshot.effectiveDailyLimit}:${utcDayKey()}`,
+        {
+          runId,
+          dailyCostUsd: snapshot.dailyCost,
+          effectiveDailyLimitUsd: snapshot.effectiveDailyLimit,
+        },
+        'subscription-metered soft daily limit exceeded',
+      )
+    }
+  }
+
+  private checkPayPerUseBudget(snapshot: BudgetSnapshot): BudgetStatus {
+    if (snapshot.runOverLimit) {
+      return this.blockedByPerRunLimit(snapshot.runCost, snapshot.effectivePerRunLimit)
+    }
+
+    // Override grants a one-time bypass of the daily cap so a stuck
+    // run can make forward progress even if the day has already blown
+    // past the limit.
+    if (snapshot.override !== null) {
+      return { overBudget: false }
+    }
+
+    if (snapshot.dailyOverLimit) {
+      return this.blockedByDailyLimit(snapshot.dailyCost, snapshot.effectiveDailyLimit)
+    }
+
+    return { overBudget: false }
+  }
+
+  private blockedByPerRunLimit(actualUsd: number, limitUsd: number): BudgetStatus {
+    return {
+      overBudget: true,
+      limit: 'per-run',
+      actualUsd,
+      limitUsd,
+    }
+  }
+
+  private blockedByDailyLimit(actualUsd: number, limitUsd: number): BudgetStatus {
+    return {
+      overBudget: true,
+      limit: 'daily',
+      actualUsd,
+      limitUsd,
+    }
+  }
+
   private logSubscriptionMeteredWarningOnce(
     key: string,
     data: Record<string, unknown>,
@@ -459,4 +501,14 @@ export class CostTracker {
     this.advisoryWarnings.add(key)
     logger.warn(data, message)
   }
+}
+
+type BudgetSnapshot = {
+  override: number | null
+  runCost: number
+  dailyCost: number
+  effectivePerRunLimit: number
+  effectiveDailyLimit: number
+  runOverLimit: boolean
+  dailyOverLimit: boolean
 }

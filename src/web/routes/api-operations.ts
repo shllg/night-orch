@@ -1,10 +1,7 @@
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { resolve } from 'node:path'
 import type { MCPDependencies } from '../../mcp/server.js'
 import { handleToolCall } from '../../mcp/tools/index.js'
 import { resolveConfigWithRuntimeSettings } from '../../settings/runtime.js'
-import { nowUtcIso } from '../../utils/time.js'
+import { readPublicUpdateStatus, requestUpdateViaTriggerFile } from '../../supervisor/update-control.js'
 import type { InteractiveAgentType } from '../agent-session.js'
 import type { RouteHandler } from './context.js'
 import {
@@ -56,23 +53,7 @@ export const handleOperationRoutes: RouteHandler = async (req, res, method, path
   }
 
   if (method === 'GET' && pathname === '/api/update-status') {
-    const statusPath = resolve(homedir(), '.config', 'night-orch', 'update-status.json')
-    try {
-      const parsed = JSON.parse(readFileSync(statusPath, 'utf-8')) as Record<string, unknown>
-      const status: Record<string, unknown> = {
-        state: typeof parsed['state'] === 'string' ? parsed['state'] : 'idle',
-      }
-      if (typeof parsed['error'] === 'string') status['error'] = parsed['error']
-      if (parsed['installMethod'] === 'git' || parsed['installMethod'] === 'npm') {
-        status['installMethod'] = parsed['installMethod']
-      }
-      if (typeof parsed['startedAt'] === 'string') status['startedAt'] = parsed['startedAt']
-      if (typeof parsed['previousCommit'] === 'string') status['previousCommit'] = parsed['previousCommit']
-      if (typeof parsed['targetCommit'] === 'string') status['targetCommit'] = parsed['targetCommit']
-      writeJson(res, 200, status)
-    } catch {
-      writeJson(res, 200, { state: 'idle' })
-    }
+    writeJson(res, 200, await readPublicUpdateStatus())
     return true
   }
 
@@ -374,11 +355,7 @@ export const handleOperationRoutes: RouteHandler = async (req, res, method, path
       return true
     }
 
-    const dataDir = resolve(homedir(), '.config', 'night-orch')
-    const triggerPath = resolve(dataDir, 'update-requested')
-    mkdirSync(dataDir, { recursive: true })
-    writeFileSync(triggerPath, nowUtcIso())
-    writeJson(res, 200, { accepted: true, method: 'trigger-file' })
+    writeJson(res, 200, await requestUpdateViaTriggerFile())
     return true
   }
 

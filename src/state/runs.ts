@@ -743,6 +743,11 @@ export function hydrateState(row: {
 type LegacyBlockReason =
   | 'cost_limit'
   | 'iteration_limit'
+  | 'run_token_limit'
+  | 'issue_token_limit'
+  | 'daily_token_limit'
+  | 'run_wall_clock_limit'
+  | 'stuck_loop'
   | 'agent_pass_limit'
   | 'reviewer_blocked'
   | 'ambiguous_review'
@@ -754,6 +759,11 @@ type LegacyBlockReason =
 const LEGACY_BLOCK_REASONS: ReadonlySet<string> = new Set<LegacyBlockReason>([
   'cost_limit',
   'iteration_limit',
+  'run_token_limit',
+  'issue_token_limit',
+  'daily_token_limit',
+  'run_wall_clock_limit',
+  'stuck_loop',
   'agent_pass_limit',
   'reviewer_blocked',
   'ambiguous_review',

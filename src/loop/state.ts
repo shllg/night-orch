@@ -272,6 +272,11 @@ export function blockedReasonFromLegacy(
   legacy:
     | 'cost_limit'
     | 'iteration_limit'
+    | 'run_token_limit'
+    | 'issue_token_limit'
+    | 'daily_token_limit'
+    | 'run_wall_clock_limit'
+    | 'stuck_loop'
     | 'agent_pass_limit'
     | 'reviewer_blocked'
     | 'ambiguous_review'
@@ -290,6 +295,16 @@ export function blockedReasonFromLegacy(
         limitUsd: ctx.costLimitUsd ?? 0,
       }
     case 'iteration_limit':
+      return {
+        type: 'iterationLimit',
+        iterations: ctx.iterations ?? 0,
+        max: ctx.maxIterations ?? 0,
+      }
+    case 'run_token_limit':
+    case 'issue_token_limit':
+    case 'daily_token_limit':
+    case 'run_wall_clock_limit':
+    case 'stuck_loop':
       return {
         type: 'iterationLimit',
         iterations: ctx.iterations ?? 0,

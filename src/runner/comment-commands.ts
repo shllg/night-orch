@@ -8,6 +8,7 @@ import { buildLabelConfig } from '../labels/config.js'
 import { queueRebase } from '../ops/rebase-and-check.js'
 import { queueContinue } from '../ops/continue.js'
 import { RetryEngine } from '../ops/retry.js'
+import type { OrchestrationCache } from './orchestration-cache.js'
 import {
   isCommandProcessed,
   markCommandProcessed,
@@ -19,11 +20,6 @@ import { isBotAuthored } from '../forge/bot-comment.js'
 import { nowUtcIso } from '../utils/time.js'
 import { logger } from '../utils/logger.js'
 
-/** Issues that returned 404 during comment scan in this process lifecycle.
- *  Bounded: entries are evicted when the key's run reaches a terminal state
- *  via cleanupRunCaches. */
-export const missingCommentCommandIssues = new Set<string>()
-
 export interface ProcessCommentCommandsParams {
   config: Config
   db: Database.Database
@@ -32,6 +28,7 @@ export interface ProcessCommentCommandsParams {
   leaseManager: LeaseManager
   repoConfig: Config['repos'][0]
   botUser: string
+  cache: OrchestrationCache
 }
 
 function getHttpStatus(err: unknown): number | null {
@@ -86,6 +83,7 @@ export async function processCommentCommands(params: ProcessCommentCommandsParam
     leaseManager,
     repoConfig,
     botUser,
+    cache,
   } = params
 
   const commandSettings = config.commentCommands ?? { enabled: true, requireCollaborator: false }
@@ -118,7 +116,7 @@ export async function processCommentCommands(params: ProcessCommentCommandsParam
 
   for (const row of issueRows) {
     const issueKey = `${row.issue_repo}#${row.issue_number}`
-    if (missingCommentCommandIssues.has(issueKey)) {
+    if (cache.missingCommentCommandIssues.has(issueKey)) {
       continue
     }
 
@@ -127,7 +125,7 @@ export async function processCommentCommands(params: ProcessCommentCommandsParam
       comments = await collectCommentSources(forge, row.issue_repo, row.issue_number, row.pr_number)
     } catch (err) {
       if (getHttpStatus(err) === 404) {
-        missingCommentCommandIssues.add(issueKey)
+        cache.missingCommentCommandIssues.add(issueKey)
         logger.debug(
           { repo: row.issue_repo, issueNumber: row.issue_number },
           'Skipping comment command scan for missing or inaccessible issue',

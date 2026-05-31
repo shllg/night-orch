@@ -2,10 +2,10 @@ import type { MCPDependencies } from '../server.js'
 import type { ForgeIssue } from '../../forge/types.js'
 import { RunManager } from '../../state/runs.js'
 import { loadIssueLogEvents, loadRunLogEvents } from '../../state/run-log-events.js'
+import { loadRuns } from '../../state/run-list.js'
 import { CostTracker } from '../../loop/cost.js'
 import { isIssueEligibleForRepo } from '../../discovery/discover.js'
 import { flushActiveAgentObservability } from '../../events/observability.js'
-import { loadRuns } from '../../cli/tui/data.js'
 import { parseUtcTimestampMs } from '../../utils/time.js'
 
 interface RunTimingRow {

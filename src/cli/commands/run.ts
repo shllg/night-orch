@@ -1,6 +1,7 @@
 import { loadConfig, resolveConfigPath, ConfigError } from '../../config/loader.js'
 import { initDatabase } from '../../state/db.js'
 import { pollOnce } from '../../runner/poller.js'
+import { createOrchestrationCache } from '../../runner/orchestration-cache.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { AutoCleanupScheduler } from '../../ops/auto-cleanup.js'
 import { ShutdownHandler } from '../../poller/shutdown.js'
@@ -133,11 +134,12 @@ export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
   })
 
   // Poll loop
+  const orchestrationCache = createOrchestrationCache()
   while (!shutdown.isShuttingDown) {
     emitNdjson('poll_cycle_start', { dryRun })
     try {
       runtimeConfig = resolveConfigWithRuntimeSettings(baseConfig, db)
-      const runPromise = pollOnce(runtimeConfig, db, dryRun, metrics)
+      const runPromise = pollOnce(runtimeConfig, db, dryRun, metrics, undefined, orchestrationCache)
       shutdown.trackRun(runPromise.then(() => {}))
       const pollResult = await runPromise
       emitNdjson('poll_cycle_result', {
