@@ -41,33 +41,18 @@ export async function processRepoReactions(
 ): Promise<void> {
   const { config, db, forge, repoConfig, runManager, leaseManager, botUser, cache } = params
 
-  try {
-    await scanAndHandleReactions({
+  const results = await Promise.allSettled([
+    scanAndHandleReactions({
       db,
       forge,
       runManager,
       repoConfig,
       maxAttemptChainLength: config.loop.maxAttemptChainLength,
       cache,
-    })
-  } catch (err) {
-    logger.warn({ repo: repoConfig.repo, err }, 'Reaction scan failed — continuing with issue discovery')
-  }
-
-  try {
-    await processMergeQueue(db, forge, repoConfig)
-  } catch (err) {
-    logger.warn({ repo: repoConfig.repo, err }, 'Merge queue processing failed — continuing')
-  }
-
-  try {
-    await scanCostBlockedRuns(db, config, forge, repoConfig, botUser)
-  } catch (err) {
-    logger.warn({ repo: repoConfig.repo, err }, 'Cost-resume scan failed — continuing')
-  }
-
-  try {
-    await processCommentCommands({
+    }),
+    processMergeQueue(db, forge, repoConfig),
+    scanCostBlockedRuns(db, config, forge, repoConfig, botUser),
+    processCommentCommands({
       config,
       db,
       forge,
@@ -76,8 +61,19 @@ export async function processRepoReactions(
       repoConfig,
       botUser,
       cache,
-    })
-  } catch (err) {
-    logger.warn({ repo: repoConfig.repo, err }, 'Comment command processing failed — continuing')
+    }),
+  ])
+
+  const warnings = [
+    'Reaction scan failed — continuing with issue discovery',
+    'Merge queue processing failed — continuing',
+    'Cost-resume scan failed — continuing',
+    'Comment command processing failed — continuing',
+  ]
+
+  for (const [index, result] of results.entries()) {
+    if (result.status === 'rejected') {
+      logger.warn({ repo: repoConfig.repo, err: result.reason }, warnings[index])
+    }
   }
 }

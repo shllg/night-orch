@@ -67,6 +67,28 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
     botUser,
   } = params
 
+  let latestIssuePromise: ReturnType<ForgeAdapter['getIssue']> | null = null
+  const getLatestIssue = (): ReturnType<ForgeAdapter['getIssue']> => {
+    latestIssuePromise ??= forge.getIssue(issueRepo, issueNumber)
+    return latestIssuePromise
+  }
+  const transitionFromRunning = async (
+    to: Parameters<typeof transitionLabels>[5],
+    blockReason?: Parameters<typeof transitionLabels>[7],
+  ): Promise<void> => {
+    const latestIssue = await getLatestIssue()
+    await transitionLabels(
+      forge,
+      issueRepo,
+      issueNumber,
+      latestIssue.labels,
+      'running',
+      to,
+      buildLabelConfig(repoConfig, latestIssue.labels),
+      blockReason,
+    )
+  }
+
   if (finalCtx.terminalStatus === 'publish') {
     try {
       const publishResult = await publishPR(finalCtx, forge, db)
@@ -78,16 +100,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
         lastError: null,
         endedAt: nowUtcIso(),
       })
-      const latestIssue = await forge.getIssue(issueRepo, issueNumber)
-      await transitionLabels(
-        forge,
-        issueRepo,
-        issueNumber,
-        latestIssue.labels,
-        'running',
-        'review_ready',
-        buildLabelConfig(repoConfig, latestIssue.labels),
-      )
+      await transitionFromRunning('review_ready')
       const notificationEvent = publishResult.created ? 'pr_ready' : 'pr_updated'
       const notifyResult = await notifier.dispatch(makePayload(notificationEvent, repo, issue, {
         prUrl: publishResult.prUrl,
@@ -142,15 +155,8 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
           lastError: err.message,
           endedAt: nowUtcIso(),
         })
-        const latestIssue = await forge.getIssue(issueRepo, issueNumber)
-        await transitionLabels(
-          forge,
-          issueRepo,
-          issueNumber,
-          latestIssue.labels,
-          'running',
+        await transitionFromRunning(
           'blocked',
-          buildLabelConfig(repoConfig, latestIssue.labels),
           blocked({
             type: 'mergeConflict',
             files: [],
@@ -178,18 +184,9 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
       const currentRun = runManager.getById(runId)
       const currentRetries = currentRun?.retryCount ?? 0
       runManager.updateAndClearCostBudgetOverride(runId, { status: 'error', iterationCount: finalCtx.iteration, lastError: errorMessage, endedAt: nowUtcIso() })
-      const latestIssue = await forge.getIssue(issueRepo, issueNumber)
       if (currentRetries < maxAutoRetries) {
         runManager.incrementRetryCount(runId)
-        await transitionLabels(
-          forge,
-          issueRepo,
-          issueNumber,
-          latestIssue.labels,
-          'running',
-          'queued',
-          buildLabelConfig(repoConfig, latestIssue.labels),
-        )
+        await transitionFromRunning('queued')
         logger.info({ repo, issueNumber, attempt: currentRetries + 1, maxAutoRetries }, 'Publish failed — auto-retrying')
         await postErrorStatusComment({
           forge,
@@ -203,15 +200,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
           warnMessage: 'Failed to post publish auto-retry status comment',
         })
       } else {
-        await transitionLabels(
-          forge,
-          issueRepo,
-          issueNumber,
-          latestIssue.labels,
-          'running',
-          'error',
-          buildLabelConfig(repoConfig, latestIssue.labels),
-        )
+        await transitionFromRunning('error')
         const attemptCount = currentRetries + 1
         await postErrorStatusComment({
           forge,
@@ -250,23 +239,13 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
       blockReason: finalCtx.blockReason ?? null,
       endedAt: nowUtcIso(),
     })
-    const latestIssue = await forge.getIssue(issueRepo, issueNumber)
     // Bridge: RunContext still carries the legacy `BlockReason` string
     // (R1d will retype it). Lift it through the documented round-trip
     // helper so labels/transitions only ever sees the typed shape.
     const typedBlockReason = finalCtx.blockReason
       ? blockedReasonFromLegacy(finalCtx.blockReason)
       : undefined
-    await transitionLabels(
-      forge,
-      issueRepo,
-      issueNumber,
-      latestIssue.labels,
-      'running',
-      'blocked',
-      buildLabelConfig(repoConfig, latestIssue.labels),
-      typedBlockReason,
-    )
+    await transitionFromRunning('blocked', typedBlockReason)
 
     try {
       const statusBody = formatStatusComment({
@@ -303,18 +282,9 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
   const currentRunForUnexpected = runManager.getById(runId)
   const currentRetriesUnexpected = currentRunForUnexpected?.retryCount ?? 0
   runManager.updateAndClearCostBudgetOverride(runId, { status: 'error', iterationCount: finalCtx.iteration, lastError: unexpectedError, endedAt: nowUtcIso() })
-  const latestIssue = await forge.getIssue(issueRepo, issueNumber)
   if (currentRetriesUnexpected < maxAutoRetries) {
     runManager.incrementRetryCount(runId)
-    await transitionLabels(
-      forge,
-      issueRepo,
-      issueNumber,
-      latestIssue.labels,
-      'running',
-      'queued',
-      buildLabelConfig(repoConfig, latestIssue.labels),
-    )
+    await transitionFromRunning('queued')
     logger.info({ repo, issueNumber, attempt: currentRetriesUnexpected + 1, maxAutoRetries }, 'Unexpected state — auto-retrying')
     await postErrorStatusComment({
       forge,
@@ -328,15 +298,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
       warnMessage: 'Failed to post unexpected-state auto-retry status comment',
     })
   } else {
-    await transitionLabels(
-      forge,
-      issueRepo,
-      issueNumber,
-      latestIssue.labels,
-      'running',
-      'error',
-      buildLabelConfig(repoConfig, latestIssue.labels),
-    )
+    await transitionFromRunning('error')
     const attemptCount = currentRetriesUnexpected + 1
     await postErrorStatusComment({
       forge,

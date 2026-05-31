@@ -132,6 +132,12 @@ export async function dispatchAttempt(
   const pollerNotifier = new PollerNotifier(innerNotifier)
 
   const issueRepo = discoveredIssue.issueRepo
+  const transitionIssueLabels = createIssueLabelTransitioner(
+    forge,
+    repoConfig,
+    issueRepo,
+    discoveredIssue.issue.number,
+  )
 
   if (discoveredIssue.triage.level === 'architectural') {
     const labelConfig = buildLabelConfig(repoConfig, discoveredIssue.issue.labels)
@@ -184,15 +190,9 @@ export async function dispatchAttempt(
           'Circuit breaker: too many consecutive blocks — skipping issue',
         )
         try { metrics?.incCircuitBreakerTrip(repoConfig.repo) } catch { /* best-effort */ }
-        const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
-        await transitionLabels(
-          forge,
-          issueRepo,
-          discoveredIssue.issue.number,
-          latestIssue.labels,
+        await transitionIssueLabels(
           replayableRun.status,
           'blocked',
-          buildLabelConfig(repoConfig, latestIssue.labels),
         )
         await postStatusComment({
           forge,
@@ -338,15 +338,9 @@ export async function dispatchAttempt(
         lastError: summary,
         endedAt: nowUtcIso(),
       })
-      const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
-      await transitionLabels(
-        forge,
-        issueRepo,
-        discoveredIssue.issue.number,
-        latestIssue.labels,
+      await transitionIssueLabels(
         'running',
         'blocked',
-        buildLabelConfig(repoConfig, latestIssue.labels),
         blocked({
           type: 'verifyConfig',
           detail: summary,
@@ -512,15 +506,9 @@ export async function dispatchAttempt(
         const allSucceeded = subResults.every((r) => r.success)
         if (allSucceeded) {
           runManager.update(run.id, { status: 'review_ready', lastError: null, endedAt: nowUtcIso() })
-          const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
-          await transitionLabels(
-            forge,
-            issueRepo,
-            discoveredIssue.issue.number,
-            latestIssue.labels,
+          await transitionIssueLabels(
             'running',
             'review_ready',
-            buildLabelConfig(repoConfig, latestIssue.labels),
           )
           await pollerNotifier.prReady(repoConfig.repo, discoveredIssue.issue, {
             summary: `Decomposed into ${decomposition.subtasks.length} sub-tasks, all completed`,
@@ -533,15 +521,9 @@ export async function dispatchAttempt(
             lastError: `${failed}/${decomposition.subtasks.length} sub-tasks failed`,
             endedAt: nowUtcIso(),
           })
-          const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
-          await transitionLabels(
-            forge,
-            issueRepo,
-            discoveredIssue.issue.number,
-            latestIssue.labels,
+          await transitionIssueLabels(
             'running',
             'blocked',
-            buildLabelConfig(repoConfig, latestIssue.labels),
           )
           outcome = 'errored'
         }
@@ -677,6 +659,37 @@ function computeImmediateFollowup(
   return null
 }
 
+function createIssueLabelTransitioner(
+  forge: ForgeAdapter,
+  repoConfig: Config['repos'][number],
+  issueRepo: string,
+  issueNumber: number,
+): (
+    from: Parameters<typeof transitionLabels>[4],
+    to: Parameters<typeof transitionLabels>[5],
+    blockReason?: Parameters<typeof transitionLabels>[7],
+  ) => Promise<void> {
+  let latestIssuePromise: ReturnType<ForgeAdapter['getIssue']> | null = null
+  const getLatestIssue = (): ReturnType<ForgeAdapter['getIssue']> => {
+    latestIssuePromise ??= forge.getIssue(issueRepo, issueNumber)
+    return latestIssuePromise
+  }
+
+  return async (from, to, blockReason) => {
+    const latestIssue = await getLatestIssue()
+    await transitionLabels(
+      forge,
+      issueRepo,
+      issueNumber,
+      latestIssue.labels,
+      from,
+      to,
+      buildLabelConfig(repoConfig, latestIssue.labels),
+      blockReason,
+    )
+  }
+}
+
 // --- Branch refresh flow extracted from the inline body for readability ---
 
 interface HandleWorktreeRefreshConflictParams {
@@ -717,6 +730,7 @@ async function handleWorktreeRefreshConflict(
     branchName: branch,
     baseBranch: repoConfig.baseBranch,
   })
+  const transitionIssueLabels = createIssueLabelTransitioner(forge, repoConfig, issueRepo, issue.number)
 
   runManager.update(runId, {
     status: 'blocked',
@@ -742,15 +756,9 @@ async function handleWorktreeRefreshConflict(
     lastError: summary,
     endedAt: nowUtcIso(),
   })
-  const latestIssue = await forge.getIssue(issueRepo, issue.number)
-  await transitionLabels(
-    forge,
-    issueRepo,
-    issue.number,
-    latestIssue.labels,
+  await transitionIssueLabels(
     'running',
     'blocked',
-    buildLabelConfig(repoConfig, latestIssue.labels),
     blocked({
       type: 'mergeConflict',
       files: [],
@@ -824,6 +832,12 @@ async function handleBranchRefreshRun(params: HandleBranchRefreshRunParams): Pro
     : updateStrategyOverride ?? repoConfig.updateStrategy
   const isExplicitRebase = operationIntent === 'rebase'
   const modeLabel = isExplicitRebase ? 'rebase' : 'branch refresh'
+  const transitionIssueLabels = createIssueLabelTransitioner(
+    forge,
+    repoConfig,
+    issueRepo,
+    discoveredIssue.issue.number,
+  )
 
   logger.info(
     { repo: repoConfig.repo, issue: discoveredIssue.issue.number, runId, operationIntent, strategy },
@@ -895,15 +909,9 @@ async function handleBranchRefreshRun(params: HandleBranchRefreshRunParams): Pro
       lastError: summary,
       endedAt: nowUtcIso(),
     })
-    const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
-    await transitionLabels(
-      forge,
-      issueRepo,
-      discoveredIssue.issue.number,
-      latestIssue.labels,
+    await transitionIssueLabels(
       'running',
       'blocked',
-      buildLabelConfig(repoConfig, latestIssue.labels),
       blocked({
         type: 'mergeConflict',
         files: rebaseResult.conflictAnalysis?.files ?? [],
@@ -935,15 +943,9 @@ async function handleBranchRefreshRun(params: HandleBranchRefreshRunParams): Pro
       lastError: rebaseResult.error,
       endedAt: nowUtcIso(),
     })
-    const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
-    await transitionLabels(
-      forge,
-      issueRepo,
-      discoveredIssue.issue.number,
-      latestIssue.labels,
+    await transitionIssueLabels(
       'running',
       'error',
-      buildLabelConfig(repoConfig, latestIssue.labels),
     )
     await postStatusComment({
       forge,
@@ -969,15 +971,9 @@ async function handleBranchRefreshRun(params: HandleBranchRefreshRunParams): Pro
       endedAt: nowUtcIso(),
       lastError: null,
     })
-    const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
-    await transitionLabels(
-      forge,
-      issueRepo,
-      discoveredIssue.issue.number,
-      latestIssue.labels,
+    await transitionIssueLabels(
       'running',
       'review_ready',
-      buildLabelConfig(repoConfig, latestIssue.labels),
     )
     await pollerNotifier.prReady(repoConfig.repo, discoveredIssue.issue, {
       summary: `${isExplicitRebase ? 'Rebased' : 'Refreshed'} successfully, verify passed`,
@@ -992,15 +988,9 @@ async function handleBranchRefreshRun(params: HandleBranchRefreshRunParams): Pro
       endedAt: nowUtcIso(),
       lastError: null,
     })
-    const latestIssue = await forge.getIssue(issueRepo, discoveredIssue.issue.number)
-    await transitionLabels(
-      forge,
-      issueRepo,
-      discoveredIssue.issue.number,
-      latestIssue.labels,
+    await transitionIssueLabels(
       'running',
       'review_ready',
-      buildLabelConfig(repoConfig, latestIssue.labels),
     )
     return { outcome: 'processed', verifyResults: rebaseResult.verifyResults ?? [] }
   }
