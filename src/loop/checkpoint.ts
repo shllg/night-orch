@@ -66,6 +66,14 @@ export function extractDecisionOutcomes(
   return raw as Record<string, PersistedDecisionOutcome>
 }
 
+export function extractCompletedPhases(
+  phaseData: Record<string, unknown> | null | undefined,
+): string[] {
+  if (!phaseData) return []
+  const raw = phaseData[COMPLETED_PHASES_KEY]
+  return Array.isArray(raw) ? (raw as string[]) : []
+}
+
 /**
  * Given a map of persisted decision outcomes, return the first terminal
  * one (`publish` / `block` / `error`). `iterate` is deliberately excluded —
@@ -217,8 +225,7 @@ export class Checkpoint {
    */
   getCompletedPhases(runId: string): string[] {
     const phaseData = this.getPhaseData(runId)
-    const raw = phaseData[COMPLETED_PHASES_KEY]
-    return Array.isArray(raw) ? (raw as string[]) : []
+    return extractCompletedPhases(phaseData)
   }
 
   /**
@@ -286,7 +293,7 @@ export class Checkpoint {
     }
   }
 
-  private getPhaseData(runId: string): Record<string, unknown> {
+  getPhaseData(runId: string): Record<string, unknown> {
     const row = this.db
       .prepare('SELECT current_phase, phase_data FROM runs WHERE id = ?')
       .get(runId) as { current_phase: string | null; phase_data: string | null } | undefined

@@ -80,7 +80,7 @@ const DEFAULT_OPTIONS: DeleteIssueEntryOptions = {
   force: false,
 }
 
-const ACTIVE_RUN_STATUS_SQL = "'queued', 'running', 'blocked', 'review_ready', 'error'"
+const ACTIVE_RUN_STATUSES = ['queued', 'running', 'blocked', 'review_ready', 'error'] as const
 
 export class DeleteIssueEntryEngine {
   constructor(
@@ -223,15 +223,16 @@ export class DeleteIssueEntryEngine {
   ): ActiveIssueRepoConflict[] {
     if (issueRepos.length === 0) return []
     const issueRepoSet = new Set(issueRepos)
+    const activeStatusPlaceholders = ACTIVE_RUN_STATUSES.map(() => '?').join(', ')
     const rows = this.db
       .prepare(
         `SELECT id, repo, status, phase_data
          FROM runs
          WHERE issue_number = ?
            AND repo != ?
-           AND status IN (${ACTIVE_RUN_STATUS_SQL})`,
+           AND status IN (${activeStatusPlaceholders})`,
       )
-      .all(issueNumber, repo) as ActiveRunRow[]
+      .all(issueNumber, repo, ...ACTIVE_RUN_STATUSES) as ActiveRunRow[]
 
     const conflicts: ActiveIssueRepoConflict[] = []
     for (const row of rows) {

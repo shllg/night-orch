@@ -62,6 +62,32 @@ describe('RunManager', () => {
     expect(updated?.prTitle).toBe('Fix race condition in startup')
   })
 
+  it('rolls back status update when clearing cost budget override fails', () => {
+    const run = makeRun()
+    runManager.update(run.id, { status: 'running' })
+    runManager.setCostBudgetOverride(run.id, 2.5)
+    db.exec(`
+      CREATE TRIGGER abort_cost_override_clear
+      BEFORE UPDATE OF cost_budget_override_usd ON runs
+      WHEN NEW.cost_budget_override_usd IS NULL
+      BEGIN
+        SELECT RAISE(ABORT, 'cost override clear failed');
+      END;
+    `)
+
+    expect(() => runManager.updateAndClearCostBudgetOverride(run.id, {
+      status: 'review_ready',
+      endedAt: '2026-01-01T00:00:00.000Z',
+    })).toThrow('cost override clear failed')
+
+    const row = db
+      .prepare('SELECT status, ended_at, cost_budget_override_usd FROM runs WHERE id = ?')
+      .get(run.id) as { status: string; ended_at: string | null; cost_budget_override_usd: number | null }
+    expect(row.status).toBe('running')
+    expect(row.ended_at).toBeNull()
+    expect(row.cost_budget_override_usd).toBe(2.5)
+  })
+
   it('stores and retrieves phaseData as JSON', () => {
     const run = makeRun()
 

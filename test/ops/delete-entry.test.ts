@@ -257,6 +257,43 @@ describe('DeleteIssueEntryEngine', () => {
     expect(db.prepare('SELECT 1 FROM leases WHERE repo = ? AND issue_number = ?').get('org/linked', 7)).toBeDefined()
   })
 
+  it('binds active run statuses as query parameters when checking shared issueRepo state', async () => {
+    const runManager = new RunManager(db)
+    const runA = runManager.create({
+      repo: 'org/repoA',
+      issueNumber: 7,
+      issueNodeId: 'node-a',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(runA.id, {
+      status: 'blocked',
+      phaseData: { issueRepo: 'org/linked' },
+    })
+
+    const config = makeConfig(tmpDir)
+    config.repos = [
+      { ...config.repos[0]!, repo: 'org/repoA', localPath: '/tmp/repoA' },
+      { ...config.repos[0]!, repo: 'org/repoB', localPath: '/tmp/repoB' },
+    ]
+
+    const preparedSql: string[] = []
+    const originalPrepare = db.prepare.bind(db)
+    vi.spyOn(db, 'prepare').mockImplementation((sql: string) => {
+      preparedSql.push(sql)
+      return originalPrepare(sql)
+    })
+
+    const engine = new DeleteIssueEntryEngine(db, config)
+    await engine.deleteEntry('org/repoA', 7, { dryRun: true })
+
+    const activeConflictSql = preparedSql.find((sql) => sql.includes('repo != ?'))
+    expect(activeConflictSql).toContain('status IN (?, ?, ?, ?, ?)')
+    expect(activeConflictSql).not.toContain("'queued'")
+    expect(activeConflictSql).not.toContain("'running'")
+  })
+
   it('deletes derived deterministic branch on entry deletion', async () => {
     const runManager = new RunManager(db)
     const run = runManager.create({

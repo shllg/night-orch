@@ -4,7 +4,7 @@ import type { WorkerAdapter } from '../workers/types.js'
 import type { MetricsService } from '../metrics/service.js'
 import type { ResolvedWorkflow } from './workflow.js'
 import type { PersistedDecisionOutcome } from './checkpoint.js'
-import { findTerminalDecisionOutcome } from './checkpoint.js'
+import { extractCompletedPhases, extractDecisionOutcomes, findTerminalDecisionOutcome } from './checkpoint.js'
 import { updateContext, recordPhase } from './context.js'
 import { hashVerifyResults, assessProgress } from './progress.js'
 import { commitChanges } from './commit.js'
@@ -87,8 +87,8 @@ export async function executeLoop(
   }
 
   const steps = deps.workflow.steps
-  const checkpointPhaseData = getCheckpointPhaseData(db, initialCtx.runId)
-  const persistedDecisions = checkpoint.getDecisionOutcomes(initialCtx.runId)
+  const checkpointPhaseData = checkpoint.getPhaseData(initialCtx.runId)
+  const persistedDecisions = extractDecisionOutcomes(checkpointPhaseData)
 
   // If a decide step terminated the previous attempt mid-action, replay
   // that terminal outcome instead of re-entering the loop. Without this,
@@ -103,7 +103,7 @@ export async function executeLoop(
     return applyPersistedDecisionOutcome(ctx, terminalOutcome)
   }
 
-  let stepIndex = resolveStartingStepIndex(steps, resumedCtx, checkpointPhaseData, checkpoint.getCompletedPhases(initialCtx.runId))
+  let stepIndex = resolveStartingStepIndex(steps, resumedCtx, checkpointPhaseData, extractCompletedPhases(checkpointPhaseData))
 
   while (stepIndex < steps.length) {
     const step = steps[stepIndex]!
@@ -369,6 +369,12 @@ export async function executeLoop(
           if (coderIndex === -1) {
             // Workflow is missing a prior coder step — can't act on
             // the jumpTo hint. Fall through to the reviewer.
+            ctx = updateContext(ctx, {
+              verifyResults: [],
+              reviewResult: null,
+              diff: null,
+              diffError: null,
+            })
             logger.warn(
               { runId: ctx.runId },
               'Empty diff but no coder step to retry — proceeding to review',
@@ -646,26 +652,6 @@ function coercePersistedBlockReason(
   return LEGACY_BLOCK_REASONS.has(value as NonNullable<RunContext['blockReason']>)
     ? (value as NonNullable<RunContext['blockReason']>)
     : null
-}
-
-function getCheckpointPhaseData(
-  db: Database.Database,
-  runId: string,
-): Record<string, unknown> {
-  const row = db
-    .prepare('SELECT phase_data FROM runs WHERE id = ?')
-    .get(runId) as { phase_data: string | null } | undefined
-  if (!row?.phase_data) return {}
-
-  try {
-    const parsed = JSON.parse(row.phase_data) as Record<string, unknown>
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-      return {}
-    }
-    return parsed
-  } catch {
-    return {}
-  }
 }
 
 function blockExit(
@@ -1013,12 +999,7 @@ function applyEstimatedWorkerCost(
  */
 function workerErrorToBlockedReason(err: WorkerError): BlockedReason {
   if (err instanceof WorkerAuthError) {
-    // The legacy BlockedReason.authFailure only supports the three CLI
-    // adapters; fall back to 'claude' if the adapter string is
-    // unexpected (e.g. opencode before R1 expanded the union).
-    const adapter: 'claude' | 'codex' | 'opencode' =
-      err.adapterType === 'codex' || err.adapterType === 'opencode' ? err.adapterType : 'claude'
-    return { type: 'authFailure', adapter }
+    return { type: 'authFailure', adapter: err.adapterType }
   }
   if (err instanceof WorkerTimeoutError) {
     return {

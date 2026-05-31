@@ -211,6 +211,10 @@ export async function executeWorkerStep(
       { role: step.role, parseError: result.parseError, rawLength: result.rawOutput.length, rawHead: result.rawOutput.slice(0, 500), rawTail: result.rawOutput.slice(-500) },
       `${step.role} worker output parse failed`,
     )
+    if (step.role === 'coder') {
+      const rawOutputHash = `sha256:${createHash('sha256').update(result.rawOutput).digest('hex').slice(0, 16)}`
+      throw new WorkerParseError(profile.type, step.id, rawOutputHash, result.parseError)
+    }
   }
 
   // R4a: kill the silent duration-based cost fallback. Worker

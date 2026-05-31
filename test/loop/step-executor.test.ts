@@ -14,6 +14,7 @@ import type { WorkerStep, VerifyStep, DecideStep } from '../../src/loop/workflow
 import type { Config } from '../../src/config/schema.js'
 import type { WorkerAdapter, WorkerTaskResult } from '../../src/workers/types.js'
 import { makeTestConfig } from '../helpers/factories.js'
+import { WorkerParseError } from '../../src/workers/errors.js'
 
 // Mock external deps
 vi.mock('execa', () => ({
@@ -463,10 +464,30 @@ describe('executeWorkerStep', () => {
     }
     const step: WorkerStep = { type: 'worker', id: 'code', role: 'coder' }
     const deps = makeDeps({ coder: makeMockAdapter(failedParseResult) })
-    const result = await executeWorkerStep(makeCtx(), step, deps)
 
-    expect(result.ctx.codeResult).toBeNull()
-    expect(result.ctx.stepOutputs['code']).toBeNull()
+    await expect(executeWorkerStep(makeCtx(), step, deps)).rejects.toBeInstanceOf(WorkerParseError)
+  })
+
+  it('coder text fallback is treated as a parse failure instead of reviewer input', async () => {
+    const fallbackParseResult: WorkerTaskResult = {
+      rawOutput: 'Coder output could not be parsed, but files changed',
+      exitCode: 0,
+      timedOut: false,
+      durationMs: 2000,
+      parsed: {
+        summary: 'Coder output could not be parsed, but files changed',
+        changedFiles: [],
+        remainingUncertainty: 'Coder structured output was not parseable — review carefully.',
+        blockers: null,
+      },
+      parseError: 'No JSON block found — used coder text as fallback',
+      sessionId: null,
+      tokenUsage: FIXTURE_TOKEN_USAGE,
+    }
+    const step: WorkerStep = { type: 'worker', id: 'code', role: 'coder' }
+    const deps = makeDeps({ coder: makeMockAdapter(fallbackParseResult) })
+
+    await expect(executeWorkerStep(makeCtx(), step, deps)).rejects.toBeInstanceOf(WorkerParseError)
   })
 
   it('throws WorkerParseError when parsed output shape does not match role contract', async () => {

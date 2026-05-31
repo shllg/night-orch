@@ -87,7 +87,7 @@ export type BlockedReason =
     }
   | {
       type: 'authFailure'
-      adapter: 'claude' | 'codex' | 'opencode'
+      adapter: string
     }
   | {
       type: 'emptyDiff'

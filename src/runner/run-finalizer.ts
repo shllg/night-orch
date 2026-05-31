@@ -70,7 +70,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
   if (finalCtx.terminalStatus === 'publish') {
     try {
       const publishResult = await publishPR(finalCtx, forge, db)
-      runManager.update(runId, {
+      runManager.updateAndClearCostBudgetOverride(runId, {
         status: 'review_ready',
         iterationCount: finalCtx.iteration,
         prNumber: publishResult.prNumber,
@@ -78,7 +78,6 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
         lastError: null,
         endedAt: nowUtcIso(),
       })
-      runManager.setCostBudgetOverride(runId, null)
       const latestIssue = await forge.getIssue(issueRepo, issueNumber)
       await transitionLabels(
         forge,
@@ -119,7 +118,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
           branchName: finalCtx.branchName,
           baseBranch: finalCtx.repoConfig.baseBranch,
         })
-        runManager.update(runId, {
+        runManager.updateAndClearCostBudgetOverride(runId, {
           status: 'blocked',
           iterationCount: finalCtx.iteration,
           blockReason: 'merge_conflict',
@@ -143,7 +142,6 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
           lastError: err.message,
           endedAt: nowUtcIso(),
         })
-        runManager.setCostBudgetOverride(runId, null)
         const latestIssue = await forge.getIssue(issueRepo, issueNumber)
         await transitionLabels(
           forge,
@@ -179,8 +177,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
 
       const currentRun = runManager.getById(runId)
       const currentRetries = currentRun?.retryCount ?? 0
-      runManager.update(runId, { status: 'error', iterationCount: finalCtx.iteration, lastError: errorMessage, endedAt: nowUtcIso() })
-      runManager.setCostBudgetOverride(runId, null)
+      runManager.updateAndClearCostBudgetOverride(runId, { status: 'error', iterationCount: finalCtx.iteration, lastError: errorMessage, endedAt: nowUtcIso() })
       const latestIssue = await forge.getIssue(issueRepo, issueNumber)
       if (currentRetries < maxAutoRetries) {
         runManager.incrementRetryCount(runId)
@@ -246,14 +243,13 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
 
   if (finalCtx.terminalStatus === 'blocked') {
     const blockReason = buildBlockReason(finalCtx)
-    runManager.update(runId, {
+    runManager.updateAndClearCostBudgetOverride(runId, {
       status: 'blocked',
       iterationCount: finalCtx.iteration,
       lastError: blockReason,
       blockReason: finalCtx.blockReason ?? null,
       endedAt: nowUtcIso(),
     })
-    runManager.setCostBudgetOverride(runId, null)
     const latestIssue = await forge.getIssue(issueRepo, issueNumber)
     // Bridge: RunContext still carries the legacy `BlockReason` string
     // (R1d will retype it). Lift it through the documented round-trip
@@ -306,8 +302,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
   const unexpectedError = `Loop ended in unexpected state: ${finalCtx.terminalStatus}/${finalCtx.currentPhase}`
   const currentRunForUnexpected = runManager.getById(runId)
   const currentRetriesUnexpected = currentRunForUnexpected?.retryCount ?? 0
-  runManager.update(runId, { status: 'error', iterationCount: finalCtx.iteration, lastError: unexpectedError, endedAt: nowUtcIso() })
-  runManager.setCostBudgetOverride(runId, null)
+  runManager.updateAndClearCostBudgetOverride(runId, { status: 'error', iterationCount: finalCtx.iteration, lastError: unexpectedError, endedAt: nowUtcIso() })
   const latestIssue = await forge.getIssue(issueRepo, issueNumber)
   if (currentRetriesUnexpected < maxAutoRetries) {
     runManager.incrementRetryCount(runId)

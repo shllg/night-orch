@@ -454,6 +454,19 @@ export class RunManager {
   }
 
   /**
+   * Apply a run update and clear the per-run budget override atomically.
+   * Used by finalization paths where a crash between the two writes would
+   * leave terminal state out of sync with retry/cost controls.
+   */
+  updateAndClearCostBudgetOverride(id: string, fields: Partial<RunRecord>): void {
+    const tx = this.db.transaction(() => {
+      this.update(id, fields)
+      this.setCostBudgetOverride(id, null)
+    })
+    tx()
+  }
+
+  /**
    * Compact the phase_data to a summary blob for retention. Does NOT
    * trigger issue-sync because the run is already in a terminal state.
    */

@@ -4,6 +4,7 @@ import { DEFAULT_WORKFLOW } from '../../src/loop/workflow.js'
 import type { RunContext } from '../../src/loop/types.js'
 import type { Config } from '../../src/config/schema.js'
 import type { WorkerAdapter, WorkerTaskResult } from '../../src/workers/types.js'
+import { WorkerAuthError } from '../../src/workers/errors.js'
 import { hashVerifyResults } from '../../src/loop/progress.js'
 import { createMetricsService } from '../../src/metrics/service.js'
 import { initDatabase } from '../../src/state/db.js'
@@ -459,6 +460,33 @@ describe('executeLoop', () => {
     expect(result.terminalStatus).toBe('blocked')
     expect(result.blockReason).toBe('auth_failure')
     expect((result.stepOutputs?.['blockMessage'] ?? '') as string).toMatch(/timed out/)
+  })
+
+  it('reports the actual adapter on auth failures from custom worker profiles', async () => {
+    const customAuthAdapter: WorkerAdapter = {
+      runTask: vi.fn().mockRejectedValue(
+        new WorkerAuthError('gemini', 'Sign in to gemini', 'missing credentials', 'plan'),
+      ),
+      checkAvailability: vi.fn().mockResolvedValue({ available: true, version: '1.0' }),
+    }
+
+    const deps: LoopDependencies = {
+      db,
+      config: makeConfig(),
+      adapters: {
+        planner: customAuthAdapter,
+        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: makeMockAdapter([makeReviewerResult()]),
+      },
+      workflow: DEFAULT_WORKFLOW,
+    }
+
+    const result = await executeLoop(makeCtx(), deps)
+
+    expect(result.terminalStatus).toBe('blocked')
+    expect(result.blockReason).toBe('auth_failure')
+    expect((result.stepOutputs?.['blockMessage'] ?? '') as string).toContain('gemini')
+    expect((result.stepOutputs?.['blockMessage'] ?? '') as string).not.toContain('claude')
   })
 
   it('trivial issue skips planning', async () => {
@@ -1008,6 +1036,44 @@ describe('executeLoop', () => {
     expect(reviewerAdapter.runTask).toHaveBeenCalledTimes(1)
   })
 
+  it('does not use corrupt phase_data artifacts to skip resume steps', async () => {
+    const persistedPlan = makePlannerResult('Corrupt persisted plan').parsed
+    db.prepare('UPDATE runs SET current_phase = ?, phase_data = ? WHERE id = ?').run(
+      'plan',
+      JSON.stringify({
+        plan: { plan: persistedPlan },
+        __completedPhases: 'plan',
+      }),
+      'run-test-1',
+    )
+
+    const plannerAdapter = makeMockAdapter([makePlannerResult('Fresh plan')])
+    const coderAdapter = makeMockAdapter([makeCoderResult()])
+    const reviewerAdapter = makeMockAdapter([makeReviewerResult('APPROVED')])
+
+    const deps: LoopDependencies = {
+      db,
+      config: makeConfig(),
+      adapters: {
+        planner: plannerAdapter,
+        coder: coderAdapter,
+        reviewer: reviewerAdapter,
+      },
+      workflow: DEFAULT_WORKFLOW,
+    }
+
+    const result = await executeLoop(makeCtx(), deps)
+
+    const quarantine = db
+      .prepare('SELECT COUNT(*) AS c FROM checkpoint_quarantine WHERE run_id = ?')
+      .get('run-test-1') as { c: number }
+    expect(quarantine.c).toBeGreaterThan(0)
+    expect(plannerAdapter.runTask).toHaveBeenCalledTimes(1)
+    expect(result.plan?.objective).toBe('Fresh plan')
+    expect(coderAdapter.runTask).toHaveBeenCalledTimes(1)
+    expect(reviewerAdapter.runTask).toHaveBeenCalledTimes(1)
+  })
+
   it('resumes decide checkpoints at iterate target instead of restarting', async () => {
     const persistedPlan = makePlannerResult('Persisted plan').parsed
     const persistedCode = makeCoderResult().parsed
@@ -1179,6 +1245,44 @@ describe('executeLoop', () => {
       )
       // Reviewer should NOT have been called
       expect(deps.adapters['reviewer']!.runTask).not.toHaveBeenCalled()
+    })
+
+    it('clears verify context before falling through to reviewer when no coder retry target exists', async () => {
+      const mockGetDiff = vi.mocked(getDiffAgainstBranch)
+      mockGetDiff.mockResolvedValue({ diff: '', error: null })
+
+      let reviewerPrompt = ''
+      const reviewerAdapter: WorkerAdapter = {
+        runTask: vi.fn().mockImplementation(async (input) => {
+          reviewerPrompt = input.prompt
+          return makeReviewerResult('APPROVED')
+        }),
+        checkAvailability: vi.fn().mockResolvedValue({ available: true, version: '1.0' }),
+      }
+
+      const deps: LoopDependencies = {
+        db,
+        config: makeConfig(),
+        adapters: {
+          planner: makeMockAdapter([makePlannerResult()]),
+          reviewer: reviewerAdapter,
+        },
+        workflow: {
+          steps: [
+            { type: 'worker', id: 'plan', role: 'planner' },
+            { type: 'verify', id: 'verify' },
+            { type: 'worker', id: 'review', role: 'reviewer' },
+            { type: 'decide', id: 'decide', onIterate: 'plan' },
+          ],
+        },
+      }
+
+      const result = await executeLoop(makeCtx(), deps)
+
+      expect(reviewerAdapter.runTask).toHaveBeenCalledTimes(1)
+      expect(reviewerPrompt).not.toContain('pnpm test')
+      expect(result.terminalStatus).toBe('blocked')
+      expect(result.blockReason).toBe('verify_config')
     })
 
     it('does not increment iteration on empty-diff retry', async () => {
