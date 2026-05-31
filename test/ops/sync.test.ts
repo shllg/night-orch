@@ -5,6 +5,7 @@ import { RunManager } from '../../src/state/runs.js'
 import { LeaseManager } from '../../src/state/leases.js'
 import type { ForgeAdapter } from '../../src/forge/types.js'
 import type { Config } from '../../src/config/schema.js'
+import { makeTestConfig } from '../helpers/factories.js'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -43,25 +44,6 @@ function makeMockForge(overrides: Partial<ForgeAdapter> = {}): ForgeAdapter {
     getPRDiff: vi.fn(),
     ...overrides,
   }
-}
-
-function makeConfig(): Config {
-  return {
-    version: 1,
-    github: { tokenEnv: 'GITHUB_TOKEN', apiBaseUrl: 'https://api.github.com', pollIntervalSeconds: 300, appMentions: {} },
-    storage: { dbPath: '', worktreeRoot: '/tmp/wt', logsRoot: '/tmp/logs' },
-    notifications: { channels: [], events: { onRunStarted: false, onBlocked: true, onPrReady: true, onPrUpdated: true, onError: true, onRetryExhausted: true } },
-    loop: { maxReviewIterations: 4, maxTotalAgentPasses: 10, stopOnPlannerFailure: true, requireVerificationPass: true, reviewApprovalKeyword: 'APPROVED', reviewNeedsChangesKeyword: 'CHANGES_REQUIRED', blockOnAmbiguousReview: true },
-    security: { maxChangedFiles: 50, maxChangedLines: 5000, maxDailyCostUsd: 50, maxCostPerRunUsd: 10 },
-    workerProfiles: {},
-    metrics: { enabled: false, port: 9090, host: '127.0.0.1' },
-    repos: [{
-      repo: 'org/repo', forge: 'github', localPath: '/tmp/repo', baseBranch: 'main',
-      branchPrefix: 'orch', labels: { ready: ['no:ready'], running: 'no:running', blocked: ['no:blocked'], reviewReady: 'no:review-ready', error: 'no:error', retry: 'no:retry' },
-      defaults: { planner: 'claude', coder: 'claude', reviewer: 'claude', doneMode: 'pr-ready', notifyPriority: 'normal', prMentions: [] },
-      verify: [], selectors: { includeLabelsAny: [], excludeLabelsAny: [] }, agents: {},
-    }],
-  } as Config
 }
 
 function insertRun(db: Database.Database, overrides: Record<string, unknown> = {}): string {
@@ -120,7 +102,12 @@ describe('SyncEngine', () => {
     vi.clearAllMocks()
     tmpDir = mkdtempSync(join(tmpdir(), 'night-orch-sync-test-'))
     db = initDatabase(join(tmpDir, 'test.db'))
-    config = makeConfig()
+    config = makeTestConfig({
+      notifications: { channels: [] },
+      repos: [{
+        selectors: { includeLabelsAny: [], excludeLabelsAny: [] },
+      }],
+    })
   })
 
   afterEach(() => {

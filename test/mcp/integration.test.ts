@@ -9,21 +9,34 @@ import { tmpdir } from 'node:os'
 import type Database from 'better-sqlite3'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
+import { makeTestConfig } from '../helpers/factories.js'
 
-function makeMinimalConfig() {
-  return {
-    version: 1 as const,
-    github: { tokenEnv: 'GITHUB_TOKEN', apiBaseUrl: 'https://api.github.com', pollIntervalSeconds: 300, appMentions: {} },
-    storage: { dbPath: '', worktreeRoot: '/tmp/wt', logsRoot: '/tmp/logs' },
-    notifications: { channels: [{ type: 'console' as const }], events: { onRunStarted: false, onBlocked: true, onPrReady: true, onPrUpdated: true, onError: true, onRetryExhausted: true } },
-    loop: { maxReviewIterations: 4, maxTotalAgentPasses: 10, stopOnPlannerFailure: true, requireVerificationPass: true, reviewApprovalKeyword: 'APPROVED', reviewNeedsChangesKeyword: 'CHANGES_REQUIRED', blockOnAmbiguousReview: true },
-    security: { maxChangedFiles: 50, maxChangedLines: 5000, maxDailyCostUsd: 50, maxCostPerRunUsd: 10 },
-    workerProfiles: {},
-    metrics: { enabled: false, port: 9090, host: '127.0.0.1' },
-    mcp: { enabled: true, transport: 'stdio' as const, authTokenEnv: null },
-    repos: [{ repo: 'org/repo', forge: 'github' as const, localPath: '/tmp/repo', baseBranch: 'main', branchPrefix: 'orch', labels: { ready: ['no:ready'], running: 'no:running', blocked: ['no:blocked', 'no:needs-human'], reviewReady: 'no:review-ready', error: 'no:error', retry: 'no:retry' }, defaults: { planner: 'claude' as const, coder: 'claude' as const, reviewer: 'claude' as const, doneMode: 'pr-ready' as const, notifyPriority: 'normal' as const, prMentions: [] }, verify: [], selectors: { includeLabelsAny: ['no:ready'], excludeLabelsAny: [] }, agents: {} }],
-  }
-}
+const EXPECTED_TOOL_NAMES = [
+  'night-orch-list-settings',
+  'night-orch-set-setting',
+  'night-orch-clear-setting',
+  'night-orch-status',
+  'night-orch-run-detail',
+  'night-orch-list-runs',
+  'night-orch-list-inbox',
+  'night-orch-cost-report',
+  'night-orch-retry',
+  'night-orch-cost-override',
+  'night-orch-daily-cost-override',
+  'night-orch-cost-reset',
+  'night-orch-daily-cost-reset',
+  'night-orch-sync',
+  'night-orch-cleanup',
+  'night-orch-labels-init',
+  'night-orch-delete-entry',
+  'night-orch-poll',
+  'night-orch-list-issues',
+  'night-orch-stream-events',
+  'night-orch-rebase',
+  'night-orch-continue',
+  'night-orch-update',
+  'night-orch-file-loop',
+]
 
 describe('MCP Integration', () => {
   let tmpDir: string
@@ -34,7 +47,7 @@ describe('MCP Integration', () => {
   beforeEach(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'night-orch-mcp-int-'))
     db = initDatabase(join(tmpDir, 'test.db'))
-    deps = { db, config: makeMinimalConfig() as MCPDependencies['config'], forgeAdapters: new Map(), poller: null, metrics: null }
+    deps = { db, config: makeTestConfig(), forgeAdapters: new Map(), poller: null, metrics: null }
 
     const server = createMCPServer(deps)
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
@@ -52,24 +65,10 @@ describe('MCP Integration', () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  it('lists all 24 tools', async () => {
+  it('lists the registered tool contract', async () => {
     const result = await client.listTools()
-    expect(result.tools.length).toBe(24)
     const names = result.tools.map((t) => t.name)
-    expect(names).toContain('night-orch-list-settings')
-    expect(names).toContain('night-orch-set-setting')
-    expect(names).toContain('night-orch-clear-setting')
-    expect(names).toContain('night-orch-status')
-    expect(names).toContain('night-orch-poll')
-    expect(names).toContain('night-orch-list-issues')
-    expect(names).toContain('night-orch-stream-events')
-    expect(names).toContain('night-orch-rebase')
-    expect(names).toContain('night-orch-continue')
-    expect(names).toContain('night-orch-delete-entry')
-    expect(names).toContain('night-orch-labels-init')
-    expect(names).toContain('night-orch-cost-override')
-    expect(names).toContain('night-orch-daily-cost-override')
-    expect(names).toContain('night-orch-file-loop')
+    expect(names).toEqual(EXPECTED_TOOL_NAMES)
   })
 
   it('calls status tool and gets valid response', async () => {

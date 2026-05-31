@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { pollOnce } from '../../src/runner/poller.js'
-import { transitionLabels } from '../../src/labels/manager.js'
 import { initDatabase } from '../../src/state/db.js'
 import type { Config } from '../../src/config/schema.js'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -8,6 +7,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type Database from 'better-sqlite3'
 import { RunManager } from '../../src/state/runs.js'
+import { makeTestConfig } from '../helpers/factories.js'
 
 vi.mock('../../src/utils/logger.js', () => ({
   logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -18,6 +18,22 @@ const mockCommentOnIssue = vi.fn().mockResolvedValue(undefined)
 const mockListIssueComments = vi.fn().mockResolvedValue([])
 const mockIsCollaborator = vi.fn().mockResolvedValue(true)
 const mockNotificationDispatch = vi.fn().mockResolvedValue({ sent: [] })
+const mockAddLabels = vi.fn().mockResolvedValue(undefined)
+const mockRemoveLabels = vi.fn().mockResolvedValue(undefined)
+const mockCreatePR = vi.fn().mockResolvedValue({
+  number: 101,
+  title: 'Test PR',
+  url: 'https://example.com/pr/101',
+  state: 'open',
+})
+const mockUpdatePR = vi.fn().mockResolvedValue({
+  number: 202,
+  title: 'Existing PR',
+  url: 'https://example.com/pr/202',
+  state: 'open',
+})
+const mockFindPRByBranch = vi.fn().mockResolvedValue(null)
+const mockPushBranch = vi.fn().mockResolvedValue(undefined)
 vi.mock('../../src/discovery/discover.js', () => ({
   discoverEligibleIssues: (...args: unknown[]) => mockDiscoverEligibleIssues(...args),
 }))
@@ -37,15 +53,15 @@ vi.mock('../../src/forge/factory.js', () => ({
       updatedAt: '',
       url: '',
     }),
-    addLabels: vi.fn().mockResolvedValue(undefined),
-    removeLabels: vi.fn().mockResolvedValue(undefined),
+    addLabels: (...args: unknown[]) => mockAddLabels(...args),
+    removeLabels: (...args: unknown[]) => mockRemoveLabels(...args),
     commentOnIssue: (...args: unknown[]) => mockCommentOnIssue(...args),
     listIssueComments: (...args: unknown[]) => mockListIssueComments(...args),
     isCollaborator: (...args: unknown[]) => mockIsCollaborator(...args),
     validateAuth: vi.fn(),
-    createPR: vi.fn(),
-    updatePR: vi.fn(),
-    findPRByBranch: vi.fn(),
+    createPR: (...args: unknown[]) => mockCreatePR(...args),
+    updatePR: (...args: unknown[]) => mockUpdatePR(...args),
+    findPRByBranch: (...args: unknown[]) => mockFindPRByBranch(...args),
     getPRDiff: vi.fn(),
   }),
 }))
@@ -60,10 +76,6 @@ vi.mock('../../src/notify/dispatcher.js', () => {
   }
   return { NotificationDispatcher: MockNotificationDispatcher }
 })
-
-vi.mock('../../src/labels/manager.js', () => ({
-  transitionLabels: vi.fn().mockResolvedValue(undefined),
-}))
 
 const mockExecuteLoop = vi.fn()
 const mockFileLoopGetActiveSession = vi.fn().mockReturnValue(null)
@@ -96,9 +108,11 @@ vi.mock('../../src/ops/rebase-and-check.js', () => ({
   queueRebase: (...args: unknown[]) => mockQueueRebase(...args),
 }))
 
-const mockPublishPR = vi.fn()
-vi.mock('../../src/publishing/publisher.js', () => ({
-  publishPR: (...args: unknown[]) => mockPublishPR(...args),
+vi.mock('../../src/publishing/push.js', () => ({
+  MergeConflictError: class MergeConflictError extends Error {
+    readonly code = 'MERGE_CONFLICT' as const
+  },
+  pushBranch: (...args: unknown[]) => mockPushBranch(...args),
 }))
 
 vi.mock('../../src/workers/factory.js', () => ({
@@ -129,41 +143,37 @@ function deferred<T = void>() {
   return { promise, resolve }
 }
 
-async function waitForCondition(
-  condition: () => boolean,
-  timeoutMs = 2000,
-): Promise<void> {
-  const start = Date.now()
-  while (!condition()) {
-    if (Date.now() - start > timeoutMs) {
-      throw new Error('Timed out waiting for condition')
-    }
-    await new Promise<void>((resolve) => setTimeout(resolve, 10))
+function publishFinalCtx(ctx: unknown): Record<string, unknown> {
+  return {
+    ...(ctx as Record<string, unknown>),
+    currentPhase: 'completed',
+    terminalStatus: 'publish',
   }
 }
 
 function makeConfig(dbPath: string): Config {
-  return {
-    version: 1,
-    github: { tokenEnv: 'GITHUB_TOKEN', apiBaseUrl: 'https://api.github.com', pollIntervalSeconds: 300, appMentions: {} },
+  return makeTestConfig({
     storage: { dbPath, worktreeRoot: '/tmp/wt', logsRoot: '/tmp/logs' },
-    notifications: { channels: [], events: { onRunStarted: false, onBlocked: true, onPrReady: true, onPrUpdated: true, onError: true, onRetryExhausted: true } },
-    loop: { maxReviewIterations: 4, maxTotalAgentPasses: 10, stopOnPlannerFailure: true, requireVerificationPass: true, reviewApprovalKeyword: 'APPROVED', reviewNeedsChangesKeyword: 'CHANGES_REQUIRED', blockOnAmbiguousReview: true, maxAutoRetries: 3 },
-    security: { maxChangedFiles: 50, maxChangedLines: 5000, maxDailyCostUsd: 50, maxCostPerRunUsd: 10 },
-    metrics: { enabled: false, port: 9090, host: '127.0.0.1' },
-    commentCommands: { enabled: true, requireCollaborator: false },
-    repos: [{
-      repo: 'org/repo', forge: 'github', localPath: '/tmp/repo', maxConcurrentRuns: 1, baseBranch: 'main',
-      branchPrefix: 'orch', labels: { ready: ['no:ready'], running: 'no:running', blocked: ['no:blocked'], reviewReady: 'no:review-ready', error: 'no:error', retry: 'no:retry', planning: 'no:planning' },
-      defaults: { planner: 'claude', coder: 'claude', reviewer: 'claude', doneMode: 'pr-ready', notifyPriority: 'normal', prMentions: [] },
-      planning: { prdDirectory: 'docs/prd' },
-      verify: ['pnpm test'], selectors: { includeLabelsAny: [], excludeLabelsAny: [] }, agents: { claude: 'claude' },
-    }],
+    notifications: { channels: [] },
     mcp: { enabled: false, transport: 'stdio', authTokenEnv: null },
+    repos: [{
+      maxConcurrentRuns: 1,
+      verify: ['pnpm test'],
+      selectors: { includeLabelsAny: [], excludeLabelsAny: [] },
+      agents: { claude: 'claude' },
+    }],
     workerProfiles: {
-      claude: { type: 'claude', command: 'claude', args: ['-p'], workerTimeoutSeconds: 1800, minimalEnv: true, runtimeWrapper: null, env: {} },
+      claude: {
+        type: 'claude',
+        command: 'claude',
+        args: ['-p'],
+        workerTimeoutSeconds: 1800,
+        minimalEnv: true,
+        runtimeWrapper: null,
+        env: {},
+      },
     },
-  } as Config
+  })
 }
 
 describe('pollOnce', () => {
@@ -174,6 +184,20 @@ describe('pollOnce', () => {
     vi.clearAllMocks()
     mockFileLoopGetActiveSession.mockReturnValue(null)
     mockFileLoopTickRepo.mockResolvedValue(null)
+    mockCreatePR.mockResolvedValue({
+      number: 101,
+      title: 'Test PR',
+      url: 'https://example.com/pr/101',
+      state: 'open',
+    })
+    mockUpdatePR.mockResolvedValue({
+      number: 202,
+      title: 'Existing PR',
+      url: 'https://example.com/pr/202',
+      state: 'open',
+    })
+    mockFindPRByBranch.mockResolvedValue(null)
+    mockPushBranch.mockResolvedValue(undefined)
     tmpDir = mkdtempSync(join(tmpdir(), 'night-orch-poller-test-'))
     db = initDatabase(join(tmpDir, 'test.db'))
   })
@@ -359,7 +383,7 @@ describe('pollOnce', () => {
     expect(result.processed).toBe(1)
     expect(result.errors).toBe(0)
     expect(result.immediateFollowupRepos).toEqual(['org/repo'])
-    expect(mockPublishPR).not.toHaveBeenCalled()
+    expect(mockCreatePR).not.toHaveBeenCalled()
 
     const row = db.prepare('SELECT status FROM runs ORDER BY created_at DESC LIMIT 1').get() as { status: string }
     expect(row.status).toBe('blocked')
@@ -384,11 +408,8 @@ describe('pollOnce', () => {
     const config = makeConfig(join(tmpDir, 'test.db'))
     await pollOnce(config, db, false)
 
-    const blockedTransition = vi.mocked(transitionLabels).mock.calls.find((call) => call[5] === 'blocked')
-    expect(blockedTransition).toBeDefined()
-    // Post-R1c: transitionLabels receives the typed BlockedReason object
-    // (lifted from the legacy string by run-finalizer's bridge).
-    expect(blockedTransition?.[7]).toMatchObject({ type: 'reviewerBlocked' })
+    expect(mockAddLabels).toHaveBeenCalledWith('org/repo', 1, ['no:blocked', 'no:needs-human'])
+    expect(mockRemoveLabels).toHaveBeenCalledWith('org/repo', 1, ['no:ready'])
 
     const statusComment = mockCommentOnIssue.mock.calls.find(
       (call) => typeof call[2] === 'string' && call[2].includes('Reviewer blocked: needs human sign-off'),
@@ -729,11 +750,8 @@ describe('pollOnce', () => {
       issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
       triage: { level: 'standard', reason: '' },
     }])
-    mockExecuteLoop.mockResolvedValue({
-      currentPhase: 'completed',
-      terminalStatus: 'publish',
-    })
-    mockPublishPR.mockRejectedValueOnce(new Error('publish failed'))
+    mockExecuteLoop.mockImplementation(async (ctx) => publishFinalCtx(ctx))
+    mockPushBranch.mockRejectedValueOnce(new Error('publish failed'))
 
     const config = makeConfig(join(tmpDir, 'test.db'))
     const result = await pollOnce(config, db, false)
@@ -750,17 +768,7 @@ describe('pollOnce', () => {
       issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
       triage: { level: 'standard', reason: '' },
     }])
-    mockExecuteLoop.mockResolvedValue({
-      currentPhase: 'completed',
-      terminalStatus: 'publish',
-    })
-    mockPublishPR.mockResolvedValueOnce({
-      prNumber: 101,
-      prTitle: 'Test PR',
-      prUrl: 'https://example.com/pr/101',
-      created: true,
-    })
-
+    mockExecuteLoop.mockImplementation(async (ctx) => publishFinalCtx(ctx))
     const config = makeConfig(join(tmpDir, 'test.db'))
     const result = await pollOnce(config, db, false)
 
@@ -776,15 +784,12 @@ describe('pollOnce', () => {
       issue: { number: 2, nodeId: '', title: 'Existing PR update', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: 'https://example.com/issues/2' },
       triage: { level: 'standard', reason: '' },
     }])
-    mockExecuteLoop.mockResolvedValue({
-      currentPhase: 'completed',
-      terminalStatus: 'publish',
-    })
-    mockPublishPR.mockResolvedValueOnce({
-      prNumber: 202,
-      prTitle: 'Existing PR',
-      prUrl: 'https://example.com/pr/202',
-      created: false,
+    mockExecuteLoop.mockImplementation(async (ctx) => publishFinalCtx(ctx))
+    mockFindPRByBranch.mockResolvedValueOnce({
+      number: 202,
+      title: 'Existing PR',
+      url: 'https://example.com/pr/202',
+      state: 'open',
     })
 
     const config = makeConfig(join(tmpDir, 'test.db'))
@@ -802,11 +807,8 @@ describe('pollOnce', () => {
       issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
       triage: { level: 'standard', reason: '' },
     }])
-    mockExecuteLoop.mockResolvedValue({
-      currentPhase: 'completed',
-      terminalStatus: 'publish',
-    })
-    mockPublishPR.mockRejectedValueOnce(new Error('publish failed'))
+    mockExecuteLoop.mockImplementation(async (ctx) => publishFinalCtx(ctx))
+    mockPushBranch.mockRejectedValueOnce(new Error('publish failed'))
 
     const config = makeConfig(join(tmpDir, 'test.db'))
     await pollOnce(config, db, false)
@@ -825,11 +827,8 @@ describe('pollOnce', () => {
       issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
       triage: { level: 'standard', reason: '' },
     }])
-    mockExecuteLoop.mockResolvedValue({
-      currentPhase: 'completed',
-      terminalStatus: 'publish',
-    })
-    mockPublishPR.mockRejectedValueOnce(new Error('publish failed'))
+    mockExecuteLoop.mockImplementation(async (ctx) => publishFinalCtx(ctx))
+    mockPushBranch.mockRejectedValueOnce(new Error('publish failed'))
 
     const config = makeConfig(join(tmpDir, 'test.db'))
     config.loop.maxAutoRetries = 0
@@ -848,11 +847,8 @@ describe('pollOnce', () => {
       issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
       triage: { level: 'standard', reason: '' },
     }])
-    mockExecuteLoop.mockResolvedValue({
-      currentPhase: 'completed',
-      terminalStatus: 'publish',
-    })
-    mockPublishPR.mockRejectedValueOnce(new Error('token=ghp_abcdefghijklmnopqrstuvwxyz123456\n@maintainer *boom*'))
+    mockExecuteLoop.mockImplementation(async (ctx) => publishFinalCtx(ctx))
+    mockPushBranch.mockRejectedValueOnce(new Error('token=ghp_abcdefghijklmnopqrstuvwxyz123456\n@maintainer *boom*'))
 
     const config = makeConfig(join(tmpDir, 'test.db'))
     config.loop.maxAutoRetries = 0
@@ -876,11 +872,8 @@ describe('pollOnce', () => {
       issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
       triage: { level: 'standard', reason: '' },
     }])
-    mockExecuteLoop.mockResolvedValue({
-      currentPhase: 'completed',
-      terminalStatus: 'publish',
-    })
-    mockPublishPR.mockRejectedValueOnce(new Error('token=ghp_abcdefghijklmnopqrstuvwxyz123456\n@maintainer *boom*'))
+    mockExecuteLoop.mockImplementation(async (ctx) => publishFinalCtx(ctx))
+    mockPushBranch.mockRejectedValueOnce(new Error('token=ghp_abcdefghijklmnopqrstuvwxyz123456\n@maintainer *boom*'))
 
     const config = makeConfig(join(tmpDir, 'test.db'))
     config.loop.maxAutoRetries = 0
@@ -1151,7 +1144,11 @@ describe('pollOnce', () => {
 
     const issue1Gate = deferred<void>()
     const issue2Gate = deferred<void>()
+    const bothIssuesStarted = deferred<void>()
     mockExecuteLoop.mockImplementation(async (ctx: { issueNumber: number }) => {
+      if (mockExecuteLoop.mock.calls.length === 2) {
+        bothIssuesStarted.resolve()
+      }
       if (ctx.issueNumber === 1) {
         await issue1Gate.promise
       } else if (ctx.issueNumber === 2) {
@@ -1164,7 +1161,7 @@ describe('pollOnce', () => {
     })
 
     const pollPromise = pollOnce(config, db, false)
-    await waitForCondition(() => mockExecuteLoop.mock.calls.length === 2)
+    await bothIssuesStarted.promise
 
     issue1Gate.resolve()
     issue2Gate.resolve()
@@ -1243,7 +1240,15 @@ describe('pollOnce', () => {
     const gate1 = deferred<void>()
     const gate2 = deferred<void>()
     const gate3 = deferred<void>()
+    const firstWaveStarted = deferred<void>()
+    const thirdStarted = deferred<void>()
     mockExecuteLoop.mockImplementation(async (ctx: { issueNumber: number }) => {
+      if (mockExecuteLoop.mock.calls.length === 2) {
+        firstWaveStarted.resolve()
+      }
+      if (ctx.issueNumber === 3) {
+        thirdStarted.resolve()
+      }
       if (ctx.issueNumber === 1) await gate1.promise
       if (ctx.issueNumber === 2) await gate2.promise
       if (ctx.issueNumber === 3) await gate3.promise
@@ -1255,17 +1260,17 @@ describe('pollOnce', () => {
 
     const pollPromise = pollOnce(config, db, false)
 
-    await waitForCondition(() => mockExecuteLoop.mock.calls.length === 2)
+    await firstWaveStarted.promise
     const firstWaveIssues = mockExecuteLoop.mock.calls
       .slice(0, 2)
       .map((call) => (call[0] as { issueNumber: number }).issueNumber)
     expect(firstWaveIssues.sort((a, b) => a - b)).toEqual([1, 2])
 
-    await new Promise<void>((resolve) => setTimeout(resolve, 50))
+    await Promise.resolve()
     expect(mockExecuteLoop).toHaveBeenCalledTimes(2)
 
     gate1.resolve()
-    await waitForCondition(() => mockExecuteLoop.mock.calls.length === 3)
+    await thirdStarted.promise
 
     gate2.resolve()
     gate3.resolve()

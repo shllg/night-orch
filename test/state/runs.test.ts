@@ -6,6 +6,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type Database from 'better-sqlite3'
+import { makeRunInput } from '../helpers/factories.js'
+import type { CreateRunParams } from '../../src/state/runs.js'
 
 describe('RunManager', () => {
   let tmpDir: string
@@ -23,15 +25,16 @@ describe('RunManager', () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
+  function makeRun(overrides: Partial<CreateRunParams> = {}) {
+    return runManager.create(makeRunInput(overrides))
+  }
+
   it('creates a run with valid ID', () => {
-    const run = runManager.create({
-      repo: 'org/repo',
+    const run = makeRun({
       issueNumber: 42,
       issueTitle: 'Fix race condition',
       issueNodeId: 'MDU6SXNzdWU0Mg==',
-      planner: 'claude',
       coder: 'codex',
-      reviewer: 'claude',
     })
     expect(run.id).toMatch(/^run-/)
     expect(run.repo).toBe('org/repo')
@@ -43,14 +46,7 @@ describe('RunManager', () => {
   })
 
   it('updates specific fields', () => {
-    const run = runManager.create({
-      repo: 'org/repo',
-      issueNumber: 1,
-      issueNodeId: 'node1',
-      planner: 'claude',
-      coder: 'claude',
-      reviewer: 'claude',
-    })
+    const run = makeRun()
 
     runManager.update(run.id, {
       status: 'running',
@@ -67,14 +63,7 @@ describe('RunManager', () => {
   })
 
   it('stores and retrieves phaseData as JSON', () => {
-    const run = runManager.create({
-      repo: 'org/repo',
-      issueNumber: 1,
-      issueNodeId: 'node1',
-      planner: 'claude',
-      coder: 'claude',
-      reviewer: 'claude',
-    })
+    const run = makeRun()
 
     runManager.update(run.id, {
       phaseData: { plan: { summary: 'Do the thing' }, codeHash: 'abc123' },
@@ -85,13 +74,9 @@ describe('RunManager', () => {
   })
 
   it('getByRepoAndIssue finds correct record', () => {
-    runManager.create({
-      repo: 'org/repo',
+    makeRun({
       issueNumber: 42,
       issueNodeId: 'node42',
-      planner: 'claude',
-      coder: 'claude',
-      reviewer: 'claude',
     })
 
     const found = runManager.getByRepoAndIssue('org/repo', 42)
@@ -104,47 +89,31 @@ describe('RunManager', () => {
 
     activeStatuses.forEach((status, index) => {
       const issueNumber = 700 + index
-      const run = runManager.create({
-        repo: 'org/repo',
+      const run = makeRun({
         issueNumber,
         issueNodeId: `node-${issueNumber}`,
-        planner: 'claude',
-        coder: 'claude',
-        reviewer: 'claude',
       })
       if (status !== 'queued') {
         runManager.update(run.id, { status })
       }
 
-      expect(() => runManager.create({
-        repo: 'org/repo',
+      expect(() => makeRun({
         issueNumber,
         issueNodeId: `node-${issueNumber}`,
-        planner: 'claude',
-        coder: 'claude',
-        reviewer: 'claude',
       })).toThrow(/active run/)
     })
   })
 
   it('getByRepoAndIssue prefers latest run when issues aggregate pointer is stale', () => {
-    const first = runManager.create({
-      repo: 'org/repo',
+    const first = makeRun({
       issueNumber: 77,
       issueNodeId: 'node77',
-      planner: 'claude',
-      coder: 'claude',
-      reviewer: 'claude',
     })
     runManager.update(first.id, { status: 'completed' })
 
-    const latest = runManager.create({
-      repo: 'org/repo',
+    const latest = makeRun({
       issueNumber: 77,
       issueNodeId: 'node77',
-      planner: 'claude',
-      coder: 'claude',
-      reviewer: 'claude',
     })
 
     db.prepare(
@@ -166,29 +135,17 @@ describe('RunManager', () => {
   })
 
   it('getActive returns non-completed records', () => {
-    const r1 = runManager.create({
-      repo: 'org/repo',
+    const r1 = makeRun({
       issueNumber: 1,
       issueNodeId: 'n1',
-      planner: 'claude',
-      coder: 'claude',
-      reviewer: 'claude',
     })
-    const r2 = runManager.create({
-      repo: 'org/repo',
+    const r2 = makeRun({
       issueNumber: 2,
       issueNodeId: 'n2',
-      planner: 'claude',
-      coder: 'claude',
-      reviewer: 'claude',
     })
-    const r3 = runManager.create({
-      repo: 'org/repo',
+    const r3 = makeRun({
       issueNumber: 3,
       issueNodeId: 'n3',
-      planner: 'claude',
-      coder: 'claude',
-      reviewer: 'claude',
     })
     runManager.update(r1.id, { status: 'running' })
     runManager.update(r2.id, { status: 'blocked' })
@@ -200,13 +157,9 @@ describe('RunManager', () => {
   })
 
   it('getActive falls back to latest runs when issues aggregate state is stale', () => {
-    const run = runManager.create({
-      repo: 'org/repo',
+    const run = makeRun({
       issueNumber: 88,
       issueNodeId: 'n88',
-      planner: 'claude',
-      coder: 'claude',
-      reviewer: 'claude',
     })
     runManager.update(run.id, { status: 'blocked' })
 
@@ -223,23 +176,15 @@ describe('RunManager', () => {
   })
 
   it('getByRepoAndIssue chooses newest attempt by created_at when older run has newer updated_at', () => {
-    const oldRun = runManager.create({
-      repo: 'org/repo',
+    const oldRun = makeRun({
       issueNumber: 91,
       issueNodeId: 'n91',
-      planner: 'claude',
-      coder: 'claude',
-      reviewer: 'claude',
     })
     runManager.update(oldRun.id, { status: 'completed' })
 
-    const newRun = runManager.create({
-      repo: 'org/repo',
+    const newRun = makeRun({
       issueNumber: 91,
       issueNodeId: 'n91',
-      planner: 'claude',
-      coder: 'claude',
-      reviewer: 'claude',
     })
     runManager.update(newRun.id, { status: 'blocked' })
 
@@ -253,23 +198,15 @@ describe('RunManager', () => {
   })
 
   it('getActive keeps issue visible when older run was touched after newest blocked attempt', () => {
-    const oldRun = runManager.create({
-      repo: 'org/repo',
+    const oldRun = makeRun({
       issueNumber: 92,
       issueNodeId: 'n92',
-      planner: 'claude',
-      coder: 'claude',
-      reviewer: 'claude',
     })
     runManager.update(oldRun.id, { status: 'completed' })
 
-    const newRun = runManager.create({
-      repo: 'org/repo',
+    const newRun = makeRun({
       issueNumber: 92,
       issueNodeId: 'n92',
-      planner: 'claude',
-      coder: 'claude',
-      reviewer: 'claude',
     })
     runManager.update(newRun.id, { status: 'blocked' })
 
@@ -284,22 +221,19 @@ describe('RunManager', () => {
 
   describe('sub-run uniqueness', () => {
     it('allows multiple sub-runs to coexist with a parent on the same repo/issue', () => {
-      const parent = runManager.create({
-        repo: 'org/repo', issueNumber: 400, issueNodeId: 'n400',
-        planner: 'claude', coder: 'claude', reviewer: 'claude',
-      })
+      const parent = makeRun({ issueNumber: 400, issueNodeId: 'n400' })
       expect(parent.parentRunId).toBeNull()
 
       // Both sub-runs share the parent's repo/issue but carry parent_run_id.
       // The pre-fix uniqueness query would reject these.
-      const sub1 = runManager.create({
-        repo: 'org/repo', issueNumber: 400, issueNodeId: 'n400',
-        planner: 'claude', coder: 'claude', reviewer: 'claude',
+      const sub1 = makeRun({
+        issueNumber: 400,
+        issueNodeId: 'n400',
         parentRunId: parent.id,
       })
-      const sub2 = runManager.create({
-        repo: 'org/repo', issueNumber: 400, issueNodeId: 'n400',
-        planner: 'claude', coder: 'claude', reviewer: 'claude',
+      const sub2 = makeRun({
+        issueNumber: 400,
+        issueNodeId: 'n400',
         parentRunId: parent.id,
       })
 
@@ -312,33 +246,21 @@ describe('RunManager', () => {
     })
 
     it('still rejects a second top-level run for the same repo/issue while one is active', () => {
-      runManager.create({
-        repo: 'org/repo', issueNumber: 401, issueNodeId: 'n401',
-        planner: 'claude', coder: 'claude', reviewer: 'claude',
-      })
+      makeRun({ issueNumber: 401, issueNodeId: 'n401' })
       expect(() =>
-        runManager.create({
-          repo: 'org/repo', issueNumber: 401, issueNodeId: 'n401',
-          planner: 'claude', coder: 'claude', reviewer: 'claude',
-        }),
+        makeRun({ issueNumber: 401, issueNodeId: 'n401' }),
       ).toThrow(/active run/)
     })
   })
 
   describe('retry count tracking', () => {
     it('exposes retryCount on new runs as 0', () => {
-      const run = runManager.create({
-        repo: 'org/repo', issueNumber: 300, issueNodeId: 'n300',
-        planner: 'claude', coder: 'claude', reviewer: 'claude',
-      })
+      const run = makeRun({ issueNumber: 300, issueNodeId: 'n300' })
       expect(run.retryCount).toBe(0)
     })
 
     it('incrementRetryCount returns new value and persists it across reads', () => {
-      const run = runManager.create({
-        repo: 'org/repo', issueNumber: 301, issueNodeId: 'n301',
-        planner: 'claude', coder: 'claude', reviewer: 'claude',
-      })
+      const run = makeRun({ issueNumber: 301, issueNodeId: 'n301' })
       expect(runManager.incrementRetryCount(run.id)).toBe(1)
       expect(runManager.incrementRetryCount(run.id)).toBe(2)
       expect(runManager.getById(run.id)?.retryCount).toBe(2)
@@ -347,10 +269,7 @@ describe('RunManager', () => {
     it('countRecentErrors uses the active run retry_count even when the single row is reused across replay retries', () => {
       // Simulate the auto-retry flow on a single reused run row:
       // the row cycles queued → running → error → queued without a new row.
-      const run = runManager.create({
-        repo: 'org/repo', issueNumber: 302, issueNodeId: 'n302',
-        planner: 'claude', coder: 'claude', reviewer: 'claude',
-      })
+      const run = makeRun({ issueNumber: 302, issueNodeId: 'n302' })
       runManager.update(run.id, { status: 'error', endedAt: new Date().toISOString() })
       expect(runManager.countRecentErrors('org/repo', 302)).toBe(0)
 

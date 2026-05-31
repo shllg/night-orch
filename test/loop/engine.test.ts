@@ -10,6 +10,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type Database from 'better-sqlite3'
+import { makeTestConfig } from '../helpers/factories.js'
 
 // Mock external deps
 vi.mock('execa', () => ({
@@ -125,43 +126,29 @@ function makeMockAdapter(results: WorkerTaskResult[]): WorkerAdapter {
 }
 
 function makeConfig(): Config {
-  return {
-    version: 1,
-    github: { tokenEnv: 'GITHUB_TOKEN', apiBaseUrl: 'https://api.github.com', pollIntervalSeconds: 300, appMentions: {} },
+  return makeTestConfig({
     storage: { dbPath: '', worktreeRoot: '', logsRoot: '' },
-    notifications: { channels: [{ type: 'console' }], events: { onRunStarted: false, onBlocked: true, onPrReady: true, onPrUpdated: true, onError: true, onRetryExhausted: true } },
     loop: {
-      maxReviewIterations: 4,
-      maxTotalAgentPasses: 10,
       maxAttemptChainLength: 3,
       maxRunTokens: 0,
       maxIssueTokens: 0,
       maxDailyTokens: 0,
       maxRunWallClockMinutes: 0,
-      stopOnPlannerFailure: true,
-      requireVerificationPass: true,
-      reviewApprovalKeyword: 'APPROVED',
-      reviewNeedsChangesKeyword: 'CHANGES_REQUIRED',
-      blockOnAmbiguousReview: true,
-      maxAutoRetries: 3,
       maxEmptyDiffRetries: 2,
       maxConsecutiveBlocks: 4,
-      decompose: false,
-      maxSubtasks: 5,
-      maxConcurrentSubtasks: 3,
-    },
-    security: { maxChangedFiles: 50, maxChangedLines: 5000, maxDailyCostUsd: 50, maxCostPerRunUsd: 10 },
-    cost: {
-      model: 'pay-per-use',
-      allowEstimatedDuration: false,
-      subscriptionMetered: { advisoryThresholdUsd: null, enforcePerRunLimit: false, enforceDailyLimit: false },
     },
     workerProfiles: {
-      claude: { type: 'claude', command: 'claude', args: ['-p'], workerTimeoutSeconds: 1800, minimalEnv: true, runtimeWrapper: null, env: {} },
+      claude: {
+        type: 'claude',
+        command: 'claude',
+        args: ['-p'],
+        workerTimeoutSeconds: 1800,
+        minimalEnv: true,
+        runtimeWrapper: null,
+        env: {},
+      },
     },
-    metrics: { enabled: false, port: 9090, host: '127.0.0.1' },
-    repos: [],
-  } as Config
+  })
 }
 
 function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
@@ -1162,7 +1149,7 @@ describe('executeLoop', () => {
           plan: { plan: persistedPlan },
           code: { codeResult: persistedCode },
           // verify is NOT in completed phases — it crashed mid-execution
-          __completed_phases__: ['plan', 'code'],
+          __completedPhases: ['plan', 'code'],
           // emptyDiffRetries stored in verify artifacts from prior iteration
           verify: {
             emptyDiffRetries: 1,

@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type Database from 'better-sqlite3'
 import type { ForgeAdapter } from '../../src/forge/types.js'
-import type { RepoConfig } from '../../src/config/schema.js'
 import { initDatabase } from '../../src/state/db.js'
 import { RunManager } from '../../src/state/runs.js'
 import { queueContinue } from '../../src/ops/continue.js'
+import { makeTestRepoConfig, makeRunInput } from '../helpers/factories.js'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -12,46 +12,6 @@ import { tmpdir } from 'node:os'
 vi.mock('../../src/utils/logger.js', () => ({
   logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }))
-
-function makeRepoConfig(): RepoConfig {
-  return {
-    repo: 'org/repo',
-    forge: 'github',
-    linkedProjects: [],
-    maxConcurrentRuns: 1,
-    localPath: '/tmp/repo',
-    baseBranch: 'main',
-    branchPrefix: 'orch',
-    updateStrategy: 'merge',
-    labels: {
-      ready: ['no:ready'],
-      running: 'no:running',
-      blocked: 'no:blocked',
-      needsHuman: 'no:needs-human',
-      reviewReady: 'no:review-ready',
-      error: 'no:error',
-      retry: 'no:retry',
-      planning: 'no:planning',
-      mergeQueued: 'no:merge-queued',
-      merging: 'no:merging',
-      mergeFailed: 'no:merge-failed',
-    },
-    labelConfig: {},
-    defaults: {
-      planner: 'claude',
-      coder: 'claude',
-      reviewer: 'claude',
-      doneMode: 'pr-ready',
-      notifyPriority: 'normal',
-      prMentions: [],
-    },
-    verify: [],
-    selectors: { includeLabelsAny: [], excludeLabelsAny: [] },
-    agents: {},
-    planning: { prdDirectory: 'docs/prd' },
-    mergeQueue: { enabled: false, batchSize: 5, mergeMethod: 'merge', retryFlakyOnce: true, requireApproval: true, stagingBranchPrefix: 'orch/staging' },
-  }
-}
 
 function makeForge(overrides: Partial<ForgeAdapter> = {}): ForgeAdapter {
   return {
@@ -103,14 +63,10 @@ describe('queueContinue', () => {
 
   it('queues blocked run with merged PR/review context', async () => {
     const runManager = new RunManager(db)
-    const run = runManager.create({
-      repo: 'org/repo',
+    const run = runManager.create(makeRunInput({
       issueNumber: 58,
       issueNodeId: 'node-58',
-      planner: 'claude',
-      coder: 'claude',
-      reviewer: 'claude',
-    })
+    }))
     runManager.update(run.id, {
       status: 'blocked',
       currentPhase: 'review',
@@ -159,7 +115,7 @@ describe('queueContinue', () => {
       ]),
     })
 
-    const result = await queueContinue(db, forge, makeRepoConfig(), 58, '')
+    const result = await queueContinue(db, forge, makeTestRepoConfig(), 58, '')
 
     expect(result.queued).toBe(true)
     const updated = runManager.getByRepoAndIssue('org/repo', 58)
@@ -174,14 +130,10 @@ describe('queueContinue', () => {
 
   it('queues error runs for a follow-up continue pass', async () => {
     const runManager = new RunManager(db)
-    const run = runManager.create({
-      repo: 'org/repo',
+    const run = runManager.create(makeRunInput({
       issueNumber: 59,
       issueNodeId: 'node-59',
-      planner: 'claude',
-      coder: 'claude',
-      reviewer: 'claude',
-    })
+    }))
     runManager.update(run.id, {
       status: 'error',
       endedAt: '2026-02-01T12:00:00Z',
@@ -189,7 +141,7 @@ describe('queueContinue', () => {
     })
 
     const forge = makeForge()
-    const result = await queueContinue(db, forge, makeRepoConfig(), 59, '')
+    const result = await queueContinue(db, forge, makeTestRepoConfig(), 59, '')
 
     expect(result.queued).toBe(true)
     expect(result.reason).toContain('Queued for continue pass')
@@ -202,21 +154,17 @@ describe('queueContinue', () => {
 
   it('rejects continue for unsupported statuses', async () => {
     const runManager = new RunManager(db)
-    const run = runManager.create({
-      repo: 'org/repo',
+    const run = runManager.create(makeRunInput({
       issueNumber: 62,
       issueNodeId: 'node-62',
-      planner: 'claude',
-      coder: 'claude',
-      reviewer: 'claude',
-    })
+    }))
     runManager.update(run.id, {
       status: 'completed',
       endedAt: '2026-02-01T12:00:00Z',
     })
 
     const forge = makeForge()
-    const result = await queueContinue(db, forge, makeRepoConfig(), 62, '')
+    const result = await queueContinue(db, forge, makeTestRepoConfig(), 62, '')
 
     expect(result.queued).toBe(false)
     expect(result.reason).toContain('blocked/review_ready/error')
@@ -226,14 +174,10 @@ describe('queueContinue', () => {
 
   it('queues fallback continue context when no PR signals exist', async () => {
     const runManager = new RunManager(db)
-    const run = runManager.create({
-      repo: 'org/repo',
+    const run = runManager.create(makeRunInput({
       issueNumber: 60,
       issueNodeId: 'node-60',
-      planner: 'claude',
-      coder: 'claude',
-      reviewer: 'claude',
-    })
+    }))
     runManager.update(run.id, {
       status: 'blocked',
       endedAt: '2026-02-01T12:00:00Z',
@@ -255,7 +199,7 @@ describe('queueContinue', () => {
       listIssueComments: vi.fn().mockResolvedValue([]),
     })
 
-    const result = await queueContinue(db, forge, makeRepoConfig(), 60, '')
+    const result = await queueContinue(db, forge, makeTestRepoConfig(), 60, '')
 
     expect(result.queued).toBe(true)
     const updated = runManager.getByRepoAndIssue('org/repo', 60)
@@ -266,14 +210,10 @@ describe('queueContinue', () => {
 
   it('derives resume phase from checkpoint artifacts when current phase is missing', async () => {
     const runManager = new RunManager(db)
-    const run = runManager.create({
-      repo: 'org/repo',
+    const run = runManager.create(makeRunInput({
       issueNumber: 63,
       issueNodeId: 'node-63',
-      planner: 'claude',
-      coder: 'claude',
-      reviewer: 'claude',
-    })
+    }))
     runManager.update(run.id, {
       status: 'blocked',
       endedAt: '2026-02-01T12:00:00Z',
@@ -292,7 +232,7 @@ describe('queueContinue', () => {
       listIssueComments: vi.fn().mockResolvedValue([]),
     })
 
-    const result = await queueContinue(db, forge, makeRepoConfig(), 63, '')
+    const result = await queueContinue(db, forge, makeTestRepoConfig(), 63, '')
 
     expect(result.queued).toBe(true)
     const updated = runManager.getByRepoAndIssue('org/repo', 63)
@@ -302,14 +242,10 @@ describe('queueContinue', () => {
 
   it('supports dry-run without mutating state or posting updates', async () => {
     const runManager = new RunManager(db)
-    const run = runManager.create({
-      repo: 'org/repo',
+    const run = runManager.create(makeRunInput({
       issueNumber: 61,
       issueNodeId: 'node-61',
-      planner: 'claude',
-      coder: 'claude',
-      reviewer: 'claude',
-    })
+    }))
     runManager.update(run.id, {
       status: 'blocked',
       endedAt: '2026-02-01T12:00:00Z',
@@ -319,7 +255,7 @@ describe('queueContinue', () => {
     })
 
     const forge = makeForge()
-    const result = await queueContinue(db, forge, makeRepoConfig(), 61, '', { dryRun: true })
+    const result = await queueContinue(db, forge, makeTestRepoConfig(), 61, '', { dryRun: true })
 
     expect(result.queued).toBe(true)
     expect(result.reason).toContain('Would queue')
@@ -338,14 +274,10 @@ describe('queueContinue', () => {
 
   it('resets cost fields on continue', async () => {
     const runManager = new RunManager(db)
-    const run = runManager.create({
-      repo: 'org/repo',
+    const run = runManager.create(makeRunInput({
       issueNumber: 64,
       issueNodeId: 'node-64',
-      planner: 'claude',
-      coder: 'claude',
-      reviewer: 'claude',
-    })
+    }))
     runManager.update(run.id, {
       status: 'blocked',
       blockReason: 'cost_limit',
@@ -360,7 +292,7 @@ describe('queueContinue', () => {
     const forge = makeForge({
       listIssueComments: vi.fn().mockResolvedValue([]),
     })
-    const result = await queueContinue(db, forge, makeRepoConfig(), 64, '')
+    const result = await queueContinue(db, forge, makeTestRepoConfig(), 64, '')
 
     expect(result.queued).toBe(true)
     const updated = runManager.getByRepoAndIssue('org/repo', 64)
@@ -373,14 +305,10 @@ describe('queueContinue', () => {
 
   it('persists strategy override and records a user action event', async () => {
     const runManager = new RunManager(db)
-    const run = runManager.create({
-      repo: 'org/repo',
+    const run = runManager.create(makeRunInput({
       issueNumber: 65,
       issueNodeId: 'node-65',
-      planner: 'claude',
-      coder: 'claude',
-      reviewer: 'claude',
-    })
+    }))
     runManager.update(run.id, {
       status: 'blocked',
       manualState: 'awaiting_rebase_resolution',
@@ -421,7 +349,7 @@ describe('queueContinue', () => {
     const forge = makeForge({
       listIssueComments: vi.fn().mockResolvedValue([]),
     })
-    const result = await queueContinue(db, forge, makeRepoConfig(), 65, '', {
+    const result = await queueContinue(db, forge, makeTestRepoConfig(), 65, '', {
       strategyOverride: 'merge',
       actor: 'web',
     })

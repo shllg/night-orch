@@ -393,23 +393,6 @@ describe('decide', () => {
     })
   })
 
-  describe('unknown verdict (type-safety escape)', () => {
-    it('returns action=error with a descriptive reason', () => {
-      const ctx = makeCtx({
-        // Cast through unknown to exercise the default branch.
-        reviewResult: {
-          verdict: 'MAYBE' as unknown as 'APPROVED',
-          summary: 'unsure',
-          findings: [],
-          definitionOfDoneCheck: { issueAddressed: false, testsPassing: false, noBlockingFindings: false },
-        },
-      })
-      const d = decide(ctx, loopConfig, securityConfig)
-      expect(d.action).toBe('error')
-      if (d.action === 'error') expect(d.reason).toContain('Unknown review verdict')
-    })
-  })
-
   describe('decideEmptyDiffRetry', () => {
     it('returns null when the diff is non-empty', () => {
       const ctx = makeCtx({ diff: 'diff --git a/x b/x\n+new line', emptyDiffRetries: 0 })

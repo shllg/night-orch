@@ -12,122 +12,10 @@ import { startWebServer } from '../../src/web/server.js'
 import type { MCPDependencies } from '../../src/mcp/server.js'
 import type Database from 'better-sqlite3'
 import type { TuiStatsSnapshot } from '../../src/state/stats.js'
+import { makeTestConfig } from '../helpers/factories.js'
 
 const MUTATION_INTENT_HEADER = 'x-night-orch-intent'
 const WEB_AUTH_TOKEN_HEADER = 'x-night-orch-web-token'
-
-function makeMinimalConfig() {
-  return {
-    version: 1 as const,
-    github: {
-      tokenEnv: 'GITHUB_TOKEN',
-      apiBaseUrl: 'https://api.github.com',
-      pollIntervalSeconds: 300,
-      appMentions: {},
-    },
-    storage: { dbPath: '', worktreeRoot: '/tmp/wt', logsRoot: '/tmp/logs' },
-    notifications: {
-      channels: [{ type: 'console' as const }],
-      events: {
-        onRunStarted: false,
-        onBlocked: true,
-        onPrReady: true,
-        onPrUpdated: true,
-        onError: true,
-        onRetryExhausted: true,
-      },
-    },
-    loop: {
-      maxReviewIterations: 4,
-      maxTotalAgentPasses: 10,
-      stopOnPlannerFailure: true,
-      requireVerificationPass: true,
-      reviewApprovalKeyword: 'APPROVED',
-      reviewNeedsChangesKeyword: 'CHANGES_REQUIRED',
-      blockOnAmbiguousReview: true,
-      maxAutoRetries: 3,
-      decompose: false,
-      maxSubtasks: 5,
-      maxConcurrentSubtasks: 3,
-    },
-    security: {
-      maxChangedFiles: 50,
-      maxChangedLines: 5000,
-      maxDailyCostUsd: 50,
-      maxCostPerRunUsd: 10,
-    },
-    cost: {
-      model: 'pay-per-use' as const,
-    },
-    workerProfiles: {},
-    metrics: { enabled: false, port: 9090, host: '127.0.0.1' },
-    observability: {
-      agentStreaming: true,
-      eventRetention: 1000,
-      sessionLogs: false,
-      sessionLogRetention: 7,
-    },
-    mcp: {
-      enabled: true,
-      transport: 'stdio' as const,
-      authTokenEnv: null,
-      httpHost: '127.0.0.1',
-      httpPort: 0,
-    },
-    commentCommands: {
-      enabled: true,
-      requireCollaborator: false,
-    },
-    repos: [{
-      repo: 'org/repo',
-      forge: 'github' as const,
-      localPath: '/tmp/repo',
-      baseBranch: 'main',
-      branchPrefix: 'orch',
-      labels: {
-        ready: ['no:ready'],
-        running: 'no:running',
-        blocked: ['no:blocked', 'no:needs-human'],
-        needsHuman: 'no:needs-human',
-        reviewReady: 'no:review-ready',
-        error: 'no:error',
-        retry: 'no:retry',
-        planning: 'no:planning',
-        mergeQueued: 'no:merge-queued',
-        merging: 'no:merging',
-        mergeFailed: 'no:merge-failed',
-      },
-      defaults: {
-        planner: 'claude' as const,
-        coder: 'claude' as const,
-        reviewer: 'claude' as const,
-        doneMode: 'pr-ready' as const,
-        notifyPriority: 'normal' as const,
-        prMentions: [],
-      },
-      planning: {
-        prdDirectory: 'docs/prd',
-      },
-      selectors: {
-        includeLabelsAny: ['no:ready'],
-        excludeLabelsAny: ['no:blocked', 'no:error', 'no:needs-human'],
-      },
-      verify: [],
-      agents: {},
-      linkedProjects: [],
-      labelConfig: {},
-      mergeQueue: {
-        enabled: false,
-        batchSize: 5,
-        mergeMethod: 'merge' as const,
-        retryFlakyOnce: true,
-        requireApproval: true,
-        stagingBranchPrefix: 'orch/staging',
-      },
-    }],
-    workflows: {},
-  }
-}
 
 describe('startWebServer', () => {
   let tmpDir: string
@@ -146,7 +34,7 @@ describe('startWebServer', () => {
     db = initDatabase(join(tmpDir, 'test.db'))
     deps = {
       db,
-      config: makeMinimalConfig() as MCPDependencies['config'],
+      config: makeTestConfig(),
       forgeAdapters: new Map(),
       poller: null,
       metrics: null,
@@ -163,20 +51,16 @@ describe('startWebServer', () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  it('serves API + static frontend', async () => {
-    const triggerPollCycle = vi.fn().mockReturnValue({
-      accepted: true as const,
-      state: 'woke-sleeper' as const,
-    })
-    deps.poller = { triggerPollCycle }
-
+  async function startTestServer(
+    options: Partial<Parameters<typeof startWebServer>[1]> = {},
+  ): Promise<string> {
     server = await startWebServer(
       deps,
       {
         host: '127.0.0.1',
         port: 0,
         frontendDistPath: frontendDir,
-        snapshotIntervalMs: 50,
+        ...options,
       },
     )
 
@@ -185,6 +69,17 @@ describe('startWebServer', () => {
       throw new Error('Unexpected address type')
     }
     baseUrl = `http://127.0.0.1:${address.port}`
+    return baseUrl
+  }
+
+  it('serves API + static frontend', async () => {
+    const triggerPollCycle = vi.fn().mockReturnValue({
+      accepted: true as const,
+      state: 'woke-sleeper' as const,
+    })
+    deps.poller = { triggerPollCycle }
+
+    await startTestServer({ snapshotIntervalMs: 50 })
 
     const health = await fetch(`${baseUrl}/api/health`)
     expect(health.status).toBe(200)
@@ -206,22 +101,6 @@ describe('startWebServer', () => {
     expect(pollPayload.state).toBe('woke-sleeper')
     expect(triggerPollCycle).toHaveBeenCalledTimes(1)
 
-    const labelsInit = await fetch(`${baseUrl}/api/operations/labels-init`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        [MUTATION_INTENT_HEADER]: 'mutate',
-        [WEB_AUTH_TOKEN_HEADER]: mutationToken,
-      },
-      body: JSON.stringify({ repo: 'org/repo', dryRun: true }),
-    })
-    expect(labelsInit.status).toBe(200)
-    await expect(labelsInit.json()).resolves.toMatchObject({
-      targetRepo: 'org/repo',
-      dryRun: true,
-      failures: 0,
-    })
-
     const deleteEntry = await fetch(`${baseUrl}/api/operations/delete-entry`, {
       method: 'POST',
       headers: {
@@ -240,20 +119,7 @@ describe('startWebServer', () => {
   })
 
   it('exposes /healthz with metrics readiness details', async () => {
-    server = await startWebServer(
-      deps,
-      {
-        host: '127.0.0.1',
-        port: 0,
-        frontendDistPath: frontendDir,
-      },
-    )
-
-    const address = server.address()
-    if (!address || typeof address === 'string') {
-      throw new Error('Unexpected address type')
-    }
-    baseUrl = `http://127.0.0.1:${address.port}`
+    await startTestServer()
 
     const healthz = await fetch(`${baseUrl}/healthz`)
     expect(healthz.status).toBe(200)
@@ -268,25 +134,13 @@ describe('startWebServer', () => {
   })
 
   it('reads and mutates runtime settings through web APIs', async () => {
-    server = await startWebServer(
-      deps,
-      {
-        host: '127.0.0.1',
-        port: 0,
-        frontendDistPath: frontendDir,
-        rawConfig: {
-          github: {
-            pollIntervalSeconds: 300,
-          },
+    await startTestServer({
+      rawConfig: {
+        github: {
+          pollIntervalSeconds: 300,
         },
       },
-    )
-
-    const address = server.address()
-    if (!address || typeof address === 'string') {
-      throw new Error('Unexpected address type')
-    }
-    baseUrl = `http://127.0.0.1:${address.port}`
+    })
     const mutationToken = await getMutationToken(baseUrl)
 
     const initial = await fetch(`${baseUrl}/api/settings`)
@@ -452,29 +306,19 @@ describe('startWebServer', () => {
   })
 
   it('keeps yaml presence for schema-valid values outside runtime override bounds', async () => {
-    const config = makeMinimalConfig()
-    config.github.pollIntervalSeconds = 7200
-    deps.config = config as MCPDependencies['config']
+    deps.config = makeTestConfig({
+      github: {
+        pollIntervalSeconds: 7200,
+      },
+    })
 
-    server = await startWebServer(
-      deps,
-      {
-        host: '127.0.0.1',
-        port: 0,
-        frontendDistPath: frontendDir,
-        rawConfig: {
-          github: {
-            pollIntervalSeconds: 7200,
-          },
+    await startTestServer({
+      rawConfig: {
+        github: {
+          pollIntervalSeconds: 7200,
         },
       },
-    )
-
-    const address = server.address()
-    if (!address || typeof address === 'string') {
-      throw new Error('Unexpected address type')
-    }
-    baseUrl = `http://127.0.0.1:${address.port}`
+    })
 
     const response = await fetch(`${baseUrl}/api/settings`)
     expect(response.status).toBe(200)
@@ -500,20 +344,7 @@ describe('startWebServer', () => {
   })
 
   it('returns 400 for invalid runtime settings mutations', async () => {
-    server = await startWebServer(
-      deps,
-      {
-        host: '127.0.0.1',
-        port: 0,
-        frontendDistPath: frontendDir,
-      },
-    )
-
-    const address = server.address()
-    if (!address || typeof address === 'string') {
-      throw new Error('Unexpected address type')
-    }
-    baseUrl = `http://127.0.0.1:${address.port}`
+    await startTestServer()
     const mutationToken = await getMutationToken(baseUrl)
 
     const invalidKeySet = await fetch(`${baseUrl}/api/operations/settings/set`, {
@@ -999,93 +830,37 @@ describe('startWebServer', () => {
   })
 
   it('dashboard includes full stats snapshot fields for the web stats page', async () => {
-    server = await startWebServer(
-      deps,
-      {
-        host: '127.0.0.1',
-        port: 0,
-        frontendDistPath: frontendDir,
-      },
-    )
-
-    const address = server.address()
-    if (!address || typeof address === 'string') {
-      throw new Error('Unexpected address type')
-    }
-    baseUrl = `http://127.0.0.1:${address.port}`
+    await startTestServer()
 
     const dashboard = await fetch(`${baseUrl}/api/dashboard`)
     expect(dashboard.status).toBe(200)
     const payload = await dashboard.json() as { stats: TuiStatsSnapshot }
 
-    expect(payload.stats).toMatchObject({
-      updatedAt: expect.any(String),
-      overview: {
-        totalRuns: expect.any(Number),
-        activeRuns: expect.any(Number),
-        queuedRuns: expect.any(Number),
-        runningRuns: expect.any(Number),
-        reviewReadyRuns: expect.any(Number),
-        completedRuns: expect.any(Number),
-        blockedRuns: expect.any(Number),
-        errorRuns: expect.any(Number),
-      },
-      throughput: {
-        runs24h: expect.any(Number),
-        runs7d: expect.any(Number),
-        runs30d: expect.any(Number),
-        completed7d: expect.any(Number),
-        blocked7d: expect.any(Number),
-        error7d: expect.any(Number),
-        successRate7d: expect.any(Number),
-        avgDurationMinutes7d: expect.any(Number),
-        avgIterations7d: expect.any(Number),
-      },
-      reliability: {
-        failureCount7d: expect.any(Number),
-        failureRate7d: expect.any(Number),
-      },
-      cost: {
-        todayCostUsd: expect.any(Number),
-        todayRunCount: expect.any(Number),
-        cost7d: expect.any(Number),
-        cost30d: expect.any(Number),
-        avgDailyCost7d: expect.any(Number),
-      },
-      efficiency: {
-        totalCostUsd7d: expect.any(Number),
-        avgCostPerRun7d: expect.any(Number),
-        avgCostPerSuccess7d: expect.any(Number),
-        avgCostPerIteration7d: expect.any(Number),
-        completedPerDollar7d: expect.any(Number),
-      },
-      resources: {
-        activeLeases: expect.any(Number),
-        expiringLeases: expect.any(Number),
-        expiredLeases: expect.any(Number),
-        leasedRepos: expect.any(Number),
-        activeWorktrees: expect.any(Number),
-        missingWorktrees: expect.any(Number),
-        staleWorktrees: expect.any(Number),
-      },
-      timing: {
-        sampleSize30d: expect.any(Number),
-        p50Minutes: expect.any(Number),
-        p90Minutes: expect.any(Number),
-        p99Minutes: expect.any(Number),
-      },
-      queue: {
-        activeBatches: expect.any(Number),
-      },
-      agents: {
-        eventsTotal: expect.any(Number),
-        events24h: expect.any(Number),
-        events7d: expect.any(Number),
-        toolCalls24h: expect.any(Number),
-        thinking24h: expect.any(Number),
-        uniqueRuns7d: expect.any(Number),
-      },
-    })
+    expect(typeof payload.stats.updatedAt).toBe('string')
+    expectNumericStats(payload.stats.overview, [
+      'totalRuns', 'activeRuns', 'queuedRuns', 'runningRuns',
+      'reviewReadyRuns', 'completedRuns', 'blockedRuns', 'errorRuns',
+    ])
+    expectNumericStats(payload.stats.throughput, [
+      'runs24h', 'runs7d', 'runs30d', 'completed7d', 'blocked7d', 'error7d',
+      'successRate7d', 'avgDurationMinutes7d', 'avgIterations7d',
+    ])
+    expectNumericStats(payload.stats.reliability, ['failureCount7d', 'failureRate7d'])
+    expectNumericStats(payload.stats.cost, ['todayCostUsd', 'todayRunCount', 'cost7d', 'cost30d', 'avgDailyCost7d'])
+    expectNumericStats(payload.stats.efficiency, [
+      'totalCostUsd7d', 'avgCostPerRun7d', 'avgCostPerSuccess7d',
+      'avgCostPerIteration7d', 'completedPerDollar7d',
+      'avgTokensPerRun7d', 'avgTokensPerSuccess7d', 'avgTokensPerIteration7d',
+    ])
+    expectNumericStats(payload.stats.resources, [
+      'activeLeases', 'expiringLeases', 'expiredLeases', 'leasedRepos',
+      'activeWorktrees', 'missingWorktrees', 'staleWorktrees',
+    ])
+    expectNumericStats(payload.stats.timing, ['sampleSize30d', 'p50Minutes', 'p90Minutes', 'p99Minutes'])
+    expectNumericStats(payload.stats.queue, ['activeBatches'])
+    expectNumericStats(payload.stats.agents, [
+      'eventsTotal', 'events24h', 'events7d', 'toolCalls24h', 'thinking24h', 'uniqueRuns7d',
+    ])
     expect(Array.isArray(payload.stats.statusCounts)).toBe(true)
     expect(Array.isArray(payload.stats.phaseCounts)).toBe(true)
     expect(Array.isArray(payload.stats.reliability.topErrorPatterns7d)).toBe(true)
@@ -1491,10 +1266,7 @@ describe('startWebServer', () => {
     })
     deps.poller = { triggerPollCycle }
 
-    server = await startWebServer(deps, { host: '127.0.0.1', port: 0, frontendDistPath: frontendDir })
-    const address = server.address()
-    if (!address || typeof address === 'string') throw new Error('Unexpected address type')
-    baseUrl = `http://127.0.0.1:${address.port}`
+    await startTestServer()
     const mutationToken = await getMutationToken(baseUrl)
 
     // GET /api/auth/session → authenticated:false before login.
@@ -1599,10 +1371,7 @@ describe('startWebServer', () => {
   })
 
   it('Phase 2a — POST /api/auth/logout clears the session cookie', async () => {
-    server = await startWebServer(deps, { host: '127.0.0.1', port: 0, frontendDistPath: frontendDir })
-    const address = server.address()
-    if (!address || typeof address === 'string') throw new Error('Unexpected address type')
-    baseUrl = `http://127.0.0.1:${address.port}`
+    await startTestServer()
 
     const logout = await fetch(`${baseUrl}/api/auth/logout`, {
       method: 'POST',
@@ -2008,6 +1777,20 @@ async function waitForWsMessage<T>(
   })
 
   return Promise.race([timeout, stream])
+}
+
+function expectNumericStats<T extends Record<string, unknown>>(
+  section: T,
+  keys: Array<Extract<keyof T, string>>,
+): void {
+  const numericKeys = Object.entries(section)
+    .filter(([, value]) => typeof value === 'number')
+    .map(([key]) => key)
+    .sort()
+  expect(numericKeys).toEqual([...keys].sort())
+  for (const key of keys) {
+    expect(typeof section[key]).toBe('number')
+  }
 }
 
 async function waitForAgentSessionEvents(

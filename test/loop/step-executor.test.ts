@@ -13,6 +13,7 @@ import type { RunContext } from '../../src/loop/types.js'
 import type { WorkerStep, VerifyStep, DecideStep } from '../../src/loop/workflow.js'
 import type { Config } from '../../src/config/schema.js'
 import type { WorkerAdapter, WorkerTaskResult } from '../../src/workers/types.js'
+import { makeTestConfig } from '../helpers/factories.js'
 
 // Mock external deps
 vi.mock('execa', () => ({
@@ -26,11 +27,6 @@ vi.mock('../../src/utils/logger.js', () => ({
     warn: vi.fn(),
     error: vi.fn(),
   },
-}))
-
-vi.mock('../../src/workers/env.js', () => ({
-  buildWorkerEnv: vi.fn().mockReturnValue({ PATH: '/usr/bin' }),
-  buildVerifierEnv: vi.fn().mockReturnValue({ PATH: '/usr/bin' }),
 }))
 
 vi.mock('../../src/git/repo.js', () => ({
@@ -123,32 +119,20 @@ function makeMockAdapter(result: WorkerTaskResult): WorkerAdapter {
 }
 
 function makeConfig(): Config {
-  return {
-    version: 1,
-    github: { tokenEnv: 'GITHUB_TOKEN', apiBaseUrl: 'https://api.github.com', pollIntervalSeconds: 300, appMentions: {} },
+  return makeTestConfig({
     storage: { dbPath: '', worktreeRoot: '', logsRoot: '' },
-    notifications: { channels: [{ type: 'console' }], events: { onRunStarted: false, onBlocked: true, onPrReady: true, onPrUpdated: true, onError: true, onRetryExhausted: true } },
-    loop: {
-      maxReviewIterations: 4,
-      maxTotalAgentPasses: 10,
-      stopOnPlannerFailure: true,
-      requireVerificationPass: true,
-      reviewApprovalKeyword: 'APPROVED',
-      reviewNeedsChangesKeyword: 'CHANGES_REQUIRED',
-      blockOnAmbiguousReview: true,
-    },
-    security: { maxChangedFiles: 50, maxChangedLines: 5000, maxDailyCostUsd: 50, maxCostPerRunUsd: 10 },
-    cost: {
-      model: 'pay-per-use',
-      allowEstimatedDuration: false,
-      subscriptionMetered: { advisoryThresholdUsd: null, enforcePerRunLimit: false, enforceDailyLimit: false },
-    },
     workerProfiles: {
-      claude: { type: 'claude', command: 'claude', args: ['-p'], workerTimeoutSeconds: 1800, minimalEnv: true, runtimeWrapper: null, env: {} },
+      claude: {
+        type: 'claude',
+        command: 'claude',
+        args: ['-p'],
+        workerTimeoutSeconds: 1800,
+        minimalEnv: true,
+        runtimeWrapper: null,
+        env: {},
+      },
     },
-    metrics: { enabled: false, port: 9090, host: '127.0.0.1' },
-    repos: [],
-  } as Config
+  })
 }
 
 function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
