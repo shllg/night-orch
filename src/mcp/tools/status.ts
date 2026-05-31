@@ -2,7 +2,7 @@ import type { MCPDependencies } from '../server.js'
 import type { ForgeIssue } from '../../forge/types.js'
 import { RunManager } from '../../state/runs.js'
 import { loadIssueLogEvents, loadRunLogEvents } from '../../state/run-log-events.js'
-import { loadRuns } from '../../state/run-list.js'
+import { loadRuns, type RunListRow } from '../../state/run-list.js'
 import { CostTracker } from '../../loop/cost.js'
 import { isIssueEligibleForRepo } from '../../discovery/discover.js'
 import { flushActiveAgentObservability } from '../../events/observability.js'
@@ -44,19 +44,35 @@ interface InboxIssueRow {
   operation_intent: string | null
 }
 
-interface HistoryRunRow extends RunTimingRow {
-  repo: string
-  issue_number: number
-  status: string
-  issue_title: string | null
-  pr_number: number | null
-  current_phase: string | null
-  iteration_count: number | null
-  estimated_cost_usd: number | null
-  prompt_tokens: number | null
-  completion_tokens: number | null
-  cache_read_tokens: number | null
-  last_error: string | null
+type HistoryRunRow = Pick<
+  RunListRow,
+  | 'id'
+  | 'repo'
+  | 'issue_number'
+  | 'status'
+  | 'issue_title'
+  | 'pr_number'
+  | 'current_phase'
+  | 'iteration_count'
+  | 'estimated_cost_usd'
+  | 'prompt_tokens'
+  | 'completion_tokens'
+  | 'cache_read_tokens'
+  | 'last_error'
+> & RunTimingRow
+
+type RecentCompletedRow = Pick<
+  RunListRow,
+  'id' | 'repo' | 'issue_number' | 'status'
+> & { ended_at: string | null }
+
+interface DailyCostRow {
+  date: string
+  total_cost_usd: number
+  run_count: number
+  total_prompt_tokens: number
+  total_completion_tokens: number
+  total_cache_read_tokens: number
 }
 
 interface QueryRunHistoryPageOptions {
@@ -96,7 +112,7 @@ function queryRunHistoryPage(
   params.push(options.limit + 1, options.offset)
 
   const rows = deps.db
-    .prepare(
+    .prepare<unknown[], HistoryRunRow>(
       `SELECT
          r.id,
          r.repo,
@@ -139,7 +155,7 @@ function queryRunHistoryPage(
        LIMIT ?
        OFFSET ?`,
     )
-    .all(...params) as HistoryRunRow[]
+    .all(...params)
 
   const hasMore = rows.length > options.limit
   return {
@@ -159,8 +175,8 @@ function loadRunTimingsByRunId(
 
   const placeholders = uniqueRunIds.map(() => '?').join(', ')
   const rows = deps.db
-    .prepare(`SELECT id, started_at, ended_at FROM runs WHERE id IN (${placeholders})`)
-    .all(...uniqueRunIds) as RunTimingRow[]
+    .prepare<unknown[], RunTimingRow>(`SELECT id, started_at, ended_at FROM runs WHERE id IN (${placeholders})`)
+    .all(...uniqueRunIds)
 
   return new Map(rows.map((row) => [row.id, row]))
 }
@@ -296,9 +312,9 @@ export async function handleStatus(args: { repo?: string }, deps: MCPDependencie
   const recentSql = args.repo
     ? "SELECT * FROM runs WHERE status = 'completed' AND repo = ? ORDER BY updated_at DESC LIMIT 10"
     : "SELECT * FROM runs WHERE status = 'completed' ORDER BY updated_at DESC LIMIT 10"
-  const recentRows = args.repo
-    ? deps.db.prepare(recentSql).all(args.repo)
-    : deps.db.prepare(recentSql).all()
+  const recentRows: RecentCompletedRow[] = args.repo
+    ? deps.db.prepare<[string], RecentCompletedRow>(recentSql).all(args.repo)
+    : deps.db.prepare<[], RecentCompletedRow>(recentSql).all()
 
   return {
     activeRuns: filtered.length,
@@ -310,7 +326,7 @@ export async function handleStatus(args: { repo?: string }, deps: MCPDependencie
       phase: r.currentPhase,
       iteration: r.iterationCount,
     })),
-    recentCompleted: (recentRows as Array<{ id: string; repo: string; issue_number: number; status: string; ended_at: string | null }>).map((r) => ({
+    recentCompleted: recentRows.map((r) => ({
       runId: r.id,
       repo: r.repo,
       issue: r.issue_number,
@@ -454,7 +470,7 @@ export async function handleListInbox(
   }
 
   const rows = deps.db
-    .prepare(
+    .prepare<unknown[], InboxIssueRow>(
       `SELECT
          i.repo,
          i.issue_number,
@@ -475,7 +491,7 @@ export async function handleListInbox(
        LEFT JOIN runs r ON r.id = i.current_run_id
        WHERE ${where.join(' AND ')}`,
     )
-    .all(...params) as InboxIssueRow[]
+    .all(...params)
 
   const triaged = rows.map((row) => {
     const triage = classifyInboxTriage(row)
@@ -549,7 +565,7 @@ export async function handleCostReport(args: { days?: number }, deps: MCPDepende
   const dailyBudgetOverrideUsd = costTracker.getDailyCapOverride()
   const effectiveDailyBudgetUsd = dailyBudgetOverrideUsd ?? deps.config.security.maxDailyCostUsd
   const rows = deps.db
-    .prepare(
+    .prepare<[number], DailyCostRow>(
       `SELECT
          date,
          total_cost_usd,
@@ -561,14 +577,7 @@ export async function handleCostReport(args: { days?: number }, deps: MCPDepende
        ORDER BY date DESC
        LIMIT ?`,
     )
-    .all(days) as Array<{
-      date: string
-      total_cost_usd: number
-      run_count: number
-      total_prompt_tokens: number
-      total_completion_tokens: number
-      total_cache_read_tokens: number
-    }>
+    .all(days)
 
   const totalCost = rows.reduce((sum, r) => sum + r.total_cost_usd, 0)
   const totalRuns = rows.reduce((sum, r) => sum + r.run_count, 0)

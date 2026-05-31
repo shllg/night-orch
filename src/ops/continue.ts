@@ -16,6 +16,7 @@ import { parseUtcTimestampMs, nowUtcIso } from '../utils/time.js'
 import { resolveIssueRepo } from '../utils/issue-repo.js'
 import { upsertBotComment, markerTag } from '../forge/bot-comment.js'
 import { logger } from '../utils/logger.js'
+import { z } from 'zod'
 
 const STATUS_MARKER = markerTag('status')
 const COMMENT_COMMAND_RE = /^\s*\/(?:orch|night-orch)\b/im
@@ -28,6 +29,25 @@ const EMPTY_CURSOR: ReactionCursor = {
 
 const CONTINUABLE_STATUSES = new Set(['blocked', 'review_ready', 'error'])
 const PHASE_CHECKPOINT_FALLBACK_ORDER = ['decide', 'review', 'verify', 'code', 'plan'] as const
+
+interface ContinueConflictExcerpt {
+  path: string
+  preview: string
+}
+
+const ContinueControlPayloadSchema = z.object({
+  conflictSummary: z.unknown().optional().transform((value) => typeof value === 'string' ? value : undefined),
+  conflictFiles: z.unknown().optional().transform((value) => toStringArray(value)),
+  conflictExcerpts: z.unknown().optional().transform((value) => toConflictExcerpts(value)),
+  conflictSnapshot: z.unknown().optional(),
+}).passthrough()
+
+type ContinueControlPayload = z.infer<typeof ContinueControlPayloadSchema>
+
+const EMPTY_CONTINUE_CONTROL_PAYLOAD: ContinueControlPayload = {
+  conflictFiles: [],
+  conflictExcerpts: [],
+}
 
 export interface QueueContinueOptions {
   issueRepo?: string
@@ -244,6 +264,7 @@ async function buildFollowupContext(params: BuildFollowupContextParams): Promise
     manualState,
     controlPayload,
   } = params
+  const parsedControlPayload = parseContinueControlPayload(controlPayload)
 
   const sections: string[] = []
   const summaryParts: string[] = []
@@ -253,8 +274,8 @@ async function buildFollowupContext(params: BuildFollowupContextParams): Promise
   }
 
   if (manualState === 'awaiting_rebase_resolution') {
-    const rebaseContext = formatRebaseResolutionContext(controlPayload)
-    const snapshot = coerceConflictSnapshot(controlPayload?.['conflictSnapshot'])
+    const rebaseContext = formatRebaseResolutionContext(parsedControlPayload)
+    const snapshot = coerceConflictSnapshot(parsedControlPayload.conflictSnapshot)
     sections.push(rebaseContext)
     summaryParts.push(snapshot?.source === 'branch_refresh' ? 'branch refresh conflict resolution' : 'rebase conflict resolution')
   }
@@ -297,12 +318,12 @@ async function buildFollowupContext(params: BuildFollowupContextParams): Promise
     primaryType: manualState === 'awaiting_rebase_resolution' ? 'rebase_conflict_resolution' : 'continue',
     summary,
     context: sections.join('\n\n'),
-    conflictSnapshot: coerceConflictSnapshot(controlPayload?.['conflictSnapshot']),
+    conflictSnapshot: coerceConflictSnapshot(parsedControlPayload.conflictSnapshot),
   }
 }
 
-function formatRebaseResolutionContext(controlPayload: Record<string, unknown> | null): string {
-  const snapshot = coerceConflictSnapshot(controlPayload?.['conflictSnapshot'])
+function formatRebaseResolutionContext(controlPayload: ContinueControlPayload): string {
+  const snapshot = coerceConflictSnapshot(controlPayload.conflictSnapshot)
   const contextLabel = snapshot?.source === 'branch_refresh' ? 'Branch Refresh Conflict Analysis' : 'Rebase Conflict Analysis'
   const guidance = snapshot?.source === 'branch_refresh'
     ? 'A prior branch refresh attempt hit conflicts. Continue should keep the existing branch and reconcile the upstream changes instead of starting fresh.'
@@ -313,28 +334,27 @@ function formatRebaseResolutionContext(controlPayload: Record<string, unknown> |
     guidance,
   ]
 
-  const summary = typeof controlPayload?.conflictSummary === 'string' ? controlPayload.conflictSummary.trim() : ''
+  const summary = controlPayload.conflictSummary?.trim() ?? ''
   if (summary) {
     lines.push('', summary)
   }
 
-  const files = Array.isArray(controlPayload?.conflictFiles) ? controlPayload.conflictFiles : []
+  const files = controlPayload.conflictFiles
   if (files.length > 0) {
     lines.push('', 'Conflicting files:')
     for (const value of files.slice(0, 12)) {
-      if (typeof value === 'string' && value.trim().length > 0) {
+      if (value.trim().length > 0) {
         lines.push(`- ${value}`)
       }
     }
   }
 
-  const excerpts = Array.isArray(controlPayload?.conflictExcerpts) ? controlPayload.conflictExcerpts : []
+  const excerpts = controlPayload.conflictExcerpts
   if (excerpts.length > 0) {
     lines.push('', 'Conflict excerpts:')
     for (const entry of excerpts.slice(0, 3)) {
-      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue
-      const path = typeof entry['path'] === 'string' ? entry['path'] : '(unknown)'
-      const preview = typeof entry['preview'] === 'string' ? entry['preview'] : ''
+      const path = entry.path
+      const preview = entry.preview
       lines.push(`- ${path}`)
       if (preview.trim()) {
         lines.push(`  Preview: ${preview.trim()}`)
@@ -343,6 +363,36 @@ function formatRebaseResolutionContext(controlPayload: Record<string, unknown> |
   }
 
   return lines.join('\n')
+}
+
+function parseContinueControlPayload(
+  value: Record<string, unknown> | null,
+): ContinueControlPayload {
+  if (!value) {
+    return EMPTY_CONTINUE_CONTROL_PAYLOAD
+  }
+  const parsed = ContinueControlPayloadSchema.safeParse(value)
+  if (!parsed.success) {
+    return EMPTY_CONTINUE_CONTROL_PAYLOAD
+  }
+  return parsed.data
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((entry): entry is string => typeof entry === 'string')
+}
+
+function toConflictExcerpts(value: unknown): ContinueConflictExcerpt[] {
+  if (!Array.isArray(value)) return []
+  const excerpts: ContinueConflictExcerpt[] = []
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue
+    const path = typeof entry['path'] === 'string' ? entry['path'] : '(unknown)'
+    const preview = typeof entry['preview'] === 'string' ? entry['preview'] : ''
+    excerpts.push({ path, preview })
+  }
+  return excerpts
 }
 
 interface CollectReactionsParams {

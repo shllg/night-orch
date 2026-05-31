@@ -53,6 +53,7 @@ import {
   resolveWorkerProfileForAgent,
   extractFollowupPromptFeedback,
   buildAttemptHistoryFollowup,
+  type RunControlPayload,
   resolveControlPayload,
   deriveBranchPolicy,
   resolveOperationIntent,
@@ -130,7 +131,7 @@ export async function dispatchAttempt(
   } = params
   const pollerNotifier = new PollerNotifier(innerNotifier)
 
-  const issueRepo = discoveredIssue.issueRepo || discoveredIssue.issue.repo || repoConfig.repo
+  const issueRepo = discoveredIssue.issueRepo
 
   if (discoveredIssue.triage.level === 'architectural') {
     const labelConfig = buildLabelConfig(repoConfig, discoveredIssue.issue.labels)
@@ -787,7 +788,7 @@ interface HandleBranchRefreshRunParams {
   runManager: RunManager
   pollerNotifier: PollerNotifier
   botUser: string
-  controlPayload: Record<string, unknown> | null
+  controlPayload: RunControlPayload | null
   operationIntent: 'refresh' | 'rebase'
   updateStrategyOverride?: UpdateStrategy
   metrics?: MetricsService
@@ -837,7 +838,7 @@ async function handleBranchRefreshRun(params: HandleBranchRefreshRunParams): Pro
     issueRepo,
     discoveredIssue.issue.number,
     verifyCommands,
-    controlPayload?.['checkAfter'] !== false,
+    controlPayload?.checkAfter !== false,
     strategy,
     {
       issueTitle: discoveredIssue.issue.title,
@@ -1011,8 +1012,7 @@ async function handleBranchRefreshRun(params: HandleBranchRefreshRunParams): Pro
 }
 
 function resolveUpdateStrategyOverride(
-  controlPayload: Record<string, unknown> | null,
+  controlPayload: RunControlPayload | null,
 ): UpdateStrategy | undefined {
-  const raw = controlPayload?.['updateStrategy']
-  return raw === 'merge' || raw === 'rebase' ? raw : undefined
+  return controlPayload?.updateStrategy
 }

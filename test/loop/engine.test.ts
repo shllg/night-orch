@@ -1045,6 +1045,46 @@ describe('executeLoop', () => {
     expect(reviewerAdapter.runTask).toHaveBeenCalledTimes(1)
   })
 
+  it('coerces invalid persisted blockReason to null when replaying terminal decide outcomes', async () => {
+    db.prepare('UPDATE runs SET current_phase = ?, phase_data = ? WHERE id = ?').run(
+      'decide',
+      JSON.stringify({
+        __decisionOutcomes: {
+          decide: {
+            action: 'block',
+            reason: 'manual block replay',
+            blockReason: 'invalid_legacy_reason',
+          },
+        },
+      }),
+      'run-test-1',
+    )
+
+    const plannerAdapter = makeMockAdapter([makePlannerResult('Should not run')])
+    const coderAdapter = makeMockAdapter([makeCoderResult()])
+    const reviewerAdapter = makeMockAdapter([makeReviewerResult('APPROVED')])
+
+    const deps: LoopDependencies = {
+      db,
+      config: makeConfig(),
+      adapters: {
+        planner: plannerAdapter,
+        coder: coderAdapter,
+        reviewer: reviewerAdapter,
+      },
+      workflow: DEFAULT_WORKFLOW,
+    }
+
+    const result = await executeLoop(makeCtx(), deps)
+
+    expect(result.terminalStatus).toBe('blocked')
+    expect(result.blockReason).toBeNull()
+    expect(result.stepOutputs['blockMessage']).toBe('manual block replay')
+    expect(plannerAdapter.runTask).not.toHaveBeenCalled()
+    expect(coderAdapter.runTask).not.toHaveBeenCalled()
+    expect(reviewerAdapter.runTask).not.toHaveBeenCalled()
+  })
+
   describe('empty-diff guard', () => {
     it('auto-retries coder when diff is empty, then succeeds on second attempt', async () => {
       const mockGetDiff = vi.mocked(getDiffAgainstBranch)

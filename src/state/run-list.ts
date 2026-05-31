@@ -266,6 +266,6 @@ export function loadRuns(
     }
   }
 
-  const stmt = db.prepare(limitedQuery)
-  return stmt.all(...params) as RunListRow[]
+  const stmt = db.prepare<unknown[], RunListRow>(limitedQuery)
+  return stmt.all(...params)
 }

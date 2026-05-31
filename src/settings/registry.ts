@@ -1,5 +1,5 @@
 import type { z } from 'zod'
-import type { Config } from '../config/schema.js'
+import { ConfigSchema, type Config } from '../config/schema.js'
 import { githubDefinitions } from './definitions/github.js'
 import { loopDefinitions } from './definitions/loop.js'
 import { observabilityDefinitions } from './definitions/observability.js'
@@ -546,7 +546,14 @@ function readJsonValue(config: Config, path: SettingPath, fallback: JsonValue): 
 }
 
 function setConfigValue(config: Config, path: SettingPath, value: unknown): Config {
-  return setPathValue(config, path, value) as Config
+  const nextConfigCandidate = setPathValue(config, path, value)
+  const validation = ConfigSchema.safeParse(nextConfigCandidate)
+  if (!validation.success) {
+    const firstIssue = validation.error.issues[0]
+    const pathLabel = firstIssue?.path.join('.') || 'root'
+    throw new Error(`Invalid config after updating ${path.join('.')}: ${pathLabel} ${firstIssue?.message ?? 'validation failed'}`)
+  }
+  return validation.data
 }
 
 function readPathValue(source: unknown, path: readonly string[]): unknown {

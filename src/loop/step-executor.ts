@@ -1,6 +1,14 @@
 import type { RunContext, LoopDecision } from './types.js'
 import type { WorkflowStep, WorkerStep, VerifyStep, DecideStep } from './workflow.js'
-import type { WorkerAdapter, WorkerTaskInput, PromptContext, WorkerTaskResult } from '../workers/types.js'
+import type {
+  WorkerAdapter,
+  WorkerTaskInput,
+  PromptContext,
+  WorkerTaskResult,
+  PlannerOutput,
+  CoderOutput,
+  ReviewerOutput,
+} from '../workers/types.js'
 import type { Config } from '../config/schema.js'
 import type { MetricsService } from '../metrics/service.js'
 import type { AgentEvent } from '../events/types.js'
@@ -15,6 +23,7 @@ import { getDiffAgainstBranch } from '../git/repo.js'
 import { superviseWorker } from './supervisor.js'
 import {
   WorkerAuthError,
+  WorkerParseError,
   WorkerTimeoutError,
   WorkerTokenCaptureError,
   WorkerTransientError,
@@ -24,6 +33,7 @@ import { getRemediation } from '../workers/auth-check.js'
 import { logger } from '../utils/logger.js'
 import { buildPlanningPrdPath, isPlanningIssue } from '../planning/mode.js'
 import { coerceConflictSnapshot } from '../ops/conflict-types.js'
+import { z } from 'zod'
 
 export interface StepDependencies {
   adapters: Record<string, WorkerAdapter>
@@ -45,6 +55,43 @@ export interface StepResult {
   /** For decide steps: the decision action. */
   decision?: LoopDecision
 }
+
+const PlannerOutputContractSchema: z.ZodType<PlannerOutput> = z.object({
+  objective: z.string(),
+  assumptions: z.array(z.string()),
+  filesToChange: z.array(z.string()),
+  steps: z.array(z.object({
+    order: z.number(),
+    description: z.string(),
+    files: z.array(z.string()),
+  })),
+  risks: z.array(z.string()),
+  testStrategy: z.string(),
+})
+
+const CoderOutputContractSchema: z.ZodType<CoderOutput> = z.object({
+  summary: z.string(),
+  changedFiles: z.array(z.string()),
+  remainingUncertainty: z.string().nullable(),
+  blockers: z.array(z.string()).nullable(),
+})
+
+const ReviewerOutputContractSchema: z.ZodType<ReviewerOutput> = z.object({
+  verdict: z.enum(['APPROVED', 'CHANGES_REQUIRED', 'BLOCKED']),
+  summary: z.string(),
+  findings: z.array(
+    z.object({
+      severity: z.enum(['critical', 'major', 'minor']),
+      message: z.string(),
+      suggestedFix: z.string().nullable(),
+    }),
+  ),
+  definitionOfDoneCheck: z.object({
+    issueAddressed: z.boolean(),
+    testsPassing: z.boolean(),
+    noBlockingFindings: z.boolean(),
+  }),
+})
 
 /**
  * Dispatch a workflow step to the appropriate executor based on step type.
@@ -458,18 +505,72 @@ function buildWorkerCtxPatch(
 
   switch (step.role) {
     case 'planner':
-      return { ...basePatch, plan: result.parsed as RunContext['plan'] }
+      return {
+        ...basePatch,
+        plan: parseWorkerOutputForRole(
+          step,
+          result,
+          profileType,
+          PlannerOutputContractSchema,
+          'planner',
+        ),
+      }
 
     case 'coder':
-      return { ...basePatch, codeResult: result.parsed as RunContext['codeResult'] }
+      return {
+        ...basePatch,
+        codeResult: parseWorkerOutputForRole(
+          step,
+          result,
+          profileType,
+          CoderOutputContractSchema,
+          'coder',
+        ),
+      }
 
     case 'reviewer':
-      return { ...basePatch, reviewResult: result.parsed as RunContext['reviewResult'] }
+      return {
+        ...basePatch,
+        reviewResult: parseWorkerOutputForRole(
+          step,
+          result,
+          profileType,
+          ReviewerOutputContractSchema,
+          'reviewer',
+        ),
+      }
 
     default:
       // Custom roles: only populate stepOutputs (already in basePatch)
       return basePatch
   }
+}
+
+function parseWorkerOutputForRole<T>(
+  step: WorkerStep,
+  result: WorkerTaskResult,
+  profileType: string,
+  schema: z.ZodType<T>,
+  roleLabel: 'planner' | 'coder' | 'reviewer',
+): T | null {
+  if (result.parsed === null) {
+    return null
+  }
+
+  const validation = schema.safeParse(result.parsed)
+  if (validation.success) {
+    return validation.data
+  }
+
+  const firstIssue = validation.error.issues[0]
+  const issuePath = firstIssue?.path.join('.') || 'root'
+  const rawOutputHash = `sha256:${createHash('sha256').update(result.rawOutput).digest('hex').slice(0, 16)}`
+  throw new WorkerParseError(
+    profileType,
+    step.id,
+    rawOutputHash,
+    `${roleLabel} output failed contract validation at ${issuePath}`,
+  )
 }
 
 // Re-export prompt templates from their canonical location under

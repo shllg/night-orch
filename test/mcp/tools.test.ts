@@ -588,6 +588,16 @@ describe('MCP Tools', () => {
     await expect(handleToolCall('unknown-tool', {}, deps)).rejects.toThrow('Unknown tool')
   })
 
+  it('rejects malformed MCP tool argument types at the boundary', async () => {
+    await expect(
+      handleToolCall('night-orch-list-runs', { limit: '10' }, deps),
+    ).rejects.toThrow('Invalid arguments for night-orch-list-runs')
+
+    await expect(
+      handleToolCall('night-orch-set-setting', { key: 42, value: '120' }, deps),
+    ).rejects.toThrow('Invalid arguments for night-orch-set-setting')
+  })
+
   it('requires auth token for mutating tools when configured', async () => {
     process.env['MCP_TOKEN'] = 'secret'
     deps.config.mcp.authTokenEnv = 'MCP_TOKEN'

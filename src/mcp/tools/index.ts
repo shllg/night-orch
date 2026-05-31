@@ -5,6 +5,7 @@ import { handleStatus, handleRunDetail, handleListRuns, handleListInbox, handleC
 import { handleRetry, handleSync, handleCleanup, handlePoll, handleRebase, handleContinue } from './operations.js'
 import { handleCostOverride, handleCostReset, handleDailyCostOverride, handleDailyCostReset, handleLabelsInit, handleDeleteEntry, handleUpdate } from './admin.js'
 import { handleFileLoop } from './file-loop.js'
+import { z } from 'zod'
 
 interface ToolDefinition {
   name: string
@@ -14,6 +15,141 @@ interface ToolDefinition {
     properties: Record<string, { type: string; description: string; default?: unknown; enum?: string[] }>
     required?: string[]
   }
+}
+
+const RUN_STATUS_VALUES = ['queued', 'running', 'blocked', 'review_ready', 'error', 'completed'] as const
+const RUN_VIEW_VALUES = ['active', 'completed', 'failed', 'all'] as const
+const INBOX_TRIAGE_VALUES = ['needs_human', 'review_ready', 'blocked', 'error', 'all'] as const
+const UPDATE_STRATEGY_VALUES = ['merge', 'rebase'] as const
+const LIST_ISSUES_FILTER_VALUES = ['eligible', 'running', 'blocked', 'all'] as const
+const FILE_LOOP_ACTION_VALUES = ['start', 'stop', 'status'] as const
+
+const EmptyArgsSchema = z.object({}).passthrough()
+const AuthTokenArgsSchema = z.object({ authToken: z.string().optional() }).passthrough()
+const SetSettingValueSchema = z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+  z.null(),
+  z.array(z.unknown()),
+  z.record(z.unknown()),
+])
+
+const SetSettingArgsSchema = z.object({
+  key: z.string(),
+  value: SetSettingValueSchema,
+  authToken: z.string().optional(),
+}).passthrough()
+const ClearSettingArgsSchema = z.object({
+  key: z.string(),
+  authToken: z.string().optional(),
+}).passthrough()
+const StatusArgsSchema = z.object({
+  repo: z.string().optional(),
+}).passthrough()
+const RunDetailArgsSchema = z.object({
+  runId: z.string(),
+}).passthrough()
+const ListRunsArgsSchema = z.object({
+  repo: z.string().optional(),
+  status: z.enum(RUN_STATUS_VALUES).optional(),
+  limit: z.number().optional(),
+  offset: z.number().optional(),
+  view: z.enum(RUN_VIEW_VALUES).optional(),
+}).passthrough()
+const ListInboxArgsSchema = z.object({
+  repo: z.string().optional(),
+  triage: z.enum(INBOX_TRIAGE_VALUES).optional(),
+  limit: z.number().optional(),
+  offset: z.number().optional(),
+}).passthrough()
+const CostReportArgsSchema = z.object({
+  days: z.number().optional(),
+}).passthrough()
+const RetryArgsSchema = z.object({
+  repo: z.string(),
+  issueNumber: z.number(),
+  resetPlan: z.boolean().optional(),
+  fresh: z.boolean().optional(),
+  strategy: z.enum(UPDATE_STRATEGY_VALUES).optional(),
+  authToken: z.string().optional(),
+}).passthrough()
+const CostOverrideArgsSchema = z.object({
+  repo: z.string(),
+  issueNumber: z.number(),
+  amountUsd: z.number().optional(),
+  clear: z.boolean().optional(),
+  authToken: z.string().optional(),
+}).passthrough()
+const CostResetArgsSchema = z.object({
+  repo: z.string(),
+  issueNumber: z.number(),
+  authToken: z.string().optional(),
+}).passthrough()
+const DailyCostOverrideArgsSchema = z.object({
+  amountUsd: z.number().optional(),
+  clear: z.boolean().optional(),
+  authToken: z.string().optional(),
+}).passthrough()
+const ToggleDryRunArgsSchema = z.object({
+  dryRun: z.boolean().optional(),
+  authToken: z.string().optional(),
+}).passthrough()
+const LabelsInitArgsSchema = z.object({
+  repo: z.string(),
+  dryRun: z.boolean().optional(),
+  authToken: z.string().optional(),
+}).passthrough()
+const DeleteEntryArgsSchema = z.object({
+  repo: z.string(),
+  issueNumber: z.number(),
+  force: z.boolean().optional(),
+  dryRun: z.boolean().optional(),
+  authToken: z.string().optional(),
+}).passthrough()
+const ListIssuesArgsSchema = z.object({
+  repo: z.string(),
+  filter: z.enum(LIST_ISSUES_FILTER_VALUES).optional(),
+}).passthrough()
+const StreamEventsArgsSchema = z.object({
+  runId: z.string().optional(),
+  repo: z.string().optional(),
+  issueNumber: z.number().optional(),
+  since: z.number().optional(),
+  limit: z.number().optional(),
+}).passthrough()
+const RebaseArgsSchema = z.object({
+  repo: z.string(),
+  issueNumber: z.number(),
+  check: z.boolean().optional(),
+  strategy: z.enum(UPDATE_STRATEGY_VALUES).optional(),
+  authToken: z.string().optional(),
+}).passthrough()
+const ContinueArgsSchema = z.object({
+  repo: z.string(),
+  issueNumber: z.number(),
+  strategy: z.enum(UPDATE_STRATEGY_VALUES).optional(),
+  authToken: z.string().optional(),
+}).passthrough()
+const FileLoopArgsSchema = z.object({
+  action: z.enum(FILE_LOOP_ACTION_VALUES),
+  repo: z.string().optional(),
+  maxMinutes: z.number().optional(),
+  authToken: z.string().optional(),
+}).passthrough()
+
+function parseToolArgs<T>(
+  toolName: string,
+  schema: z.ZodType<T>,
+  args: unknown,
+): T {
+  const parsed = schema.safeParse(args)
+  if (!parsed.success) {
+    const firstIssue = parsed.error.issues[0]
+    const path = firstIssue?.path.join('.') || 'root'
+    throw new Error(`Invalid arguments for ${toolName} at ${path}: ${firstIssue?.message ?? 'validation failed'}`)
+  }
+  return parsed.data
 }
 
 export function registerTools(): ToolDefinition[] {
@@ -346,7 +482,7 @@ export function registerTools(): ToolDefinition[] {
 
 export async function handleToolCall(
   name: string,
-  args: Record<string, unknown>,
+  args: unknown,
   deps: MCPDependencies,
 ): Promise<unknown> {
   const runtimeDeps: MCPDependencies = {
@@ -356,65 +492,66 @@ export async function handleToolCall(
 
   switch (name) {
     case 'night-orch-list-settings':
+      parseToolArgs(name, EmptyArgsSchema, args)
       return handleListSettings(deps)
     case 'night-orch-set-setting':
-      return handleSetSetting(args as { key: string; value: unknown; authToken?: string }, deps)
+      return handleSetSetting(parseToolArgs(name, SetSettingArgsSchema, args), deps)
     case 'night-orch-clear-setting':
-      return handleClearSetting(args as { key: string; authToken?: string }, deps)
+      return handleClearSetting(parseToolArgs(name, ClearSettingArgsSchema, args), deps)
     case 'night-orch-status':
-      return handleStatus(args as { repo?: string }, runtimeDeps)
+      return handleStatus(parseToolArgs(name, StatusArgsSchema, args), runtimeDeps)
     case 'night-orch-run-detail':
-      return handleRunDetail(args as { runId: string }, runtimeDeps)
+      return handleRunDetail(parseToolArgs(name, RunDetailArgsSchema, args), runtimeDeps)
     case 'night-orch-list-runs':
-      return handleListRuns(args as { repo?: string; status?: string; limit?: number; offset?: number; view?: string }, runtimeDeps)
+      return handleListRuns(parseToolArgs(name, ListRunsArgsSchema, args), runtimeDeps)
     case 'night-orch-list-inbox':
-      return handleListInbox(args as { repo?: string; triage?: string; limit?: number; offset?: number }, runtimeDeps)
+      return handleListInbox(parseToolArgs(name, ListInboxArgsSchema, args), runtimeDeps)
     case 'night-orch-cost-report':
-      return handleCostReport(args as { days?: number }, runtimeDeps)
+      return handleCostReport(parseToolArgs(name, CostReportArgsSchema, args), runtimeDeps)
     case 'night-orch-retry':
-      return handleRetry(args as { repo: string; issueNumber: number; resetPlan?: boolean; fresh?: boolean; strategy?: 'merge' | 'rebase'; authToken?: string }, runtimeDeps)
+      return handleRetry(parseToolArgs(name, RetryArgsSchema, args), runtimeDeps)
     case 'night-orch-cost-override':
       return handleCostOverride(
-        args as { repo: string; issueNumber: number; amountUsd?: number; clear?: boolean; authToken?: string },
+        parseToolArgs(name, CostOverrideArgsSchema, args),
         runtimeDeps,
       )
     case 'night-orch-cost-reset':
       return handleCostReset(
-        args as { repo: string; issueNumber: number; authToken?: string },
+        parseToolArgs(name, CostResetArgsSchema, args),
         runtimeDeps,
       )
     case 'night-orch-daily-cost-override':
       return handleDailyCostOverride(
-        args as { amountUsd?: number; clear?: boolean; authToken?: string },
+        parseToolArgs(name, DailyCostOverrideArgsSchema, args),
         runtimeDeps,
       )
     case 'night-orch-daily-cost-reset':
       return handleDailyCostReset(
-        args as { authToken?: string },
+        parseToolArgs(name, AuthTokenArgsSchema, args),
         runtimeDeps,
       )
     case 'night-orch-sync':
-      return handleSync(args as { dryRun?: boolean; authToken?: string }, runtimeDeps)
+      return handleSync(parseToolArgs(name, ToggleDryRunArgsSchema, args), runtimeDeps)
     case 'night-orch-cleanup':
-      return handleCleanup(args as { dryRun?: boolean; authToken?: string }, runtimeDeps)
+      return handleCleanup(parseToolArgs(name, ToggleDryRunArgsSchema, args), runtimeDeps)
     case 'night-orch-labels-init':
-      return handleLabelsInit(args as { repo: string; dryRun?: boolean; authToken?: string }, runtimeDeps)
+      return handleLabelsInit(parseToolArgs(name, LabelsInitArgsSchema, args), runtimeDeps)
     case 'night-orch-delete-entry':
-      return handleDeleteEntry(args as { repo: string; issueNumber: number; force?: boolean; dryRun?: boolean; authToken?: string }, runtimeDeps)
+      return handleDeleteEntry(parseToolArgs(name, DeleteEntryArgsSchema, args), runtimeDeps)
     case 'night-orch-poll':
-      return handlePoll(args as { dryRun?: boolean; authToken?: string }, runtimeDeps)
+      return handlePoll(parseToolArgs(name, ToggleDryRunArgsSchema, args), runtimeDeps)
     case 'night-orch-list-issues':
-      return handleListIssues(args as { repo: string; filter?: string }, runtimeDeps)
+      return handleListIssues(parseToolArgs(name, ListIssuesArgsSchema, args), runtimeDeps)
     case 'night-orch-stream-events':
-      return handleStreamEvents(args as { runId?: string; repo?: string; issueNumber?: number; since?: number; limit?: number }, runtimeDeps)
+      return handleStreamEvents(parseToolArgs(name, StreamEventsArgsSchema, args), runtimeDeps)
     case 'night-orch-rebase':
-      return handleRebase(args as { repo: string; issueNumber: number; check?: boolean; strategy?: 'merge' | 'rebase'; authToken?: string }, runtimeDeps)
+      return handleRebase(parseToolArgs(name, RebaseArgsSchema, args), runtimeDeps)
     case 'night-orch-continue':
-      return handleContinue(args as { repo: string; issueNumber: number; strategy?: 'merge' | 'rebase'; authToken?: string }, runtimeDeps)
+      return handleContinue(parseToolArgs(name, ContinueArgsSchema, args), runtimeDeps)
     case 'night-orch-update':
-      return handleUpdate(args as { authToken?: string }, runtimeDeps)
+      return handleUpdate(parseToolArgs(name, AuthTokenArgsSchema, args), runtimeDeps)
     case 'night-orch-file-loop':
-      return handleFileLoop(args as { action: 'start' | 'stop' | 'status'; repo?: string; maxMinutes?: number; authToken?: string }, runtimeDeps)
+      return handleFileLoop(parseToolArgs(name, FileLoopArgsSchema, args), runtimeDeps)
     default:
       throw new Error(`Unknown tool: ${name}`)
   }

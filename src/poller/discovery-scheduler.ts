@@ -46,8 +46,7 @@ export async function discoverIssuesForRepo(
 
   const discovered = targetIssue
     ? discoveredAll.filter((d) => {
-        const issueRepo = d.issueRepo || d.issue.repo || repoConfig.repo
-        return d.issue.number === targetIssue.issueNumber && issueRepo === targetIssue.repo
+        return d.issue.number === targetIssue.issueNumber && d.issueRepo === targetIssue.repo
       })
     : prioritizeDiscoveredIssues(runManager, repoConfig.repo, discoveredAll)
 
@@ -60,7 +59,7 @@ export async function discoverIssuesForRepo(
 
   issueManager.upsertDiscovered(
     dispatchable.map((d) => ({
-      repo: d.issueRepo || d.issue.repo || repoConfig.repo,
+      repo: d.issueRepo,
       issueNumber: d.issue.number,
       issueNodeId: d.issue.nodeId,
       issueTitle: d.issue.title,

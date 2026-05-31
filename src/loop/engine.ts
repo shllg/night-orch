@@ -600,7 +600,7 @@ function applyPersistedDecisionOutcome(
         updateContext(ctx, {
           currentPhase: 'blocked',
           terminalStatus: 'blocked',
-          blockReason: (outcome.blockReason ?? null) as RunContext['blockReason'],
+          blockReason: coercePersistedBlockReason(outcome.blockReason),
           stepOutputs: {
             ...ctx.stepOutputs,
             blockMessage: outcome.reason ?? 'Blocked by prior decide outcome',
@@ -618,6 +618,34 @@ function applyPersistedDecisionOutcome(
     default:
       return ctx
   }
+}
+
+const LEGACY_BLOCK_REASONS = new Set<NonNullable<RunContext['blockReason']>>([
+  'cost_limit',
+  'iteration_limit',
+  'run_token_limit',
+  'issue_token_limit',
+  'daily_token_limit',
+  'run_wall_clock_limit',
+  'stuck_loop',
+  'agent_pass_limit',
+  'reviewer_blocked',
+  'ambiguous_review',
+  'verify_config',
+  'merge_conflict',
+  'auth_failure',
+  'empty_diff',
+])
+
+function coercePersistedBlockReason(
+  value: unknown,
+): RunContext['blockReason'] {
+  if (typeof value !== 'string') {
+    return null
+  }
+  return LEGACY_BLOCK_REASONS.has(value as NonNullable<RunContext['blockReason']>)
+    ? (value as NonNullable<RunContext['blockReason']>)
+    : null
 }
 
 function getCheckpointPhaseData(

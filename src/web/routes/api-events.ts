@@ -8,6 +8,42 @@ import type {
 import type { WsClientState, WebSocketCommand } from '../server.js'
 import { sendWebsocket } from '../server.js'
 import { buildDashboardSnapshot } from '../snapshots.js'
+import { z } from 'zod'
+
+const WebSocketCommandSchema: z.ZodType<WebSocketCommand> = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('subscribe-run-events'),
+    runId: z.string(),
+    since: z.number().optional(),
+  }).passthrough(),
+  z.object({
+    type: z.literal('unsubscribe-run-events'),
+    runId: z.string(),
+  }).passthrough(),
+  z.object({
+    type: z.literal('subscribe-issue-events'),
+    repo: z.string(),
+    issueNumber: z.number(),
+    since: z.number().optional(),
+  }).passthrough(),
+  z.object({
+    type: z.literal('unsubscribe-issue-events'),
+    repo: z.string(),
+    issueNumber: z.number(),
+  }).passthrough(),
+  z.object({
+    type: z.literal('subscribe-agent-session-events'),
+    sessionId: z.string(),
+    since: z.number().optional(),
+  }).passthrough(),
+  z.object({
+    type: z.literal('unsubscribe-agent-session-events'),
+    sessionId: z.string(),
+  }).passthrough(),
+  z.object({
+    type: z.literal('refresh'),
+  }).passthrough(),
+])
 
 export async function handleWsMessage(
   ws: WebSocket,
@@ -16,13 +52,21 @@ export async function handleWsMessage(
   deps: MCPDependencies,
   agentSessionManager: InteractiveAgentSessionManager,
 ): Promise<void> {
-  let command: WebSocketCommand
+  let parsedMessage: unknown
   try {
-    command = JSON.parse(rawMessage) as WebSocketCommand
+    parsedMessage = JSON.parse(rawMessage)
   } catch {
     sendWebsocket(ws, { type: 'error', error: 'Invalid JSON message' })
     return
   }
+
+  const parsedCommand = WebSocketCommandSchema.safeParse(parsedMessage)
+  if (!parsedCommand.success) {
+    sendWebsocket(ws, { type: 'error', error: 'Invalid websocket command payload' })
+    return
+  }
+
+  const command = parsedCommand.data
 
   if (command.type === 'subscribe-run-events') {
     const runId = typeof command.runId === 'string' ? command.runId : ''

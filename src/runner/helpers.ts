@@ -16,8 +16,23 @@ import { markerTag, upsertBotComment } from '../forge/bot-comment.js'
 import { formatStatusComment } from '../forge/status-comment.js'
 import { nowUtcIso } from '../utils/time.js'
 import { logger } from '../utils/logger.js'
+import { z } from 'zod'
 
 export const STATUS_MARKER = markerTag('status')
+
+export interface RunControlPayload {
+  issueRepo?: string
+  preserveBranchState?: boolean
+  updateStrategy?: UpdateStrategy
+  checkAfter?: boolean
+}
+
+const RunControlPayloadSchema = z.object({
+  issueRepo: z.unknown().optional().transform((value) => typeof value === 'string' ? value : undefined),
+  preserveBranchState: z.unknown().optional().transform((value) => typeof value === 'boolean' ? value : undefined),
+  updateStrategy: z.unknown().optional().transform((value) => value === 'merge' || value === 'rebase' ? value : undefined),
+  checkAfter: z.unknown().optional().transform((value) => typeof value === 'boolean' ? value : undefined),
+}).passthrough()
 
 export const TAINTED_BLOCK_REASONS = new Set([
   'agent_pass_limit',
@@ -384,9 +399,11 @@ export function resolveManualState(run: RunRecord | null | undefined): RunManual
 
 export function resolveControlPayload(
   run: RunRecord | null | undefined,
-): Record<string, unknown> | null {
+): RunControlPayload | null {
   if (!run?.controlPayload) return null
-  return run.controlPayload
+  const parsed = RunControlPayloadSchema.safeParse(run.controlPayload)
+  if (!parsed.success) return null
+  return parsed.data
 }
 
 export function prioritizeDiscoveredIssues(
@@ -431,7 +448,7 @@ export interface BranchPolicy {
 
 export interface DeriveBranchPolicyInput {
   operationIntent: RunRecord['operationIntent']
-  controlPayload: Record<string, unknown> | null
+  controlPayload: RunControlPayload | null
   planningMode: boolean
   updateStrategyOverride: UpdateStrategy | undefined
   shouldResetFromHistory: boolean
@@ -447,7 +464,7 @@ export function deriveBranchPolicy(input: DeriveBranchPolicyInput): BranchPolicy
     shouldResetFromHistory,
     hasFollowupPromptFeedback,
   } = input
-  const preserveBranchState = Boolean(controlPayload?.['preserveBranchState'])
+  const preserveBranchState = controlPayload?.preserveBranchState === true
     || operationIntent === 'refresh'
     || operationIntent === 'rebase'
     || (operationIntent === 'continue' && updateStrategyOverride === undefined)

@@ -1562,6 +1562,38 @@ describe('startWebServer', () => {
     })
   })
 
+  it('returns websocket command validation errors for non-object payloads', async () => {
+    server = await startWebServer(
+      deps,
+      {
+        host: '127.0.0.1',
+        port: 0,
+        frontendDistPath: frontendDir,
+        snapshotIntervalMs: 50,
+      },
+    )
+
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Unexpected address type')
+    }
+
+    const wsOrigin = `http://127.0.0.1:${address.port}`
+    const ws = new WebSocket(`ws://127.0.0.1:${address.port}/ws`, { origin: wsOrigin })
+    await once(ws, 'open')
+    ws.send(JSON.stringify('not-an-object'))
+
+    const errorMessage = await waitForWsMessage<{ error: string }>(ws, (payload) => {
+      if (!payload || typeof payload !== 'object') return null
+      const message = payload as { type?: unknown; error?: unknown }
+      if (message.type !== 'error' || typeof message.error !== 'string') return null
+      return { error: message.error }
+    }, 5000)
+
+    expect(errorMessage.error).toBe('Invalid websocket command payload')
+    ws.close()
+  })
+
   it('streams run events over websocket subscriptions', async () => {
     const runManager = new RunManager(db)
     const run = runManager.create({

@@ -469,6 +469,26 @@ describe('executeWorkerStep', () => {
     expect(result.ctx.stepOutputs['code']).toBeNull()
   })
 
+  it('throws WorkerParseError when parsed output shape does not match role contract', async () => {
+    const invalidPlannerShape: WorkerTaskResult = {
+      rawOutput: '{"foo":"bar"}',
+      exitCode: 0,
+      timedOut: false,
+      durationMs: 1000,
+      parsed: { foo: 'bar' } as unknown as WorkerTaskResult['parsed'],
+      parseError: null,
+      sessionId: 'sess-planner-1',
+      tokenUsage: FIXTURE_TOKEN_USAGE,
+    }
+    const step: WorkerStep = { type: 'worker', id: 'plan', role: 'planner' }
+    const deps = makeDeps({ planner: makeMockAdapter(invalidPlannerShape) })
+
+    await expect(executeWorkerStep(makeCtx(), step, deps)).rejects.toMatchObject({
+      code: 'WORKER_PARSE_FAILURE',
+      step: 'plan',
+    })
+  })
+
   it('resolves adapter via roles → agents mapping', async () => {
     // Adapter registered as 'claude', role is 'planner', roles.planner = 'claude'
     const step: WorkerStep = { type: 'worker', id: 'plan', role: 'planner' }
