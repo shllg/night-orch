@@ -21,14 +21,17 @@ import { randomUUID } from 'node:crypto'
 import { createInterface } from 'node:readline'
 import type { WorkerAdapter, WorkerTaskInput, WorkerTaskResult } from './types.js'
 import { execWithTimeout } from './timeout.js'
-import { parsePlannerOutput } from './parsers/planner.js'
-import { parseCoderOutput } from './parsers/coder.js'
-import { parseReviewerOutput } from './parsers/reviewer.js'
+import {
+  extractClaudeTokenUsage,
+  extractCodexOutput,
+  extractCodexThreadId,
+  extractCodexTokenUsage,
+  parseOutput,
+  tryParseJson,
+} from './parsers/dispatch.js'
 import { classifyAuthFailure } from './auth-check.js'
 import { logger } from '../utils/logger.js'
 import { emitWorkerEvent, isRecord, summarizeValue } from './events.js'
-import { extractClaudeTokenUsage } from './claude.js'
-import { extractCodexOutput, extractCodexTokenUsage } from './codex.js'
 import { normalizePathForSubprocess } from './env.js'
 
 const DEFAULT_CLAUDE_MODEL = 'claude-opus-4-7'
@@ -443,25 +446,6 @@ function resolveTokenUsage(
   return extractClaudeTokenUsage(rawOutput)
 }
 
-function parseOutput(role: string, raw: string): { parsed: WorkerTaskResult['parsed']; parseError: string | null } {
-  switch (role) {
-    case 'planner': {
-      const { result, error } = parsePlannerOutput(raw)
-      return { parsed: result, parseError: error }
-    }
-    case 'coder': {
-      const { result, error } = parseCoderOutput(raw)
-      return { parsed: result, parseError: error }
-    }
-    case 'reviewer': {
-      const { result, error } = parseReviewerOutput(raw)
-      return { parsed: result, parseError: error }
-    }
-    default:
-      return { parsed: null, parseError: `Unknown role: ${role}` }
-  }
-}
-
 function parseClaudeEffort(args: string[]): ClaudeCodeOptions['effort'] | undefined {
   const effort = extractFlagValue(args, ['--effort'])
   if (!effort) return undefined
@@ -510,48 +494,6 @@ function extractFlagValue(args: string[], flagNames: string[]): string | undefin
     }
   }
   return undefined
-}
-
-function extractCodexThreadId(raw: string): string | null {
-  const events = parseCodexEvents(raw)
-  for (const event of events) {
-    if (!isRecord(event)) continue
-    if (typeof event['thread_id'] === 'string') return event['thread_id']
-    if (typeof event['id'] === 'string' && event['object'] === 'thread') return event['id']
-    if (isRecord(event['session']) && typeof event['session']['thread_id'] === 'string') {
-      return event['session']['thread_id']
-    }
-  }
-  return null
-}
-
-function parseCodexEvents(raw: string): unknown[] {
-  const trimmed = raw.trim()
-
-  if (trimmed.startsWith('[')) {
-    try {
-      const parsed: unknown = JSON.parse(trimmed)
-      if (Array.isArray(parsed)) return parsed
-    } catch {
-      // Fall through to line-by-line parsing.
-    }
-  }
-
-  const events: unknown[] = []
-  for (const line of raw.split('\n')) {
-    const parsed = tryParseJson(line.trim())
-    if (parsed) events.push(parsed)
-  }
-  return events
-}
-
-function tryParseJson(value: string): unknown | null {
-  if (!value.startsWith('{') && !value.startsWith('[')) return null
-  try {
-    return JSON.parse(value)
-  } catch {
-    return null
-  }
 }
 
 function formatSandcastleError(error: unknown): string {

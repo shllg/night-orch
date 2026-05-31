@@ -34,7 +34,6 @@ vi.mock('../../src/git/repo.js', () => ({
     diff: 'diff --git a/file.ts b/file.ts\n+added',
     error: null,
   }),
-  getChangedFilesAgainstBranch: vi.fn().mockResolvedValue(['src/a.ts']),
 }))
 
 // ---------------------------------------------------------------------------
@@ -451,7 +450,7 @@ describe('executeWorkerStep', () => {
     expect(result.ctx.plan).not.toBeNull()
   })
 
-  it('coder parse failure with exit 0 falls back to git diff', async () => {
+  it('coder parse failure with exit 0 does not fabricate a code result', async () => {
     const failedParseResult: WorkerTaskResult = {
       rawOutput: 'some raw output',
       exitCode: 0,
@@ -466,9 +465,8 @@ describe('executeWorkerStep', () => {
     const deps = makeDeps({ coder: makeMockAdapter(failedParseResult) })
     const result = await executeWorkerStep(makeCtx(), step, deps)
 
-    expect(result.ctx.codeResult).not.toBeNull()
-    expect(result.ctx.codeResult!.changedFiles).toEqual(['src/a.ts'])
-    expect(result.ctx.codeResult!.summary).toContain('git diff')
+    expect(result.ctx.codeResult).toBeNull()
+    expect(result.ctx.stepOutputs['code']).toBeNull()
   })
 
   it('resolves adapter via roles → agents mapping', async () => {

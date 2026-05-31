@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { extractCodexOutput } from '../../src/workers/codex.js'
+import { extractCodexOutput } from '../../src/workers/parsers/dispatch.js'
 
 describe('extractCodexOutput', () => {
   it('extracts agent_message text from JSON array format', () => {

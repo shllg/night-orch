@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { extractCodexTokenUsage } from '../../src/workers/codex.js'
+import { extractCodexTokenUsage } from '../../src/workers/parsers/dispatch.js'
 
 /**
  * R4c: fixture-based token extraction tests for the Codex CLI adapter.

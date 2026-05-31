@@ -11,7 +11,7 @@ import { resolveVerifyCommands } from './verification-profile.js'
 import { compilePrompt } from '../workers/prompt/compiler.js'
 import { getDefaultTemplate, buildPlanningOnlyCoderTemplate } from '../workers/prompt/templates.js'
 import { buildWorkerEnv, buildVerifierEnv } from '../workers/env.js'
-import { getDiffAgainstBranch, getChangedFilesAgainstBranch } from '../git/repo.js'
+import { getDiffAgainstBranch } from '../git/repo.js'
 import { superviseWorker } from './supervisor.js'
 import {
   WorkerAuthError,
@@ -191,13 +191,7 @@ export async function executeWorkerStep(
 
   // Map result to the appropriate RunContext field based on role
   const ctxPatch = buildWorkerCtxPatch(ctx, step, result, profile.type)
-  let updatedCtx = updateContext(ctx, ctxPatch)
-
-  // Coder fallback: if parse failed but worker exited 0, build synthetic
-  // codeResult from git diff (the coder wrote files to disk).
-  if (step.role === 'coder' && !updatedCtx.codeResult && result.exitCode === 0) {
-    updatedCtx = await applyCoderDiffFallback(updatedCtx)
-  }
+  const updatedCtx = updateContext(ctx, ctxPatch)
 
   return {
     ctx: updatedCtx,
@@ -476,28 +470,6 @@ function buildWorkerCtxPatch(
       // Custom roles: only populate stepOutputs (already in basePatch)
       return basePatch
   }
-}
-
-/**
- * Apply the git-diff fallback for coder steps where parse failed but the
- * worker exited successfully. Called after buildWorkerCtxPatch for coder role.
- */
-async function applyCoderDiffFallback(ctx: RunContext): Promise<RunContext> {
-  if (ctx.codeResult) return ctx
-
-  logger.info({ runId: ctx.runId }, 'Coder parse failed — falling back to git diff for changed files')
-  const changedFiles = await getChangedFilesAgainstBranch(ctx.worktreePath, ctx.repoConfig.baseBranch)
-  if (changedFiles.length > 0) {
-    return updateContext(ctx, {
-      codeResult: {
-        summary: 'Coder output could not be parsed. Changed files detected via git diff.',
-        changedFiles,
-        remainingUncertainty: 'Coder structured output was not parseable — review carefully.',
-        blockers: null,
-      },
-    })
-  }
-  return ctx
 }
 
 // Re-export prompt templates from their canonical location under

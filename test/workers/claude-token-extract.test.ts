@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { extractClaudeTokenUsage } from '../../src/workers/claude.js'
+import { extractClaudeTokenUsage } from '../../src/workers/parsers/dispatch.js'
 
 /**
  * R4c: fixture-based token extraction tests for the Claude Code CLI

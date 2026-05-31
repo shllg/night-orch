@@ -1,7 +1,5 @@
 import type { WorkerAdapter, WorkerTaskInput, WorkerTaskResult } from './types.js'
-import { parsePlannerOutput } from './parsers/planner.js'
-import { parseCoderOutput } from './parsers/coder.js'
-import { parseReviewerOutput } from './parsers/reviewer.js'
+import { parseOutput, parseTokenCount } from './parsers/dispatch.js'
 import { logger } from '../utils/logger.js'
 import { loadAcpxRuntime } from './acpx-imports.js'
 import { emitWorkerEvent, isRecord, summarizeValue } from './events.js'
@@ -205,28 +203,6 @@ function emitAcpUpdateEvent(notification: Record<string, unknown>, input: Worker
   }
 }
 
-function parseOutput(
-  role: string,
-  raw: string,
-): { parsed: WorkerTaskResult['parsed']; parseError: string | null } {
-  switch (role) {
-    case 'planner': {
-      const { result, error } = parsePlannerOutput(raw)
-      return { parsed: result, parseError: error }
-    }
-    case 'coder': {
-      const { result, error } = parseCoderOutput(raw)
-      return { parsed: result, parseError: error }
-    }
-    case 'reviewer': {
-      const { result, error } = parseReviewerOutput(raw)
-      return { parsed: result, parseError: error }
-    }
-    default:
-      return { parsed: null, parseError: `Unknown role: ${role}` }
-  }
-}
-
 function extractAcpTokenUsageFromNotification(notification: Record<string, unknown>): WorkerTaskResult['tokenUsage'] {
   const directUsage = tokenUsageFromCandidate(notification['usage'])
   if (directUsage) return directUsage
@@ -337,9 +313,4 @@ function mergeTokenUsage(
     completionTokens,
     ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
   }
-}
-
-function parseTokenCount(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return 0
-  return Math.max(0, Math.floor(value))
 }
