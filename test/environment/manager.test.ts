@@ -42,12 +42,12 @@ function makeRepoConfig(overrides: Partial<RepoConfig> = {}): RepoConfig {
     baseBranch: 'main',
     branchPrefix: 'orch',
     labels: {
-      ready: ['orch:ready'],
-      running: 'orch:running',
-      blocked: ['orch:blocked'],
-      reviewReady: 'orch:review-ready',
-      error: 'orch:error',
-      retry: 'orch:retry',
+      ready: ['no:ready'],
+      running: 'no:running',
+      blocked: ['no:blocked'],
+      reviewReady: 'no:review-ready',
+      error: 'no:error',
+      retry: 'no:retry',
     },
     defaults: {
       planner: 'claude',

@@ -14,7 +14,7 @@ function makeRepoConfig(overrides: Partial<RepoConfig> = {}): RepoConfig {
     localPath: '/tmp/repo',
     baseBranch: 'main',
     branchPrefix: 'orch',
-    labels: { ready: ['orch:ready'], running: 'orch:running', blocked: 'orch:blocked', needsHuman: 'orch:needs-human', reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry', planning: 'orch:planning' },
+    labels: { ready: ['no:ready'], running: 'no:running', blocked: 'no:blocked', needsHuman: 'no:needs-human', reviewReady: 'no:review-ready', error: 'no:error', retry: 'no:retry', planning: 'no:planning' },
     defaults: { planner: 'claude', coder: 'claude', reviewer: 'claude', doneMode: 'pr-ready', notifyPriority: 'normal', prMentions: [] },
     planning: { prdDirectory: 'docs/prd' },
     verify: [],
@@ -130,7 +130,7 @@ describe('resolveWorkflow', () => {
     const result = resolveWorkflow(
       makeRepoConfig({ workflow: 'minimal' }),
       makeConfig(),
-      ['orch:planning'],
+      ['no:planning'],
       'standard',
     )
     expect(result).toBe(PLANNING_ONLY_WORKFLOW)

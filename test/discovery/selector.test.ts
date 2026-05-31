@@ -19,28 +19,28 @@ function makeIssue(labels: string[]): ForgeIssue {
 
 describe('isEligible', () => {
   it('matches issue with an include label', () => {
-    const issue = makeIssue(['orch:ready', 'bug'])
-    expect(isEligible(issue, { includeLabelsAny: ['orch:ready'], excludeLabelsAny: [] })).toBe(true)
+    const issue = makeIssue(['no:ready', 'bug'])
+    expect(isEligible(issue, { includeLabelsAny: ['no:ready'], excludeLabelsAny: [] })).toBe(true)
   })
 
   it('rejects issue missing all include labels', () => {
     const issue = makeIssue(['bug'])
-    expect(isEligible(issue, { includeLabelsAny: ['orch:ready'], excludeLabelsAny: [] })).toBe(false)
+    expect(isEligible(issue, { includeLabelsAny: ['no:ready'], excludeLabelsAny: [] })).toBe(false)
   })
 
   it('rejects issue with an exclude label', () => {
-    const issue = makeIssue(['orch:ready', 'orch:blocked'])
+    const issue = makeIssue(['no:ready', 'no:blocked'])
     expect(
-      isEligible(issue, { includeLabelsAny: ['orch:ready'], excludeLabelsAny: ['orch:blocked'] }),
+      isEligible(issue, { includeLabelsAny: ['no:ready'], excludeLabelsAny: ['no:blocked'] }),
     ).toBe(false)
   })
 
   it('exclude takes priority over include', () => {
-    const issue = makeIssue(['orch:ready', 'orch:error'])
+    const issue = makeIssue(['no:ready', 'no:error'])
     expect(
       isEligible(issue, {
-        includeLabelsAny: ['orch:ready'],
-        excludeLabelsAny: ['orch:error'],
+        includeLabelsAny: ['no:ready'],
+        excludeLabelsAny: ['no:error'],
       }),
     ).toBe(false)
   })
@@ -51,23 +51,23 @@ describe('isEligible', () => {
   })
 
   it('empty excludeLabelsAny excludes nothing', () => {
-    const issue = makeIssue(['orch:ready'])
-    expect(isEligible(issue, { includeLabelsAny: ['orch:ready'], excludeLabelsAny: [] })).toBe(true)
+    const issue = makeIssue(['no:ready'])
+    expect(isEligible(issue, { includeLabelsAny: ['no:ready'], excludeLabelsAny: [] })).toBe(true)
   })
 })
 
 describe('filterEligible', () => {
   it('filters a batch of issues', () => {
     const issues = [
-      makeIssue(['orch:ready']),
+      makeIssue(['no:ready']),
       makeIssue(['bug']),
-      makeIssue(['orch:ready', 'orch:blocked']),
+      makeIssue(['no:ready', 'no:blocked']),
     ]
     const result = filterEligible(issues, {
-      includeLabelsAny: ['orch:ready'],
-      excludeLabelsAny: ['orch:blocked'],
+      includeLabelsAny: ['no:ready'],
+      excludeLabelsAny: ['no:blocked'],
     })
     expect(result).toHaveLength(1)
-    expect(result[0]?.labels).toContain('orch:ready')
+    expect(result[0]?.labels).toContain('no:ready')
   })
 })

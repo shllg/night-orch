@@ -17,17 +17,17 @@ const ambiguousReview: BlockedReason = { type: 'ambiguousReview', excerpt: 'mang
 const verifyConfig: BlockedReason = { type: 'verifyConfig', detail: 'no commands' }
 
 const config: LabelConfig = {
-  ready: ['orch:ready'],
-  running: 'orch:running',
-  blocked: 'orch:blocked',
-  needsHuman: 'orch:needs-human',
-  reviewReady: 'orch:review-ready',
-  error: 'orch:error',
-  retry: 'orch:retry',
-  planning: 'orch:planning',
-  mergeQueued: 'orch:merge-queued',
-  merging: 'orch:merging',
-  mergeFailed: 'orch:merge-failed',
+  ready: ['no:ready'],
+  running: 'no:running',
+  blocked: 'no:blocked',
+  needsHuman: 'no:needs-human',
+  reviewReady: 'no:review-ready',
+  error: 'no:error',
+  retry: 'no:retry',
+  planning: 'no:planning',
+  mergeQueued: 'no:merge-queued',
+  merging: 'no:merging',
+  mergeFailed: 'no:merge-failed',
 }
 
 describe('isHumanRequired', () => {
@@ -60,25 +60,25 @@ describe('computeLabelMutation', () => {
   const fromStates: RunStatus[] = ['queued', 'running', 'review_ready', 'blocked', 'error', 'completed']
   const labelScenarios = [
     { name: 'empty labels', labels: [] },
-    { name: 'single ready label', labels: ['orch:ready', 'keep:me'] },
+    { name: 'single ready label', labels: ['no:ready', 'keep:me'] },
     {
       name: 'dirty orchestration labels',
       labels: [
-        'orch:ready',
+        'no:ready',
         'queue:ready',
-        'orch:running',
-        'orch:blocked',
-        'orch:needs-human',
-        'orch:review-ready',
-        'orch:error',
-        'orch:retry',
+        'no:running',
+        'no:blocked',
+        'no:needs-human',
+        'no:review-ready',
+        'no:error',
+        'no:retry',
         'keep:me',
       ],
     },
   ] as const
   const multiReadyConfig: LabelConfig = {
     ...config,
-    ready: ['orch:ready', 'queue:ready'],
+    ready: ['no:ready', 'queue:ready'],
   }
   const orchestrationLabels = [
     ...multiReadyConfig.ready,
@@ -164,10 +164,10 @@ describe('computeLabelMutation', () => {
     const first = computeLabelMutation(
       'running',
       'review_ready',
-      ['orch:ready', 'queue:ready', 'orch:running', 'orch:retry'],
+      ['no:ready', 'queue:ready', 'no:running', 'no:retry'],
       multiReadyConfig,
     )
-    const applied = applyMutation(['orch:ready', 'queue:ready', 'orch:running', 'orch:retry'], first)
+    const applied = applyMutation(['no:ready', 'queue:ready', 'no:running', 'no:retry'], first)
     const second = computeLabelMutation('review_ready', 'review_ready', applied, multiReadyConfig)
     expect(second).toEqual({ add: [], remove: [] })
   })
@@ -176,7 +176,7 @@ describe('computeLabelMutation', () => {
     const mutation = computeLabelMutation(
       'review_ready',
       'review_ready',
-      ['orch:review-ready'],
+      ['no:review-ready'],
       multiReadyConfig,
     )
     expect(mutation).toEqual({ add: [], remove: [] })
@@ -199,18 +199,18 @@ describe('computeMergeLabelMutation', () => {
   describe('pending', () => {
     it('adds mergeQueued and removes mergeFailed from empty labels', () => {
       const m = computeMergeLabelMutation('pending', [], config)
-      expect(m.add).toEqual(['orch:merge-queued'])
+      expect(m.add).toEqual(['no:merge-queued'])
       expect(m.remove).toEqual([])
     })
 
     it('removes lingering mergeFailed when queuing', () => {
-      const m = computeMergeLabelMutation('pending', ['orch:merge-failed'], config)
-      expect(m.add).toEqual(['orch:merge-queued'])
-      expect(m.remove).toEqual(['orch:merge-failed'])
+      const m = computeMergeLabelMutation('pending', ['no:merge-failed'], config)
+      expect(m.add).toEqual(['no:merge-queued'])
+      expect(m.remove).toEqual(['no:merge-failed'])
     })
 
     it('idempotent — does not re-add mergeQueued if already present', () => {
-      const m = computeMergeLabelMutation('pending', ['orch:merge-queued'], config)
+      const m = computeMergeLabelMutation('pending', ['no:merge-queued'], config)
       expect(m.add).toEqual([])
       expect(m.remove).toEqual([])
     })
@@ -219,11 +219,11 @@ describe('computeMergeLabelMutation', () => {
   describe('building', () => {
     it('adds mergeQueued and removes mergeFailed', () => {
       const m = computeMergeLabelMutation('building', [], config)
-      expect(m.add).toEqual(['orch:merge-queued'])
+      expect(m.add).toEqual(['no:merge-queued'])
     })
 
     it('idempotent when mergeQueued already set', () => {
-      const m = computeMergeLabelMutation('building', ['orch:merge-queued'], config)
+      const m = computeMergeLabelMutation('building', ['no:merge-queued'], config)
       expect(m.add).toEqual([])
     })
   })
@@ -231,7 +231,7 @@ describe('computeMergeLabelMutation', () => {
   describe('testing', () => {
     it('adds mergeQueued on enter', () => {
       const m = computeMergeLabelMutation('testing', [], config)
-      expect(m.add).toEqual(['orch:merge-queued'])
+      expect(m.add).toEqual(['no:merge-queued'])
     })
   })
 
@@ -239,15 +239,15 @@ describe('computeMergeLabelMutation', () => {
     it('swaps mergeQueued for merging and clears mergeFailed', () => {
       const m = computeMergeLabelMutation(
         'bisecting',
-        ['orch:merge-queued', 'orch:merge-failed'],
+        ['no:merge-queued', 'no:merge-failed'],
         config,
       )
-      expect(m.add).toEqual(['orch:merging'])
-      expect(m.remove.sort()).toEqual(['orch:merge-failed', 'orch:merge-queued'])
+      expect(m.add).toEqual(['no:merging'])
+      expect(m.remove.sort()).toEqual(['no:merge-failed', 'no:merge-queued'])
     })
 
     it('idempotent when merging already set', () => {
-      const m = computeMergeLabelMutation('bisecting', ['orch:merging'], config)
+      const m = computeMergeLabelMutation('bisecting', ['no:merging'], config)
       expect(m.add).toEqual([])
     })
   })
@@ -256,12 +256,12 @@ describe('computeMergeLabelMutation', () => {
     it('strips every merge-queue label', () => {
       const m = computeMergeLabelMutation(
         'passed',
-        ['orch:merge-queued', 'orch:merging', 'orch:merge-failed'],
+        ['no:merge-queued', 'no:merging', 'no:merge-failed'],
         config,
       )
       expect(m.add).toEqual([])
       expect(m.remove.sort()).toEqual(
-        ['orch:merge-failed', 'orch:merge-queued', 'orch:merging'].sort(),
+        ['no:merge-failed', 'no:merge-queued', 'no:merging'].sort(),
       )
     })
 
@@ -276,15 +276,15 @@ describe('computeMergeLabelMutation', () => {
     it('adds mergeFailed, removes mergeQueued + merging', () => {
       const m = computeMergeLabelMutation(
         'failed',
-        ['orch:merge-queued', 'orch:merging'],
+        ['no:merge-queued', 'no:merging'],
         config,
       )
-      expect(m.add).toEqual(['orch:merge-failed'])
-      expect(m.remove.sort()).toEqual(['orch:merge-queued', 'orch:merging'])
+      expect(m.add).toEqual(['no:merge-failed'])
+      expect(m.remove.sort()).toEqual(['no:merge-queued', 'no:merging'])
     })
 
     it('idempotent when mergeFailed already set', () => {
-      const m = computeMergeLabelMutation('failed', ['orch:merge-failed'], config)
+      const m = computeMergeLabelMutation('failed', ['no:merge-failed'], config)
       expect(m.add).toEqual([])
       expect(m.remove).toEqual([])
     })
@@ -292,8 +292,8 @@ describe('computeMergeLabelMutation', () => {
 
   it('never returns labels that should not be there (no cross-contamination)', () => {
     // Sanity: bisecting output should never include mergeQueued (always removed).
-    const m = computeMergeLabelMutation('bisecting', ['orch:merge-queued'], config)
-    expect(m.add).not.toContain('orch:merge-queued')
-    expect(m.remove).toContain('orch:merge-queued')
+    const m = computeMergeLabelMutation('bisecting', ['no:merge-queued'], config)
+    expect(m.add).not.toContain('no:merge-queued')
+    expect(m.remove).toContain('no:merge-queued')
   })
 })

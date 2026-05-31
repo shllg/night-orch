@@ -25,7 +25,7 @@ function makeMockForge(): ForgeAdapter {
   return {
     listEligibleIssues: vi.fn(),
     getIssue: vi.fn().mockResolvedValue({
-      number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:error'],
+      number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:error'],
       assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '',
     }),
     addLabels: vi.fn().mockResolvedValue(undefined),
@@ -51,7 +51,7 @@ function makeConfig(): Config {
     metrics: { enabled: false, port: 9090, host: '127.0.0.1' },
     repos: [{
       repo: 'org/repo', forge: 'github', localPath: '/tmp/repo', baseBranch: 'main',
-      branchPrefix: 'orch', labels: { ready: ['orch:ready'], running: 'orch:running', blocked: ['orch:blocked'], reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry' },
+      branchPrefix: 'orch', labels: { ready: ['no:ready'], running: 'no:running', blocked: ['no:blocked'], reviewReady: 'no:review-ready', error: 'no:error', retry: 'no:retry' },
       defaults: { planner: 'claude', coder: 'claude', reviewer: 'claude', doneMode: 'pr-ready', notifyPriority: 'normal', prMentions: [] },
       verify: [], selectors: { includeLabelsAny: [], excludeLabelsAny: [] }, agents: {},
     }],
@@ -146,7 +146,7 @@ describe('RetryEngine', () => {
   it('blocked run → new attempt queued, previous frozen, labels updated', async () => {
     const forge = makeMockForge()
     vi.mocked(forge.getIssue).mockResolvedValue({
-      number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:blocked'],
+      number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:blocked'],
       assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '',
     })
     const runId = insertRun(db, { status: 'blocked' })
@@ -175,7 +175,7 @@ describe('RetryEngine', () => {
       forge,
       'org/repo',
       1,
-      ['orch:blocked'],
+      ['no:blocked'],
       'blocked',
       'queued',
       expect.any(Object),
@@ -204,7 +204,7 @@ describe('RetryEngine', () => {
       forge,
       'org/repo',
       1,
-      ['orch:error'],
+      ['no:error'],
       'error',
       'queued',
       expect.any(Object),
@@ -214,7 +214,7 @@ describe('RetryEngine', () => {
   it('review_ready run → new attempt queued for another pass', async () => {
     const forge = makeMockForge()
     vi.mocked(forge.getIssue).mockResolvedValue({
-      number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:review-ready'],
+      number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:review-ready'],
       assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '',
     })
     const runId = insertRun(db, { status: 'review_ready' })

@@ -22,7 +22,7 @@ function makeContext(overrides: Partial<PromptContext> = {}): PromptContext {
       number: 42,
       title: 'Fix login timeout',
       body: 'The login page times out after 10 seconds.',
-      labels: ['bug', 'orch:ready'],
+      labels: ['bug', 'no:ready'],
     },
     repo: {
       name: 'org/repo',
@@ -98,7 +98,7 @@ describe('compilePrompt', () => {
 
     expect(systemPrompt).toContain('Role: planner')
     expect(systemPrompt).toContain('Issue: #42 <issue_title>Fix login timeout</issue_title>')
-    expect(systemPrompt).toContain('Labels: bug, orch:ready')
+    expect(systemPrompt).toContain('Labels: bug, no:ready')
     expect(systemPrompt).toContain('Repo: org/repo (main)')
     expect(systemPrompt).toContain('Iteration: 1/4')
     expect(systemPrompt).toContain('Retry: false')

@@ -47,7 +47,7 @@ For mobile or server-hosted setups, use an external terminal client such as Term
 
 ### 5. Queue work
 
-Add the ready label (default: `orch:ready`) to an issue in a configured repository. Night-orch will pick it up on the next poll cycle and run the Plan -> Code -> Verify -> Review loop.
+Add the ready label (default: `no:ready`) to an issue in a configured repository. Night-orch will pick it up on the next poll cycle and run the Plan -> Code -> Verify -> Review loop.
 
 ## Configure with an AI agent
 
@@ -66,7 +66,7 @@ THEN interview me — ask these one or two at a time, infer sensible answers fro
 1. Which repo(s) should it work on? (owner/name + local checkout path)
 2. Forge: GitHub or Forgejo? (Forgejo needs apiBaseUrl + token env var)
 3. Base branch and branch prefix? (default base `main`, prefix `orch`)
-4. Which label marks an issue "ready to implement"? (default `orch:ready`)
+4. Which label marks an issue "ready to implement"? (default `no:ready`)
 5. Worker per role — planner / coder / reviewer: `claude`, `codex`, or `opencode`?
    (Proven default: planner=claude, coder=codex, reviewer=codex.)
 6. Verify commands that must pass before a PR is opened (lint, typecheck, tests, build).

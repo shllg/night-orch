@@ -23,7 +23,7 @@ function makeMockForge(): ForgeAdapter {
   return {
     listEligibleIssues: vi.fn(),
     getIssue: vi.fn().mockResolvedValue({
-      number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:blocked'],
+      number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:blocked'],
       assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '',
     }),
     addLabels: vi.fn().mockResolvedValue(undefined),
@@ -59,7 +59,7 @@ function makeConfig(overrides: { costModel?: 'pay-per-use' | 'subscription' | 's
     commentCommands: { enabled: true, requireCollaborator: true },
     repos: [{
       repo: 'org/repo', forge: 'github', linkedProjects: [], maxConcurrentRuns: 1, localPath: '/tmp/repo', baseBranch: 'main',
-      branchPrefix: 'orch', updateStrategy: 'merge',       labels: { ready: ['orch:ready'], running: 'orch:running', blocked: 'orch:blocked', needsHuman: 'orch:needs-human', reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry', planning: 'orch:planning', mergeQueued: 'orch:merge-queued', merging: 'orch:merging', mergeFailed: 'orch:merge-failed' },
+      branchPrefix: 'orch', updateStrategy: 'merge',       labels: { ready: ['no:ready'], running: 'no:running', blocked: 'no:blocked', needsHuman: 'no:needs-human', reviewReady: 'no:review-ready', error: 'no:error', retry: 'no:retry', planning: 'no:planning', mergeQueued: 'no:merge-queued', merging: 'no:merging', mergeFailed: 'no:merge-failed' },
       labelConfig: {},
       planning: { prdDirectory: 'docs/prd' },
       defaults: { planner: 'claude', coder: 'claude', reviewer: 'claude', doneMode: 'pr-ready', notifyPriority: 'normal', prMentions: [] },
@@ -321,7 +321,7 @@ describe('scanCostBlockedRuns', () => {
       forge,
       'org/repo',
       1,
-      ['orch:blocked'],
+      ['no:blocked'],
       'blocked',
       'queued',
       expect.any(Object),

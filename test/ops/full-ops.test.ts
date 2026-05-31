@@ -34,7 +34,7 @@ function makeMockForge(overrides: Partial<ForgeAdapter> = {}): ForgeAdapter {
   return {
     listEligibleIssues: vi.fn(),
     getIssue: vi.fn().mockResolvedValue({
-      number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:running'],
+      number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:running'],
       assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '',
     }),
     addLabels: vi.fn().mockResolvedValue(undefined),
@@ -61,7 +61,7 @@ function makeConfig(): Config {
     metrics: { enabled: false, port: 9090, host: '127.0.0.1' },
     repos: [{
       repo: 'org/repo', forge: 'github', localPath: '/tmp/repo', baseBranch: 'main',
-      branchPrefix: 'orch', labels: { ready: ['orch:ready'], running: 'orch:running', blocked: ['orch:blocked'], reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry' },
+      branchPrefix: 'orch', labels: { ready: ['no:ready'], running: 'no:running', blocked: ['no:blocked'], reviewReady: 'no:review-ready', error: 'no:error', retry: 'no:retry' },
       defaults: { planner: 'claude', coder: 'claude', reviewer: 'claude', doneMode: 'pr-ready', notifyPriority: 'normal', prMentions: [] },
       verify: [], selectors: { includeLabelsAny: [], excludeLabelsAny: [] }, agents: {},
     }],
@@ -127,7 +127,7 @@ describe('Full ops integration', () => {
     db.prepare("UPDATE runs SET status = 'error', last_error = 'test error', ended_at = datetime('now') WHERE id = ?").run(runId)
 
     vi.mocked(forge.getIssue).mockResolvedValue({
-      number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:error'],
+      number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:error'],
       assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '',
     })
 

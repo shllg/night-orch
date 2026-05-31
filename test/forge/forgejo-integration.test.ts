@@ -24,11 +24,11 @@ function jsonResponse(body: unknown, status = 200, headers: Record<string, strin
 }
 
 const REPO_LABELS = [
-  { id: 1, name: 'orch:ready' },
-  { id: 2, name: 'orch:running' },
-  { id: 3, name: 'orch:blocked' },
-  { id: 4, name: 'orch:review-ready' },
-  { id: 5, name: 'orch:error' },
+  { id: 1, name: 'no:ready' },
+  { id: 2, name: 'no:running' },
+  { id: 3, name: 'no:blocked' },
+  { id: 4, name: 'no:review-ready' },
+  { id: 5, name: 'no:error' },
 ]
 
 function makeRepoConfig(): RepoConfig {
@@ -40,12 +40,12 @@ function makeRepoConfig(): RepoConfig {
     baseBranch: 'main',
     branchPrefix: 'orch',
     labels: {
-      ready: ['orch:ready'],
-      running: 'orch:running',
-      blocked: ['orch:blocked'],
-      reviewReady: 'orch:review-ready',
-      error: 'orch:error',
-      retry: 'orch:retry',
+      ready: ['no:ready'],
+      running: 'no:running',
+      blocked: ['no:blocked'],
+      reviewReady: 'no:review-ready',
+      error: 'no:error',
+      retry: 'no:retry',
     },
     defaults: {
       planner: 'claude',
@@ -57,7 +57,7 @@ function makeRepoConfig(): RepoConfig {
     },
     verify: [],
     selectors: {
-      includeLabelsAny: ['orch:ready'],
+      includeLabelsAny: ['no:ready'],
       excludeLabelsAny: [],
     },
     agents: {},
@@ -89,8 +89,8 @@ describe('Forgejo Integration', () => {
   describe('discovery → claim → create PR flow', () => {
     it('discovers eligible issues, adds running label, and creates PR', async () => {
       const repoConfig = makeRepoConfig()
-      const issue1 = makeForgejoIssue(1, [{ id: 1, name: 'orch:ready' }])
-      const issue2 = makeForgejoIssue(2, [{ id: 1, name: 'orch:ready' }])
+      const issue1 = makeForgejoIssue(1, [{ id: 1, name: 'no:ready' }])
+      const issue2 = makeForgejoIssue(2, [{ id: 1, name: 'no:ready' }])
 
       // 1. listEligibleIssues: fetch issues + labels (for cache)
       mockFetch
@@ -98,11 +98,11 @@ describe('Forgejo Integration', () => {
         .mockResolvedValueOnce(jsonResponse([issue1, issue2]))
         // Label cache: repo labels
         .mockResolvedValueOnce(jsonResponse(REPO_LABELS))
-        // addLabels POST (claim issue 1 with orch:running)
+        // addLabels POST (claim issue 1 with no:running)
         .mockResolvedValueOnce(jsonResponse([]))
         // removeLabels refreshes label cache after mutation
         .mockResolvedValueOnce(jsonResponse(REPO_LABELS))
-        // removeLabels DELETE (remove orch:ready from issue 1) — id 1
+        // removeLabels DELETE (remove no:ready from issue 1) — id 1
         .mockResolvedValueOnce(jsonResponse(undefined, 204))
         // createPR POST
         .mockResolvedValueOnce(jsonResponse({
@@ -124,8 +124,8 @@ describe('Forgejo Integration', () => {
       expect(issues[1]?.number).toBe(2)
 
       // Step 2: Claim issue 1 — add running, remove ready
-      await adapter.addLabels('org/repo', 1, ['orch:running'])
-      await adapter.removeLabels('org/repo', 1, ['orch:ready'])
+      await adapter.addLabels('org/repo', 1, ['no:running'])
+      await adapter.removeLabels('org/repo', 1, ['no:ready'])
 
       // Step 3: Create PR
       const pr = await adapter.createPR('org/repo', {
@@ -148,7 +148,7 @@ describe('Forgejo Integration', () => {
         // addLabels POST
         .mockResolvedValueOnce(jsonResponse([]))
 
-      await adapter.addLabels('org/repo', 5, ['orch:running', 'orch:blocked'])
+      await adapter.addLabels('org/repo', 5, ['no:running', 'no:blocked'])
 
       // The POST should contain label IDs [2, 3]
       const postCall = mockFetch.mock.calls[1]!
@@ -169,12 +169,12 @@ describe('Forgejo Integration', () => {
       mockFetch
         // Label cache
         .mockResolvedValueOnce(jsonResponse(REPO_LABELS))
-        // DELETE label 2 (orch:running) — success
+        // DELETE label 2 (no:running) — success
         .mockResolvedValueOnce(jsonResponse(undefined, 204))
-        // Label cache already warm, then DELETE label 3 (orch:blocked) — 404 (not present, that's ok)
+        // Label cache already warm, then DELETE label 3 (no:blocked) — 404 (not present, that's ok)
         .mockResolvedValueOnce(jsonResponse({ message: 'Not Found' }, 404))
 
-      await adapter.removeLabels('org/repo', 5, ['orch:running', 'orch:blocked'])
+      await adapter.removeLabels('org/repo', 5, ['no:running', 'no:blocked'])
       // Should not throw
     })
   })

@@ -29,7 +29,7 @@ function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
     issue: { number: 1, nodeId: '', title: '', body: '', labels: [], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
     repoConfig: {
       verify: ['pnpm test'],
-      labels: { planning: 'orch:planning' },
+      labels: { planning: 'no:planning' },
       planning: { prdDirectory: 'docs/prd' },
     } as RunContext['repoConfig'],
     roles: { planner: 'claude', coder: 'claude', reviewer: 'claude' },
@@ -77,7 +77,7 @@ describe('decide', () => {
 
   it('planning label + coder output present → publish without review/verify', () => {
     const ctx = makeCtx({
-      issue: { ...makeCtx().issue, labels: ['orch:planning'] },
+      issue: { ...makeCtx().issue, labels: ['no:planning'] },
       codeResult: {
         summary: 'Wrote PRD',
         changedFiles: ['docs/prd/1-test.md'],
@@ -93,7 +93,7 @@ describe('decide', () => {
 
   it('planning label + missing coder output → block', () => {
     const ctx = makeCtx({
-      issue: { ...makeCtx().issue, labels: ['orch:planning'] },
+      issue: { ...makeCtx().issue, labels: ['no:planning'] },
       codeResult: null,
       reviewResult: null,
       verifyResults: [],

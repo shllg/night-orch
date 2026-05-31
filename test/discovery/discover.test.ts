@@ -27,7 +27,7 @@ function makeIssue(overrides: Partial<ForgeIssue> = {}): ForgeIssue {
     repo: 'org/repo',
     title: 'Test issue',
     body: 'Fix the thing',
-    labels: ['orch:ready'],
+    labels: ['no:ready'],
     assignees: [],
     state: 'open',
     createdAt: '2026-01-01T00:00:00Z',
@@ -45,17 +45,17 @@ function makeRepoConfig(overrides: Partial<RepoConfig> = {}): RepoConfig {
     baseBranch: 'main',
     branchPrefix: 'orch',
     labels: {
-      ready: ['orch:ready'],
-      running: 'orch:running',
-      blocked: ['orch:blocked', 'orch:needs-human'],
-      needsHuman: 'orch:needs-human',
-      reviewReady: 'orch:review-ready',
-      error: 'orch:error',
-      retry: 'orch:retry',
-      planning: 'orch:planning',
-      mergeQueued: 'orch:merge-queued',
-      merging: 'orch:merging',
-      mergeFailed: 'orch:merge-failed',
+      ready: ['no:ready'],
+      running: 'no:running',
+      blocked: ['no:blocked', 'no:needs-human'],
+      needsHuman: 'no:needs-human',
+      reviewReady: 'no:review-ready',
+      error: 'no:error',
+      retry: 'no:retry',
+      planning: 'no:planning',
+      mergeQueued: 'no:merge-queued',
+      merging: 'no:merging',
+      mergeFailed: 'no:merge-failed',
     },
     defaults: {
       planner: 'claude',
@@ -67,8 +67,8 @@ function makeRepoConfig(overrides: Partial<RepoConfig> = {}): RepoConfig {
     },
     verify: [],
     selectors: {
-      includeLabelsAny: ['orch:ready'],
-      excludeLabelsAny: ['orch:blocked'],
+      includeLabelsAny: ['no:ready'],
+      excludeLabelsAny: ['no:blocked'],
     },
     agents: {},
     linkedProjects: [],
@@ -103,9 +103,9 @@ function makeMockLeaseManager(leasedIssues: Set<number> = new Set()): LeaseManag
 describe('discoverEligibleIssues', () => {
   it('returns issues that pass selector and are not leased', async () => {
     const issues = [
-      makeIssue({ number: 1, labels: ['orch:ready'] }),
-      makeIssue({ number: 2, labels: ['orch:ready'] }),
-      makeIssue({ number: 3, labels: ['orch:ready'] }),
+      makeIssue({ number: 1, labels: ['no:ready'] }),
+      makeIssue({ number: 2, labels: ['no:ready'] }),
+      makeIssue({ number: 3, labels: ['no:ready'] }),
     ]
     const forge = makeMockForge(issues)
     const leaseManager = makeMockLeaseManager(new Set([2]))
@@ -118,8 +118,8 @@ describe('discoverEligibleIssues', () => {
 
   it('excludes issues with exclude labels', async () => {
     const issues = [
-      makeIssue({ number: 1, labels: ['orch:ready'] }),
-      makeIssue({ number: 2, labels: ['orch:ready', 'orch:blocked'] }),
+      makeIssue({ number: 1, labels: ['no:ready'] }),
+      makeIssue({ number: 2, labels: ['no:ready', 'no:blocked'] }),
     ]
     const forge = makeMockForge(issues)
     const leaseManager = makeMockLeaseManager()
@@ -141,8 +141,8 @@ describe('discoverEligibleIssues', () => {
 
   it('triages each issue', async () => {
     const issues = [
-      makeIssue({ number: 1, labels: ['orch:ready', 'bug'], body: 'Short' }),
-      makeIssue({ number: 2, labels: ['orch:ready', 'refactor'], body: 'Major refactoring' }),
+      makeIssue({ number: 1, labels: ['no:ready', 'bug'], body: 'Short' }),
+      makeIssue({ number: 2, labels: ['no:ready', 'refactor'], body: 'Major refactoring' }),
     ]
     const forge = makeMockForge(issues)
     const leaseManager = makeMockLeaseManager()
@@ -160,9 +160,9 @@ describe('discoverEligibleIssues', () => {
 
   it('sorts trivial first, standard second, architectural last', async () => {
     const issues = [
-      makeIssue({ number: 1, labels: ['orch:ready', 'refactor'], body: 'Big change' }), // architectural
-      makeIssue({ number: 2, labels: ['orch:ready', 'enhancement'], body: 'A'.repeat(300) }), // standard
-      makeIssue({ number: 3, labels: ['orch:ready', 'bug'], body: 'Typo' }), // trivial
+      makeIssue({ number: 1, labels: ['no:ready', 'refactor'], body: 'Big change' }), // architectural
+      makeIssue({ number: 2, labels: ['no:ready', 'enhancement'], body: 'A'.repeat(300) }), // standard
+      makeIssue({ number: 3, labels: ['no:ready', 'bug'], body: 'Typo' }), // trivial
     ]
     const forge = makeMockForge(issues)
     const leaseManager = makeMockLeaseManager()
@@ -176,7 +176,7 @@ describe('discoverEligibleIssues', () => {
   })
 
   it('attaches repoConfig to each discovered issue', async () => {
-    const issues = [makeIssue({ number: 1, labels: ['orch:ready'] })]
+    const issues = [makeIssue({ number: 1, labels: ['no:ready'] })]
     const forge = makeMockForge(issues)
     const leaseManager = makeMockLeaseManager()
     const config = makeRepoConfig()
@@ -198,8 +198,8 @@ describe('discoverEligibleIssues', () => {
 
   it('checks lease status for each eligible issue', async () => {
     const issues = [
-      makeIssue({ number: 1, labels: ['orch:ready'] }),
-      makeIssue({ number: 2, labels: ['orch:ready'] }),
+      makeIssue({ number: 1, labels: ['no:ready'] }),
+      makeIssue({ number: 2, labels: ['no:ready'] }),
     ]
     const forge = makeMockForge(issues)
     const leaseManager = makeMockLeaseManager()
@@ -215,7 +215,7 @@ describe('discoverEligibleIssues', () => {
       number: 7,
       repo: 'org/tracker',
       url: 'https://github.com/org/tracker/issues/7',
-      labels: ['orch:ready'],
+      labels: ['no:ready'],
     })
     const forge = makeMockForge([issue])
     const leaseManager = makeMockLeaseManager()
@@ -229,8 +229,8 @@ describe('discoverEligibleIssues', () => {
   it('applies kanban selectors when trigger label is present', () => {
     const repoConfig = makeRepoConfig({
       selectors: {
-        includeLabelsAny: ['orch:ready'],
-        excludeLabelsAny: ['orch:blocked'],
+        includeLabelsAny: ['no:ready'],
+        excludeLabelsAny: ['no:blocked'],
       },
       kanban: {
         triggerLabel: 'flow:kanban',
@@ -251,7 +251,7 @@ describe('discoverEligibleIssues', () => {
     })
 
     const kanbanEligible = makeIssue({ labels: ['flow:kanban', 'kanban:todo'] })
-    const nonKanbanReady = makeIssue({ labels: ['flow:kanban', 'orch:ready'] })
+    const nonKanbanReady = makeIssue({ labels: ['flow:kanban', 'no:ready'] })
 
     expect(isIssueEligibleForRepo(kanbanEligible, repoConfig)).toBe(true)
     expect(isIssueEligibleForRepo(nonKanbanReady, repoConfig)).toBe(false)
@@ -259,8 +259,8 @@ describe('discoverEligibleIssues', () => {
 
   it('handles all issues being leased', async () => {
     const issues = [
-      makeIssue({ number: 1, labels: ['orch:ready'] }),
-      makeIssue({ number: 2, labels: ['orch:ready'] }),
+      makeIssue({ number: 1, labels: ['no:ready'] }),
+      makeIssue({ number: 2, labels: ['no:ready'] }),
     ]
     const forge = makeMockForge(issues)
     const leaseManager = makeMockLeaseManager(new Set([1, 2]))

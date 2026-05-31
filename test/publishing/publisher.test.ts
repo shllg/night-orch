@@ -68,7 +68,7 @@ function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
       baseBranch: 'main',
       branchPrefix: 'orch',
       updateStrategy: 'merge',
-      labels: { ready: ['orch:ready'], running: 'orch:running', blocked: ['orch:blocked'], reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry' },
+      labels: { ready: ['no:ready'], running: 'no:running', blocked: ['no:blocked'], reviewReady: 'no:review-ready', error: 'no:error', retry: 'no:retry' },
       defaults: { planner: 'claude', coder: 'claude', reviewer: 'claude', doneMode: 'pr-ready', notifyPriority: 'normal', prMentions: [] },
       verify: [],
       selectors: { includeLabelsAny: [], excludeLabelsAny: [] },

@@ -58,7 +58,7 @@ night-orch run-once  # single poll cycle (useful for testing)
 night-orch demo      # web UI against synthetic demo data (UI dev mode)
 ```
 
-The daemon polls each configured repo for issues labeled `orch:ready`, processes them through the AI pipeline, and creates PRs. It runs continuously until you stop it (Ctrl+C).
+The daemon polls each configured repo for issues labeled `no:ready`, processes them through the AI pipeline, and creates PRs. It runs continuously until you stop it (Ctrl+C).
 
 ### Demo mode (UI iteration)
 
@@ -181,7 +181,7 @@ ReadWritePaths=/home/orch/.config/night-orch /home/orch/code/.night-orch
 WantedBy=multi-user.target
 ```
 
-**`/etc/night-orch/env`** — mode `0600`, owned by `orch:orch`.
+**`/etc/night-orch/env`** — mode `0600`, owned by `no:orch`.
 Keeps secrets out of the service unit and out of `ps`.
 
 ```ini
@@ -284,26 +284,26 @@ Repos are polled in parallel. By default, each repo runs one issue at a time; ra
 
 ## How Issues Are Processed
 
-1. **Discovery** — the daemon polls each repo for open issues with configured labels (default: `orch:ready`)
+1. **Discovery** — the daemon polls each repo for open issues with configured labels (default: `no:ready`)
 2. **Triage** — issues are classified as trivial, standard, or architectural based on labels and body length
 3. **Decomposition** (optional) — complex issues are split into independent sub-tasks
 4. **Pipeline execution** — each issue runs through the configured workflow in an isolated git worktree (defaults: `standard` = Plan → Code → Verify → Review → Decide, `trivial` = Code → Verify → Decide)
 5. **Publishing** — approved changes are committed, pushed, and a PR is created on the remote
 6. **Merge queue** (optional) — approved PRs are batched, tested, and merged automatically
 
-Planning-only override: if an issue also has the planning label (default `orch:planning`), night-orch runs a planning-only workflow and publishes exactly one PRD markdown file (no code/test/config changes).
+Planning-only override: if an issue also has the planning label (default `no:planning`), night-orch runs a planning-only workflow and publishes exactly one PRD markdown file (no code/test/config changes).
 
 ### Label lifecycle
 
 ```
-orch:ready → orch:running → orch:review-ready → (merged)
+no:ready → no:running → no:review-ready → (merged)
                   ↓                ↓
-            orch:blocked     orch:merge-queued
+            no:blocked     no:merge-queued
                   ↓                ↓
-            orch:error       orch:merge-failed
+            no:error       no:merge-failed
 ```
 
-To retry a blocked or errored issue, remove the blocking label and add `orch:ready`, or use:
+To retry a blocked or errored issue, remove the blocking label and add `no:ready`, or use:
 
 ```bash
 night-orch retry owner/repo 42
@@ -485,7 +485,7 @@ Each poll cycle:
 4. **Test** — push the staging branch, wait for CI
 5. **On pass** — fast-forward the base branch to the staging tip, close merged PRs
 6. **On fail** — bisect the batch (split in half, test each half, recurse)
-7. **Culprit found** — the single PR that broke CI is labeled `orch:merge-failed`
+7. **Culprit found** — the single PR that broke CI is labeled `no:merge-failed`
 
 ### Flaky CI handling
 
@@ -493,9 +493,9 @@ With `retryFlakyOnce: true` (default), a failed batch is retried once before bis
 
 ### Labels
 
-- `orch:merge-queued` — PR has entered the merge queue
-- `orch:merging` — PR's batch is currently being tested
-- `orch:merge-failed` — PR was identified as the bisection culprit
+- `no:merge-queued` — PR has entered the merge queue
+- `no:merging` — PR's batch is currently being tested
+- `no:merge-failed` — PR was identified as the bisection culprit
 
 ---
 
@@ -591,7 +591,7 @@ Night-orch responds to commands posted on the backing issue **or** on the PR. Ac
 | `/orch cancel` | Cancel an active run |
 | `/orch continue` | Queue a context-aware second pass for blocked/review-ready/errored runs |
 
-Once a run reaches `review_ready`, re-trigger it through `/orch continue`, `/orch retry`, or `/orch rebase`. Re-adding `orch:ready` manually is treated as stale orchestration state and will be scrubbed on the next poll.
+Once a run reaches `review_ready`, re-trigger it through `/orch continue`, `/orch retry`, or `/orch rebase`. Re-adding `no:ready` manually is treated as stale orchestration state and will be scrubbed on the next poll.
 
 Night-orch distinguishes its own comments from yours via an HTML marker (`<!-- night-orch:… -->`), not by GitHub author, so `/orch` commands you post under the same identity that runs night-orch are still parsed. See [Single-user deployment](./single-user.md).
 
@@ -701,7 +701,7 @@ Queue a context-aware second pass for blocked/review-ready/errored work. Night-o
 
 After a branch refresh, explicit rebase, or publish/push reconciliation conflicts, `/orch continue` keeps the current branch state and asks the agent to resolve the conflict. The follow-up prompt now includes the preserved conflict snapshot rather than only a lossy text summary. Use `/orch retry` instead when you want to discard the current branch state and restart from the latest base branch.
 
-For review-ready issues, `continue`, `retry`, and `rebase` are the supported re-entry paths. Manually re-adding `orch:ready` does not start another pass.
+For review-ready issues, `continue`, `retry`, and `rebase` are the supported re-entry paths. Manually re-adding `no:ready` does not start another pass.
 
 Options: `--strategy merge|rebase` (override the repo default for this manual action). This is most useful when resuming after a rebase conflict and you want the next manual update step to use a different strategy. Successful queueing also signals any running daemon that uses the same database to wake for the next cycle immediately.
 

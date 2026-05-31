@@ -43,7 +43,7 @@ describe('compilePRTitle', () => {
   })
 
   it('falls back to CHORE when no conventional label is present', () => {
-    expect(compilePRTitle(42, 'Adjust queue handling', ['orch:running'])).toBe(
+    expect(compilePRTitle(42, 'Adjust queue handling', ['no:running'])).toBe(
       '[CHORE] Adjust queue handling (night-orch / #42)',
     )
   })

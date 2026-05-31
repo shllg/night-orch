@@ -909,17 +909,17 @@ Note: `architectural` issues are intentionally handled outside workflow executio
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `ready` | string or string[] | `['orch:ready']` | Normalized to array. |
-| `running` | string | `orch:running` |  |
-| `blocked` | string or string[] | `orch:blocked` | Normalized to array. |
-| `needsHuman` | string | `orch:needs-human` |  |
-| `reviewReady` | string | `orch:review-ready` |  |
-| `error` | string | `orch:error` |  |
-| `retry` | string | `orch:retry` |  |
-| `planning` | string | `orch:planning` | When present on an issue, night-orch switches to planning-only mode and publishes only a PRD markdown file. |
-| `mergeQueued` | string | `orch:merge-queued` | Set when PR enters the merge queue. |
-| `merging` | string | `orch:merging` | Set while staging branch CI is running. |
-| `mergeFailed` | string | `orch:merge-failed` | Set when the merge queue identifies this PR as the culprit. |
+| `ready` | string or string[] | `['no:ready']` | Normalized to array. |
+| `running` | string | `no:running` |  |
+| `blocked` | string or string[] | `no:blocked` | Normalized to array. |
+| `needsHuman` | string | `no:needs-human` |  |
+| `reviewReady` | string | `no:review-ready` |  |
+| `error` | string | `no:error` |  |
+| `retry` | string | `no:retry` |  |
+| `planning` | string | `no:planning` | When present on an issue, night-orch switches to planning-only mode and publishes only a PRD markdown file. |
+| `mergeQueued` | string | `no:merge-queued` | Set when PR enters the merge queue. |
+| `merging` | string | `no:merging` | Set while staging branch CI is running. |
+| `mergeFailed` | string | `no:merge-failed` | Set when the merge queue identifies this PR as the culprit. |
 
 ### `repos[].linkedProjects`
 
@@ -992,7 +992,7 @@ Role labels can override these defaults per issue:
 
 Planning-only mode label:
 
-- `orch:planning` (or whatever `repos[].labels.planning` is set to)
+- `no:planning` (or whatever `repos[].labels.planning` is set to)
 
 When this label is present, night-orch uses a planning-only workflow and must produce a PR containing exactly one PRD markdown file.
 
@@ -1096,8 +1096,8 @@ If a configured template file is missing, a warning is logged and built-in defau
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `includeLabelsAny` | string[] | `['orch:ready']` | Issue must include at least one (empty list means include all). |
-| `excludeLabelsAny` | string[] | `['orch:blocked', 'orch:error', 'orch:needs-human']` | Issue is skipped if any label matches. |
+| `includeLabelsAny` | string[] | `['no:ready']` | Issue must include at least one (empty list means include all). |
+| `excludeLabelsAny` | string[] | `['no:blocked', 'no:error', 'no:needs-human']` | Issue is skipped if any label matches. |
 
 ### `repos[].agents`
 
@@ -1155,7 +1155,7 @@ When enabled, each poll cycle:
 3. If no active batch, scans for eligible PRs (review_ready + CI passing + approved) and forms a new batch
 4. Conflicting PRs are ejected from the batch and continue to the next eligible PR
 
-Labels used: `orch:merge-queued`, `orch:merging`, `orch:merge-failed`.
+Labels used: `no:merge-queued`, `no:merging`, `no:merge-failed`.
 
 ## Forge-Specific Notes
 

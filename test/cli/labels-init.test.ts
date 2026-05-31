@@ -27,12 +27,12 @@ const BASE_CONFIG = {
       repo: 'org/repo',
       forge: 'github',
       labels: {
-        ready: ['orch:ready'],
-        running: 'orch:running',
-        blocked: ['orch:blocked', 'orch:needs-human'],
-        reviewReady: 'orch:review-ready',
-        error: 'orch:error',
-        retry: 'orch:retry',
+        ready: ['no:ready'],
+        running: 'no:running',
+        blocked: ['no:blocked', 'no:needs-human'],
+        reviewReady: 'no:review-ready',
+        error: 'no:error',
+        retry: 'no:retry',
       },
       labelConfig: {},
     },
@@ -68,7 +68,7 @@ describe('labelsInitCommand', () => {
     await labelsInitCommand('org/repo', { dryRun: true })
     expect(process.exitCode).not.toBe(1)
     expect(mockExecFile).not.toHaveBeenCalled()
-    expect(stdoutSpy).toHaveBeenCalledWith(expect.stringContaining('[dry-run] gh label create orch:ready'))
+    expect(stdoutSpy).toHaveBeenCalledWith(expect.stringContaining('[dry-run] gh label create no:ready'))
   })
 
   it('executes gh label create in non-dry-run mode', async () => {
@@ -77,7 +77,7 @@ describe('labelsInitCommand', () => {
     expect(mockExecFile).toHaveBeenCalled()
     expect(mockExecFile).toHaveBeenCalledWith(
       'gh',
-      expect.arrayContaining(['label', 'create', 'orch:ready', '--repo', 'org/repo', '--force']),
+      expect.arrayContaining(['label', 'create', 'no:ready', '--repo', 'org/repo', '--force']),
       { timeout: 20_000 },
       expect.any(Function),
     )

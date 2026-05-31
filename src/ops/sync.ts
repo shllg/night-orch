@@ -205,7 +205,7 @@ export class SyncEngine {
     // of a process crash inside the finalizer window. Route it to the
     // explicit orphan marker so the user's next `/orch continue` starts
     // from a clean, continuable error state rather than the deadlock
-    // state (queued in DB + `orch:running` label on the forge) that
+    // state (queued in DB + `no:running` label on the forge) that
     // discovery silently skips.
     const orphan = detectFinalizerOrphan(run)
     if (orphan) {

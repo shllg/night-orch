@@ -22,17 +22,17 @@ vi.mock('../../src/utils/logger.js', () => ({
 }))
 
 const labelConfig: LabelConfig = {
-  ready: ['orch:ready'],
-  running: 'orch:running',
-  blocked: 'orch:blocked',
-  needsHuman: 'orch:needs-human',
-  reviewReady: 'orch:review-ready',
-  error: 'orch:error',
-  retry: 'orch:retry',
-  planning: 'orch:planning',
-  mergeQueued: 'orch:merge-queued',
-  merging: 'orch:merging',
-  mergeFailed: 'orch:merge-failed',
+  ready: ['no:ready'],
+  running: 'no:running',
+  blocked: 'no:blocked',
+  needsHuman: 'no:needs-human',
+  reviewReady: 'no:review-ready',
+  error: 'no:error',
+  retry: 'no:retry',
+  planning: 'no:planning',
+  mergeQueued: 'no:merge-queued',
+  merging: 'no:merging',
+  mergeFailed: 'no:merge-failed',
 }
 
 function makeMockForge(): ForgeAdapter {
@@ -64,16 +64,16 @@ describe('transitionLabels', () => {
   it('calls forge.addLabels and forge.removeLabels correctly', async () => {
     const forge = makeMockForge()
 
-    await transitionLabels(forge, 'org/repo', 1, ['orch:ready'], 'queued', 'running', labelConfig)
+    await transitionLabels(forge, 'org/repo', 1, ['no:ready'], 'queued', 'running', labelConfig)
 
-    expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:running'])
-    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:ready'])
+    expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 1, ['no:running'])
+    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['no:ready'])
   })
 
   it('skips API calls when no labels change', async () => {
     const forge = makeMockForge()
 
-    await transitionLabels(forge, 'org/repo', 1, ['orch:running'], 'running', 'running', labelConfig)
+    await transitionLabels(forge, 'org/repo', 1, ['no:running'], 'running', 'running', labelConfig)
 
     expect(forge.addLabels).not.toHaveBeenCalled()
     expect(forge.removeLabels).not.toHaveBeenCalled()
@@ -83,21 +83,21 @@ describe('transitionLabels', () => {
     const forge = makeMockForge()
 
     // Already has running label
-    await transitionLabels(forge, 'org/repo', 1, ['orch:ready', 'orch:running'], 'queued', 'running', labelConfig)
+    await transitionLabels(forge, 'org/repo', 1, ['no:ready', 'no:running'], 'queued', 'running', labelConfig)
 
-    // Should not try to add orch:running since it's already there
+    // Should not try to add no:running since it's already there
     expect(forge.addLabels).not.toHaveBeenCalled()
-    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:ready'])
+    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['no:ready'])
   })
 
   it('only removes labels actually present', async () => {
     const forge = makeMockForge()
 
-    // Does not have orch:ready — only running
-    await transitionLabels(forge, 'org/repo', 1, ['orch:running'], 'running', 'error', labelConfig)
+    // Does not have no:ready — only running
+    await transitionLabels(forge, 'org/repo', 1, ['no:running'], 'running', 'error', labelConfig)
 
-    expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:error'])
-    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:running'])
+    expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 1, ['no:error'])
+    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['no:running'])
   })
 
   it('addLabels failure is logged but does not throw', async () => {
@@ -105,7 +105,7 @@ describe('transitionLabels', () => {
     vi.mocked(forge.addLabels).mockRejectedValue(new Error('API error'))
 
     await expect(
-      transitionLabels(forge, 'org/repo', 1, ['orch:ready'], 'queued', 'running', labelConfig),
+      transitionLabels(forge, 'org/repo', 1, ['no:ready'], 'queued', 'running', labelConfig),
     ).resolves.toBeUndefined()
 
     // removeLabels should still be called
@@ -117,43 +117,43 @@ describe('transitionLabels', () => {
     vi.mocked(forge.removeLabels).mockRejectedValue(new Error('API error'))
 
     await expect(
-      transitionLabels(forge, 'org/repo', 1, ['orch:ready'], 'queued', 'running', labelConfig),
+      transitionLabels(forge, 'org/repo', 1, ['no:ready'], 'queued', 'running', labelConfig),
     ).resolves.toBeUndefined()
   })
 
   it('handles transition to completed — removes running + reviewReady', async () => {
     const forge = makeMockForge()
 
-    await transitionLabels(forge, 'org/repo', 1, ['orch:running', 'orch:review-ready'], 'running', 'completed', labelConfig)
+    await transitionLabels(forge, 'org/repo', 1, ['no:running', 'no:review-ready'], 'running', 'completed', labelConfig)
 
     expect(forge.addLabels).not.toHaveBeenCalled()
-    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, expect.arrayContaining(['orch:running', 'orch:review-ready']))
+    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, expect.arrayContaining(['no:running', 'no:review-ready']))
   })
 
   it('handles transition to blocked without blockReason — adds only blocked label', async () => {
     const forge = makeMockForge()
 
-    await transitionLabels(forge, 'org/repo', 1, ['orch:running'], 'running', 'blocked', labelConfig)
+    await transitionLabels(forge, 'org/repo', 1, ['no:running'], 'running', 'blocked', labelConfig)
 
-    expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:blocked'])
-    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:running'])
+    expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 1, ['no:blocked'])
+    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['no:running'])
   })
 
   it('handles transition to blocked with reviewerBlocked — adds blocked + needsHuman', async () => {
     const forge = makeMockForge()
 
-    await transitionLabels(forge, 'org/repo', 1, ['orch:running'], 'running', 'blocked', labelConfig, reviewerBlockedReason)
+    await transitionLabels(forge, 'org/repo', 1, ['no:running'], 'running', 'blocked', labelConfig, reviewerBlockedReason)
 
-    expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:blocked', 'orch:needs-human'])
-    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:running'])
+    expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 1, ['no:blocked', 'no:needs-human'])
+    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['no:running'])
   })
 
   it('handles transition to blocked with costLimit — adds only blocked label', async () => {
     const forge = makeMockForge()
 
-    await transitionLabels(forge, 'org/repo', 1, ['orch:running'], 'running', 'blocked', labelConfig, costLimitReason)
+    await transitionLabels(forge, 'org/repo', 1, ['no:running'], 'running', 'blocked', labelConfig, costLimitReason)
 
-    expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:blocked'])
+    expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 1, ['no:blocked'])
   })
 
   it('removes stale needsHuman label when blocked reason does not require humans', async () => {
@@ -163,13 +163,13 @@ describe('transitionLabels', () => {
       forge,
       'org/repo',
       1,
-      ['orch:running', 'orch:needs-human'],
+      ['no:running', 'no:needs-human'],
       'running',
       'blocked',
       labelConfig,
       costLimitReason,
     )
 
-    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:running', 'orch:needs-human'])
+    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['no:running', 'no:needs-human'])
   })
 })

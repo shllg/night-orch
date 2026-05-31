@@ -277,18 +277,18 @@ repos:
     # updateStrategy: merge  # 'merge' (default, reliable) or 'rebase' (linear history)
     labels:
       ready:
-        - orch:ready
-      running: orch:running
+        - no:ready
+      running: no:running
       blocked:
-        - orch:blocked
-        - orch:needs-human
-      reviewReady: orch:review-ready
-      error: orch:error
-      retry: orch:retry
-      planning: orch:planning
-      # mergeQueued: orch:merge-queued
-      # merging: orch:merging
-      # mergeFailed: orch:merge-failed
+        - no:blocked
+        - no:needs-human
+      reviewReady: no:review-ready
+      error: no:error
+      retry: no:retry
+      planning: no:planning
+      # mergeQueued: no:merge-queued
+      # merging: no:merging
+      # mergeFailed: no:merge-failed
     # Optional kanban-state flow. If triggerLabel is present on an issue,
     # these labels are used for state transitions instead of labels above.
     # kanban:
@@ -315,13 +315,13 @@ repos:
     #   reviewerProfileKey: codex-default
     # Optional per-label metadata overrides used by `night-orch labels-init`
     labelConfig:
-      orch:ready:
+      no:ready:
         color: 0E8A16
         description: Queued for night-orch processing
-      orch:running:
+      no:running:
         color: FBCA04
         description: Currently being processed by night-orch
-      orch:planning:
+      no:planning:
         color: C2E0C6
         description: Planning-only mode (PRD markdown only)
     defaults:
@@ -375,10 +375,10 @@ repos:
       reviewerSystem: .night-orch/prompts/reviewer-system.md
     selectors:
       includeLabelsAny:
-        - orch:ready
+        - no:ready
       excludeLabelsAny:
-        - orch:blocked
-        - orch:error
+        - no:blocked
+        - no:error
     agents:
       claude: claude-default
       codex: codex-default

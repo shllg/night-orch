@@ -26,7 +26,7 @@ function makeGitHubIssueData(number: number) {
     node_id: `MDU6SXNzdWUx${number}`,
     title: `Issue #${number}`,
     body: `Body for issue ${number}`,
-    labels: [{ name: 'orch:ready' }],
+    labels: [{ name: 'no:ready' }],
     assignees: [{ login: 'user1' }],
     state: 'open',
     created_at: '2026-01-01T00:00:00Z',
@@ -55,7 +55,7 @@ function makeForgejoIssueData(number: number) {
     number,
     title: `Issue #${number}`,
     body: `Body for issue ${number}`,
-    labels: [{ id: 1, name: 'orch:ready' }],
+    labels: [{ id: 1, name: 'no:ready' }],
     assignees: [{ login: 'user1' }],
     state: 'open',
     created_at: '2026-01-01T00:00:00Z',
@@ -78,7 +78,7 @@ function makeForgejoPRData(number: number) {
 }
 
 const FORGEJO_REPO_LABELS = [
-  { id: 1, name: 'orch:ready' },
+  { id: 1, name: 'no:ready' },
   { id: 2, name: 'new-label' },
   { id: 3, name: 'old-label' },
 ]
@@ -104,12 +104,12 @@ function makeRepoConfig(): RepoConfig {
     baseBranch: 'main',
     branchPrefix: 'orch',
     labels: {
-      ready: ['orch:ready'],
-      running: 'orch:running',
-      blocked: ['orch:blocked', 'orch:needs-human'],
-      reviewReady: 'orch:review-ready',
-      error: 'orch:error',
-      retry: 'orch:retry',
+      ready: ['no:ready'],
+      running: 'no:running',
+      blocked: ['no:blocked', 'no:needs-human'],
+      reviewReady: 'no:review-ready',
+      error: 'no:error',
+      retry: 'no:retry',
     },
     defaults: {
       planner: 'claude',
@@ -121,7 +121,7 @@ function makeRepoConfig(): RepoConfig {
     },
     verify: [],
     selectors: {
-      includeLabelsAny: ['orch:ready'],
+      includeLabelsAny: ['no:ready'],
       excludeLabelsAny: [],
     },
     agents: {},

@@ -190,19 +190,19 @@ const LabelsSchema = z.object({
   ready: z.union([z.string(), z.array(z.string())]).transform(v =>
     Array.isArray(v) ? v : [v],
   ),
-  running: z.string().default('orch:running'),
+  running: z.string().default('no:running'),
   blocked: z.union([
     z.string(),
-    z.array(z.string()).transform(v => v[0] ?? 'orch:blocked'),
-  ]).default('orch:blocked'),
-  needsHuman: z.string().default('orch:needs-human'),
-  reviewReady: z.string().default('orch:review-ready'),
-  error: z.string().default('orch:error'),
-  retry: z.string().default('orch:retry'),
-  planning: z.string().default('orch:planning'),
-  mergeQueued: z.string().default('orch:merge-queued'),
-  merging: z.string().default('orch:merging'),
-  mergeFailed: z.string().default('orch:merge-failed'),
+    z.array(z.string()).transform(v => v[0] ?? 'no:blocked'),
+  ]).default('no:blocked'),
+  needsHuman: z.string().default('no:needs-human'),
+  reviewReady: z.string().default('no:review-ready'),
+  error: z.string().default('no:error'),
+  retry: z.string().default('no:retry'),
+  planning: z.string().default('no:planning'),
+  mergeQueued: z.string().default('no:merge-queued'),
+  merging: z.string().default('no:merging'),
+  mergeFailed: z.string().default('no:merge-failed'),
 })
 
 const LinkedProjectSchema = z
@@ -233,8 +233,8 @@ const DefaultsSchema = z.object({
 })
 
 const SelectorsSchema = z.object({
-  includeLabelsAny: z.array(z.string()).default(['orch:ready']),
-  excludeLabelsAny: z.array(z.string()).default(['orch:blocked', 'orch:error', 'orch:needs-human']),
+  includeLabelsAny: z.array(z.string()).default(['no:ready']),
+  excludeLabelsAny: z.array(z.string()).default(['no:blocked', 'no:error', 'no:needs-human']),
 })
 
 const PromptsSchema = z.object({
@@ -467,7 +467,7 @@ const RepoConfigSchema = z.object({
    *  'merge' (default) creates merge commits — reliable for automated systems.
    *  'rebase' replays commits for linear history — fragile with conflicts. */
   updateStrategy: z.enum(['merge', 'rebase']).default('merge'),
-  labels: LabelsSchema.default({ ready: ['orch:ready'] }),
+  labels: LabelsSchema.default({ ready: ['no:ready'] }),
   kanban: KanbanSchema.optional(),
   labelConfig: z.record(LabelPresentationSchema).default({}),
   defaults: DefaultsSchema.default({}),

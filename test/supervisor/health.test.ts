@@ -24,7 +24,7 @@ describe('resolveSupervisorHealthTargets', () => {
           '  - repo: org/repo',
           '    localPath: /tmp/repo',
           '    labels:',
-          '      ready: [orch:ready]',
+          '      ready: [no:ready]',
           'mcp:',
           '  enabled: true',
           '  httpHost: 127.0.0.1',

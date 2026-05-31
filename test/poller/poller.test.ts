@@ -30,7 +30,7 @@ vi.mock('../../src/forge/factory.js', () => ({
       nodeId: '',
       title: 'Test',
       body: '',
-      labels: ['orch:running'],
+      labels: ['no:running'],
       assignees: [],
       state: 'open',
       createdAt: '',
@@ -154,7 +154,7 @@ function makeConfig(dbPath: string): Config {
     commentCommands: { enabled: true, requireCollaborator: false },
     repos: [{
       repo: 'org/repo', forge: 'github', localPath: '/tmp/repo', maxConcurrentRuns: 1, baseBranch: 'main',
-      branchPrefix: 'orch', labels: { ready: ['orch:ready'], running: 'orch:running', blocked: ['orch:blocked'], reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry', planning: 'orch:planning' },
+      branchPrefix: 'orch', labels: { ready: ['no:ready'], running: 'no:running', blocked: ['no:blocked'], reviewReady: 'no:review-ready', error: 'no:error', retry: 'no:retry', planning: 'no:planning' },
       defaults: { planner: 'claude', coder: 'claude', reviewer: 'claude', doneMode: 'pr-ready', notifyPriority: 'normal', prMentions: [] },
       planning: { prdDirectory: 'docs/prd' },
       verify: ['pnpm test'], selectors: { includeLabelsAny: [], excludeLabelsAny: [] }, agents: { claude: 'claude' },
@@ -213,7 +213,7 @@ describe('pollOnce', () => {
 
   it('dry run logs discovered issues without processing', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([{
-      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
       triage: { level: 'standard', reason: '' },
     }])
 
@@ -250,7 +250,7 @@ describe('pollOnce', () => {
 
   it('trivial issues use lightweight workflow and fallback codex profile-by-type when agent mapping is missing', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([{
-      issue: { number: 1, nodeId: '', title: 'Tiny fix', body: 'Fix typo', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      issue: { number: 1, nodeId: '', title: 'Tiny fix', body: 'Fix typo', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
       triage: { level: 'trivial', reason: 'Short body with trivial label' },
     }])
     mockExecuteLoop.mockResolvedValue({
@@ -288,7 +288,7 @@ describe('pollOnce', () => {
 
   it('applies workflowByTriage role and agent overrides during run setup', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([{
-      issue: { number: 1, nodeId: '', title: 'Tiny fix', body: 'Fix typo', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      issue: { number: 1, nodeId: '', title: 'Tiny fix', body: 'Fix typo', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
       triage: { level: 'trivial', reason: 'Short body with trivial label' },
     }])
     mockExecuteLoop.mockResolvedValue({
@@ -345,7 +345,7 @@ describe('pollOnce', () => {
 
   it('uses terminalStatus for blocked runs even when currentPhase is publish', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([{
-      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
       triage: { level: 'standard', reason: '' },
     }])
     mockExecuteLoop.mockResolvedValue({
@@ -367,7 +367,7 @@ describe('pollOnce', () => {
 
   it('propagates blockReason into blocked labels and status comments', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([{
-      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
       triage: { level: 'standard', reason: '' },
     }])
     mockExecuteLoop.mockResolvedValue({
@@ -405,7 +405,7 @@ describe('pollOnce', () => {
 
   it('reuses existing queued run instead of creating a new run', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([{
-      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
       triage: { level: 'standard', reason: '' },
     }])
     mockExecuteLoop.mockResolvedValue({
@@ -433,7 +433,7 @@ describe('pollOnce', () => {
 
   it('reuses existing blocked run when issue is rediscovered as ready', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([{
-      issue: { number: 2, nodeId: '', title: 'Retry me', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      issue: { number: 2, nodeId: '', title: 'Retry me', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
       triage: { level: 'standard', reason: '' },
     }])
     mockExecuteLoop.mockResolvedValue({
@@ -466,7 +466,7 @@ describe('pollOnce', () => {
 
   it('preserves queued run iteration_count when resuming execution', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([{
-      issue: { number: 3, nodeId: '', title: 'Resume iteration', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      issue: { number: 3, nodeId: '', title: 'Resume iteration', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
       triage: { level: 'standard', reason: '' },
     }])
     mockExecuteLoop.mockImplementationOnce(async (ctx: { iteration: number }) => ({
@@ -726,7 +726,7 @@ describe('pollOnce', () => {
 
   it('returns error when publish fails', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([{
-      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
       triage: { level: 'standard', reason: '' },
     }])
     mockExecuteLoop.mockResolvedValue({
@@ -747,7 +747,7 @@ describe('pollOnce', () => {
 
   it('marks publish success as immediate follow-up eligible', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([{
-      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
       triage: { level: 'standard', reason: '' },
     }])
     mockExecuteLoop.mockResolvedValue({
@@ -773,7 +773,7 @@ describe('pollOnce', () => {
 
   it('emits pr_updated notification when publish updates an existing PR', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([{
-      issue: { number: 2, nodeId: '', title: 'Existing PR update', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: 'https://example.com/issues/2' },
+      issue: { number: 2, nodeId: '', title: 'Existing PR update', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: 'https://example.com/issues/2' },
       triage: { level: 'standard', reason: '' },
     }])
     mockExecuteLoop.mockResolvedValue({
@@ -799,7 +799,7 @@ describe('pollOnce', () => {
 
   it('posts a structured auto-retry status comment when publish fails and retries remain', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([{
-      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
       triage: { level: 'standard', reason: '' },
     }])
     mockExecuteLoop.mockResolvedValue({
@@ -822,7 +822,7 @@ describe('pollOnce', () => {
 
   it('posts a structured retry-exhausted status comment when publish retries are exhausted', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([{
-      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
       triage: { level: 'standard', reason: '' },
     }])
     mockExecuteLoop.mockResolvedValue({
@@ -845,7 +845,7 @@ describe('pollOnce', () => {
 
   it('sanitizes error content before posting status comments', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([{
-      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
       triage: { level: 'standard', reason: '' },
     }])
     mockExecuteLoop.mockResolvedValue({
@@ -873,7 +873,7 @@ describe('pollOnce', () => {
 
   it('sanitizes retry_exhausted notification summaries', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([{
-      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
       triage: { level: 'standard', reason: '' },
     }])
     mockExecuteLoop.mockResolvedValue({
@@ -902,7 +902,7 @@ describe('pollOnce', () => {
   it('posts a night-orch plan summary comment through the loop onPlanReady hook', async () => {
     const callOrder: string[] = []
     mockDiscoverEligibleIssues.mockResolvedValue([{
-      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      issue: { number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
       triage: { level: 'standard', reason: '' },
     }])
     mockCommentOnIssue.mockImplementation(async () => {
@@ -948,11 +948,11 @@ describe('pollOnce', () => {
   it('processes the next eligible issue in the same poll cycle', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([
       {
-        issue: { number: 1, nodeId: '', title: 'First', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        issue: { number: 1, nodeId: '', title: 'First', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
         triage: { level: 'standard', reason: '' },
       },
       {
-        issue: { number: 2, nodeId: '', title: 'Second', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        issue: { number: 2, nodeId: '', title: 'Second', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
         triage: { level: 'standard', reason: '' },
       },
     ])
@@ -985,11 +985,11 @@ describe('pollOnce', () => {
   it('prioritizes queued merge-conflict follow-ups before fresh ready issues', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([
       {
-        issue: { number: 41, nodeId: '', title: 'Fresh', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        issue: { number: 41, nodeId: '', title: 'Fresh', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
         triage: { level: 'standard', reason: '' },
       },
       {
-        issue: { number: 13, nodeId: '', title: 'Follow-up', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        issue: { number: 13, nodeId: '', title: 'Follow-up', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
         triage: { level: 'standard', reason: '' },
       },
     ])
@@ -1030,7 +1030,7 @@ describe('pollOnce', () => {
   it('posts a blocked status comment when branch refresh conflicts', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([
       {
-        issue: { number: 13, nodeId: '', title: 'Follow-up', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        issue: { number: 13, nodeId: '', title: 'Follow-up', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
         triage: { level: 'standard', reason: '' },
       },
     ])
@@ -1080,7 +1080,7 @@ describe('pollOnce', () => {
   it('does not enter the coder loop when executeRebase returns an error', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([
       {
-        issue: { number: 13, nodeId: '', title: 'Follow-up', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        issue: { number: 13, nodeId: '', title: 'Follow-up', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
         triage: { level: 'standard', reason: '' },
       },
     ])
@@ -1139,12 +1139,12 @@ describe('pollOnce', () => {
     mockDiscoverEligibleIssues.mockImplementation(async (repoConfig: { repo: string }) => {
       if (repoConfig.repo === 'org/repo-a') {
         return [{
-          issue: { number: 1, nodeId: '', title: 'A', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+          issue: { number: 1, nodeId: '', title: 'A', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
           triage: { level: 'standard', reason: '' },
         }]
       }
       return [{
-        issue: { number: 2, nodeId: '', title: 'B', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        issue: { number: 2, nodeId: '', title: 'B', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
         triage: { level: 'standard', reason: '' },
       }]
     })
@@ -1200,7 +1200,7 @@ describe('pollOnce', () => {
         throw new Error('repo-a unavailable')
       }
       return [{
-        issue: { number: 2, nodeId: '', title: 'B', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        issue: { number: 2, nodeId: '', title: 'B', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
         triage: { level: 'standard', reason: '' },
       }]
     })
@@ -1227,15 +1227,15 @@ describe('pollOnce', () => {
 
     mockDiscoverEligibleIssues.mockResolvedValue([
       {
-        issue: { number: 1, nodeId: '', title: 'First', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        issue: { number: 1, nodeId: '', title: 'First', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
         triage: { level: 'standard', reason: '' },
       },
       {
-        issue: { number: 2, nodeId: '', title: 'Second', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        issue: { number: 2, nodeId: '', title: 'Second', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
         triage: { level: 'standard', reason: '' },
       },
       {
-        issue: { number: 3, nodeId: '', title: 'Third', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        issue: { number: 3, nodeId: '', title: 'Third', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
         triage: { level: 'standard', reason: '' },
       },
     ])
@@ -1278,11 +1278,11 @@ describe('pollOnce', () => {
   it('processes only the targeted issue when targetIssue is provided', async () => {
     mockDiscoverEligibleIssues.mockResolvedValue([
       {
-        issue: { number: 1, nodeId: '', title: 'First', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        issue: { number: 1, nodeId: '', title: 'First', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
         triage: { level: 'standard', reason: '' },
       },
       {
-        issue: { number: 2, nodeId: '', title: 'Second', body: '', labels: ['orch:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+        issue: { number: 2, nodeId: '', title: 'Second', body: '', labels: ['no:ready'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
         triage: { level: 'standard', reason: '' },
       },
     ])

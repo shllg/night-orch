@@ -4,20 +4,20 @@ import { buildLabelConfig, getDiscoveryIncludeLabels, isKanbanIssue } from '../.
 describe('label flow config', () => {
   const repoConfig = {
     labels: {
-      ready: ['orch:ready'],
-      running: 'orch:running',
-      blocked: 'orch:blocked',
-      needsHuman: 'orch:needs-human',
-      reviewReady: 'orch:review-ready',
-      error: 'orch:error',
-      retry: 'orch:retry',
-      planning: 'orch:planning',
-      mergeQueued: 'orch:merge-queued',
-      merging: 'orch:merging',
-      mergeFailed: 'orch:merge-failed',
+      ready: ['no:ready'],
+      running: 'no:running',
+      blocked: 'no:blocked',
+      needsHuman: 'no:needs-human',
+      reviewReady: 'no:review-ready',
+      error: 'no:error',
+      retry: 'no:retry',
+      planning: 'no:planning',
+      mergeQueued: 'no:merge-queued',
+      merging: 'no:merging',
+      mergeFailed: 'no:merge-failed',
     },
     selectors: {
-      includeLabelsAny: ['orch:ready'],
+      includeLabelsAny: ['no:ready'],
       excludeLabelsAny: [],
     },
     kanban: {
@@ -39,9 +39,9 @@ describe('label flow config', () => {
   }
 
   it('uses default labels when kanban trigger is absent', () => {
-    const result = buildLabelConfig(repoConfig, ['orch:ready'])
-    expect(result.running).toBe('orch:running')
-    expect(result.ready).toEqual(['orch:ready'])
+    const result = buildLabelConfig(repoConfig, ['no:ready'])
+    expect(result.running).toBe('no:running')
+    expect(result.ready).toEqual(['no:ready'])
   })
 
   it('uses kanban labels when trigger label is present', () => {
@@ -52,11 +52,11 @@ describe('label flow config', () => {
 
   it('adds kanban ready labels to discovery include labels', () => {
     const result = getDiscoveryIncludeLabels(repoConfig)
-    expect(result).toEqual(['orch:ready', 'kanban:todo'])
+    expect(result).toEqual(['no:ready', 'kanban:todo'])
   })
 
   it('detects kanban trigger label', () => {
     expect(isKanbanIssue(['flow:kanban'], repoConfig)).toBe(true)
-    expect(isKanbanIssue(['orch:ready'], repoConfig)).toBe(false)
+    expect(isKanbanIssue(['no:ready'], repoConfig)).toBe(false)
   })
 })

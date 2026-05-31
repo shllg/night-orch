@@ -37,7 +37,7 @@ describe('resolveRoles', () => {
   })
 
   it('ignores non-role labels', () => {
-    const result = resolveRoles(['orch:ready', 'bug', 'code:codex'], defaults)
+    const result = resolveRoles(['no:ready', 'bug', 'code:codex'], defaults)
     expect(result.coder).toBe('codex')
     expect(result.planner).toBe('claude')
   })

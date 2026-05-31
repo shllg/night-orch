@@ -30,7 +30,7 @@ function makeForgejoIssue(overrides: Record<string, unknown> = {}) {
     number: 1,
     title: 'Test issue',
     body: 'Test body',
-    labels: [{ id: 1, name: 'orch:ready' }],
+    labels: [{ id: 1, name: 'no:ready' }],
     assignees: [{ login: 'user1' }],
     state: 'open',
     created_at: '2026-01-01T00:00:00Z',
@@ -63,12 +63,12 @@ function makeRepoConfig(overrides: Partial<RepoConfig> = {}): RepoConfig {
     baseBranch: 'main',
     branchPrefix: 'orch',
     labels: {
-      ready: ['orch:ready'],
-      running: 'orch:running',
-      blocked: ['orch:blocked', 'orch:needs-human'],
-      reviewReady: 'orch:review-ready',
-      error: 'orch:error',
-      retry: 'orch:retry',
+      ready: ['no:ready'],
+      running: 'no:running',
+      blocked: ['no:blocked', 'no:needs-human'],
+      reviewReady: 'no:review-ready',
+      error: 'no:error',
+      retry: 'no:retry',
     },
     defaults: {
       planner: 'claude',
@@ -80,7 +80,7 @@ function makeRepoConfig(overrides: Partial<RepoConfig> = {}): RepoConfig {
     },
     verify: [],
     selectors: {
-      includeLabelsAny: ['orch:ready'],
+      includeLabelsAny: ['no:ready'],
       excludeLabelsAny: [],
     },
     agents: {},
@@ -89,8 +89,8 @@ function makeRepoConfig(overrides: Partial<RepoConfig> = {}): RepoConfig {
 }
 
 const REPO_LABELS = [
-  { id: 1, name: 'orch:ready' },
-  { id: 2, name: 'orch:running' },
+  { id: 1, name: 'no:ready' },
+  { id: 2, name: 'no:running' },
   { id: 3, name: 'bug' },
 ]
 
@@ -114,7 +114,7 @@ describe('ForgejoForgeAdapter', () => {
         repo: 'org/repo',
         title: 'Test issue',
         body: 'Test body',
-        labels: ['orch:ready'],
+        labels: ['no:ready'],
         assignees: ['user1'],
         state: 'open',
         createdAt: '2026-01-01T00:00:00Z',
@@ -160,7 +160,7 @@ describe('ForgejoForgeAdapter', () => {
 
       const config = makeRepoConfig({
         selectors: {
-          includeLabelsAny: ['orch:ready', 'orch:priority'],
+          includeLabelsAny: ['no:ready', 'no:priority'],
           excludeLabelsAny: [],
         },
       })
@@ -227,7 +227,7 @@ describe('ForgejoForgeAdapter', () => {
       // Second call: post labels
       mockFetch.mockResolvedValueOnce(jsonResponse([]))
 
-      await adapter.addLabels('org/repo', 1, ['orch:ready', 'bug'])
+      await adapter.addLabels('org/repo', 1, ['no:ready', 'bug'])
 
       const postCall = mockFetch.mock.calls[1]!
       expect(postCall[0]).toContain('/repos/org/repo/issues/1/labels')
@@ -262,7 +262,7 @@ describe('ForgejoForgeAdapter', () => {
         headers: new Headers(), json: () => Promise.resolve(undefined),
       } as unknown as Response)
 
-      await adapter.removeLabels('org/repo', 1, ['orch:ready'])
+      await adapter.removeLabels('org/repo', 1, ['no:ready'])
 
       expect(mockFetch).toHaveBeenCalledTimes(2)
       const deleteCall = mockFetch.mock.calls[1]!
@@ -273,7 +273,7 @@ describe('ForgejoForgeAdapter', () => {
       mockFetch.mockResolvedValueOnce(jsonResponse(REPO_LABELS))
       mockFetch.mockResolvedValueOnce(jsonResponse({ message: 'Not Found' }, 404))
 
-      await expect(adapter.removeLabels('org/repo', 1, ['orch:ready'])).resolves.toBeUndefined()
+      await expect(adapter.removeLabels('org/repo', 1, ['no:ready'])).resolves.toBeUndefined()
     })
 
     it('skips labels not found in cache', async () => {

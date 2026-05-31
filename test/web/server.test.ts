@@ -85,17 +85,17 @@ function makeMinimalConfig() {
       baseBranch: 'main',
       branchPrefix: 'orch',
       labels: {
-        ready: ['orch:ready'],
-        running: 'orch:running',
-        blocked: ['orch:blocked', 'orch:needs-human'],
-        needsHuman: 'orch:needs-human',
-        reviewReady: 'orch:review-ready',
-        error: 'orch:error',
-        retry: 'orch:retry',
-        planning: 'orch:planning',
-        mergeQueued: 'orch:merge-queued',
-        merging: 'orch:merging',
-        mergeFailed: 'orch:merge-failed',
+        ready: ['no:ready'],
+        running: 'no:running',
+        blocked: ['no:blocked', 'no:needs-human'],
+        needsHuman: 'no:needs-human',
+        reviewReady: 'no:review-ready',
+        error: 'no:error',
+        retry: 'no:retry',
+        planning: 'no:planning',
+        mergeQueued: 'no:merge-queued',
+        merging: 'no:merging',
+        mergeFailed: 'no:merge-failed',
       },
       defaults: {
         planner: 'claude' as const,
@@ -109,8 +109,8 @@ function makeMinimalConfig() {
         prdDirectory: 'docs/prd',
       },
       selectors: {
-        includeLabelsAny: ['orch:ready'],
-        excludeLabelsAny: ['orch:blocked', 'orch:error', 'orch:needs-human'],
+        includeLabelsAny: ['no:ready'],
+        excludeLabelsAny: ['no:blocked', 'no:error', 'no:needs-human'],
       },
       verify: [],
       agents: {},
@@ -1231,7 +1231,7 @@ describe('startWebServer', () => {
 
     expect(payload.repos).toHaveLength(1)
     expect(payload.repos[0]?.repo).toBe('org/repo')
-    expect(payload.repos[0]?.labels.blocked).toBe('orch:blocked')
+    expect(payload.repos[0]?.labels.blocked).toBe('no:blocked')
     expect(payload.repos[0]?.prompts).toMatchObject({
       plannerSystem: true,
       coderSystem: false,

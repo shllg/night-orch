@@ -70,19 +70,19 @@ function makeConfig(dbPath: string): Config {
       branchPrefix: 'orch',
       updateStrategy: 'merge',
       labels: {
-        ready: ['orch:ready'],
-        running: 'orch:running',
-        blocked: ['orch:blocked'],
-        needsHuman: 'orch:needs-human',
-        reviewReady: 'orch:review-ready',
-        error: 'orch:error',
-        retry: 'orch:retry',
-        planning: 'orch:planning',
+        ready: ['no:ready'],
+        running: 'no:running',
+        blocked: ['no:blocked'],
+        needsHuman: 'no:needs-human',
+        reviewReady: 'no:review-ready',
+        error: 'no:error',
+        retry: 'no:retry',
+        planning: 'no:planning',
       },
       defaults: { planner: 'claude', coder: 'claude', reviewer: 'claude', doneMode: 'pr-ready', notifyPriority: 'normal', prMentions: [] },
       planning: { prdDirectory: 'docs/prd' },
       verify: ['pnpm test'],
-      selectors: { includeLabelsAny: ['orch:ready'], excludeLabelsAny: [] },
+      selectors: { includeLabelsAny: ['no:ready'], excludeLabelsAny: [] },
       agents: { claude: 'claude' },
     }],
     mcp: { enabled: false, transport: 'stdio', authTokenEnv: null },
@@ -173,7 +173,7 @@ describe('dispatchAttempt review_ready replay guard', () => {
   })
 
   it('skips stale review_ready replays, reconciles labels, and becomes a no-op on the next pass', async () => {
-    const issue = makeIssue(['orch:ready'])
+    const issue = makeIssue(['no:ready'])
     const forge = makeForge(issue)
     const run = runManager.create({
       repo: 'org/repo',
@@ -218,9 +218,9 @@ describe('dispatchAttempt review_ready replay guard', () => {
 
     expect(first).toEqual({ outcome: 'skipped', immediateFollowupRepo: null })
     expect(mockExecuteLoop).not.toHaveBeenCalled()
-    expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:review-ready'])
-    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:ready'])
-    expect(issue.labels.sort()).toEqual(['orch:review-ready'])
+    expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 1, ['no:review-ready'])
+    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['no:ready'])
+    expect(issue.labels.sort()).toEqual(['no:review-ready'])
 
     vi.mocked(forge.addLabels).mockClear()
     vi.mocked(forge.removeLabels).mockClear()
@@ -259,7 +259,7 @@ describe('dispatchAttempt review_ready replay guard', () => {
   })
 
   it('dispatches normally when a queued control run exists', async () => {
-    const issue = makeIssue(['orch:review-ready'])
+    const issue = makeIssue(['no:review-ready'])
     const forge = makeForge(issue)
     runManager.create({
       repo: 'org/repo',
@@ -302,7 +302,7 @@ describe('dispatchAttempt review_ready replay guard', () => {
   })
 
   it('preserves existing blocked replay behavior', async () => {
-    const issue = makeIssue(['orch:blocked'])
+    const issue = makeIssue(['no:blocked'])
     const forge = makeForge(issue)
     const run = runManager.create({
       repo: 'org/repo',
@@ -350,7 +350,7 @@ describe('dispatchAttempt review_ready replay guard', () => {
   })
 
   it('blocks immediately when worktree is dirty before the loop starts', async () => {
-    const issue = makeIssue(['orch:ready'])
+    const issue = makeIssue(['no:ready'])
     const forge = makeForge(issue)
     const run = runManager.create({
       repo: 'org/repo',
@@ -398,7 +398,7 @@ describe('dispatchAttempt review_ready replay guard', () => {
   })
 
   it('blocks immediately when worktree refresh conflicts before the loop starts', async () => {
-    const issue = makeIssue(['orch:ready'])
+    const issue = makeIssue(['no:ready'])
     const forge = makeForge(issue)
     const run = runManager.create({
       repo: 'org/repo',

@@ -3,11 +3,11 @@ import { buildPlanningPrdPath, isPlanningIssue, normalizeRepoRelativePath } from
 
 describe('isPlanningIssue', () => {
   it('returns true when planning label is present', () => {
-    expect(isPlanningIssue(['bug', 'orch:planning'], { labels: { planning: 'orch:planning' } } as never)).toBe(true)
+    expect(isPlanningIssue(['bug', 'no:planning'], { labels: { planning: 'no:planning' } } as never)).toBe(true)
   })
 
   it('returns false when planning label is absent', () => {
-    expect(isPlanningIssue(['bug'], { labels: { planning: 'orch:planning' } } as never)).toBe(false)
+    expect(isPlanningIssue(['bug'], { labels: { planning: 'no:planning' } } as never)).toBe(false)
   })
 })
 

@@ -49,7 +49,7 @@ function makeRepoConfig(overrides: Partial<RepoConfig> = {}): RepoConfig {
   return {
     repo: 'org/repo', forge: 'github', localPath: '/tmp/repo', baseBranch: 'main',
     branchPrefix: 'orch',
-    labels: { ready: ['orch:ready'], running: 'orch:running', blocked: 'orch:blocked', needsHuman: 'orch:needs-human', reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry', mergeQueued: 'orch:merge-queued', merging: 'orch:merging', mergeFailed: 'orch:merge-failed' },
+    labels: { ready: ['no:ready'], running: 'no:running', blocked: 'no:blocked', needsHuman: 'no:needs-human', reviewReady: 'no:review-ready', error: 'no:error', retry: 'no:retry', mergeQueued: 'no:merge-queued', merging: 'no:merging', mergeFailed: 'no:merge-failed' },
     defaults: { planner: 'claude', coder: 'claude', reviewer: 'claude', doneMode: 'pr-ready', notifyPriority: 'normal', prMentions: [] },
     verify: [], selectors: { includeLabelsAny: [], excludeLabelsAny: [] },
     agents: {}, labelConfig: {},
@@ -211,7 +211,7 @@ describe('processMergeQueue', () => {
     const row = db.prepare("SELECT status, block_reason FROM runs WHERE id = 'r1'").get() as { status: string; block_reason: string | null }
     expect(row.status).toBe('blocked')
     expect(row.block_reason).toBe('merge_conflict')
-    expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 100, ['orch:merge-failed'])
-    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 100, ['orch:merge-queued', 'orch:merging'])
+    expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 100, ['no:merge-failed'])
+    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 100, ['no:merge-queued', 'no:merging'])
   })
 })

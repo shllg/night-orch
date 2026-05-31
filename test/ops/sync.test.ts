@@ -30,7 +30,7 @@ function makeMockForge(overrides: Partial<ForgeAdapter> = {}): ForgeAdapter {
   return {
     listEligibleIssues: vi.fn(),
     getIssue: vi.fn().mockResolvedValue({
-      number: 1, nodeId: '', title: 'Test', body: '', labels: ['orch:running'],
+      number: 1, nodeId: '', title: 'Test', body: '', labels: ['no:running'],
       assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '',
     }),
     addLabels: vi.fn().mockResolvedValue(undefined),
@@ -57,7 +57,7 @@ function makeConfig(): Config {
     metrics: { enabled: false, port: 9090, host: '127.0.0.1' },
     repos: [{
       repo: 'org/repo', forge: 'github', localPath: '/tmp/repo', baseBranch: 'main',
-      branchPrefix: 'orch', labels: { ready: ['orch:ready'], running: 'orch:running', blocked: ['orch:blocked'], reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry' },
+      branchPrefix: 'orch', labels: { ready: ['no:ready'], running: 'no:running', blocked: ['no:blocked'], reviewReady: 'no:review-ready', error: 'no:error', retry: 'no:retry' },
       defaults: { planner: 'claude', coder: 'claude', reviewer: 'claude', doneMode: 'pr-ready', notifyPriority: 'normal', prMentions: [] },
       verify: [], selectors: { includeLabelsAny: [], excludeLabelsAny: [] }, agents: {},
     }],
@@ -323,7 +323,7 @@ describe('SyncEngine', () => {
     // No stale runs (lease is active), but label mismatch detected
     expect(result.reconciledRuns).toHaveLength(0)
     expect(result.labelCorrections).toHaveLength(1)
-    expect(result.labelCorrections[0]!.added).toContain('orch:running')
+    expect(result.labelCorrections[0]!.added).toContain('no:running')
   })
 
   it('completed run → no change', async () => {

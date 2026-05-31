@@ -15,7 +15,7 @@ function makeMockClient(): ForgejoClient {
 const LABELS = [
   { id: 1, name: 'bug' },
   { id: 2, name: 'enhancement' },
-  { id: 3, name: 'orch:ready' },
+  { id: 3, name: 'no:ready' },
 ]
 
 describe('LabelCache', () => {

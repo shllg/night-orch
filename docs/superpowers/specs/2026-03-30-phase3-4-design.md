@@ -162,7 +162,7 @@ Night-orch creates PRs but doesn't manage merging. PRs pile up, conflicts accumu
 4. **Test the batch:** Push staging branch, wait for CI
 5. **On pass:** Fast-forward base branch to staging tip, close PRs as merged
 6. **On fail:** Bisect — split batch in half, test each half, recurse until culprit found
-7. **On culprit:** Eject the failing PR, label it `orch:merge-failed`, re-queue remaining PRs
+7. **On culprit:** Eject the failing PR, label it `no:merge-failed`, re-queue remaining PRs
 
 **DB schema (migration 007):**
 
@@ -200,7 +200,7 @@ repos:
       stagingBranchPrefix: orch/staging
 ```
 
-**Label additions:** `orch:merge-queued`, `orch:merging`, `orch:merge-failed`
+**Label additions:** `no:merge-queued`, `no:merging`, `no:merge-failed`
 
 **ForgeAdapter additions:**
 - `getRefCheckStatus?(repo, sha)` — CI status for arbitrary ref (staging branch has no PR)

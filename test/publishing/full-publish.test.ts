@@ -24,16 +24,16 @@ vi.mock('../../src/utils/logger.js', () => ({
 }))
 
 const labelConfig: LabelConfig = {
-  ready: ['orch:ready'],
-  running: 'orch:running',
-  blocked: ['orch:blocked', 'orch:needs-human'],
-  reviewReady: 'orch:review-ready',
-  error: 'orch:error',
-  retry: 'orch:retry',
-  planning: 'orch:planning',
-  mergeQueued: 'orch:merge-queued',
-  merging: 'orch:merging',
-  mergeFailed: 'orch:merge-failed',
+  ready: ['no:ready'],
+  running: 'no:running',
+  blocked: ['no:blocked', 'no:needs-human'],
+  reviewReady: 'no:review-ready',
+  error: 'no:error',
+  retry: 'no:retry',
+  planning: 'no:planning',
+  mergeQueued: 'no:merge-queued',
+  merging: 'no:merging',
+  mergeFailed: 'no:merge-failed',
 }
 
 function makePR(num: number): ForgePR {
@@ -69,7 +69,7 @@ function makeCtx(): RunContext {
     runId: 'run-int-1',
     repo: 'org/repo',
     issueNumber: 1,
-    issue: { number: 1, nodeId: '', title: 'Fix bug', body: '', labels: ['orch:running'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: 'https://github.com/org/repo/issues/1' },
+    issue: { number: 1, nodeId: '', title: 'Fix bug', body: '', labels: ['no:running'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: 'https://github.com/org/repo/issues/1' },
     repoConfig: {
       repo: 'org/repo',
       forge: 'github',
@@ -77,7 +77,7 @@ function makeCtx(): RunContext {
       baseBranch: 'main',
       branchPrefix: 'orch',
       updateStrategy: 'merge',
-      labels: { ready: ['orch:ready'], running: 'orch:running', blocked: ['orch:blocked'], reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry', planning: 'orch:planning' },
+      labels: { ready: ['no:ready'], running: 'no:running', blocked: ['no:blocked'], reviewReady: 'no:review-ready', error: 'no:error', retry: 'no:retry', planning: 'no:planning' },
       planning: { prdDirectory: 'docs/prd' },
       defaults: { planner: 'claude', coder: 'claude', reviewer: 'claude', doneMode: 'pr-ready', notifyPriority: 'normal', prMentions: [] },
       verify: [],
@@ -142,8 +142,8 @@ describe('Full publish integration', () => {
     // Transition labels running → review_ready
     await transitionLabels(forge, ctx.repo, ctx.issueNumber, ctx.issue.labels, 'running', 'review_ready', labelConfig)
 
-    expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:review-ready'])
-    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['orch:running'])
+    expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 1, ['no:review-ready'])
+    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['no:running'])
 
     // DB should have PR number
     const row = db.prepare('SELECT pr_number FROM issue_links WHERE repo = ? AND issue_number = ?')

@@ -20,7 +20,7 @@ function makeMinimalConfig() {
     workerProfiles: {},
     metrics: { enabled: false, port: 9090, host: '127.0.0.1' },
     mcp: { enabled: true, transport: 'stdio' as const, authTokenEnv: null },
-    repos: [{ repo: 'org/repo', forge: 'github' as const, localPath: '/tmp/repo', baseBranch: 'main', branchPrefix: 'orch', labels: { ready: ['orch:ready'], running: 'orch:running', blocked: ['orch:blocked', 'orch:needs-human'], reviewReady: 'orch:review-ready', error: 'orch:error', retry: 'orch:retry' }, defaults: { planner: 'claude' as const, coder: 'claude' as const, reviewer: 'claude' as const, doneMode: 'pr-ready' as const, notifyPriority: 'normal' as const, prMentions: [] }, verify: [], selectors: { includeLabelsAny: ['orch:ready'], excludeLabelsAny: [] }, agents: {} }],
+    repos: [{ repo: 'org/repo', forge: 'github' as const, localPath: '/tmp/repo', baseBranch: 'main', branchPrefix: 'orch', labels: { ready: ['no:ready'], running: 'no:running', blocked: ['no:blocked', 'no:needs-human'], reviewReady: 'no:review-ready', error: 'no:error', retry: 'no:retry' }, defaults: { planner: 'claude' as const, coder: 'claude' as const, reviewer: 'claude' as const, doneMode: 'pr-ready' as const, notifyPriority: 'normal' as const, prMentions: [] }, verify: [], selectors: { includeLabelsAny: ['no:ready'], excludeLabelsAny: [] }, agents: {} }],
   }
 }
 
@@ -680,9 +680,9 @@ describe('MCP Tools', () => {
 
     it('returns issues with orchestrator state', async () => {
       const issues = [
-        makeIssue(1, 'First', ['orch:ready']),
-        makeIssue(2, 'Second', ['orch:ready']),
-        makeIssue(3, 'Third', ['orch:ready']),
+        makeIssue(1, 'First', ['no:ready']),
+        makeIssue(2, 'Second', ['no:ready']),
+        makeIssue(3, 'Third', ['no:ready']),
       ]
       deps.forgeAdapters.set('org/repo', makeMockAdapter(issues))
 
@@ -714,7 +714,7 @@ describe('MCP Tools', () => {
     })
 
     it('filters by state', async () => {
-      const issues = [makeIssue(1, 'First', ['orch:ready']), makeIssue(2, 'Second', ['orch:ready'])]
+      const issues = [makeIssue(1, 'First', ['no:ready']), makeIssue(2, 'Second', ['no:ready'])]
       deps.forgeAdapters.set('org/repo', makeMockAdapter(issues))
 
       const runManager = new RunManager(db)
@@ -731,13 +731,13 @@ describe('MCP Tools', () => {
 
     it('applies local selector filters before returning issues', async () => {
       deps.config.repos[0]!.selectors = {
-        includeLabelsAny: ['orch:ready'],
+        includeLabelsAny: ['no:ready'],
         excludeLabelsAny: ['skip-me'],
       }
 
       const issues = [
-        makeIssue(1, 'Eligible', ['orch:ready']),
-        makeIssue(2, 'Excluded', ['orch:ready', 'skip-me']),
+        makeIssue(1, 'Eligible', ['no:ready']),
+        makeIssue(2, 'Excluded', ['no:ready', 'skip-me']),
         makeIssue(3, 'Missing include', ['bug']),
       ]
       deps.forgeAdapters.set('org/repo', makeMockAdapter(issues))

@@ -264,11 +264,11 @@ describe('ConfigSchema', () => {
 
   it('normalizes ready labels from string to array', () => {
     const raw = loadExampleConfig()
-    raw.repos[0].labels.ready = 'orch:ready'
+    raw.repos[0].labels.ready = 'no:ready'
     const result = ConfigSchema.safeParse(raw)
     expect(result.success).toBe(true)
     if (result.success) {
-      expect(result.data.repos[0]?.labels.ready).toEqual(['orch:ready'])
+      expect(result.data.repos[0]?.labels.ready).toEqual(['no:ready'])
     }
   })
 
@@ -279,7 +279,7 @@ describe('ConfigSchema', () => {
       repos: [{ repo: 'org/repo', localPath: '/tmp/repo' }],
     }
     const result = ConfigSchema.parse(minimal)
-    expect(result.repos[0]!.labels.planning).toBe('orch:planning')
+    expect(result.repos[0]!.labels.planning).toBe('no:planning')
     expect(result.repos[0]!.planning.prdDirectory).toBe('docs/prd')
   })
 
@@ -405,20 +405,20 @@ describe('ConfigSchema', () => {
     expect(result.success).toBe(false)
   })
 
-  it('excludes orch:needs-human by default', () => {
+  it('excludes no:needs-human by default', () => {
     const minimal = {
       version: 1,
       github: { tokenEnv: 'GITHUB_TOKEN' },
       repos: [{ repo: 'org/repo', localPath: '/tmp/repo' }],
     }
     const result = ConfigSchema.parse(minimal)
-    expect(result.repos[0]!.selectors.excludeLabelsAny).toContain('orch:needs-human')
+    expect(result.repos[0]!.selectors.excludeLabelsAny).toContain('no:needs-human')
   })
 
   it('accepts per-repo labelConfig overrides', () => {
     const raw = loadExampleConfig()
     raw.repos[0].labelConfig = {
-      'orch:ready': {
+      'no:ready': {
         color: '0E8A16',
         description: 'Queued for processing',
       },
@@ -427,14 +427,14 @@ describe('ConfigSchema', () => {
     const result = ConfigSchema.safeParse(raw)
     expect(result.success).toBe(true)
     if (result.success) {
-      expect(result.data.repos[0]?.labelConfig['orch:ready']?.color).toBe('0E8A16')
+      expect(result.data.repos[0]?.labelConfig['no:ready']?.color).toBe('0E8A16')
     }
   })
 
   it('rejects invalid labelConfig colors', () => {
     const raw = loadExampleConfig()
     raw.repos[0].labelConfig = {
-      'orch:ready': {
+      'no:ready': {
         color: 'XYZ',
       },
     }

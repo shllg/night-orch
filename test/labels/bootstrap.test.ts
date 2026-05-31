@@ -5,35 +5,35 @@ describe('buildLabelBootstrapDefinitions', () => {
   it('builds all configured labels with defaults', () => {
     const result = buildLabelBootstrapDefinitions({
       labels: {
-        ready: ['orch:ready'],
-        running: 'orch:running',
-        blocked: ['orch:blocked', 'orch:needs-human'],
-        reviewReady: 'orch:review-ready',
-        error: 'orch:error',
-        retry: 'orch:retry',
-        planning: 'orch:planning',
-        mergeQueued: 'orch:merge-queued',
-        merging: 'orch:merging',
-        mergeFailed: 'orch:merge-failed',
+        ready: ['no:ready'],
+        running: 'no:running',
+        blocked: ['no:blocked', 'no:needs-human'],
+        reviewReady: 'no:review-ready',
+        error: 'no:error',
+        retry: 'no:retry',
+        planning: 'no:planning',
+        mergeQueued: 'no:merge-queued',
+        merging: 'no:merging',
+        mergeFailed: 'no:merge-failed',
       },
       labelConfig: {},
     })
 
     expect(result.map((l) => l.name)).toEqual([
-      'orch:ready',
-      'orch:running',
-      'orch:blocked',
-      'orch:needs-human',
-      'orch:review-ready',
-      'orch:error',
-      'orch:retry',
-      'orch:planning',
-      'orch:merge-queued',
-      'orch:merging',
-      'orch:merge-failed',
+      'no:ready',
+      'no:running',
+      'no:blocked',
+      'no:needs-human',
+      'no:review-ready',
+      'no:error',
+      'no:retry',
+      'no:planning',
+      'no:merge-queued',
+      'no:merging',
+      'no:merge-failed',
     ])
-    expect(result.find((l) => l.name === 'orch:ready')).toEqual({
-      name: 'orch:ready',
+    expect(result.find((l) => l.name === 'no:ready')).toEqual({
+      name: 'no:ready',
       color: '0E8A16',
       description: 'Queued for night-orch processing',
     })
@@ -74,38 +74,38 @@ describe('buildLabelBootstrapDefinitions', () => {
   it('deduplicates repeated labels across roles', () => {
     const result = buildLabelBootstrapDefinitions({
       labels: {
-        ready: ['orch:shared'],
-        running: 'orch:shared',
-        blocked: ['orch:shared'],
-        reviewReady: 'orch:shared',
-        error: 'orch:shared',
-        retry: 'orch:shared',
-        planning: 'orch:shared',
-        mergeQueued: 'orch:shared',
-        merging: 'orch:shared',
-        mergeFailed: 'orch:shared',
+        ready: ['no:shared'],
+        running: 'no:shared',
+        blocked: ['no:shared'],
+        reviewReady: 'no:shared',
+        error: 'no:shared',
+        retry: 'no:shared',
+        planning: 'no:shared',
+        mergeQueued: 'no:shared',
+        merging: 'no:shared',
+        mergeFailed: 'no:shared',
       },
       labelConfig: {},
     })
 
     expect(result).toHaveLength(1)
-    expect(result[0]?.name).toBe('orch:shared')
+    expect(result[0]?.name).toBe('no:shared')
   })
 
   it('includes kanban trigger and kanban state labels when configured', () => {
     const result = buildLabelBootstrapDefinitions({
       labels: {
-        ready: ['orch:ready'],
-        running: 'orch:running',
-        blocked: ['orch:blocked'],
-        needsHuman: 'orch:needs-human',
-        reviewReady: 'orch:review-ready',
-        error: 'orch:error',
-        retry: 'orch:retry',
-        planning: 'orch:planning',
-        mergeQueued: 'orch:merge-queued',
-        merging: 'orch:merging',
-        mergeFailed: 'orch:merge-failed',
+        ready: ['no:ready'],
+        running: 'no:running',
+        blocked: ['no:blocked'],
+        needsHuman: 'no:needs-human',
+        reviewReady: 'no:review-ready',
+        error: 'no:error',
+        retry: 'no:retry',
+        planning: 'no:planning',
+        mergeQueued: 'no:merge-queued',
+        merging: 'no:merging',
+        mergeFailed: 'no:merge-failed',
       },
       kanban: {
         triggerLabel: 'flow:kanban',

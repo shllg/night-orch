@@ -34,17 +34,17 @@ export function buildLabelConfig(
     : repoConfig.labels
 
   return {
-    ready: asLabelArray(source.ready, ['orch:ready']),
-    running: asSingleLabel(source.running, 'orch:running'),
-    blocked: asSingleLabel(source.blocked, 'orch:blocked'),
-    needsHuman: asSingleLabel(source.needsHuman, 'orch:needs-human'),
-    reviewReady: asSingleLabel(source.reviewReady, 'orch:review-ready'),
-    error: asSingleLabel(source.error, 'orch:error'),
-    retry: asSingleLabel(source.retry, 'orch:retry'),
-    planning: asSingleLabel(source.planning, 'orch:planning'),
-    mergeQueued: asSingleLabel(source.mergeQueued, 'orch:merge-queued'),
-    merging: asSingleLabel(source.merging, 'orch:merging'),
-    mergeFailed: asSingleLabel(source.mergeFailed, 'orch:merge-failed'),
+    ready: asLabelArray(source.ready, ['no:ready']),
+    running: asSingleLabel(source.running, 'no:running'),
+    blocked: asSingleLabel(source.blocked, 'no:blocked'),
+    needsHuman: asSingleLabel(source.needsHuman, 'no:needs-human'),
+    reviewReady: asSingleLabel(source.reviewReady, 'no:review-ready'),
+    error: asSingleLabel(source.error, 'no:error'),
+    retry: asSingleLabel(source.retry, 'no:retry'),
+    planning: asSingleLabel(source.planning, 'no:planning'),
+    mergeQueued: asSingleLabel(source.mergeQueued, 'no:merge-queued'),
+    merging: asSingleLabel(source.merging, 'no:merging'),
+    mergeFailed: asSingleLabel(source.mergeFailed, 'no:merge-failed'),
   }
 }
 

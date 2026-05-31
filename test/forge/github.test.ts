@@ -56,12 +56,12 @@ function makeRepoConfig(overrides: Partial<RepoConfig> = {}): RepoConfig {
     baseBranch: 'main',
     branchPrefix: 'orch',
     labels: {
-      ready: ['orch:ready'],
-      running: 'orch:running',
-      blocked: ['orch:blocked', 'orch:needs-human'],
-      reviewReady: 'orch:review-ready',
-      error: 'orch:error',
-      retry: 'orch:retry',
+      ready: ['no:ready'],
+      running: 'no:running',
+      blocked: ['no:blocked', 'no:needs-human'],
+      reviewReady: 'no:review-ready',
+      error: 'no:error',
+      retry: 'no:retry',
     },
     defaults: {
       planner: 'claude',
@@ -73,8 +73,8 @@ function makeRepoConfig(overrides: Partial<RepoConfig> = {}): RepoConfig {
     },
     verify: [],
     selectors: {
-      includeLabelsAny: ['orch:ready'],
-      excludeLabelsAny: ['orch:blocked', 'orch:error'],
+      includeLabelsAny: ['no:ready'],
+      excludeLabelsAny: ['no:blocked', 'no:error'],
     },
     agents: {},
     ...overrides,
@@ -213,7 +213,7 @@ describe('GitHubForgeAdapter', () => {
 
       const config = makeRepoConfig({
         selectors: {
-          includeLabelsAny: ['orch:ready', 'orch:priority'],
+          includeLabelsAny: ['no:ready', 'no:priority'],
           excludeLabelsAny: [],
         },
       })

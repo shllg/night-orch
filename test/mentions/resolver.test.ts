@@ -55,7 +55,7 @@ describe('resolveMentions', () => {
 
   it('non pr-mention labels are ignored', () => {
     const result = resolveMentions(
-      ['bug', 'enhancement', 'orch:ready'],
+      ['bug', 'enhancement', 'no:ready'],
       { ...defaults, prMentions: [] },
       {},
     )
