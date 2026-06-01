@@ -1,6 +1,7 @@
 import type { InboxCommandHints, InboxTriage } from '../discovery/triage.js'
 import type { RunListRow } from './run-list.js'
 import type { HistoryRunRow, InboxIssueRow, RunTimingRow } from './run-queries.js'
+import { coerceManualState, coerceOperationIntent, type RunManualState, type RunOperationIntent } from './runs.js'
 import { parseUtcTimestampMs } from '../utils/time.js'
 
 const INBOX_TRIAGE_SORT_ORDER: Record<InboxTriage, number> = {
@@ -44,8 +45,8 @@ export interface InboxItemRow {
   blockReason: string | null
   lastError: string | null
   reason: string | null
-  manualState: string
-  operationIntent: string
+  manualState: RunManualState
+  operationIntent: RunOperationIntent
   recommendedCommand: string | null
   availableCommands: string[]
   updatedAt: string | null
@@ -118,8 +119,8 @@ export function mapInboxIssueRow(
     blockReason: row.block_reason,
     lastError: row.last_error,
     reason: row.block_reason ?? row.last_error,
-    manualState: row.manual_state ?? 'none',
-    operationIntent: row.operation_intent ?? 'auto',
+    manualState: coerceManualState(row.manual_state),
+    operationIntent: coerceOperationIntent(row.operation_intent),
     recommendedCommand: commandHints.recommendedCommand,
     availableCommands: commandHints.availableCommands,
     updatedAt: row.updated_at,

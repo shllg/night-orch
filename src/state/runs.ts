@@ -637,13 +637,13 @@ function safeParseRecordJson(
   }
 }
 
-function coerceOperationIntent(value: string | null | undefined): RunOperationIntent {
+export function coerceOperationIntent(value: string | null | undefined): RunOperationIntent {
   return value === 'continue' || value === 'retry' || value === 'rebase' || value === 'refresh'
     ? value
     : 'auto'
 }
 
-function coerceManualState(value: string | null | undefined): RunManualState {
+export function coerceManualState(value: string | null | undefined): RunManualState {
   return value === 'awaiting_rebase_resolution' ? value : 'none'
 }
 

@@ -1,10 +1,12 @@
 import type Database from 'better-sqlite3'
 import type { LoopPhase, RunContext, PlannerOutput, CoderOutput, ReviewerOutput, VerifyResult } from './types.js'
+import type { WorkflowStep } from './workflow.js'
 import { RunManager } from '../state/runs.js'
 import { insertRunLogEvent } from '../state/run-log-events.js'
 import { nowUtcIso } from '../utils/time.js'
 import { logger } from '../utils/logger.js'
 import { parsePhaseData } from './checkpoint-schema.js'
+import { recordPhase, updateContext } from './context.js'
 
 export interface CheckpointArtifactEvent {
   runId: string
@@ -90,6 +92,120 @@ export function findTerminalDecisionOutcome(
     }
   }
   return null
+}
+
+export function resolveStartingStepIndex(
+  steps: WorkflowStep[],
+  resumedCtx: RunContext | null,
+  checkpointPhaseData: Readonly<Record<string, unknown>>,
+  completedPhases: readonly string[],
+): number {
+  if (!resumedCtx) return 0
+
+  const resumedPhaseIndex = steps.findIndex((step) => step.id === resumedCtx.currentPhase)
+  if (resumedPhaseIndex === -1) return 0
+
+  const resumedStep = steps[resumedPhaseIndex]!
+  const hasCompletedSentinel = completedPhases.length > 0
+  const artifactComplete = isStepCheckpointComplete(resumedStep, checkpointPhaseData[resumedStep.id])
+  const isCompletedCheckpoint = hasCompletedSentinel
+    ? completedPhases.includes(resumedStep.id) && artifactComplete
+    : artifactComplete
+  if (!isCompletedCheckpoint) {
+    return resumedPhaseIndex
+  }
+
+  if (resumedStep.type === 'decide') {
+    const iterateTargetIndex = steps.findIndex((step) => step.id === resumedStep.onIterate)
+    return iterateTargetIndex >= 0 ? iterateTargetIndex : 0
+  }
+
+  const nextStepIndex = resumedPhaseIndex + 1
+  return nextStepIndex < steps.length ? nextStepIndex : resumedPhaseIndex
+}
+
+export function applyPersistedDecisionOutcome(
+  ctx: RunContext,
+  terminal: { phase: string; outcome: PersistedDecisionOutcome },
+): RunContext {
+  const { phase, outcome } = terminal
+  switch (outcome.action) {
+    case 'publish':
+      return recordPhase(
+        updateContext(ctx, { currentPhase: 'completed', terminalStatus: 'publish' }),
+        phase,
+        'success',
+      )
+    case 'block':
+      return recordPhase(
+        updateContext(ctx, {
+          currentPhase: 'blocked',
+          terminalStatus: 'blocked',
+          blockReason: coercePersistedBlockReason(outcome.blockReason),
+          stepOutputs: {
+            ...ctx.stepOutputs,
+            blockMessage: outcome.reason ?? 'Blocked by prior decide outcome',
+          },
+        }),
+        phase,
+        'failure',
+      )
+    case 'error':
+      return recordPhase(
+        updateContext(ctx, { currentPhase: 'error', terminalStatus: 'error' }),
+        phase,
+        'failure',
+      )
+    default:
+      return ctx
+  }
+}
+
+const LEGACY_BLOCK_REASONS = new Set<NonNullable<RunContext['blockReason']>>([
+  'cost_limit',
+  'iteration_limit',
+  'run_token_limit',
+  'issue_token_limit',
+  'daily_token_limit',
+  'run_wall_clock_limit',
+  'stuck_loop',
+  'agent_pass_limit',
+  'reviewer_blocked',
+  'ambiguous_review',
+  'verify_config',
+  'merge_conflict',
+  'auth_failure',
+  'empty_diff',
+])
+
+function coercePersistedBlockReason(
+  value: unknown,
+): RunContext['blockReason'] {
+  if (typeof value !== 'string') {
+    return null
+  }
+  return LEGACY_BLOCK_REASONS.has(value as NonNullable<RunContext['blockReason']>)
+    ? (value as NonNullable<RunContext['blockReason']>)
+    : null
+}
+
+function isStepCheckpointComplete(step: WorkflowStep, rawArtifacts: unknown): boolean {
+  if (typeof rawArtifacts !== 'object' || rawArtifacts === null || Array.isArray(rawArtifacts)) {
+    return false
+  }
+
+  const artifacts = rawArtifacts as Record<string, unknown>
+  switch (step.type) {
+    case 'worker':
+      if (step.role === 'planner') return artifacts['plan'] !== null && artifacts['plan'] !== undefined
+      if (step.role === 'coder') return artifacts['codeResult'] !== null && artifacts['codeResult'] !== undefined
+      if (step.role === 'reviewer') return artifacts['reviewResult'] !== null && artifacts['reviewResult'] !== undefined
+      return 'stepOutput' in artifacts
+    case 'verify':
+      return Array.isArray(artifacts['verifyResults'])
+    case 'decide':
+      return true
+  }
 }
 
 export function clearResumeDecisionArtifacts(

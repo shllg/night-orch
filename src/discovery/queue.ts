@@ -1,4 +1,5 @@
-import type { RunManager, RunOperationIntent, RunRecord } from '../state/runs.js'
+import type { RunManager } from '../state/runs.js'
+import { resolveOperationIntent } from '../runner/intent.js'
 import type { DiscoveredIssue } from './discover.js'
 
 /**
@@ -27,20 +28,8 @@ function getIssueQueuePriority(
   const queuedRun = runManager.getLatestQueuedByIssue(repo, issueNumber)
   if (!queuedRun) return 3
 
-  const operationIntent = resolveQueuedOperationIntent(queuedRun)
+  const operationIntent = resolveOperationIntent(queuedRun)
   if (operationIntent === 'rebase' || operationIntent === 'refresh') return 0
   if (operationIntent === 'continue' || operationIntent === 'retry') return 1
   return 2
-}
-
-function resolveQueuedOperationIntent(run: RunRecord): RunOperationIntent {
-  if (run.operationIntent !== 'auto') return run.operationIntent
-  if (run.blockReason === 'merge_conflict') return 'retry'
-
-  const reactionType = run.phaseData?.reactionType
-  if (reactionType === 'rebase') return 'rebase'
-  if (reactionType === 'merge_conflict' || reactionType === 'refresh') return 'refresh'
-  if (typeof reactionType === 'string' && reactionType.trim().length > 0) return 'continue'
-
-  return 'auto'
 }

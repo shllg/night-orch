@@ -123,4 +123,41 @@ describe('prioritizeDiscoveredIssues', () => {
 
     expect(ranked.map((item) => item.issue.number)).toEqual([11, 12, 13])
   })
+
+  it('only prioritizes inferred follow-up intents from queued runs', () => {
+    const blockedRun = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 21,
+      issueNodeId: 'node-21',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(blockedRun.id, {
+      status: 'blocked',
+      operationIntent: 'auto',
+      blockReason: 'merge_conflict',
+      phaseData: { reactionType: 'refresh' },
+    })
+
+    const queuedRun = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 22,
+      issueNodeId: 'node-22',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(queuedRun.id, {
+      operationIntent: 'auto',
+      phaseData: { reactionType: 'refresh' },
+    })
+
+    const ranked = prioritizeDiscoveredIssues(runManager, 'org/repo', [
+      makeDiscovered(21),
+      makeDiscovered(22),
+    ])
+
+    expect(ranked.map((item) => item.issue.number)).toEqual([22, 21])
+  })
 })

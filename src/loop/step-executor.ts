@@ -14,7 +14,7 @@ import type { MetricsService } from '../metrics/service.js'
 import type { AgentEvent } from '../events/types.js'
 import { updateContext } from './context.js'
 import { decide } from './decision.js'
-import { runVerifyCommands } from './verifier.js'
+import { allRequiredVerifyPassed, runVerifyCommands } from './verifier.js'
 import { resolveVerifyCommands } from './verification-profile.js'
 import { compilePrompt } from '../workers/prompt/compiler.js'
 import { getDefaultTemplate, buildPlanningOnlyCoderTemplate } from '../workers/prompt/templates.js'
@@ -313,6 +313,51 @@ export async function executeDecideStep(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+export function determineStepSuccess(step: WorkflowStep, ctx: RunContext): boolean {
+  switch (step.type) {
+    case 'worker':
+      if (step.role === 'planner') return ctx.plan !== null
+      if (step.role === 'coder') return ctx.codeResult !== null
+      if (step.role === 'reviewer') return ctx.reviewResult !== null
+      return true
+    case 'verify':
+      return ctx.verifyResults.length > 0 && allRequiredVerifyPassed(ctx.verifyResults)
+    case 'decide':
+      return true
+  }
+}
+
+export function buildStepArtifacts(step: WorkflowStep, ctx: RunContext): Record<string, unknown> {
+  switch (step.type) {
+    case 'worker':
+      if (step.role === 'planner') return { plan: ctx.plan }
+      if (step.role === 'coder') return { codeResult: ctx.codeResult }
+      if (step.role === 'reviewer') return { reviewResult: ctx.reviewResult }
+      return { stepOutput: ctx.stepOutputs[step.id] ?? null }
+    case 'verify':
+      return {
+        verifyResults: ctx.verifyResults,
+        diff: ctx.diff,
+        diffError: ctx.diffError,
+        emptyDiffRetries: ctx.emptyDiffRetries,
+      }
+    case 'decide':
+      return {}
+  }
+}
+
+/**
+ * Scan backward from the verify step to find the nearest coder step.
+ * Returns -1 if no coder step is found.
+ */
+export function findCoderStepBefore(steps: WorkflowStep[], verifyIndex: number): number {
+  for (let i = verifyIndex - 1; i >= 0; i--) {
+    const s = steps[i]!
+    if (s.type === 'worker' && s.role === 'coder') return i
+  }
+  return -1
+}
 
 /** Resolve the correct worker adapter for a role, using repo agent mapping. */
 function resolveAdapter(
