@@ -5,6 +5,7 @@ import {
   RUN_STATE_KINDS,
   assertNever,
   blocked,
+  blockReasonSummary,
   blockedReasonFromLegacy,
   blockedReasonToLegacy,
   describeBlockedReason,
@@ -14,6 +15,7 @@ import {
   type RunState,
   type RunStateKind,
 } from '../../src/loop/state.js'
+import type { RunContext } from '../../src/loop/types.js'
 
 describe('RunState discriminated union', () => {
   describe('LEGACY_BLOCK_REASON_VALUES', () => {
@@ -133,6 +135,31 @@ describe('RunState discriminated union', () => {
 
     it.each(cases)('describes %s', ({ reason, matches }) => {
       expect(describeBlockedReason(reason)).toMatch(matches)
+    })
+
+    it('covers every BlockedReason type', () => {
+      const covered = new Set(cases.map((c) => c.reason.type))
+      expect(covered.size).toBe(BLOCKED_REASON_TYPES.length)
+    })
+  })
+
+  describe('blockReasonSummary', () => {
+    const cases: Array<{ reason: BlockedReason; matches: RegExp }> = [
+      { reason: { type: 'costLimit', limit: 'per-run', actualUsd: 12, limitUsd: 10 }, matches: /Cost limit exceeded/ },
+      { reason: { type: 'iterationLimit', iterations: 4, max: 4 }, matches: /Maximum review iterations reached/ },
+      { reason: { type: 'agentPassLimit', passes: 10, max: 10 }, matches: /Maximum total agent passes reached/ },
+      { reason: { type: 'reviewerBlocked', summary: 'no' }, matches: /Reviewer marked this run as blocked/ },
+      { reason: { type: 'ambiguousReview', excerpt: 'mangled' }, matches: /Review output was not parseable/ },
+      { reason: { type: 'verifyConfig', detail: 'missing' }, matches: /Verification is required/ },
+      { reason: { type: 'mergeConflict', files: ['a.ts'], summary: 'conflict' }, matches: /conflict encountered/ },
+      { reason: { type: 'authFailure', adapter: 'codex' }, matches: /codex/ },
+      { reason: { type: 'emptyDiff', retries: 2 }, matches: /no file changes/ },
+      { reason: { type: 'workerTimeout', adapter: 'claude', step: 'coder', timeoutMs: 30000 }, matches: /timed out during coder/ },
+      { reason: { type: 'tokenCaptureFailed', adapter: 'claude', step: 'reviewer' }, matches: /without parseable token usage/ },
+    ]
+
+    it.each(cases)('summarizes %s', ({ reason, matches }) => {
+      expect(blockReasonSummary(reason, makeSummaryCtx())).toMatch(matches)
     })
 
     it('covers every BlockedReason type', () => {
@@ -363,5 +390,41 @@ function stubReason(type: BlockedReasonType): BlockedReason {
       return { type: 'workerTimeout', adapter: 'claude', step: 'coder', timeoutMs: 0 }
     case 'tokenCaptureFailed':
       return { type: 'tokenCaptureFailed', adapter: 'claude', step: 'coder' }
+  }
+}
+
+function makeSummaryCtx(): RunContext {
+  return {
+    runId: 'run-1',
+    repo: 'org/repo',
+    issueNumber: 1,
+    issue: { number: 1, nodeId: '', title: 'Issue', body: '', labels: [], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+    repoConfig: {} as RunContext['repoConfig'],
+    roles: { planner: 'claude', coder: 'codex', reviewer: 'codex' },
+    triageResult: { level: 'standard', reason: '' },
+    adjustedLimits: { maxReviewIterations: 4, maxTotalAgentPasses: 10, workerTimeoutSeconds: 1800 },
+    branchName: 'orch/1-issue',
+    worktreePath: '/tmp/wt',
+    plan: null,
+    codeResult: null,
+    diff: null,
+    verifyResults: [],
+    reviewResult: null,
+    reviewFindings: [],
+    iteration: 4,
+    totalAgentPasses: 10,
+    estimatedCostUsd: 12.3456,
+    currentPhase: 'review',
+    terminalStatus: 'running',
+    phaseHistory: [],
+    dryRun: false,
+    runMode: 'fresh',
+    blockReason: null,
+    prReviewFeedback: null,
+    diffError: null,
+    emptyDiffRetries: 2,
+    sessionIds: {},
+    stepOutputs: {},
+    iterationSnapshots: [],
   }
 }

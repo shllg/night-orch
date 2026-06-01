@@ -170,13 +170,13 @@ export async function handleListRuns(
   const runTimings = loadRunTimingsByRunId(
     deps.db,
     pageRows
-      .map((row) => row.id)
-      .filter((runId) => !runId.startsWith('issue:')),
+      .map((row) => row.run_id)
+      .filter((runId): runId is string => runId !== null),
   )
 
   return {
     count: pageRows.length,
-    runs: pageRows.map((row) => mapActiveRunRow(row, runTimings.get(row.id))),
+    runs: pageRows.map((row) => mapActiveRunRow(row, row.run_id ? runTimings.get(row.run_id) : undefined)),
     limit,
     offset,
     hasMore,

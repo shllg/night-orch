@@ -78,10 +78,11 @@ export function mapActiveRunRow(
   row: RunListRow,
   timing: RunTimingRow | undefined,
 ): RunSummaryRow {
-  const hasRun = !row.id.startsWith('issue:')
+  const hasRun = row.run_id !== null
+  const runId = row.run_id ?? `issue:${row.repo}#${row.issue_number}`
 
   return {
-    runId: row.id,
+    runId,
     hasRun,
     repo: row.repo,
     issue: row.issue_number,

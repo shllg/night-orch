@@ -55,3 +55,13 @@ export function resolveRoles(
 
   return result
 }
+
+export function coerceAgentName(
+  value: string,
+  fallback: AgentName,
+): AgentName {
+  if (VALID_AGENTS.has(value)) {
+    return value as AgentName
+  }
+  return fallback
+}

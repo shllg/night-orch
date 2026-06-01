@@ -1,11 +1,8 @@
 import type { RunContext } from '../loop/types.js'
-import type { BlockedReason } from '../loop/state.js'
-import type { NotificationPayload } from '../notify/types.js'
 import type { ForgeAdapter } from '../forge/types.js'
-import { assertNever, blockedReasonFromLegacy } from '../loop/state.js'
+import { blockedReasonFromLegacy, blockReasonSummary } from '../loop/state.js'
 import { markerTag, upsertBotComment } from '../forge/bot-comment.js'
 import { formatStatusComment } from '../forge/status-comment.js'
-import { nowUtcIso } from '../utils/time.js'
 import { logger } from '../utils/logger.js'
 
 export const STATUS_MARKER = markerTag('status')
@@ -47,43 +44,6 @@ export function buildBlockReason(ctx: RunContext): string {
   return `Blocked in phase ${ctx.currentPhase} (no review result available)`
 }
 
-/**
- * Render a human-readable, action-oriented summary for a typed
- * `BlockedReason`. Used as the body of the blocked status comment and
- * the lastError column on the run row.
- *
- * Exhaustive switch — adding a new variant to `BlockedReason` in
- * `loop/state.ts` produces a compile error here until handled.
- */
-export function blockReasonSummary(reason: BlockedReason, ctx: RunContext): string {
-  switch (reason.type) {
-    case 'costLimit':
-      return `Cost limit exceeded (estimated: $${ctx.estimatedCostUsd.toFixed(4)}). Grant a budget override or raise the limit in Settings to continue.`
-    case 'iterationLimit':
-      return `Maximum review iterations reached (${ctx.iteration}/${ctx.adjustedLimits.maxReviewIterations}). Use /orch continue to add more iterations with PR context, or raise the limit in Settings.`
-    case 'agentPassLimit':
-      return `Maximum total agent passes reached (${ctx.totalAgentPasses}/${ctx.adjustedLimits.maxTotalAgentPasses}). Use /orch continue to resume, or raise the limit in Settings.`
-    case 'reviewerBlocked':
-      return 'Reviewer marked this run as blocked. Address the review findings, then use /orch continue.'
-    case 'ambiguousReview':
-      return 'Review output was not parseable. Use /orch retry to re-run, or disable blockOnAmbiguousReview in Settings.'
-    case 'verifyConfig':
-      return 'Verification is required but verify commands or results are unavailable. Check repo verify config.'
-    case 'mergeConflict':
-      return 'Rebase or merge conflict encountered. Use /orch continue to keep the existing branch and resolve the conflict, or /orch retry to start fresh from the latest base branch.'
-    case 'authFailure':
-      return `Worker CLI authentication expired (${reason.adapter}). Re-authenticate the worker CLI, then use /orch retry.`
-    case 'emptyDiff':
-      return `Coder produced no file changes after ${ctx.emptyDiffRetries} attempt(s). The task may need clarification. Use /orch retry to start fresh from the latest base branch.`
-    case 'workerTimeout':
-      return `${reason.adapter} timed out during ${reason.step} after ${reason.timeoutMs}ms. Use /orch retry to start fresh, or increase the worker timeout in Settings.`
-    case 'tokenCaptureFailed':
-      return `${reason.adapter} produced output without parseable token usage during ${reason.step}. This is a worker bug — capture the raw output and file an issue.`
-    default:
-      return assertNever(reason, 'blockReasonSummary')
-  }
-}
-
 export function formatBlockComment(reason: string, ctx: RunContext): string {
   const parts = [`⛔ **night-orch**: Run blocked.\n\n**Reason:** ${reason}`]
   if (ctx.reviewResult?.findings && ctx.reviewResult.findings.length > 0) {
@@ -95,30 +55,6 @@ export function formatBlockComment(reason: string, ctx: RunContext): string {
   }
   parts.push(`\n*Iteration ${ctx.iteration}, cost: $${ctx.estimatedCostUsd.toFixed(4)}*`)
   return parts.join('\n')
-}
-
-export function makePayload(
-  event: NotificationPayload['event'],
-  repo: string,
-  issue: { number: number; title: string; url?: string },
-  extra: Partial<NotificationPayload> = {},
-): NotificationPayload {
-  return {
-    event,
-    repo,
-    issueNumber: issue.number,
-    issueTitle: issue.title,
-    issueUrl: issue.url ?? null,
-    state: event,
-    prUrl: null,
-    prNumber: null,
-    summary: `${event}: #${issue.number} ${issue.title}`,
-    blockingReason: null,
-    reviewSummary: null,
-    iterationCount: 0,
-    timestamp: nowUtcIso(),
-    ...extra,
-  }
 }
 
 export interface PostStatusCommentParams {

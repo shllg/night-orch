@@ -46,7 +46,7 @@ export function buildIssueList(runs: RunListRow[]): IssueListRow[] {
   const byIssue = new Map<string, IssueListRow>()
 
   for (const run of runs) {
-    const syntheticIssueRow = run.id.startsWith('issue:')
+    const syntheticIssueRow = run.run_id === null
     const key = `${run.repo}#${run.issue_number}`
     const existing = byIssue.get(key)
 

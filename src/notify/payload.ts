@@ -2,6 +2,30 @@ import type { RunContext } from '../loop/types.js'
 import { nowUtcIso } from '../utils/time.js'
 import type { NotificationEvent, NotificationPayload } from './types.js'
 
+export function makePayload(
+  event: NotificationPayload['event'],
+  repo: string,
+  issue: { number: number; title: string; url?: string },
+  extra: Partial<NotificationPayload> = {},
+): NotificationPayload {
+  return {
+    event,
+    repo,
+    issueNumber: issue.number,
+    issueTitle: issue.title,
+    issueUrl: issue.url ?? null,
+    state: event,
+    prUrl: null,
+    prNumber: null,
+    summary: `${event}: #${issue.number} ${issue.title}`,
+    blockingReason: null,
+    reviewSummary: null,
+    iterationCount: 0,
+    timestamp: nowUtcIso(),
+    ...extra,
+  }
+}
+
 export function buildPayload(
   ctx: RunContext,
   event: NotificationEvent,

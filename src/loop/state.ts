@@ -260,6 +260,35 @@ export function describeBlockedReason(reason: BlockedReason): string {
   }
 }
 
+export function blockReasonSummary(reason: BlockedReason, ctx: RunContext): string {
+  switch (reason.type) {
+    case 'costLimit':
+      return `Cost limit exceeded (estimated: $${ctx.estimatedCostUsd.toFixed(4)}). Grant a budget override or raise the limit in Settings to continue.`
+    case 'iterationLimit':
+      return `Maximum review iterations reached (${ctx.iteration}/${ctx.adjustedLimits.maxReviewIterations}). Use /orch continue to add more iterations with PR context, or raise the limit in Settings.`
+    case 'agentPassLimit':
+      return `Maximum total agent passes reached (${ctx.totalAgentPasses}/${ctx.adjustedLimits.maxTotalAgentPasses}). Use /orch continue to resume, or raise the limit in Settings.`
+    case 'reviewerBlocked':
+      return 'Reviewer marked this run as blocked. Address the review findings, then use /orch continue.'
+    case 'ambiguousReview':
+      return 'Review output was not parseable. Use /orch retry to re-run, or disable blockOnAmbiguousReview in Settings.'
+    case 'verifyConfig':
+      return 'Verification is required but verify commands or results are unavailable. Check repo verify config.'
+    case 'mergeConflict':
+      return 'Rebase or merge conflict encountered. Use /orch continue to keep the existing branch and resolve the conflict, or /orch retry to start fresh from the latest base branch.'
+    case 'authFailure':
+      return `Worker CLI authentication expired (${reason.adapter}). Re-authenticate the worker CLI, then use /orch retry.`
+    case 'emptyDiff':
+      return `Coder produced no file changes after ${ctx.emptyDiffRetries} attempt(s). The task may need clarification. Use /orch retry to start fresh from the latest base branch.`
+    case 'workerTimeout':
+      return `${reason.adapter} timed out during ${reason.step} after ${reason.timeoutMs}ms. Use /orch retry to start fresh, or increase the worker timeout in Settings.`
+    case 'tokenCaptureFailed':
+      return `${reason.adapter} produced output without parseable token usage during ${reason.step}. This is a worker bug — capture the raw output and file an issue.`
+    default:
+      return assertNever(reason, 'blockReasonSummary')
+  }
+}
+
 /**
  * Legacy bridge: map the pre-R1 `BlockReason` string enum to a typed
  * `BlockedReason` object. R1b and R1c use this during the incremental

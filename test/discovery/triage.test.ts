@@ -8,6 +8,12 @@ import {
 import type { ForgeIssue } from '../../src/forge/types.js'
 import type { AiClient } from '../../src/ai/types.js'
 import { AiTransientError } from '../../src/ai/errors.js'
+import {
+  BLOCKED_REASON_TYPES,
+  blockedReasonToLegacy,
+  type BlockedReason,
+  type BlockedReasonType,
+} from '../../src/loop/state.js'
 
 function makeIssue(overrides: Partial<ForgeIssue> = {}): ForgeIssue {
   return {
@@ -207,6 +213,21 @@ describe('inbox triage helpers', () => {
     ).toBe('blocked')
   })
 
+  it('classifies every persisted BlockedReason projection for the inbox', () => {
+    for (const type of BLOCKED_REASON_TYPES) {
+      const blockReason = blockedReasonToLegacy(stubBlockedReason(type))
+      const expected = blockReason === 'reviewer_blocked' ? 'needs_human' : 'blocked'
+
+      expect(
+        classifyInboxTriage({
+          status: 'blocked',
+          block_reason: blockReason,
+          manual_state: null,
+        }),
+      ).toBe(expected)
+    }
+  })
+
   it('derives retry hints for error rows', () => {
     expect(
       deriveInboxCommandHints({
@@ -233,3 +254,30 @@ describe('inbox triage helpers', () => {
     })
   })
 })
+
+function stubBlockedReason(type: BlockedReasonType): BlockedReason {
+  switch (type) {
+    case 'costLimit':
+      return { type: 'costLimit', limit: 'per-run', actualUsd: 0, limitUsd: 0 }
+    case 'iterationLimit':
+      return { type: 'iterationLimit', iterations: 0, max: 0 }
+    case 'agentPassLimit':
+      return { type: 'agentPassLimit', passes: 0, max: 0 }
+    case 'reviewerBlocked':
+      return { type: 'reviewerBlocked', summary: '' }
+    case 'ambiguousReview':
+      return { type: 'ambiguousReview', excerpt: '' }
+    case 'verifyConfig':
+      return { type: 'verifyConfig', detail: '' }
+    case 'mergeConflict':
+      return { type: 'mergeConflict', files: [], summary: '' }
+    case 'authFailure':
+      return { type: 'authFailure', adapter: 'claude' }
+    case 'emptyDiff':
+      return { type: 'emptyDiff', retries: 0 }
+    case 'workerTimeout':
+      return { type: 'workerTimeout', adapter: 'claude', step: 'coder', timeoutMs: 0 }
+    case 'tokenCaptureFailed':
+      return { type: 'tokenCaptureFailed', adapter: 'claude', step: 'coder' }
+  }
+}

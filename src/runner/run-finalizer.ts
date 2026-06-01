@@ -19,12 +19,12 @@ import {
   STATUS_MARKER,
   buildBlockReason,
   formatBlockComment,
-  makePayload,
   postStatusComment,
   postErrorStatusComment,
   toErrorMessage,
   sanitizeErrorForComment,
 } from './comment-formatting.js'
+import { makePayload } from '../notify/payload.js'
 
 export interface FinalizeRunOutcomeParams {
   finalCtx: RunContext

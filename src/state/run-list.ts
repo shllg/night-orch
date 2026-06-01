@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3'
 
 export interface RunListRow {
   id: string
+  run_id: string | null
   repo: string
   issue_number: number
   issue_title: string | null
@@ -97,10 +98,11 @@ export function loadRuns(
          FROM issues i
          WHERE i.status != 'completed'
        ),
-       run_rows AS (
-         SELECT
-           r.id,
-           r.repo,
+	       run_rows AS (
+	         SELECT
+	           r.id,
+	           r.id AS run_id,
+	           r.repo,
            r.issue_number,
            COALESCE(
              NULLIF(TRIM(r.issue_title), ''),
@@ -154,10 +156,11 @@ export function loadRuns(
           AND u.issue_number = r.issue_number
          ${includeTerminated ? '' : 'WHERE r.terminated_at IS NULL'}
        ),
-       issue_override_rows AS (
-         SELECT
-           'issue:' || i.repo || '#' || i.issue_number AS id,
-           i.repo,
+	       issue_override_rows AS (
+	         SELECT
+	           'issue:' || i.repo || '#' || i.issue_number AS id,
+	           NULL AS run_id,
+	           i.repo,
            i.issue_number,
            COALESCE(
              NULLIF(TRIM(i.issue_title), ''),
@@ -221,9 +224,10 @@ export function loadRuns(
          UNION ALL
          SELECT * FROM issue_override_rows
        )
-       SELECT
-         id,
-         repo,
+	       SELECT
+	         id,
+	         run_id,
+	         repo,
          issue_number,
          issue_title,
          status,

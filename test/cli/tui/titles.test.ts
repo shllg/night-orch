@@ -64,6 +64,7 @@ describe('tui title helpers', () => {
 function runRow(partial: Partial<RunListRow>): RunListRow {
   return {
     id: partial.id ?? 'run-1',
+    run_id: partial.run_id ?? partial.id ?? 'run-1',
     repo: partial.repo ?? 'org/repo',
     issue_number: partial.issue_number ?? 1,
     issue_title: partial.issue_title ?? null,

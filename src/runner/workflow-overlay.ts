@@ -1,16 +1,5 @@
 import type { Config } from '../config/schema.js'
-import type { ResolvedRoles } from '../discovery/roles.js'
 import type { ResolvedWorkflow } from '../loop/workflow.js'
-
-export function coerceAgentName(
-  value: string,
-  fallback: ResolvedRoles['planner'],
-): ResolvedRoles['planner'] {
-  if (value === 'claude' || value === 'codex' || value === 'opencode') {
-    return value
-  }
-  return fallback
-}
 
 export function applyWorkflowAgentOverrides(
   repoConfig: Config['repos'][number],

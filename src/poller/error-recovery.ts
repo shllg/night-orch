@@ -7,7 +7,8 @@ import { transitionLabels } from '../labels/manager.js'
 import { buildLabelConfig } from '../labels/config.js'
 import { nowUtcIso } from '../utils/time.js'
 import { logger } from '../utils/logger.js'
-import { makePayload, postErrorStatusComment, sanitizeErrorForComment, toErrorMessage } from '../runner/comment-formatting.js'
+import { postErrorStatusComment, sanitizeErrorForComment, toErrorMessage } from '../runner/comment-formatting.js'
+import { makePayload } from '../notify/payload.js'
 
 /**
  * R6: infra error recovery for the poller's per-issue dispatch loop.

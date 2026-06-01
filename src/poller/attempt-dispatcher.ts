@@ -48,9 +48,9 @@ import { PollerNotifier } from './notify-dispatcher.js'
 import {
   applyWorkflowAgentOverrides,
   applyWorkflowRoleDefaults,
-  coerceAgentName,
   resolveWorkerProfileForAgent,
 } from '../runner/workflow-overlay.js'
+import { coerceAgentName } from '../discovery/roles.js'
 import {
   isImmediateFollowupStatus,
   extractFollowupPromptFeedback,

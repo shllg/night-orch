@@ -28,10 +28,18 @@ export async function runPostWorkerHooks(
   step: WorkerStep,
   config: Config,
 ): Promise<WorkerHookBlock | null> {
-  for (const hook of POST_WORKER_HOOKS) {
-    const block = await hook(ctx, step, config)
-    if (block) return block
+  const results = await Promise.allSettled(
+    POST_WORKER_HOOKS.map((hook) => hook(ctx, step, config)),
+  )
+
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      logger.warn({ runId: ctx.runId, phase: step.id, err: result.reason }, 'Post-worker hook failed — continuing')
+      continue
+    }
+    if (result.value) return result.value
   }
+
   return null
 }
 

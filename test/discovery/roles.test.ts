@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolveRoles } from '../../src/discovery/roles.js'
+import { coerceAgentName, resolveRoles } from '../../src/discovery/roles.js'
 
 const defaults = {
   planner: 'claude' as const,
@@ -51,5 +51,17 @@ describe('resolveRoles', () => {
     const opencodeDefaults = { ...defaults, coder: 'opencode' as const }
     const result = resolveRoles([], opencodeDefaults)
     expect(result.coder).toBe('opencode')
+  })
+})
+
+describe('coerceAgentName', () => {
+  it('preserves valid persisted agent names', () => {
+    expect(coerceAgentName('claude', 'codex')).toBe('claude')
+    expect(coerceAgentName('codex', 'claude')).toBe('codex')
+    expect(coerceAgentName('opencode', 'claude')).toBe('opencode')
+  })
+
+  it('falls back when persisted data contains an unknown agent name', () => {
+    expect(coerceAgentName('unknown-agent', 'codex')).toBe('codex')
   })
 })

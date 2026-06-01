@@ -15,8 +15,8 @@ import {
   resolveControlPayload,
   resolveOperationIntent,
   selectReplayableRun,
-} from '../../src/runner/helpers.js'
-import { shouldResetBranch } from '../../src/runner/intent.js'
+  shouldResetBranch,
+} from '../../src/runner/intent.js'
 import { logger } from '../../src/utils/logger.js'
 import type { RunRecord, RunOperationIntent, RunStatus } from '../../src/state/runs.js'
 
