@@ -45,6 +45,7 @@ import {
 } from './error-recovery.js'
 import { clearResumeDecisionArtifacts } from '../loop/checkpoint.js'
 import { PollerNotifier } from './notify-dispatcher.js'
+import { RunStateController } from './run-state-controller.js'
 import {
   applyWorkflowAgentOverrides,
   applyWorkflowRoleDefaults,
@@ -132,8 +133,17 @@ export async function dispatchAttempt(
     metrics,
   } = params
   const pollerNotifier = new PollerNotifier(innerNotifier)
-
   const issueRepo = discoveredIssue.issueRepo
+  const runStateController = new RunStateController({
+    forge,
+    repoConfig,
+    issueRepo,
+    issue: discoveredIssue.issue,
+    runManager,
+    pollerNotifier,
+    botUser,
+  })
+
   const transitionIssueLabels = createIssueLabelTransitioner(
     forge,
     repoConfig,
@@ -241,8 +251,7 @@ export async function dispatchAttempt(
       )
     }
     runId = run.id
-    runManager.update(run.id, {
-      status: 'running',
+    await runStateController.markRunning(run.id, {
       iterationCount: startingIteration,
       issueTitle: discoveredIssue.issue.title,
       branchName: branch,
@@ -255,21 +264,7 @@ export async function dispatchAttempt(
       endedAt: null,
       lastError: null,
       blockReason: null,
-    })
-
-    // Label transition
-    await transitionLabels(
-      forge,
-      issueRepo,
-      discoveredIssue.issue.number,
-      discoveredIssue.issue.labels,
-      previousRunStatus,
-      'running',
-      buildLabelConfig(repoConfig, discoveredIssue.issue.labels),
-    )
-
-    // Notify
-    await pollerNotifier.runStarted(repoConfig.repo, discoveredIssue.issue)
+    }, previousRunStatus)
 
     const operationIntent = resolveOperationIntent(activeRun)
     const controlPayload = resolveControlPayload(activeRun)
@@ -333,35 +328,28 @@ export async function dispatchAttempt(
 
     if (!ensuredWorktree.isClean) {
       const summary = `Cannot start run because worktree is dirty before loop start: ${worktreePath}`
-      runManager.update(run.id, {
-        status: 'blocked',
-        blockReason: 'verify_config',
-        operationIntent,
-        lastError: summary,
-        endedAt: nowUtcIso(),
-      })
-      await transitionIssueLabels(
-        'running',
-        'blocked',
-        blocked({
+      await runStateController.markBlocked(run.id, {
+        from: 'running',
+        fields: {
+          blockReason: 'verify_config',
+          operationIntent,
+          lastError: summary,
+        },
+        labelReason: blocked({
           type: 'verifyConfig',
           detail: summary,
         }).reason,
-      )
-      await postStatusComment({
-        forge,
-        issueRepo,
-        issueNumber: discoveredIssue.issue.number,
-        botUser,
-        body: formatStatusComment({
-          blockReason: summary,
-          nextStep: 'Use /orch retry to recreate a fresh worktree from the base branch.',
-        }),
-        warnMessage: 'Failed to post dirty worktree status comment',
-      })
-      await pollerNotifier.blocked(repoConfig.repo, discoveredIssue.issue, {
-        summary,
-        blockingReason: 'verify_config',
+        comment: {
+          body: formatStatusComment({
+            blockReason: summary,
+            nextStep: 'Use /orch retry to recreate a fresh worktree from the base branch.',
+          }),
+          warnMessage: 'Failed to post dirty worktree status comment',
+        },
+        notification: {
+          summary,
+          blockingReason: 'verify_config',
+        },
       })
       return {
         outcome: 'errored',
@@ -507,26 +495,20 @@ export async function dispatchAttempt(
 
         const allSucceeded = subResults.every((r) => r.success)
         if (allSucceeded) {
-          runManager.update(run.id, { status: 'review_ready', lastError: null, endedAt: nowUtcIso() })
-          await transitionIssueLabels(
-            'running',
-            'review_ready',
-          )
-          await pollerNotifier.prReady(repoConfig.repo, discoveredIssue.issue, {
-            summary: `Decomposed into ${decomposition.subtasks.length} sub-tasks, all completed`,
+          await runStateController.markReviewReady(run.id, {
+            from: 'running',
+            notification: {
+              summary: `Decomposed into ${decomposition.subtasks.length} sub-tasks, all completed`,
+            },
           })
           outcome = 'processed'
         } else {
           const failed = subResults.filter((r) => !r.success).length
-          runManager.update(run.id, {
-            status: 'blocked',
-            lastError: `${failed}/${decomposition.subtasks.length} sub-tasks failed`,
-            endedAt: nowUtcIso(),
+          await runStateController.markBlocked(run.id, {
+            from: 'running',
+            fields: { lastError: `${failed}/${decomposition.subtasks.length} sub-tasks failed` },
+            notification: false,
           })
-          await transitionIssueLabels(
-            'running',
-            'blocked',
-          )
           outcome = 'errored'
         }
         return {
@@ -732,55 +714,56 @@ async function handleWorktreeRefreshConflict(
     branchName: branch,
     baseBranch: repoConfig.baseBranch,
   })
-  const transitionIssueLabels = createIssueLabelTransitioner(forge, repoConfig, issueRepo, issue.number)
-
-  runManager.update(runId, {
-    status: 'blocked',
-    blockReason: 'merge_conflict',
-    operationIntent: 'refresh',
-    manualState: 'awaiting_rebase_resolution',
-    controlPayload: {
-      issueRepo,
-      preserveBranchState: true,
-      conflictSummary: summary,
-      conflictFiles: [],
-      conflictExcerpts: [],
-      conflictSnapshot: snapshot,
-      requestedAt: nowUtcIso(),
-    },
-    phaseData: {
-      issueRepo,
-      reactionType: 'refresh_conflict',
-      reactionSummary: 'Branch refresh conflicted before planning started',
-      reactionContext: summary,
-      reactionConflictSnapshot: snapshot,
-    },
-    lastError: summary,
-    endedAt: nowUtcIso(),
+  const runStateController = new RunStateController({
+    forge,
+    repoConfig,
+    issueRepo,
+    issue,
+    runManager,
+    pollerNotifier,
+    botUser,
   })
-  await transitionIssueLabels(
-    'running',
-    'blocked',
-    blocked({
+
+  await runStateController.markBlocked(runId, {
+    from: 'running',
+    fields: {
+      blockReason: 'merge_conflict',
+      operationIntent: 'refresh',
+      manualState: 'awaiting_rebase_resolution',
+      controlPayload: {
+        issueRepo,
+        preserveBranchState: true,
+        conflictSummary: summary,
+        conflictFiles: [],
+        conflictExcerpts: [],
+        conflictSnapshot: snapshot,
+        requestedAt: nowUtcIso(),
+      },
+      phaseData: {
+        issueRepo,
+        reactionType: 'refresh_conflict',
+        reactionSummary: 'Branch refresh conflicted before planning started',
+        reactionContext: summary,
+        reactionConflictSnapshot: snapshot,
+      },
+      lastError: summary,
+    },
+    labelReason: blocked({
       type: 'mergeConflict',
       files: [],
       summary,
     }).reason,
-  )
-  await postStatusComment({
-    forge,
-    issueRepo,
-    issueNumber: issue.number,
-    botUser,
-    body: formatStatusComment({
-      blockReason: summary,
-      nextStep: 'Use /orch continue to resume with the preserved branch state, or /orch retry to rebuild from the latest base branch.',
-    }),
-    warnMessage: 'Failed to post worktree refresh conflict status comment',
-  })
-  await pollerNotifier.blocked(repoConfig.repo, issue, {
-    summary,
-    blockingReason: 'merge_conflict',
+    comment: {
+      body: formatStatusComment({
+        blockReason: summary,
+        nextStep: 'Use /orch continue to resume with the preserved branch state, or /orch retry to rebuild from the latest base branch.',
+      }),
+      warnMessage: 'Failed to post worktree refresh conflict status comment',
+    },
+    notification: {
+      summary,
+      blockingReason: 'merge_conflict',
+    },
   })
   return 'errored'
 }
@@ -834,12 +817,15 @@ async function handleBranchRefreshRun(params: HandleBranchRefreshRunParams): Pro
     : updateStrategyOverride ?? repoConfig.updateStrategy
   const isExplicitRebase = operationIntent === 'rebase'
   const modeLabel = isExplicitRebase ? 'rebase' : 'branch refresh'
-  const transitionIssueLabels = createIssueLabelTransitioner(
+  const runStateController = new RunStateController({
     forge,
     repoConfig,
     issueRepo,
-    discoveredIssue.issue.number,
-  )
+    issue: discoveredIssue.issue,
+    runManager,
+    pollerNotifier,
+    botUser,
+  })
 
   logger.info(
     { repo: repoConfig.repo, issue: discoveredIssue.issue.number, runId, operationIntent, strategy },
@@ -882,118 +868,90 @@ async function handleBranchRefreshRun(params: HandleBranchRefreshRunParams): Pro
       branchHeadSha: rebaseResult.conflictAnalysis?.branchHeadSha ?? null,
       baseHeadSha: rebaseResult.conflictAnalysis?.baseHeadSha ?? null,
     })
-    runManager.update(runId, {
-      status: 'blocked',
-      blockReason: 'merge_conflict',
-      operationIntent,
-      manualState: 'awaiting_rebase_resolution',
-      controlPayload: {
-        issueRepo,
-        preserveBranchState: true,
-        conflictSummary: summary,
-        conflictFiles: rebaseResult.conflictAnalysis?.files ?? [],
-        conflictExcerpts: rebaseResult.conflictAnalysis?.excerpts ?? [],
-        resolutionAttempted: rebaseResult.resolution?.attempted ?? false,
-        resolutionOutcome: rebaseResult.resolution?.outcome ?? null,
-        resolvedFiles: rebaseResult.resolution?.files ?? [],
-        conflictSnapshot: snapshot,
-        requestedAt: nowUtcIso(),
+    await runStateController.markBlocked(runId, {
+      from: 'running',
+      fields: {
+        blockReason: 'merge_conflict',
+        operationIntent,
+        manualState: 'awaiting_rebase_resolution',
+        controlPayload: {
+          issueRepo,
+          preserveBranchState: true,
+          conflictSummary: summary,
+          conflictFiles: rebaseResult.conflictAnalysis?.files ?? [],
+          conflictExcerpts: rebaseResult.conflictAnalysis?.excerpts ?? [],
+          resolutionAttempted: rebaseResult.resolution?.attempted ?? false,
+          resolutionOutcome: rebaseResult.resolution?.outcome ?? null,
+          resolvedFiles: rebaseResult.resolution?.files ?? [],
+          conflictSnapshot: snapshot,
+          requestedAt: nowUtcIso(),
+        },
+        phaseData: {
+          issueRepo,
+          reactionType: isExplicitRebase ? 'rebase_conflict' : 'refresh_conflict',
+          reactionSummary: isExplicitRebase
+            ? 'Explicit rebase conflicted with latest base branch changes'
+            : 'Automatic branch refresh conflicted with latest base branch changes',
+          reactionContext: summary,
+          reactionConflictSnapshot: snapshot,
+        },
+        lastError: summary,
       },
-      phaseData: {
-        issueRepo,
-        reactionType: isExplicitRebase ? 'rebase_conflict' : 'refresh_conflict',
-        reactionSummary: isExplicitRebase
-          ? 'Explicit rebase conflicted with latest base branch changes'
-          : 'Automatic branch refresh conflicted with latest base branch changes',
-        reactionContext: summary,
-        reactionConflictSnapshot: snapshot,
-      },
-      lastError: summary,
-      endedAt: nowUtcIso(),
-    })
-    await transitionIssueLabels(
-      'running',
-      'blocked',
-      blocked({
+      labelReason: blocked({
         type: 'mergeConflict',
         files: rebaseResult.conflictAnalysis?.files ?? [],
         summary,
       }).reason,
-    )
-    await postStatusComment({
-      forge,
-      issueRepo,
-      issueNumber: discoveredIssue.issue.number,
-      botUser,
-      body: formatStatusComment({
-        blockReason: summary,
-        nextStep: 'Use /orch continue to keep the existing branch and resolve the conflicts, or /orch retry to reset the branch and re-implement from scratch.',
-      }),
-      warnMessage: 'Failed to post branch refresh merge-conflict status comment',
-    })
-    await pollerNotifier.blocked(repoConfig.repo, discoveredIssue.issue, {
-      summary,
-      blockingReason: 'merge_conflict',
+      comment: {
+        body: formatStatusComment({
+          blockReason: summary,
+          nextStep: 'Use /orch continue to keep the existing branch and resolve the conflicts, or /orch retry to reset the branch and re-implement from scratch.',
+        }),
+        warnMessage: 'Failed to post branch refresh merge-conflict status comment',
+      },
+      notification: {
+        summary,
+        blockingReason: 'merge_conflict',
+      },
     })
     return { outcome: 'errored', verifyResults: [] }
   }
 
   if (rebaseResult.error) {
-    runManager.update(runId, {
-      status: 'error',
-      operationIntent,
-      lastError: rebaseResult.error,
-      endedAt: nowUtcIso(),
-    })
-    await transitionIssueLabels(
-      'running',
-      'error',
-    )
-    await postStatusComment({
-      forge,
-      issueRepo,
-      issueNumber: discoveredIssue.issue.number,
-      botUser,
-      body: formatStatusComment({
-        blockReason: rebaseResult.error,
-        nextStep: `Retry the ${modeLabel} after fixing the underlying git or push error.`,
-      }),
-      warnMessage: 'Failed to post branch refresh error status comment',
-    })
-    await pollerNotifier.error(repoConfig.repo, discoveredIssue.issue, {
-      summary: rebaseResult.error,
+    await runStateController.markError(runId, {
+      from: 'running',
+      fields: {
+        operationIntent,
+        lastError: rebaseResult.error,
+      },
+      comment: {
+        body: formatStatusComment({
+          blockReason: rebaseResult.error,
+          nextStep: `Retry the ${modeLabel} after fixing the underlying git or push error.`,
+        }),
+        warnMessage: 'Failed to post branch refresh error status comment',
+      },
+      notification: {
+        summary: rebaseResult.error,
+      },
     })
     return { outcome: 'errored', verifyResults: [] }
   }
 
   if (rebaseResult.rebased && rebaseResult.verifyPassed) {
     logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, operationIntent }, 'Branch refresh succeeded, verify passed — returning to review_ready')
-    runManager.update(runId, {
-      status: 'review_ready',
-      endedAt: nowUtcIso(),
-      lastError: null,
-    })
-    await transitionIssueLabels(
-      'running',
-      'review_ready',
-    )
-    await pollerNotifier.prReady(repoConfig.repo, discoveredIssue.issue, {
-      summary: `${isExplicitRebase ? 'Rebased' : 'Refreshed'} successfully, verify passed`,
+    await runStateController.markReviewReady(runId, {
+      from: 'running',
+      notification: {
+        summary: `${isExplicitRebase ? 'Rebased' : 'Refreshed'} successfully, verify passed`,
+      },
     })
     return { outcome: 'processed', verifyResults: rebaseResult.verifyResults ?? [] }
   }
 
   if (!rebaseResult.rebased && rebaseResult.verifyPassed) {
     logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number }, 'Branch already up to date — returning to review_ready')
-    runManager.update(runId, {
-      status: 'review_ready',
-      endedAt: nowUtcIso(),
-      lastError: null,
-    })
-    await transitionIssueLabels(
-      'running',
-      'review_ready',
-    )
+    await runStateController.markReviewReady(runId, { from: 'running' })
     return { outcome: 'processed', verifyResults: rebaseResult.verifyResults ?? [] }
   }
 

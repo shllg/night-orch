@@ -5,9 +5,6 @@ import type {
   WorkerTaskInput,
   PromptContext,
   WorkerTaskResult,
-  PlannerOutput,
-  CoderOutput,
-  ReviewerOutput,
 } from '../workers/types.js'
 import type { Config } from '../config/schema.js'
 import type { MetricsService } from '../metrics/service.js'
@@ -28,12 +25,17 @@ import {
   WorkerTokenCaptureError,
   WorkerTransientError,
 } from '../workers/errors.js'
+import {
+  CoderOutputContractSchema,
+  PlannerOutputContractSchema,
+  ReviewerOutputContractSchema,
+} from '../workers/contracts.js'
 import { createHash } from 'node:crypto'
 import { getRemediation } from '../workers/auth-check.js'
 import { logger } from '../utils/logger.js'
 import { buildPlanningPrdPath, isPlanningIssue } from '../planning/mode.js'
 import { coerceConflictSnapshot } from '../ops/conflict-types.js'
-import { z } from 'zod'
+import type { z } from 'zod'
 
 export interface StepDependencies {
   adapters: Record<string, WorkerAdapter>
@@ -55,43 +57,6 @@ export interface StepResult {
   /** For decide steps: the decision action. */
   decision?: LoopDecision
 }
-
-const PlannerOutputContractSchema: z.ZodType<PlannerOutput> = z.object({
-  objective: z.string(),
-  assumptions: z.array(z.string()),
-  filesToChange: z.array(z.string()),
-  steps: z.array(z.object({
-    order: z.number(),
-    description: z.string(),
-    files: z.array(z.string()),
-  })),
-  risks: z.array(z.string()),
-  testStrategy: z.string(),
-})
-
-const CoderOutputContractSchema: z.ZodType<CoderOutput> = z.object({
-  summary: z.string(),
-  changedFiles: z.array(z.string()),
-  remainingUncertainty: z.string().nullable(),
-  blockers: z.array(z.string()).nullable(),
-})
-
-const ReviewerOutputContractSchema: z.ZodType<ReviewerOutput> = z.object({
-  verdict: z.enum(['APPROVED', 'CHANGES_REQUIRED', 'BLOCKED']),
-  summary: z.string(),
-  findings: z.array(
-    z.object({
-      severity: z.enum(['critical', 'major', 'minor']),
-      message: z.string(),
-      suggestedFix: z.string().nullable(),
-    }),
-  ),
-  definitionOfDoneCheck: z.object({
-    issueAddressed: z.boolean(),
-    testsPassing: z.boolean(),
-    noBlockingFindings: z.boolean(),
-  }),
-})
 
 /**
  * Dispatch a workflow step to the appropriate executor based on step type.
