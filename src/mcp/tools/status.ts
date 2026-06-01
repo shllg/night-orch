@@ -2,184 +2,34 @@ import type { MCPDependencies } from '../server.js'
 import type { ForgeIssue } from '../../forge/types.js'
 import { RunManager } from '../../state/runs.js'
 import { loadIssueLogEvents, loadRunLogEvents } from '../../state/run-log-events.js'
-import { loadRuns, type RunListRow } from '../../state/run-list.js'
+import { loadRuns } from '../../state/run-list.js'
 import { CostTracker } from '../../loop/cost.js'
 import { isIssueEligibleForRepo } from '../../discovery/discover.js'
 import { flushActiveAgentObservability } from '../../events/observability.js'
-import { parseUtcTimestampMs } from '../../utils/time.js'
-
-interface RunTimingRow {
-  id: string
-  started_at: string | null
-  ended_at: string | null
-}
+import {
+  classifyInboxTriage,
+  deriveInboxCommandHints,
+  type InboxTriage,
+} from '../../discovery/triage.js'
+import {
+  loadDailyCostRows,
+  loadInboxIssueRows,
+  loadRecentCompletedRuns,
+  loadRunTimingsByRunId,
+  queryRunHistoryPage,
+} from '../../state/run-queries.js'
+import {
+  countInboxTriages,
+  mapActiveRunRow,
+  mapHistoryRunRow,
+  mapInboxIssueRow,
+  sortInboxItems,
+} from '../../state/run-mapper.js'
 
 type RunListView = 'active' | 'completed' | 'failed' | 'all'
-type InboxTriage = 'needs_human' | 'review_ready' | 'blocked' | 'error'
 
 const RUN_LIST_VIEWS: readonly RunListView[] = ['active', 'completed', 'failed', 'all']
 const INBOX_TRIAGE_VALUES: readonly InboxTriage[] = ['needs_human', 'review_ready', 'blocked', 'error']
-const INBOX_TRIAGE_SORT_ORDER: Record<InboxTriage, number> = {
-  needs_human: 0,
-  review_ready: 1,
-  blocked: 2,
-  error: 3,
-}
-
-interface InboxIssueRow {
-  repo: string
-  issue_number: number
-  issue_title: string | null
-  status: string
-  current_phase: string | null
-  iteration_count: number | null
-  estimated_cost_usd: number | null
-  last_error: string | null
-  block_reason: string | null
-  pr_number: number | null
-  pr_title: string | null
-  updated_at: string | null
-  run_id: string | null
-  manual_state: string | null
-  operation_intent: string | null
-}
-
-type HistoryRunRow = Pick<
-  RunListRow,
-  | 'id'
-  | 'repo'
-  | 'issue_number'
-  | 'status'
-  | 'issue_title'
-  | 'pr_number'
-  | 'current_phase'
-  | 'iteration_count'
-  | 'estimated_cost_usd'
-  | 'prompt_tokens'
-  | 'completion_tokens'
-  | 'cache_read_tokens'
-  | 'last_error'
-> & RunTimingRow
-
-type RecentCompletedRow = Pick<
-  RunListRow,
-  'id' | 'repo' | 'issue_number' | 'status'
-> & { ended_at: string | null }
-
-interface DailyCostRow {
-  date: string
-  total_cost_usd: number
-  run_count: number
-  total_prompt_tokens: number
-  total_completion_tokens: number
-  total_cache_read_tokens: number
-}
-
-interface QueryRunHistoryPageOptions {
-  repo?: string
-  statuses?: string[]
-  limit: number
-  offset: number
-}
-
-interface RunPage<T> {
-  rows: T[]
-  hasMore: boolean
-}
-
-function queryRunHistoryPage(
-  deps: MCPDependencies,
-  options: QueryRunHistoryPageOptions,
-): RunPage<HistoryRunRow> {
-  const params: unknown[] = []
-  const conditions: string[] = []
-
-  if (options.repo) {
-    conditions.push('r.repo = ?')
-    params.push(options.repo)
-  }
-
-  if (options.statuses && options.statuses.length > 0) {
-    const placeholders = options.statuses.map(() => '?').join(', ')
-    conditions.push(`r.status IN (${placeholders})`)
-    params.push(...options.statuses)
-  }
-
-  const whereClause = conditions.length > 0
-    ? `WHERE ${conditions.join(' AND ')}`
-    : ''
-
-  params.push(options.limit + 1, options.offset)
-
-  const rows = deps.db
-    .prepare<unknown[], HistoryRunRow>(
-      `SELECT
-         r.id,
-         r.repo,
-         r.issue_number,
-         r.status,
-         COALESCE(
-           NULLIF(TRIM(r.issue_title), ''),
-           (
-             SELECT NULLIF(TRIM(r2.issue_title), '')
-             FROM runs r2
-             WHERE r2.repo = r.repo
-               AND r2.issue_number = r.issue_number
-               AND r2.issue_title IS NOT NULL
-               AND TRIM(r2.issue_title) != ''
-             ORDER BY
-               COALESCE(julianday(r2.created_at), 0) DESC,
-               COALESCE(julianday(r2.updated_at), 0) DESC,
-               r2.rowid DESC,
-               r2.id DESC
-             LIMIT 1
-           )
-         ) AS issue_title,
-         r.pr_number,
-         r.current_phase,
-         r.iteration_count,
-         r.estimated_cost_usd,
-         r.prompt_tokens,
-         r.completion_tokens,
-         r.cache_read_tokens,
-         r.last_error,
-         r.started_at,
-         r.ended_at
-       FROM runs r
-       ${whereClause}
-       ORDER BY
-         COALESCE(julianday(r.created_at), 0) DESC,
-         COALESCE(julianday(r.updated_at), 0) DESC,
-         r.rowid DESC,
-         r.id DESC
-       LIMIT ?
-       OFFSET ?`,
-    )
-    .all(...params)
-
-  const hasMore = rows.length > options.limit
-  return {
-    rows: hasMore ? rows.slice(0, options.limit) : rows,
-    hasMore,
-  }
-}
-
-function loadRunTimingsByRunId(
-  deps: MCPDependencies,
-  runIds: string[],
-): Map<string, RunTimingRow> {
-  const uniqueRunIds = [...new Set(runIds)]
-  if (uniqueRunIds.length === 0) {
-    return new Map()
-  }
-
-  const placeholders = uniqueRunIds.map(() => '?').join(', ')
-  const rows = deps.db
-    .prepare<unknown[], RunTimingRow>(`SELECT id, started_at, ended_at FROM runs WHERE id IN (${placeholders})`)
-    .all(...uniqueRunIds)
-
-  return new Map(rows.map((row) => [row.id, row]))
-}
 
 function normalizeListRunsLimit(limit: number | undefined): number {
   if (typeof limit !== 'number' || !Number.isFinite(limit)) {
@@ -212,94 +62,6 @@ function normalizeInboxTriage(value: string | undefined): InboxTriage | 'all' | 
     : null
 }
 
-function classifyInboxTriage(row: Pick<InboxIssueRow, 'status' | 'block_reason' | 'manual_state'>): InboxTriage {
-  if (row.status === 'review_ready') return 'review_ready'
-  if (row.status === 'error') return 'error'
-  if (row.block_reason === 'reviewer_blocked' || row.manual_state === 'awaiting_rebase_resolution') {
-    return 'needs_human'
-  }
-  return 'blocked'
-}
-
-function deriveInboxCommandHints(
-  row: Pick<InboxIssueRow, 'status' | 'block_reason' | 'manual_state'>,
-): {
-  recommendedCommand: string | null
-  availableCommands: string[]
-} {
-  if (row.status === 'error') {
-    return {
-      recommendedCommand: '/orch retry',
-      availableCommands: ['/orch retry'],
-    }
-  }
-
-  if (row.manual_state === 'awaiting_rebase_resolution' || row.block_reason === 'merge_conflict') {
-    return {
-      recommendedCommand: '/orch continue',
-      availableCommands: ['/orch continue', '/orch retry'],
-    }
-  }
-
-  if (row.status === 'review_ready' || row.status === 'blocked') {
-    return {
-      recommendedCommand: '/orch continue',
-      availableCommands: ['/orch continue', '/orch retry'],
-    }
-  }
-
-  return {
-    recommendedCommand: null,
-    availableCommands: [],
-  }
-}
-
-function parseSortableTs(value: string | null): number {
-  if (!value) return Number.NEGATIVE_INFINITY
-  const parsed = parseUtcTimestampMs(value)
-  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY
-}
-
-function mapRunRow(
-  row: HistoryRunRow,
-): {
-  runId: string
-  hasRun: boolean
-  repo: string
-  issue: number
-  status: string
-  issueTitle: string | null
-  prNumber: number | null
-  phase: string | null
-  iterations: number
-  costUsd: number
-  promptTokens: number
-  completionTokens: number
-  cacheReadTokens: number
-  lastError: string | null
-  startedAt: string | null
-  endedAt: string | null
-} {
-  return {
-    runId: row.id,
-    hasRun: true,
-    repo: row.repo,
-    issue: row.issue_number,
-    status: row.status,
-    issueTitle: row.issue_title,
-    prNumber: row.pr_number,
-    phase: row.current_phase,
-    iterations: row.iteration_count ?? 0,
-    costUsd: row.estimated_cost_usd ?? 0,
-    promptTokens: row.prompt_tokens ?? 0,
-    completionTokens: row.completion_tokens ?? 0,
-    cacheReadTokens: row.cache_read_tokens ?? 0,
-    lastError: row.last_error,
-    startedAt: row.started_at,
-    endedAt: row.ended_at,
-  }
-}
-
 export async function handleStatus(args: { repo?: string }, deps: MCPDependencies): Promise<unknown> {
   const runManager = new RunManager(deps.db)
   const costTracker = new CostTracker(deps.db)
@@ -308,13 +70,7 @@ export async function handleStatus(args: { repo?: string }, deps: MCPDependencie
   const filtered = args.repo ? active.filter((r) => r.repo === args.repo) : active
   const dailyTokens = costTracker.getDailyTokenUsage()
 
-  // Recent completed runs
-  const recentSql = args.repo
-    ? "SELECT * FROM runs WHERE status = 'completed' AND repo = ? ORDER BY updated_at DESC LIMIT 10"
-    : "SELECT * FROM runs WHERE status = 'completed' ORDER BY updated_at DESC LIMIT 10"
-  const recentRows: RecentCompletedRow[] = args.repo
-    ? deps.db.prepare<[string], RecentCompletedRow>(recentSql).all(args.repo)
-    : deps.db.prepare<[], RecentCompletedRow>(recentSql).all()
+  const recentRows = loadRecentCompletedRuns(deps.db, args.repo)
 
   return {
     activeRuns: filtered.length,
@@ -381,7 +137,7 @@ export async function handleListRuns(
           : undefined
 
   if (historyStatuses || view === 'all') {
-    const page = queryRunHistoryPage(deps, {
+    const page = queryRunHistoryPage(deps.db, {
       repo: args.repo,
       statuses: historyStatuses,
       limit,
@@ -390,7 +146,7 @@ export async function handleListRuns(
 
     return {
       count: page.rows.length,
-      runs: page.rows.map((row) => mapRunRow(row)),
+      runs: page.rows.map((row) => mapHistoryRunRow(row)),
       limit,
       offset,
       hasMore: page.hasMore,
@@ -412,7 +168,7 @@ export async function handleListRuns(
   const hasMore = filteredRows.length > limit
   const pageRows = hasMore ? filteredRows.slice(0, limit) : filteredRows
   const runTimings = loadRunTimingsByRunId(
-    deps,
+    deps.db,
     pageRows
       .map((row) => row.id)
       .filter((runId) => !runId.startsWith('issue:')),
@@ -420,29 +176,7 @@ export async function handleListRuns(
 
   return {
     count: pageRows.length,
-    runs: pageRows.map((row) => {
-      const hasRun = !row.id.startsWith('issue:')
-      const timing = hasRun ? runTimings.get(row.id) : undefined
-
-      return {
-        runId: row.id,
-        hasRun,
-        repo: row.repo,
-        issue: row.issue_number,
-        status: row.status,
-        issueTitle: row.issue_title,
-        prNumber: row.pr_number,
-        phase: row.current_phase,
-        iterations: row.iteration_count ?? 0,
-        costUsd: row.estimated_cost_usd ?? 0,
-        promptTokens: row.prompt_tokens ?? 0,
-        completionTokens: row.completion_tokens ?? 0,
-        cacheReadTokens: row.cache_read_tokens ?? 0,
-        lastError: row.last_error,
-        startedAt: hasRun ? timing?.started_at ?? null : null,
-        endedAt: hasRun ? timing?.ended_at ?? null : null,
-      }
-    }),
+    runs: pageRows.map((row) => mapActiveRunRow(row, runTimings.get(row.id))),
     limit,
     offset,
     hasMore,
@@ -462,92 +196,25 @@ export async function handleListInbox(
     throw new Error(`Invalid triage filter: ${args.triage}`)
   }
 
-  const params: unknown[] = []
-  const where = [`i.status IN ('blocked', 'review_ready', 'error')`]
-  if (args.repo) {
-    where.push('i.repo = ?')
-    params.push(args.repo)
-  }
-
-  const rows = deps.db
-    .prepare<unknown[], InboxIssueRow>(
-      `SELECT
-         i.repo,
-         i.issue_number,
-         i.issue_title,
-         i.status,
-         i.current_phase,
-         i.iteration_count,
-         i.estimated_cost_usd,
-         i.last_error,
-         i.block_reason,
-         i.pr_number,
-         i.pr_title,
-         i.updated_at,
-         r.id AS run_id,
-         r.manual_state,
-         r.operation_intent
-       FROM issues i
-       LEFT JOIN runs r ON r.id = i.current_run_id
-       WHERE ${where.join(' AND ')}`,
-    )
-    .all(...params)
-
+  const rows = loadInboxIssueRows(deps.db, args.repo)
   const triaged = rows.map((row) => {
     const triage = classifyInboxTriage(row)
     const commandHints = deriveInboxCommandHints(row)
-    return {
-      runId: row.run_id ?? `issue:${row.repo}#${row.issue_number}`,
-      repo: row.repo,
-      issue: row.issue_number,
-      issueTitle: row.issue_title,
-      status: row.status,
-      triage,
-      phase: row.current_phase,
-      iterations: row.iteration_count ?? 0,
-      costUsd: row.estimated_cost_usd ?? 0,
-      prNumber: row.pr_number,
-      prTitle: row.pr_title,
-      blockReason: row.block_reason,
-      lastError: row.last_error,
-      reason: row.block_reason ?? row.last_error,
-      manualState: row.manual_state ?? 'none',
-      operationIntent: row.operation_intent ?? 'auto',
-      recommendedCommand: commandHints.recommendedCommand,
-      availableCommands: commandHints.availableCommands,
-      updatedAt: row.updated_at,
-    }
+    return mapInboxIssueRow(row, triage, commandHints)
   })
-
-  const triageCounts: Record<InboxTriage, number> = {
-    needs_human: 0,
-    review_ready: 0,
-    blocked: 0,
-    error: 0,
-  }
-
-  for (const item of triaged) {
-    triageCounts[item.triage] += 1
-  }
+  const triageCounts = countInboxTriages(triaged)
 
   const filtered = triageFilter === 'all'
     ? triaged
     : triaged.filter((item) => item.triage === triageFilter)
+  const sorted = sortInboxItems(filtered)
 
-  filtered.sort((a, b) => {
-    const triageDelta = INBOX_TRIAGE_SORT_ORDER[a.triage] - INBOX_TRIAGE_SORT_ORDER[b.triage]
-    if (triageDelta !== 0) return triageDelta
-    const updatedDelta = parseSortableTs(b.updatedAt) - parseSortableTs(a.updatedAt)
-    if (updatedDelta !== 0) return updatedDelta
-    return b.issue - a.issue
-  })
-
-  const page = filtered.slice(offset, offset + limit)
-  const hasMore = offset + limit < filtered.length
+  const page = sorted.slice(offset, offset + limit)
+  const hasMore = offset + limit < sorted.length
 
   return {
     count: page.length,
-    total: filtered.length,
+    total: sorted.length,
     items: page,
     triageCounts,
     limit,
@@ -564,20 +231,7 @@ export async function handleCostReport(args: { days?: number }, deps: MCPDepende
   const costTracker = new CostTracker(deps.db)
   const dailyBudgetOverrideUsd = costTracker.getDailyCapOverride()
   const effectiveDailyBudgetUsd = dailyBudgetOverrideUsd ?? deps.config.security.maxDailyCostUsd
-  const rows = deps.db
-    .prepare<[number], DailyCostRow>(
-      `SELECT
-         date,
-         total_cost_usd,
-         run_count,
-         total_prompt_tokens,
-         total_completion_tokens,
-         total_cache_read_tokens
-       FROM daily_costs
-       ORDER BY date DESC
-       LIMIT ?`,
-    )
-    .all(days)
+  const rows = loadDailyCostRows(deps.db, days)
 
   const totalCost = rows.reduce((sum, r) => sum + r.total_cost_usd, 0)
   const totalRuns = rows.reduce((sum, r) => sum + r.run_count, 0)

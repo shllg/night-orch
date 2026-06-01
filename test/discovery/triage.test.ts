@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest'
-import { triageIssue, triageIssueWithAi } from '../../src/discovery/triage.js'
+import {
+  classifyInboxTriage,
+  deriveInboxCommandHints,
+  triageIssue,
+  triageIssueWithAi,
+} from '../../src/discovery/triage.js'
 import type { ForgeIssue } from '../../src/forge/types.js'
 import type { AiClient } from '../../src/ai/types.js'
 import { AiTransientError } from '../../src/ai/errors.js'
@@ -152,5 +157,79 @@ describe('triageIssueWithAi (Phase 3)', () => {
     const ai = makeAiClient(vi.fn().mockRejectedValue(new Error('boom')))
     const result = await triageIssueWithAi(makeIssue({ body: 'A'.repeat(200) }), ai)
     expect(result.level).toBe('standard')
+  })
+})
+
+describe('inbox triage helpers', () => {
+  it('classifies reviewer-blocked and manual rebase states as needs_human', () => {
+    expect(
+      classifyInboxTriage({
+        status: 'blocked',
+        block_reason: 'reviewer_blocked',
+        manual_state: null,
+      }),
+    ).toBe('needs_human')
+
+    expect(
+      classifyInboxTriage({
+        status: 'blocked',
+        block_reason: null,
+        manual_state: 'awaiting_rebase_resolution',
+      }),
+    ).toBe('needs_human')
+  })
+
+  it('classifies review_ready and error states directly', () => {
+    expect(
+      classifyInboxTriage({
+        status: 'review_ready',
+        block_reason: null,
+        manual_state: null,
+      }),
+    ).toBe('review_ready')
+
+    expect(
+      classifyInboxTriage({
+        status: 'error',
+        block_reason: null,
+        manual_state: null,
+      }),
+    ).toBe('error')
+  })
+
+  it('defaults remaining blocked states to blocked', () => {
+    expect(
+      classifyInboxTriage({
+        status: 'blocked',
+        block_reason: 'merge_conflict',
+        manual_state: null,
+      }),
+    ).toBe('blocked')
+  })
+
+  it('derives retry hints for error rows', () => {
+    expect(
+      deriveInboxCommandHints({
+        status: 'error',
+        block_reason: null,
+        manual_state: null,
+      }),
+    ).toEqual({
+      recommendedCommand: '/orch retry',
+      availableCommands: ['/orch retry'],
+    })
+  })
+
+  it('derives continue/retry hints for followup resolution paths', () => {
+    expect(
+      deriveInboxCommandHints({
+        status: 'blocked',
+        block_reason: 'merge_conflict',
+        manual_state: null,
+      }),
+    ).toEqual({
+      recommendedCommand: '/orch continue',
+      availableCommands: ['/orch continue', '/orch retry'],
+    })
   })
 })

@@ -8,11 +8,11 @@ import { extractCompletedPhases, extractDecisionOutcomes, findTerminalDecisionOu
 import { updateContext, recordPhase } from './context.js'
 import { hashVerifyResults, assessProgress } from './progress.js'
 import { commitChanges } from './commit.js'
-import { checkWorktreeScope } from './diff-guard.js'
 import { executeStep, type StepDependencies } from './step-executor.js'
 import { Checkpoint } from './checkpoint.js'
 import { FileRunArtifactWriter } from './run-artifacts.js'
 import { CostTracker, describeBudgetBlock, costLimitRecoveryHint, type BudgetStatus } from './cost.js'
+import { runPostWorkerHooks } from './hooks.js'
 import { estimateTheoreticalCostUsd, estimateWorkerCost } from './pricing.js'
 import { allRequiredVerifyPassed } from './verifier.js'
 import {
@@ -262,26 +262,16 @@ export async function executeLoop(
           stepStartedAt,
         )
       }
-      // Plan-time scope guard: block over-scoped coder output *before*
-      // spending verify + review on it. Production saw 157-file diffs
-      // caught only at commit time; this fails fast at the code phase.
-      if (step.role === 'coder') {
-        const scope = await checkWorktreeScope(ctx.worktreePath, config.security)
-        if (!scope.ok) {
-          const blockMessage = `Scope guard: ${scope.reason}`
-          logger.warn(
-            { runId: ctx.runId, phase: step.id, stats: scope.stats },
-            'Scope guard tripped after coder step — blocking before review',
-          )
-          return blockExit(
-            ctx,
-            checkpoint,
-            step.id,
-            'verify_config',
-            blockMessage,
-            stepStartedAt,
-          )
-        }
+      const workerHookBlock = await runPostWorkerHooks(ctx, step, config)
+      if (workerHookBlock) {
+        return blockExit(
+          ctx,
+          checkpoint,
+          step.id,
+          workerHookBlock.blockReason,
+          workerHookBlock.blockMessage,
+          stepStartedAt,
+        )
       }
       try { metrics?.observePhaseDuration(step.id, stepDurationMs / 1000) } catch { /* best-effort */ }
     }

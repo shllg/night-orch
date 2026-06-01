@@ -46,11 +46,13 @@ import {
 import { clearResumeDecisionArtifacts } from '../loop/checkpoint.js'
 import { PollerNotifier } from './notify-dispatcher.js'
 import {
-  coerceAgentName,
-  isImmediateFollowupStatus,
   applyWorkflowAgentOverrides,
   applyWorkflowRoleDefaults,
+  coerceAgentName,
   resolveWorkerProfileForAgent,
+} from '../runner/workflow-overlay.js'
+import {
+  isImmediateFollowupStatus,
   extractFollowupPromptFeedback,
   buildAttemptHistoryFollowup,
   type RunControlPayload,
@@ -58,9 +60,9 @@ import {
   deriveBranchPolicy,
   resolveOperationIntent,
   selectReplayableRun,
-  shouldResetBranch,
-  postStatusComment,
-} from '../runner/helpers.js'
+} from '../runner/intent.js'
+import { shouldResetBranch } from '../runner/queue.js'
+import { postStatusComment } from '../runner/comment-formatting.js'
 import { createWorkItemFromDiscoveredIssue } from '../work-items/types.js'
 import type { OrchestrationCache } from '../runner/orchestration-cache.js'
 import type { NotificationDispatcher } from '../notify/dispatcher.js'

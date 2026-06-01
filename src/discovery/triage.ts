@@ -11,6 +11,19 @@ export interface TriageResult {
   reason: string
 }
 
+export type InboxTriage = 'needs_human' | 'review_ready' | 'blocked' | 'error'
+
+export interface InboxTriageInput {
+  status: string
+  block_reason: string | null
+  manual_state: string | null
+}
+
+export interface InboxCommandHints {
+  recommendedCommand: string | null
+  availableCommands: string[]
+}
+
 const TRIVIAL_LABELS = new Set(['bug', 'typo', 'chore', 'docs'])
 const ARCHITECTURAL_LABELS = new Set(['breaking', 'refactor', 'architecture', 'rfc'])
 
@@ -178,5 +191,42 @@ export function adjustLimitsForTriage(
         maxTotalAgentPasses: baseLimits.maxTotalAgentPasses,
         workerTimeoutSeconds: Math.max(1, baseTimeout),
       }
+  }
+}
+
+export function classifyInboxTriage(row: InboxTriageInput): InboxTriage {
+  if (row.status === 'review_ready') return 'review_ready'
+  if (row.status === 'error') return 'error'
+  if (row.block_reason === 'reviewer_blocked' || row.manual_state === 'awaiting_rebase_resolution') {
+    return 'needs_human'
+  }
+  return 'blocked'
+}
+
+export function deriveInboxCommandHints(row: InboxTriageInput): InboxCommandHints {
+  if (row.status === 'error') {
+    return {
+      recommendedCommand: '/orch retry',
+      availableCommands: ['/orch retry'],
+    }
+  }
+
+  if (row.manual_state === 'awaiting_rebase_resolution' || row.block_reason === 'merge_conflict') {
+    return {
+      recommendedCommand: '/orch continue',
+      availableCommands: ['/orch continue', '/orch retry'],
+    }
+  }
+
+  if (row.status === 'review_ready' || row.status === 'blocked') {
+    return {
+      recommendedCommand: '/orch continue',
+      availableCommands: ['/orch continue', '/orch retry'],
+    }
+  }
+
+  return {
+    recommendedCommand: null,
+    availableCommands: [],
   }
 }

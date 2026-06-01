@@ -24,7 +24,7 @@ import {
   postErrorStatusComment,
   toErrorMessage,
   sanitizeErrorForComment,
-} from './helpers.js'
+} from './comment-formatting.js'
 
 export interface FinalizeRunOutcomeParams {
   finalCtx: RunContext

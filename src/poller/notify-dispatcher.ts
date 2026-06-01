@@ -1,6 +1,6 @@
 import type { NotificationDispatcher } from '../notify/dispatcher.js'
 import type { NotificationPayload } from '../notify/types.js'
-import { makePayload } from '../runner/helpers.js'
+import { makePayload } from '../runner/comment-formatting.js'
 
 /**
  * Typed facade over `NotificationDispatcher` for the poller path.

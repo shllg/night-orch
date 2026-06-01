@@ -182,6 +182,10 @@ export interface TuiStatsSnapshot {
   }
 }
 
+// Generic alias for non-TUI consumers (web/MCP) that should not couple
+// to the UI-specific type name.
+export type RuntimeStatsSnapshot = TuiStatsSnapshot
+
 export function loadTuiStats(
   db: Database.Database,
   options: TuiStatsOptions = {},

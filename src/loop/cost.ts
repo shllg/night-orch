@@ -8,8 +8,8 @@
  *   - `cost/budget.ts`   — budget policy types and pure helpers
  *
  * This file keeps the `CostTracker` class as a stable public surface.
- * It holds the shared `db` handle, `IssueManager`, and the one-shot
- * warning dedup set for subscription-metered advisories, delegating
+ * It holds the shared `db` handle, `IssueManager`, and the subscription
+ * advisory logger, delegating
  * all real work to the four modules above.
  *
  * **Append-only ledger invariant (post-R0d + R4e):** every cost
@@ -23,7 +23,6 @@ import type Database from 'better-sqlite3'
 import type { Config } from '../config/schema.js'
 import { IssueManager } from '../state/issues.js'
 import { utcDayKey } from '../utils/time.js'
-import { logger } from '../utils/logger.js'
 import {
   evaluateSubscriptionQuota,
   resolveCostPolicy,
@@ -61,6 +60,7 @@ import {
   setDailyCapOverride,
   setRunBudgetOverride,
 } from './cost/overrides.js'
+import { SubscriptionAdvisoryWarnings, quotaPeriodKey } from './cost/advisory.js'
 
 // Re-export the extracted types + helpers so callers that import from
 // './cost.js' continue to work unchanged after R4d.
@@ -89,7 +89,7 @@ function resolveTheoreticalUsd(theoreticalCostUsd: number | undefined, amountUsd
 
 export class CostTracker {
   private issueManager: IssueManager
-  private advisoryWarnings = new Set<string>()
+  private subscriptionAdvisories = new SubscriptionAdvisoryWarnings()
 
   constructor(private db: Database.Database) {
     this.issueManager = new IssueManager(db)
@@ -310,14 +310,8 @@ export class CostTracker {
     const periodTheoretical =
       quota.period === 'day'
         ? this.getDailyTheoreticalCost()
-        : getMonthlyTheoreticalCost(this.db, this.quotaPeriodKey('month'))
+        : getMonthlyTheoreticalCost(this.db, quotaPeriodKey('month'))
     return evaluateSubscriptionQuota(quota, periodTheoretical)
-  }
-
-  /** Period key for warning dedup + month lookup: `YYYY-MM-DD` or `YYYY-MM`. */
-  private quotaPeriodKey(period: 'day' | 'month'): string {
-    const day = utcDayKey()
-    return period === 'day' ? day : day.slice(0, 7)
   }
 
   private checkQuotaExhaustionBudget(
@@ -328,8 +322,8 @@ export class CostTracker {
     const quotaStatus = this.evaluateQuota(policy)
     if (!quotaStatus?.exhausted) return null
 
-    this.logSubscriptionMeteredWarningOnce(
-      `${runId}:quota:${quotaStatus.period}:${this.quotaPeriodKey(quotaStatus.period)}`,
+    this.subscriptionAdvisories.warnOnce(
+      `${runId}:quota:${quotaStatus.period}:${quotaPeriodKey(quotaStatus.period)}`,
       {
         runId,
         includedUsd: quotaStatus.includedUsd,
@@ -405,7 +399,7 @@ export class CostTracker {
     const advisoryThreshold = policy.subscriptionMetered.advisoryThresholdUsd
     if (advisoryThreshold !== null) {
       if (snapshot.runCost >= advisoryThreshold) {
-        this.logSubscriptionMeteredWarningOnce(
+        this.subscriptionAdvisories.warnOnce(
           `${runId}:advisory:run:${advisoryThreshold}`,
           {
             runId,
@@ -416,7 +410,7 @@ export class CostTracker {
         )
       }
       if (snapshot.dailyCost >= advisoryThreshold) {
-        this.logSubscriptionMeteredWarningOnce(
+        this.subscriptionAdvisories.warnOnce(
           `${runId}:advisory:daily:${advisoryThreshold}:${utcDayKey()}`,
           {
             runId,
@@ -429,7 +423,7 @@ export class CostTracker {
     }
 
     if (snapshot.runOverLimit && !policy.subscriptionMetered.enforcePerRunLimit) {
-      this.logSubscriptionMeteredWarningOnce(
+      this.subscriptionAdvisories.warnOnce(
         `${runId}:soft:per-run:${snapshot.effectivePerRunLimit}`,
         {
           runId,
@@ -443,7 +437,7 @@ export class CostTracker {
     if (snapshot.override !== null) return
 
     if (snapshot.dailyOverLimit && !policy.subscriptionMetered.enforceDailyLimit) {
-      this.logSubscriptionMeteredWarningOnce(
+      this.subscriptionAdvisories.warnOnce(
         `${runId}:soft:daily:${snapshot.effectiveDailyLimit}:${utcDayKey()}`,
         {
           runId,
@@ -492,15 +486,6 @@ export class CostTracker {
     }
   }
 
-  private logSubscriptionMeteredWarningOnce(
-    key: string,
-    data: Record<string, unknown>,
-    message: string,
-  ): void {
-    if (this.advisoryWarnings.has(key)) return
-    this.advisoryWarnings.add(key)
-    logger.warn(data, message)
-  }
 }
 
 type BudgetSnapshot = {

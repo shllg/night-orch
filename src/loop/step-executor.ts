@@ -576,13 +576,3 @@ function parseWorkerOutputForRole<T>(
     `${roleLabel} output failed contract validation at ${issuePath}`,
   )
 }
-
-// Re-export prompt templates from their canonical location under
-// workers/prompt/ (rule 00-core: "Keep prompt logic in workers/prompt/").
-export {
-  DEFAULT_PLANNER_TEMPLATE,
-  DEFAULT_CODER_TEMPLATE,
-  DEFAULT_REVIEWER_TEMPLATE,
-  buildPlanningOnlyCoderTemplate,
-  getDefaultTemplate,
-} from '../workers/prompt/templates.js'

@@ -41,8 +41,13 @@ vi.mock('../../src/git/repo.js', () => ({
   getChangedFilesAgainstBranch: vi.fn().mockResolvedValue(['src/a.ts']),
 }))
 
+vi.mock('../../src/loop/hooks.js', () => ({
+  runPostWorkerHooks: vi.fn().mockResolvedValue(null),
+}))
+
 import { logger } from '../../src/utils/logger.js'
 import { getDiffAgainstBranch } from '../../src/git/repo.js'
+import { runPostWorkerHooks } from '../../src/loop/hooks.js'
 
 // All worker fixtures include a non-empty tokenUsage so the post-R4a
 // step-executor accepts them. Tests that explicitly want to exercise
@@ -207,6 +212,7 @@ describe('executeLoop', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(runPostWorkerHooks).mockResolvedValue(null)
     tmpDir = mkdtempSync(join(tmpdir(), 'night-orch-engine-test-'))
     db = initDatabase(join(tmpDir, 'test.db'))
 
@@ -1283,6 +1289,31 @@ describe('executeLoop', () => {
       expect(reviewerPrompt).not.toContain('pnpm test')
       expect(result.terminalStatus).toBe('blocked')
       expect(result.blockReason).toBe('verify_config')
+    })
+
+    it('blocks before verify when a post-worker hook reports a block', async () => {
+      vi.mocked(runPostWorkerHooks).mockResolvedValueOnce({
+        blockReason: 'verify_config',
+        blockMessage: 'Scope guard: Too many changed files: 99 > 50',
+      })
+
+      const deps: LoopDependencies = {
+        db,
+        config: makeConfig(),
+        adapters: {
+          planner: makeMockAdapter([makePlannerResult()]),
+          coder: makeMockAdapter([makeCoderResult()]),
+          reviewer: makeMockAdapter([makeReviewerResult('APPROVED')]),
+        },
+        workflow: DEFAULT_WORKFLOW,
+      }
+
+      const result = await executeLoop(makeCtx(), deps)
+
+      expect(result.terminalStatus).toBe('blocked')
+      expect(result.blockReason).toBe('verify_config')
+      expect(result.stepOutputs['blockMessage']).toBe('Scope guard: Too many changed files: 99 > 50')
+      expect(deps.adapters['reviewer']!.runTask).not.toHaveBeenCalled()
     })
 
     it('does not increment iteration on empty-diff retry', async () => {
