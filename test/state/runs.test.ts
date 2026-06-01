@@ -203,6 +203,38 @@ describe('RunManager', () => {
     expect(updated?.phaseData).toEqual({ plan: { summary: 'Do the thing' }, codeHash: 'abc123' })
   })
 
+  it('rejects invalid phaseData sentinel shapes on write', () => {
+    const run = makeRun()
+
+    expect(() => runManager.updatePhase(run.id, {
+      phaseData: { __sessionIds: { planner: 42 } },
+    })).toThrow(/phase_data failed validation/)
+  })
+
+  it('rejects invalid controlPayload shapes on write', () => {
+    const run = makeRun()
+
+    expect(() => runManager.updateControl(run.id, {
+      controlPayload: { updateStrategy: 'squash' },
+    })).toThrow(/control_payload failed validation/)
+  })
+
+  it('returns null for stored controlPayload that fails schema validation', () => {
+    const run = makeRun()
+    db.prepare('UPDATE runs SET control_payload = ? WHERE id = ?')
+      .run(JSON.stringify({ updateStrategy: 'squash' }), run.id)
+
+    expect(runManager.getById(run.id)?.controlPayload).toBeNull()
+  })
+
+  it('returns null for stored phaseData that fails sentinel schema validation', () => {
+    const run = makeRun()
+    db.prepare('UPDATE runs SET phase_data = ? WHERE id = ?')
+      .run(JSON.stringify({ __sessionIds: { planner: 42 } }), run.id)
+
+    expect(runManager.getById(run.id)?.phaseData).toBeNull()
+  })
+
   it('getByRepoAndIssue finds correct record', () => {
     makeRun({
       issueNumber: 42,

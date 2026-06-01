@@ -1,23 +1,11 @@
-import { z } from 'zod'
 import type { RunManager, RunManualState, RunOperationIntent, RunRecord } from '../state/runs.js'
 import type { RunContext } from '../loop/types.js'
 import type { UpdateStrategy } from '../git/worktree.js'
 import { coerceConflictSnapshot, type ConflictSnapshot } from '../ops/conflict-types.js'
 import { logger } from '../utils/logger.js'
+import { RunControlPayloadSchema, type RunControlPayload } from '../state/run-payloads.js'
 
-export interface RunControlPayload {
-  issueRepo?: string
-  preserveBranchState?: boolean
-  updateStrategy?: UpdateStrategy
-  checkAfter?: boolean
-}
-
-const RunControlPayloadSchema = z.object({
-  issueRepo: z.string().optional(),
-  preserveBranchState: z.boolean().optional(),
-  updateStrategy: z.enum(['merge', 'rebase']).optional(),
-  checkAfter: z.boolean().optional(),
-}).passthrough()
+export type { RunControlPayload }
 
 export function isImmediateFollowupStatus(status: RunRecord['status']): boolean {
   return status === 'review_ready'

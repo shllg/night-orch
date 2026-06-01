@@ -5,7 +5,13 @@ import { RunManager } from '../state/runs.js'
 import { insertRunLogEvent } from '../state/run-log-events.js'
 import { nowUtcIso } from '../utils/time.js'
 import { logger } from '../utils/logger.js'
-import { parsePhaseData } from './checkpoint-schema.js'
+import {
+  extractCompletedPhases,
+  extractDecisionOutcomes,
+  parsePhaseData,
+  SENTINEL_KEYS,
+  type PersistedDecisionOutcome,
+} from './checkpoint-schema.js'
 import { recordPhase, updateContext } from './context.js'
 import { LEGACY_BLOCK_REASON_VALUES } from './state.js'
 
@@ -27,55 +33,30 @@ export interface CheckpointArtifactEventWriter {
  * or fully completed — a distinction that matters for decide steps whose
  * terminal outcome must not be re-routed to iterate on resume.
  */
-const COMPLETED_PHASES_KEY = '__completedPhases'
+const COMPLETED_PHASES_KEY = SENTINEL_KEYS.completedPhases
 
 /**
  * Sentinel key for session IDs. Persisted across crashes so
  * multi-step workflows can resume their `--continue` chains on the worker.
  */
-const SESSION_IDS_KEY = '__sessionIds'
+const SESSION_IDS_KEY = SENTINEL_KEYS.sessionIds
 
 /**
  * Sentinel key for generic custom-role step outputs. buildStepArtifacts
  * only persists well-known role outputs (plan/code/review/verify); without
  * this escape hatch custom-workflow step outputs are lost on resume.
  */
-const STEP_OUTPUTS_KEY = '__stepOutputs'
+const STEP_OUTPUTS_KEY = SENTINEL_KEYS.stepOutputs
 
 /**
  * Sentinel key for terminal outcomes of decide steps. When present, the
  * engine must not re-enter the loop on resume — it routes straight to the
  * terminal state instead.
  */
-const DECISION_OUTCOMES_KEY = '__decisionOutcomes'
+const DECISION_OUTCOMES_KEY = SENTINEL_KEYS.decisionOutcomes
 
-export interface PersistedDecisionOutcome {
-  action: 'publish' | 'iterate' | 'block' | 'error'
-  reason?: string
-  blockReason?: string | null
-}
-
-/**
- * Extract the `__decisionOutcomes` map from an already-parsed `phase_data`
- * object. Accepts any unknown shape and returns an empty map if the key is
- * missing or malformed — callers can treat the result as authoritative.
- */
-export function extractDecisionOutcomes(
-  phaseData: Record<string, unknown> | null | undefined,
-): Record<string, PersistedDecisionOutcome> {
-  if (!phaseData) return {}
-  const raw = phaseData[DECISION_OUTCOMES_KEY]
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
-  return raw as Record<string, PersistedDecisionOutcome>
-}
-
-export function extractCompletedPhases(
-  phaseData: Record<string, unknown> | null | undefined,
-): string[] {
-  if (!phaseData) return []
-  const raw = phaseData[COMPLETED_PHASES_KEY]
-  return Array.isArray(raw) ? (raw as string[]) : []
-}
+export { extractCompletedPhases, extractDecisionOutcomes }
+export type { PersistedDecisionOutcome }
 
 /**
  * Given a map of persisted decision outcomes, return the first terminal

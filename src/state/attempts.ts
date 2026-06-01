@@ -1,6 +1,8 @@
 import type Database from 'better-sqlite3'
 import { generateRunId } from '../utils/ids.js'
 import { nowUtcIso } from '../utils/time.js'
+import { validatePhaseDataForWrite } from '../loop/checkpoint-schema.js'
+import { validateControlPayloadForWrite } from './run-payloads.js'
 
 /**
  * Intent that caused an attempt to be created. `initial` is the first
@@ -255,6 +257,8 @@ export function createFollowupAttempt(
 ): CreateFollowupAttemptResult {
   const now = input.now ?? nowUtcIso()
   const resetBranch = input.resetBranch ?? defaultResetBranch(input.intent)
+  const phaseData = input.phaseData === null ? null : validatePhaseDataForWrite(input.phaseData)
+  const controlPayload = input.controlPayload === null ? null : validateControlPayloadForWrite(input.controlPayload)
   const maxSequenceNumber = Number.isFinite(input.maxSequenceNumber)
     ? Math.max(1, Math.floor(input.maxSequenceNumber as number))
     : DEFAULT_MAX_ATTEMPT_CHAIN_LENGTH
@@ -322,14 +326,14 @@ export function createFollowupAttempt(
       prev.planner,
       prev.coder,
       prev.reviewer,
-      input.phaseData === null ? null : JSON.stringify(input.phaseData),
+      phaseData === null ? null : JSON.stringify(phaseData),
       resetBranch ? null : prev.pr_number,
       resetBranch ? null : prev.pr_title,
       resetBranch ? null : prev.branch_name,
       resetBranch ? null : prev.branch_slug,
       resetBranch ? null : prev.worktree_path,
       input.intent,
-      input.controlPayload === null ? null : JSON.stringify(input.controlPayload),
+      controlPayload === null ? null : JSON.stringify(controlPayload),
       prev.parent_run_id,
       prev.id,
       newSequence,

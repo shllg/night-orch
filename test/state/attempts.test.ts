@@ -197,7 +197,7 @@ describe('attempts immutability invariant', () => {
         previousAttemptId: first.id,
         intent: 'retry',
         phaseData: { issueRepo: 'foo/bar', reactionType: 'retry' },
-        controlPayload: { source: 'test' },
+        controlPayload: { source: 'manual_continue' },
       })
 
       expect(result.sequenceNumber).toBe(2)
@@ -298,11 +298,11 @@ describe('attempts immutability invariant', () => {
         previousAttemptId: first.id,
         intent: 'retry',
         phaseData: { issueRepo: 'foo/bar', marker: 'p' },
-        controlPayload: { source: 'comment', marker: 'c' },
+        controlPayload: { source: 'manual_continue', marker: 'c' },
       })
       const newRow = runs.getById(result.attemptId)!
       expect(newRow.phaseData).toEqual({ issueRepo: 'foo/bar', marker: 'p' })
-      expect(newRow.controlPayload).toEqual({ source: 'comment', marker: 'c' })
+      expect(newRow.controlPayload).toEqual({ source: 'manual_continue', marker: 'c' })
     })
 
     it('throws AttemptNotFoundError when previous attempt is unknown', () => {

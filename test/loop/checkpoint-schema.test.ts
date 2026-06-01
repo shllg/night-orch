@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { parsePhaseData, SENTINEL_KEYS } from '../../src/loop/checkpoint-schema.js'
+import {
+  extractCompletedPhases,
+  extractDecisionOutcomes,
+  parsePhaseData,
+  SENTINEL_KEYS,
+} from '../../src/loop/checkpoint-schema.js'
 
 describe('parsePhaseData', () => {
   describe('empty and absent inputs', () => {
@@ -163,6 +168,29 @@ describe('parsePhaseData', () => {
         expect(result.payload).not.toBeNull()
         expect(result.payload!.length).toBe(8 * 1024)
       }
+    })
+  })
+
+  describe('schema-owned sentinel extraction', () => {
+    it('extracts completed phases only from schema-valid sentinel data', () => {
+      expect(extractCompletedPhases({ [SENTINEL_KEYS.completedPhases]: ['plan', 'code'] }))
+        .toEqual(['plan', 'code'])
+      expect(extractCompletedPhases({ [SENTINEL_KEYS.completedPhases]: ['plan', 42] }))
+        .toEqual([])
+    })
+
+    it('extracts decision outcomes only from schema-valid sentinel data', () => {
+      expect(extractDecisionOutcomes({
+        [SENTINEL_KEYS.decisionOutcomes]: {
+          decide: { action: 'publish', reason: 'ok' },
+        },
+      })).toEqual({ decide: { action: 'publish', reason: 'ok' } })
+
+      expect(extractDecisionOutcomes({
+        [SENTINEL_KEYS.decisionOutcomes]: {
+          decide: { action: 'bogus' },
+        },
+      })).toEqual({})
     })
   })
 })

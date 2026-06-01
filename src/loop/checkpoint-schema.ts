@@ -47,6 +47,8 @@ const persistedDecisionOutcomeSchema = z.object({
   blockReason: z.string().nullable().optional(),
 })
 
+export type PersistedDecisionOutcome = z.infer<typeof persistedDecisionOutcomeSchema>
+
 /**
  * Top-level phase_data schema. Sentinel keys are validated; any
  * other key (phase artifact objects, per-attempt scratch fields)
@@ -133,16 +135,45 @@ export function parsePhaseData(raw: string | null | undefined): ParsePhaseDataRe
 
   const validation = PhaseDataSchema.safeParse(parsed)
   if (!validation.success) {
-    const issues = validation.error.issues
-      .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
-      .join('; ')
     return {
       ok: false,
       reason: 'schema_error',
-      detail: issues,
+      detail: formatZodIssues(validation.error),
       payload: truncated,
     }
   }
 
   return { ok: true, data: validation.data as Record<string, unknown> }
+}
+
+export function validatePhaseDataForWrite(value: Record<string, unknown>): Record<string, unknown> {
+  const validation = PhaseDataSchema.safeParse(value)
+  if (!validation.success) {
+    throw new Error(`phase_data failed validation: ${formatZodIssues(validation.error)}`)
+  }
+  return validation.data as Record<string, unknown>
+}
+
+export function extractDecisionOutcomes(
+  phaseData: Record<string, unknown> | null | undefined,
+): Record<string, PersistedDecisionOutcome> {
+  if (!phaseData) return {}
+  const validation = PhaseDataSchema.safeParse(phaseData)
+  if (!validation.success) return {}
+  return validation.data[SENTINEL_KEYS.decisionOutcomes] ?? {}
+}
+
+export function extractCompletedPhases(
+  phaseData: Record<string, unknown> | null | undefined,
+): string[] {
+  if (!phaseData) return []
+  const validation = PhaseDataSchema.safeParse(phaseData)
+  if (!validation.success) return []
+  return validation.data[SENTINEL_KEYS.completedPhases] ?? []
+}
+
+function formatZodIssues(error: z.ZodError): string {
+  return error.issues
+    .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
+    .join('; ')
 }

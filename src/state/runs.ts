@@ -13,6 +13,8 @@ import {
   type LegacyBlockReason,
   type RunState,
 } from '../loop/state.js'
+import { parsePhaseData, validatePhaseDataForWrite } from '../loop/checkpoint-schema.js'
+import { parseControlPayload, validateControlPayloadForWrite } from './run-payloads.js'
 
 export type RunStatus = 'queued' | 'running' | 'blocked' | 'review_ready' | 'error' | 'completed'
 export type RunOperationIntent = 'auto' | 'continue' | 'retry' | 'rebase' | 'refresh'
@@ -265,8 +267,10 @@ export class RunManager {
         continue
       }
       let val: unknown = rawValue
-      if ((key === 'phaseData' || key === 'controlPayload') && val !== null) {
-        val = JSON.stringify(val)
+      if (key === 'phaseData' && val !== null) {
+        val = JSON.stringify(validatePhaseDataForWrite(val as Record<string, unknown>))
+      } else if (key === 'controlPayload' && val !== null) {
+        val = JSON.stringify(validateControlPayloadForWrite(val as Record<string, unknown>))
       }
       setClauses.push(`${col} = ?`)
       values.push(val)
@@ -403,6 +407,10 @@ export class RunManager {
     const now = nowUtcIso()
     const tx = this.db.transaction(() => {
       if (phaseData !== null) {
+        const parsed = parsePhaseData(phaseData)
+        if (!parsed.ok) {
+          throw new Error(`phase_data failed validation: ${parsed.detail}`)
+        }
         this.db
           .prepare(
             'UPDATE runs SET current_phase = ?, phase_data = ?, iteration_count = COALESCE(?, iteration_count), updated_at = ? WHERE id = ?',
@@ -425,6 +433,10 @@ export class RunManager {
    * outcomes, etc).
    */
   updatePhaseData(id: string, phaseData: string): void {
+    const parsed = parsePhaseData(phaseData)
+    if (!parsed.ok) {
+      throw new Error(`phase_data failed validation: ${parsed.detail}`)
+    }
     this.db
       .prepare('UPDATE runs SET phase_data = ?, updated_at = ? WHERE id = ?')
       .run(phaseData, nowUtcIso(), id)
@@ -604,7 +616,14 @@ export class RunManager {
  * "no checkpoint data" shape.
  */
 function safeParsePhaseData(raw: string | null, runId: string): Record<string, unknown> | null {
-  return safeParseRecordJson(raw, runId, 'phase_data')
+  if (!raw) return null
+  const result = parsePhaseData(raw)
+  if (result.ok) return result.data
+  logger.warn(
+    { runId, fieldName: 'phase_data', reason: result.reason, detail: result.detail },
+    'Failed to parse run JSON payload — returning null',
+  )
+  return null
 }
 
 function safeParseRecordJson(
@@ -613,6 +632,15 @@ function safeParseRecordJson(
   fieldName: 'phase_data' | 'control_payload',
 ): Record<string, unknown> | null {
   if (!raw) return null
+  if (fieldName === 'control_payload') {
+    const result = parseControlPayload(raw)
+    if (result.ok) return result.data
+    logger.warn(
+      { runId, fieldName, reason: result.reason, detail: result.detail },
+      'Failed to parse run JSON payload — returning null',
+    )
+    return null
+  }
   try {
     const parsed = JSON.parse(raw) as unknown
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
