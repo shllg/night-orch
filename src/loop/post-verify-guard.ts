@@ -17,7 +17,7 @@ export type PostVerifyGuardResult =
 
 export function handlePostVerifyGuard(params: {
   ctx: RunContext
-  checkpoint: Checkpoint
+  checkpoint: Pick<Checkpoint, 'phaseBlocked'>
   steps: WorkflowStep[]
   stepIndex: number
   loopConfig: Config['loop']

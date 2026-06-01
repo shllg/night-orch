@@ -20,6 +20,7 @@ import {
   executeStep,
   type StepDependencies,
 } from './step-executor.js'
+import { runVerifyGate } from './verify-gate.js'
 import { FileRunArtifactWriter } from './run-artifacts.js'
 import { CostTracker, describeBudgetBlock, costLimitRecoveryHint } from './cost.js'
 import {
@@ -29,12 +30,10 @@ import {
   runawayLimitToBlockReason,
 } from './cost/budget-guard.js'
 import { runPostWorkerHooks } from './hooks.js'
-import { allRequiredVerifyPassed } from './verifier.js'
 import { WorkerError, isTransientWorkerError } from '../workers/errors.js'
 import { workerErrorToBlockedReason } from './worker-errors.js'
 import { blocked, blockedReasonToLegacy } from './state.js'
 import { blockExit } from './block-exit.js'
-import { handlePostVerifyGuard } from './post-verify-guard.js'
 import { logger } from '../utils/logger.js'
 import { utcIsoFromMs } from '../utils/time.js'
 import type Database from 'better-sqlite3'
@@ -171,6 +170,30 @@ export async function executeLoop(
     ctx = updateContext(ctx, { currentPhase: step.id })
     checkpoint.phaseStarted(ctx.runId, step.id, ctx.iteration)
 
+    if (step.type === 'verify') {
+      const gate = await runVerifyGate({
+        ctx,
+        step,
+        stepDeps,
+        checkpoint,
+        steps,
+        stepIndex,
+        loopConfig: config.loop,
+        metrics,
+        leaseHeartbeat: deps.leaseHeartbeat,
+        startedAtMs: stepStart,
+        startedAtIso: stepStartedAt,
+      })
+      ctx = gate.ctx
+      if (gate.action === 'return') return ctx
+      if (gate.action === 'continue') {
+        stepIndex = gate.stepIndex
+        continue
+      }
+      stepIndex++
+      continue
+    }
+
     let result: Awaited<ReturnType<typeof executeStep>>
     try {
       result = await executeStep(ctx, step, stepDeps)
@@ -277,14 +300,6 @@ export async function executeLoop(
       }
       try { metrics?.observePhaseDuration(step.id, stepDurationMs / 1000) } catch { /* best-effort */ }
     }
-    if (step.type === 'verify') {
-      try {
-        metrics?.observePhaseDuration('verify', stepDurationMs / 1000)
-        metrics?.observeVerifyDuration(stepDurationMs / 1000)
-        const allPassed = ctx.verifyResults.length > 0 && allRequiredVerifyPassed(ctx.verifyResults)
-        metrics?.incVerifyRuns(allPassed ? 'pass' : 'fail')
-      } catch { /* best-effort */ }
-    }
 
     // Determine step success
     const stepSuccess = determineStepSuccess(step, ctx)
@@ -322,23 +337,6 @@ export async function executeLoop(
       }
     }
     ctx = recordPhase(ctx, step.id, stepSuccess ? 'success' : 'failure', {}, stepStartedAt)
-
-    if (step.type === 'verify') {
-      const guard = handlePostVerifyGuard({
-        ctx,
-        checkpoint,
-        steps,
-        stepIndex,
-        loopConfig: config.loop,
-        metrics,
-      })
-      ctx = guard.ctx
-      if (guard.action === 'return') return ctx
-      if (guard.action === 'continue') {
-        stepIndex = guard.stepIndex
-        continue
-      }
-    }
 
     // Fire onPlanReady after plan step completes with a plan
     if (step.type === 'worker' && step.role === 'planner' && ctx.plan && deps.onPlanReady) {

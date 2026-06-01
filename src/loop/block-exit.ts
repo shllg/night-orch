@@ -4,7 +4,7 @@ import type { RunContext } from './types.js'
 
 export function blockExit(
   ctx: RunContext,
-  checkpoint: Checkpoint,
+  checkpoint: Pick<Checkpoint, 'phaseBlocked'>,
   phase: string,
   blockReason: NonNullable<RunContext['blockReason']>,
   blockMessage: string,
