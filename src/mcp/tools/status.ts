@@ -13,11 +13,11 @@ import {
 } from '../../discovery/triage.js'
 import {
   loadDailyCostRows,
-  loadInboxIssueRows,
   loadRecentCompletedRuns,
   loadRunTimingsByRunId,
   queryRunHistoryPage,
 } from '../../state/run-queries.js'
+import { loadInboxIssueRows } from '../../state/inbox-queries.js'
 import {
   countInboxTriages,
   mapActiveRunRow,

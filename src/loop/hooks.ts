@@ -9,6 +9,16 @@ export interface WorkerHookBlock {
   blockMessage: string
 }
 
+type PostWorkerHook = (
+  ctx: RunContext,
+  step: WorkerStep,
+  config: Config,
+) => Promise<WorkerHookBlock | null>
+
+const POST_WORKER_HOOKS: readonly PostWorkerHook[] = [
+  checkCoderWorktreeScopeHook,
+]
+
 /**
  * Run hook checks immediately after a worker step succeeds and cost is
  * recorded, before verify/review phases run.
@@ -18,7 +28,11 @@ export async function runPostWorkerHooks(
   step: WorkerStep,
   config: Config,
 ): Promise<WorkerHookBlock | null> {
-  return checkCoderWorktreeScopeHook(ctx, step, config)
+  for (const hook of POST_WORKER_HOOKS) {
+    const block = await hook(ctx, step, config)
+    if (block) return block
+  }
+  return null
 }
 
 async function checkCoderWorktreeScopeHook(

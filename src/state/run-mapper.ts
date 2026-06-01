@@ -1,6 +1,7 @@
 import type { InboxCommandHints, InboxTriage } from '../discovery/triage.js'
 import type { RunListRow } from './run-list.js'
-import type { HistoryRunRow, InboxIssueRow, RunTimingRow } from './run-queries.js'
+import type { InboxIssueRow } from './inbox-queries.js'
+import type { HistoryRunRow, RunTimingRow } from './run-queries.js'
 import { coerceManualState, coerceOperationIntent, type RunManualState, type RunOperationIntent } from './runs.js'
 import { parseUtcTimestampMs } from '../utils/time.js'
 

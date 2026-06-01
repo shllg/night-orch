@@ -60,8 +60,8 @@ import {
   deriveBranchPolicy,
   resolveOperationIntent,
   selectReplayableRun,
+  shouldResetBranch,
 } from '../runner/intent.js'
-import { shouldResetBranch } from '../runner/queue.js'
 import { postStatusComment } from '../runner/comment-formatting.js'
 import { createWorkItemFromDiscoveredIssue } from '../work-items/types.js'
 import type { OrchestrationCache } from '../runner/orchestration-cache.js'

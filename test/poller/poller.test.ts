@@ -36,7 +36,15 @@ const mockUpdatePR = vi.fn().mockResolvedValue({
 const mockFindPRByBranch = vi.fn().mockResolvedValue(null)
 const mockPushBranch = vi.fn().mockResolvedValue(undefined)
 vi.mock('../../src/discovery/discover.js', () => ({
-  discoverEligibleIssues: (...args: unknown[]) => mockDiscoverEligibleIssues(...args),
+  discoverEligibleIssues: async (...args: unknown[]) => {
+    const repoConfig = args[0] as Config['repos'][number]
+    const discovered = await mockDiscoverEligibleIssues(...args) as Array<Record<string, unknown>>
+    return discovered.map((item) => ({
+      issueRepo: repoConfig.repo,
+      repoConfig,
+      ...item,
+    }))
+  },
 }))
 
 vi.mock('../../src/forge/factory.js', () => ({

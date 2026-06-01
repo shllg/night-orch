@@ -1,4 +1,5 @@
 import type { LoopPhase } from './types.js'
+import type { RunContext } from './types.js'
 
 /**
  * Single source of truth for a run's state throughout the loop engine,
@@ -141,6 +142,28 @@ export const RUN_STATE_KINDS = [
 
 export type RunStateKind = (typeof RUN_STATE_KINDS)[number]
 
+export const LEGACY_BLOCK_REASON_VALUES = [
+  'cost_limit',
+  'iteration_limit',
+  'run_token_limit',
+  'issue_token_limit',
+  'daily_token_limit',
+  'run_wall_clock_limit',
+  'stuck_loop',
+  'agent_pass_limit',
+  'reviewer_blocked',
+  'ambiguous_review',
+  'verify_config',
+  'merge_conflict',
+  'auth_failure',
+  'empty_diff',
+] as const satisfies readonly NonNullable<RunContext['blockReason']>[]
+
+export type LegacyBlockReason = (typeof LEGACY_BLOCK_REASON_VALUES)[number]
+
+type MissingLegacyBlockReasons = Exclude<NonNullable<RunContext['blockReason']>, LegacyBlockReason>
+export const LEGACY_BLOCK_REASONS_COVER_RUN_CONTEXT: MissingLegacyBlockReasons extends never ? true : never = true
+
 /**
  * Compile-time exhaustiveness helper. Place in the `default` arm of a
  * switch that must handle every state or reason variant. If a new variant
@@ -269,21 +292,7 @@ export interface LegacyBlockReasonContext {
 }
 
 export function blockedReasonFromLegacy(
-  legacy:
-    | 'cost_limit'
-    | 'iteration_limit'
-    | 'run_token_limit'
-    | 'issue_token_limit'
-    | 'daily_token_limit'
-    | 'run_wall_clock_limit'
-    | 'stuck_loop'
-    | 'agent_pass_limit'
-    | 'reviewer_blocked'
-    | 'ambiguous_review'
-    | 'verify_config'
-    | 'merge_conflict'
-    | 'auth_failure'
-    | 'empty_diff',
+  legacy: LegacyBlockReason,
   ctx: LegacyBlockReasonContext = {},
 ): BlockedReason {
   switch (legacy) {

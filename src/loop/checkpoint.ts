@@ -7,6 +7,7 @@ import { nowUtcIso } from '../utils/time.js'
 import { logger } from '../utils/logger.js'
 import { parsePhaseData } from './checkpoint-schema.js'
 import { recordPhase, updateContext } from './context.js'
+import { LEGACY_BLOCK_REASON_VALUES } from './state.js'
 
 export interface CheckpointArtifactEvent {
   runId: string
@@ -161,22 +162,7 @@ export function applyPersistedDecisionOutcome(
   }
 }
 
-const LEGACY_BLOCK_REASONS = new Set<NonNullable<RunContext['blockReason']>>([
-  'cost_limit',
-  'iteration_limit',
-  'run_token_limit',
-  'issue_token_limit',
-  'daily_token_limit',
-  'run_wall_clock_limit',
-  'stuck_loop',
-  'agent_pass_limit',
-  'reviewer_blocked',
-  'ambiguous_review',
-  'verify_config',
-  'merge_conflict',
-  'auth_failure',
-  'empty_diff',
-])
+const LEGACY_BLOCK_REASONS = new Set<NonNullable<RunContext['blockReason']>>(LEGACY_BLOCK_REASON_VALUES)
 
 function coercePersistedBlockReason(
   value: unknown,

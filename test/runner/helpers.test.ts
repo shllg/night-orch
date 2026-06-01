@@ -1,11 +1,30 @@
-import { describe, it, expect } from 'vitest'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
+
+vi.mock('../../src/utils/logger.js', () => ({
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
+}))
+
 import {
   buildAttemptHistoryFollowup,
   deriveBranchPolicy,
+  resolveControlPayload,
   resolveOperationIntent,
   selectReplayableRun,
 } from '../../src/runner/helpers.js'
+import { shouldResetBranch } from '../../src/runner/intent.js'
+import { logger } from '../../src/utils/logger.js'
 import type { RunRecord, RunOperationIntent, RunStatus } from '../../src/state/runs.js'
+
+const loggerWarn = vi.mocked(logger.warn)
+
+beforeEach(() => {
+  vi.clearAllMocks()
+})
 
 function makeRun(overrides: Partial<RunRecord> = {}): RunRecord {
   return {
@@ -117,6 +136,23 @@ describe('selectReplayableRun', () => {
   })
 })
 
+describe('resolveControlPayload', () => {
+  it('rejects and logs invalid run-control payload fields', () => {
+    expect(
+      resolveControlPayload(
+        makeRun({ controlPayload: { updateStrategy: 'squash' } }),
+      ),
+    ).toBeNull()
+
+    expect(loggerWarn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: 'run-1',
+      }),
+      'Ignoring invalid run-control payload',
+    )
+  })
+})
+
 describe('deriveBranchPolicy', () => {
   it('maps refresh intent to preserve branch and refresh run mode', () => {
     const policy = deriveBranchPolicy({
@@ -218,6 +254,22 @@ describe('deriveBranchPolicy', () => {
       resetToBase: true,
       runMode: 'fresh',
     })
+  })
+})
+
+describe('shouldResetBranch', () => {
+  it('resets after prior error or tainted blocked result', () => {
+    const runManager = {
+      getLatestFinishedByIssue(_repo: string, issueNumber: number) {
+        if (issueNumber === 1) return makeRun({ status: 'error' })
+        if (issueNumber === 2) return makeRun({ status: 'blocked', blockReason: 'merge_conflict' })
+        return makeRun({ status: 'blocked', blockReason: 'reviewer_blocked' })
+      },
+    }
+
+    expect(shouldResetBranch(runManager, 'org/repo', 1, 'run-current')).toBe(true)
+    expect(shouldResetBranch(runManager, 'org/repo', 2, 'run-current')).toBe(true)
+    expect(shouldResetBranch(runManager, 'org/repo', 3, 'run-current')).toBe(false)
   })
 })
 

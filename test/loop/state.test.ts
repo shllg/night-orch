@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   BLOCKED_REASON_TYPES,
+  LEGACY_BLOCK_REASON_VALUES,
   RUN_STATE_KINDS,
   assertNever,
   blocked,
@@ -15,6 +16,27 @@ import {
 } from '../../src/loop/state.js'
 
 describe('RunState discriminated union', () => {
+  describe('LEGACY_BLOCK_REASON_VALUES', () => {
+    it('contains every persisted legacy block reason', () => {
+      expect(LEGACY_BLOCK_REASON_VALUES).toEqual([
+        'cost_limit',
+        'iteration_limit',
+        'run_token_limit',
+        'issue_token_limit',
+        'daily_token_limit',
+        'run_wall_clock_limit',
+        'stuck_loop',
+        'agent_pass_limit',
+        'reviewer_blocked',
+        'ambiguous_review',
+        'verify_config',
+        'merge_conflict',
+        'auth_failure',
+        'empty_diff',
+      ])
+    })
+  })
+
   describe('RUN_STATE_KINDS', () => {
     it('contains all top-level kinds the union defines', () => {
       // Build a representative instance of every kind so the test fails

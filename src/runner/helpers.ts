@@ -21,6 +21,8 @@ export {
   resolveControlPayload,
   selectReplayableRun,
   deriveBranchPolicy,
+  TAINTED_BLOCK_REASONS,
+  shouldResetBranch,
   type RunControlPayload,
   type FollowupPromptFeedback,
   type BranchPolicy,
@@ -33,8 +35,3 @@ export {
   applyWorkflowRoleDefaults,
   resolveWorkerProfileForAgent,
 } from './workflow-overlay.js'
-
-export {
-  TAINTED_BLOCK_REASONS,
-  shouldResetBranch,
-} from './queue.js'

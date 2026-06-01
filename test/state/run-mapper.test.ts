@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { mapInboxIssueRow } from '../../src/state/run-mapper.js'
-import type { InboxIssueRow } from '../../src/state/run-queries.js'
+import type { InboxIssueRow } from '../../src/state/inbox-queries.js'
 
 function makeInboxIssueRow(overrides: Partial<InboxIssueRow> = {}): InboxIssueRow {
   return {

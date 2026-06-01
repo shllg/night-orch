@@ -1,8 +1,9 @@
 import { z } from 'zod'
-import type { RunManualState, RunOperationIntent, RunRecord } from '../state/runs.js'
+import type { RunManager, RunManualState, RunOperationIntent, RunRecord } from '../state/runs.js'
 import type { RunContext } from '../loop/types.js'
 import type { UpdateStrategy } from '../git/worktree.js'
 import { coerceConflictSnapshot, type ConflictSnapshot } from '../ops/conflict-types.js'
+import { logger } from '../utils/logger.js'
 
 export interface RunControlPayload {
   issueRepo?: string
@@ -12,10 +13,10 @@ export interface RunControlPayload {
 }
 
 const RunControlPayloadSchema = z.object({
-  issueRepo: z.unknown().optional().transform((value) => typeof value === 'string' ? value : undefined),
-  preserveBranchState: z.unknown().optional().transform((value) => typeof value === 'boolean' ? value : undefined),
-  updateStrategy: z.unknown().optional().transform((value) => value === 'merge' || value === 'rebase' ? value : undefined),
-  checkAfter: z.unknown().optional().transform((value) => typeof value === 'boolean' ? value : undefined),
+  issueRepo: z.string().optional(),
+  preserveBranchState: z.boolean().optional(),
+  updateStrategy: z.enum(['merge', 'rebase']).optional(),
+  checkAfter: z.boolean().optional(),
 }).passthrough()
 
 export function isImmediateFollowupStatus(status: RunRecord['status']): boolean {
@@ -111,7 +112,13 @@ export function resolveControlPayload(
 ): RunControlPayload | null {
   if (!run?.controlPayload) return null
   const parsed = RunControlPayloadSchema.safeParse(run.controlPayload)
-  if (!parsed.success) return null
+  if (!parsed.success) {
+    logger.warn(
+      { runId: run.id, issues: parsed.error.issues },
+      'Ignoring invalid run-control payload',
+    )
+    return null
+  }
   return parsed.data
 }
 
@@ -121,6 +128,26 @@ export function selectReplayableRun(run: RunRecord | null): RunRecord | null {
     return run
   }
   return null
+}
+
+export const TAINTED_BLOCK_REASONS = new Set([
+  'agent_pass_limit',
+  'merge_conflict',
+  'auth_failure',
+  'empty_diff',
+])
+
+export function shouldResetBranch(
+  runManager: RunManager,
+  repo: string,
+  issueNumber: number,
+  currentRunId: string,
+): boolean {
+  const prior = runManager.getLatestFinishedByIssue(repo, issueNumber, currentRunId)
+  if (!prior) return false
+  if (prior.status === 'error') return true
+  if (prior.status === 'blocked' && prior.blockReason && TAINTED_BLOCK_REASONS.has(prior.blockReason)) return true
+  return false
 }
 
 export interface BranchPolicy {
