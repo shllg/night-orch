@@ -62,6 +62,110 @@ describe('RunManager', () => {
     expect(updated?.prTitle).toBe('Fix race condition in startup')
   })
 
+  it('updates lifecycle fields and stamps terminated_at for completed runs', () => {
+    const run = makeRun()
+
+    runManager.updateLifecycle(run.id, {
+      status: 'completed',
+      iterationCount: 3,
+      blockReason: null,
+      lastError: null,
+      endedAt: '2026-01-01T00:00:00.000Z',
+    })
+
+    const updated = runManager.getById(run.id)
+    expect(updated?.status).toBe('completed')
+    expect(updated?.iterationCount).toBe(3)
+    expect(updated?.endedAt).toBe('2026-01-01T00:00:00.000Z')
+
+    const row = db
+      .prepare('SELECT terminated_at FROM runs WHERE id = ?')
+      .get(run.id) as { terminated_at: string | null }
+    expect(row.terminated_at).not.toBeNull()
+  })
+
+  it('updates phase, control, cost, worktree, and pull request fields through typed setters', () => {
+    const run = makeRun()
+
+    runManager.updatePhase(run.id, {
+      currentPhase: 'verify',
+      iterationCount: 2,
+      phaseData: { verify: { passed: true } },
+    })
+    runManager.updateControl(run.id, {
+      operationIntent: 'refresh',
+      manualState: 'awaiting_rebase_resolution',
+      controlPayload: { preserveBranchState: true },
+    })
+    runManager.updateCost(run.id, {
+      estimatedCostUsd: 1.234567,
+      promptTokens: 10,
+      completionTokens: 20,
+      cacheReadTokens: 30,
+    })
+    runManager.updateWorktree(run.id, {
+      issueTitle: 'Updated title',
+      branchName: 'orch/1-updated-title',
+      branchSlug: 'updated-title',
+      worktreePath: '/tmp/worktree',
+    })
+    runManager.updatePullRequest(run.id, {
+      prNumber: 123,
+      prTitle: 'Update PR',
+    })
+
+    const updated = runManager.getById(run.id)
+    expect(updated).toMatchObject({
+      currentPhase: 'verify',
+      iterationCount: 2,
+      phaseData: { verify: { passed: true } },
+      operationIntent: 'refresh',
+      manualState: 'awaiting_rebase_resolution',
+      controlPayload: { preserveBranchState: true },
+      estimatedCostUsd: 1.234567,
+      promptTokens: 10,
+      completionTokens: 20,
+      cacheReadTokens: 30,
+      issueTitle: 'Updated title',
+      branchName: 'orch/1-updated-title',
+      branchSlug: 'updated-title',
+      worktreePath: '/tmp/worktree',
+      prNumber: 123,
+      prTitle: 'Update PR',
+    })
+  })
+
+  it('updates run-state transition fields atomically through the typed transition setter', () => {
+    const run = makeRun()
+
+    runManager.transitionRunState(run.id, {
+      status: 'blocked',
+      endedAt: '2026-01-01T00:00:00.000Z',
+      blockReason: 'merge_conflict',
+      lastError: 'Merge conflict',
+      operationIntent: 'refresh',
+      manualState: 'awaiting_rebase_resolution',
+      controlPayload: { preserveBranchState: true },
+      phaseData: { reactionType: 'refresh_conflict' },
+      branchName: 'orch/1-fix-bug',
+      worktreePath: '/tmp/worktree',
+    })
+
+    const updated = runManager.getById(run.id)
+    expect(updated).toMatchObject({
+      status: 'blocked',
+      endedAt: '2026-01-01T00:00:00.000Z',
+      blockReason: 'merge_conflict',
+      lastError: 'Merge conflict',
+      operationIntent: 'refresh',
+      manualState: 'awaiting_rebase_resolution',
+      controlPayload: { preserveBranchState: true },
+      phaseData: { reactionType: 'refresh_conflict' },
+      branchName: 'orch/1-fix-bug',
+      worktreePath: '/tmp/worktree',
+    })
+  })
+
   it('rolls back status update when clearing cost budget override fails', () => {
     const run = makeRun()
     runManager.update(run.id, { status: 'running' })

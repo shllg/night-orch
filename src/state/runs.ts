@@ -67,6 +67,87 @@ export interface CreateRunParams {
   parentRunId?: string | null
 }
 
+export interface RunLifecycleFields {
+  status?: RunStatus
+  iterationCount?: number
+  endedAt?: string | null
+  lastError?: string | null
+  blockReason?: string | null
+  parentRunId?: string | null
+}
+
+export interface RunPhaseFields {
+  currentPhase?: string | null
+  phaseData?: Record<string, unknown> | null
+  iterationCount?: number
+}
+
+export interface RunCostFields {
+  estimatedCostUsd?: number
+  promptTokens?: number
+  completionTokens?: number
+  cacheReadTokens?: number
+}
+
+export interface RunControlFields {
+  operationIntent?: RunOperationIntent
+  manualState?: RunManualState
+  controlPayload?: Record<string, unknown> | null
+}
+
+export interface RunWorktreeFields {
+  issueTitle?: string | null
+  branchName?: string | null
+  branchSlug?: string | null
+  worktreePath?: string | null
+}
+
+export interface RunPullRequestFields {
+  prNumber?: number | null
+  prTitle?: string | null
+}
+
+type RunWritablePatch =
+  & RunLifecycleFields
+  & RunPhaseFields
+  & RunCostFields
+  & RunControlFields
+  & RunWorktreeFields
+  & RunPullRequestFields
+
+export type RunStateTransitionFields =
+  & RunLifecycleFields
+  & RunPhaseFields
+  & RunControlFields
+  & RunWorktreeFields
+  & RunPullRequestFields
+
+type RunWritableField = keyof RunWritablePatch
+
+const RUN_COLUMN_MAP = {
+  status: 'status',
+  issueTitle: 'issue_title',
+  iterationCount: 'iteration_count',
+  currentPhase: 'current_phase',
+  phaseData: 'phase_data',
+  endedAt: 'ended_at',
+  lastError: 'last_error',
+  prNumber: 'pr_number',
+  prTitle: 'pr_title',
+  branchName: 'branch_name',
+  branchSlug: 'branch_slug',
+  worktreePath: 'worktree_path',
+  estimatedCostUsd: 'estimated_cost_usd',
+  promptTokens: 'prompt_tokens',
+  completionTokens: 'completion_tokens',
+  cacheReadTokens: 'cache_read_tokens',
+  blockReason: 'block_reason',
+  operationIntent: 'operation_intent',
+  manualState: 'manual_state',
+  controlPayload: 'control_payload',
+  parentRunId: 'parent_run_id',
+} satisfies Record<RunWritableField, string>
+
 export class RunManager {
   private issueManager: IssueManager
 
@@ -133,166 +214,62 @@ export class RunManager {
   }
 
   update(id: string, fields: Partial<RunRecord>): void {
-    const allowed = [
-      'status',
-      'issueTitle',
-      'iterationCount',
-      'currentPhase',
-      'phaseData',
-      'endedAt',
-      'lastError',
-      'prNumber',
-      'prTitle',
-      'branchName',
-      'branchSlug',
-      'worktreePath',
-      'estimatedCostUsd',
-      'promptTokens',
-      'completionTokens',
-      'cacheReadTokens',
-      'blockReason',
-      'operationIntent',
-      'manualState',
-      'controlPayload',
-      'parentRunId',
-    ] as const
+    this.updateFields(id, fields as RunWritablePatch)
+  }
 
-    const columnMap: Record<string, string> = {
-      issueNumber: 'issue_number',
-      issueTitle: 'issue_title',
-      issueNodeId: 'issue_node_id',
-      iterationCount: 'iteration_count',
-      currentPhase: 'current_phase',
-      phaseData: 'phase_data',
-      startedAt: 'started_at',
-      endedAt: 'ended_at',
-      lastError: 'last_error',
-      prNumber: 'pr_number',
-      prTitle: 'pr_title',
-      branchName: 'branch_name',
-      branchSlug: 'branch_slug',
-      worktreePath: 'worktree_path',
-      estimatedCostUsd: 'estimated_cost_usd',
-      promptTokens: 'prompt_tokens',
-      completionTokens: 'completion_tokens',
-      cacheReadTokens: 'cache_read_tokens',
-      blockReason: 'block_reason',
-      operationIntent: 'operation_intent',
-      manualState: 'manual_state',
-      controlPayload: 'control_payload',
-      parentRunId: 'parent_run_id',
-    }
+  updateLifecycle(id: string, fields: RunLifecycleFields): void {
+    this.updateFields(id, fields)
+  }
 
-    const setClauses: string[] = []
-    const values: unknown[] = []
+  updatePhase(id: string, fields: RunPhaseFields): void {
+    this.updateFields(id, fields)
+  }
 
-    for (const key of allowed) {
-      if (key in fields) {
-        const col = columnMap[key] ?? key
-        let val: unknown = fields[key]
-        if ((key === 'phaseData' || key === 'controlPayload') && val !== null) {
-          val = JSON.stringify(val)
-        }
-        setClauses.push(`${col} = ?`)
-        values.push(val)
-      }
-    }
+  updateCost(id: string, fields: RunCostFields): void {
+    this.updateFields(id, fields)
+  }
 
-    if (setClauses.length === 0) return
+  updateControl(id: string, fields: RunControlFields): void {
+    this.updateFields(id, fields)
+  }
 
-    const now = nowUtcIso()
-    setClauses.push('updated_at = ?')
-    values.push(now)
+  updateWorktree(id: string, fields: RunWorktreeFields): void {
+    this.updateFields(id, fields)
+  }
 
-    // Bridge to the immutable-attempts invariant: when a row transitions to
-    // the terminal 'completed' status, also stamp `terminated_at` so the
-    // one-live-top-level-per-issue unique index (migration 024) permits a
-    // successor attempt to be inserted. retry/continue/rebase finalize
-    // earlier states (blocked/error/review_ready) explicitly via
-    // AttemptController in R0c.
-    if (fields.status === 'completed') {
-      setClauses.push('terminated_at = COALESCE(terminated_at, ?)')
-      values.push(now)
-    }
+  updatePullRequest(id: string, fields: RunPullRequestFields): void {
+    this.updateFields(id, fields)
+  }
 
-    values.push(id)
-
-    const updateTx = this.db.transaction(() => {
-      this.db
-        .prepare(`UPDATE runs SET ${setClauses.join(', ')} WHERE id = ?`)
-        .run(...values)
-      this.issueManager.syncFromRunId(id)
-    })
-
-    updateTx()
+  transitionRunState(id: string, fields: RunStateTransitionFields): void {
+    this.updateFields(id, fields)
   }
 
   updateIfStatus(id: string, allowedStatuses: readonly RunStatus[], fields: Partial<RunRecord>): boolean {
     if (allowedStatuses.length === 0) return false
+    return this.updateFields(id, fields as RunWritablePatch, { allowedStatuses })
+  }
 
-    const allowed = [
-      'status',
-      'issueTitle',
-      'iterationCount',
-      'currentPhase',
-      'phaseData',
-      'endedAt',
-      'lastError',
-      'prNumber',
-      'prTitle',
-      'branchName',
-      'branchSlug',
-      'worktreePath',
-      'estimatedCostUsd',
-      'promptTokens',
-      'completionTokens',
-      'cacheReadTokens',
-      'blockReason',
-      'operationIntent',
-      'manualState',
-      'controlPayload',
-      'parentRunId',
-    ] as const
-
-    const columnMap: Record<string, string> = {
-      issueNumber: 'issue_number',
-      issueTitle: 'issue_title',
-      issueNodeId: 'issue_node_id',
-      iterationCount: 'iteration_count',
-      currentPhase: 'current_phase',
-      phaseData: 'phase_data',
-      startedAt: 'started_at',
-      endedAt: 'ended_at',
-      lastError: 'last_error',
-      prNumber: 'pr_number',
-      prTitle: 'pr_title',
-      branchName: 'branch_name',
-      branchSlug: 'branch_slug',
-      worktreePath: 'worktree_path',
-      estimatedCostUsd: 'estimated_cost_usd',
-      promptTokens: 'prompt_tokens',
-      completionTokens: 'completion_tokens',
-      cacheReadTokens: 'cache_read_tokens',
-      blockReason: 'block_reason',
-      operationIntent: 'operation_intent',
-      manualState: 'manual_state',
-      controlPayload: 'control_payload',
-      parentRunId: 'parent_run_id',
-    }
-
+  private updateFields(
+    id: string,
+    fields: RunWritablePatch,
+    options: { allowedStatuses?: readonly RunStatus[] } = {},
+  ): boolean {
     const setClauses: string[] = []
     const values: unknown[] = []
 
-    for (const key of allowed) {
-      if (key in fields) {
-        const col = columnMap[key] ?? key
-        let val: unknown = fields[key]
-        if ((key === 'phaseData' || key === 'controlPayload') && val !== null) {
-          val = JSON.stringify(val)
-        }
-        setClauses.push(`${col} = ?`)
-        values.push(val)
+    for (const [rawKey, rawValue] of Object.entries(fields)) {
+      const key = rawKey as RunWritableField
+      const col = RUN_COLUMN_MAP[key]
+      if (!col) {
+        continue
       }
+      let val: unknown = rawValue
+      if ((key === 'phaseData' || key === 'controlPayload') && val !== null) {
+        val = JSON.stringify(val)
+      }
+      setClauses.push(`${col} = ?`)
+      values.push(val)
     }
 
     if (setClauses.length === 0) return false
@@ -301,25 +278,32 @@ export class RunManager {
     setClauses.push('updated_at = ?')
     values.push(now)
 
-    // Mirror of update(): auto-stamp terminated_at on transition to
-    // 'completed' to satisfy the one-live-head invariant.
+    // Bridge to the immutable-attempts invariant: when a row transitions to
+    // the terminal 'completed' status, also stamp `terminated_at` so the
+    // one-live-top-level-per-issue unique index (migration 024) permits a
+    // successor attempt to be inserted.
     if (fields.status === 'completed') {
       setClauses.push('terminated_at = COALESCE(terminated_at, ?)')
       values.push(now)
     }
 
-    values.push(id, ...allowedStatuses)
-
-    const placeholders = allowedStatuses.map(() => '?').join(', ')
+    values.push(id)
+    const allowedStatuses = options.allowedStatuses
+    if (allowedStatuses) {
+      values.push(...allowedStatuses)
+    }
+    const placeholders = allowedStatuses?.map(() => '?').join(', ')
     const updateTx = this.db.transaction(() => {
       const result = this.db
-        .prepare(`UPDATE runs SET ${setClauses.join(', ')} WHERE id = ? AND status IN (${placeholders})`)
+        .prepare(
+          `UPDATE runs SET ${setClauses.join(', ')} WHERE id = ?${
+            allowedStatuses ? ` AND status IN (${placeholders})` : ''
+          }`,
+        )
         .run(...values)
-      if (result.changes > 0) {
-        this.issueManager.syncFromRunId(id)
-        return true
-      }
-      return false
+      if (result.changes === 0) return false
+      this.issueManager.syncFromRunId(id)
+      return true
     })
 
     return updateTx()
@@ -460,9 +444,9 @@ export class RunManager {
    * Used by finalization paths where a crash between the two writes would
    * leave terminal state out of sync with retry/cost controls.
    */
-  updateAndClearCostBudgetOverride(id: string, fields: Partial<RunRecord>): void {
+  updateAndClearCostBudgetOverride(id: string, fields: RunStateTransitionFields): void {
     const tx = this.db.transaction(() => {
-      this.update(id, fields)
+      this.updateFields(id, fields)
       this.setCostBudgetOverride(id, null)
     })
     tx()

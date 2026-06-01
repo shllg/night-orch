@@ -356,7 +356,7 @@ async function cancelRunFromComment(params: CancelRunFromCommentParams): Promise
     return { ok: false, reason: `Cancel only supports running/queued runs (current: ${run.status})` }
   }
 
-  runManager.update(run.id, {
+  runManager.updateLifecycle(run.id, {
     status: 'blocked',
     endedAt: nowUtcIso(),
     lastError: `Cancelled by @${user} via comment command`,

@@ -314,7 +314,7 @@ export class SyncEngine {
 
   private markCompleted(run: ActiveRunRow, dryRun: boolean, reason: string, forge: ForgeAdapter): SyncAction {
     if (!dryRun) {
-      this.runManager.update(run.id, {
+      this.runManager.updateLifecycle(run.id, {
         status: 'completed',
         lastError: null,
         endedAt: nowUtcIso(),
@@ -334,7 +334,7 @@ export class SyncEngine {
 
   private markClosed(run: ActiveRunRow, dryRun: boolean, reason: string, forge: ForgeAdapter): SyncAction {
     if (!dryRun) {
-      this.runManager.update(run.id, {
+      this.runManager.updateLifecycle(run.id, {
         status: 'completed',
         lastError: null,
         endedAt: nowUtcIso(),
@@ -354,7 +354,7 @@ export class SyncEngine {
 
   private markReviewReady(run: ActiveRunRow, dryRun: boolean, reason: string, forge: ForgeAdapter): SyncAction {
     if (!dryRun) {
-      this.runManager.update(run.id, {
+      this.runManager.updateLifecycle(run.id, {
         status: 'review_ready',
         lastError: null,
       })
@@ -380,7 +380,7 @@ export class SyncEngine {
     const actionLabel = orphan.outcome.action
     const reason = `Orphaned after process restart during ${actionLabel} finalize — run /orch continue to resume`
     if (!dryRun) {
-      this.runManager.update(run.id, {
+      this.runManager.updateLifecycle(run.id, {
         status: 'error',
         endedAt: nowUtcIso(),
         lastError: reason,
@@ -410,7 +410,7 @@ export class SyncEngine {
 
   private async markStale(run: ActiveRunRow, dryRun: boolean, reason: string): Promise<SyncAction> {
     if (!dryRun) {
-      this.runManager.update(run.id, {
+      this.runManager.transitionRunState(run.id, {
         status: 'queued',
         currentPhase: null,
         lastError: reason,

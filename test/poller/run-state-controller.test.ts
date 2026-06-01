@@ -46,7 +46,7 @@ describe('RunStateController', () => {
   it('marks a run blocked through state, labels, status comment, and notification', async () => {
     const issue = makeIssue()
     const forge = makeForge(issue)
-    const runManager = { update: vi.fn() } as unknown as RunManager
+    const runManager = { transitionRunState: vi.fn() } as unknown as RunManager
     const pollerNotifier = { blocked: vi.fn() } as unknown as PollerNotifier
     const controller = new RunStateController({
       forge,
@@ -75,7 +75,7 @@ describe('RunStateController', () => {
       },
     })
 
-    expect(runManager.update).toHaveBeenCalledWith(
+    expect(runManager.transitionRunState).toHaveBeenCalledWith(
       'run-1',
       expect.objectContaining({
         status: 'blocked',

@@ -5,7 +5,7 @@ import { buildLabelConfig } from '../labels/config.js'
 import { transitionLabels } from '../labels/manager.js'
 import type { BlockedReason } from '../loop/state.js'
 import { postStatusComment } from '../runner/comment-formatting.js'
-import type { RunManager, RunRecord, RunStatus } from '../state/runs.js'
+import type { RunManager, RunStateTransitionFields, RunStatus } from '../state/runs.js'
 import { nowUtcIso } from '../utils/time.js'
 import type { PollerNotifier, NotifyIssue } from './notify-dispatcher.js'
 
@@ -21,7 +21,7 @@ export interface RunStateControllerParams {
 
 export interface BlockedTransitionParams {
   from: RunStatus
-  fields: Omit<Partial<RunRecord>, 'status' | 'endedAt'>
+  fields: Omit<RunStateTransitionFields, 'status' | 'endedAt'>
   labelReason?: BlockedReason
   comment?: {
     body: string
@@ -36,7 +36,7 @@ export interface BlockedTransitionParams {
 
 export interface ErrorTransitionParams {
   from: RunStatus
-  fields: Omit<Partial<RunRecord>, 'status' | 'endedAt'>
+  fields: Omit<RunStateTransitionFields, 'status' | 'endedAt'>
   comment?: {
     body: string
     warnMessage: string
@@ -48,7 +48,7 @@ export interface ErrorTransitionParams {
 
 export interface ReviewReadyTransitionParams {
   from: RunStatus
-  fields?: Omit<Partial<RunRecord>, 'status' | 'endedAt'>
+  fields?: Omit<RunStateTransitionFields, 'status' | 'endedAt'>
   notification?: {
     summary?: string
     prUrl?: string | null
@@ -62,7 +62,7 @@ export class RunStateController {
   constructor(private readonly params: RunStateControllerParams) {}
 
   async markBlocked(runId: string, transition: BlockedTransitionParams): Promise<void> {
-    this.params.runManager.update(runId, {
+    this.params.runManager.transitionRunState(runId, {
       ...transition.fields,
       status: 'blocked',
       endedAt: nowUtcIso(),
@@ -81,7 +81,7 @@ export class RunStateController {
   }
 
   async markError(runId: string, transition: ErrorTransitionParams): Promise<void> {
-    this.params.runManager.update(runId, {
+    this.params.runManager.transitionRunState(runId, {
       ...transition.fields,
       status: 'error',
       endedAt: nowUtcIso(),
@@ -98,7 +98,7 @@ export class RunStateController {
   }
 
   async markReviewReady(runId: string, transition: ReviewReadyTransitionParams): Promise<void> {
-    this.params.runManager.update(runId, {
+    this.params.runManager.transitionRunState(runId, {
       ...(transition.fields ?? {}),
       status: 'review_ready',
       endedAt: nowUtcIso(),
@@ -114,8 +114,8 @@ export class RunStateController {
     }
   }
 
-  async markRunning(runId: string, fields: Omit<Partial<RunRecord>, 'status'>, from: RunStatus): Promise<void> {
-    this.params.runManager.update(runId, {
+  async markRunning(runId: string, fields: Omit<RunStateTransitionFields, 'status'>, from: RunStatus): Promise<void> {
+    this.params.runManager.transitionRunState(runId, {
       ...fields,
       status: 'running',
     })

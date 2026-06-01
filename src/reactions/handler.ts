@@ -95,7 +95,7 @@ export async function handleReaction(
       throw err
     }
   } else {
-    runManager.update(run.id, {
+    runManager.transitionRunState(run.id, {
       status: 'queued',
       lastError: null,
       endedAt: null,

@@ -214,7 +214,7 @@ function transitionMergedRuns(
   const endedAt = nowUtcIso()
   for (const row of rows) {
     try {
-      runManager.update(row.id, { status: 'completed', lastError: null, endedAt })
+      runManager.updateLifecycle(row.id, { status: 'completed', lastError: null, endedAt })
       logger.info(
         { repo, runId: row.id, prNumber: row.pr_number },
         'Transitioned run out of review_ready after successful merge',
@@ -331,7 +331,7 @@ async function quarantineCulpritPR(
   const runManager = new RunManager(db)
   const endedAt = nowUtcIso()
   for (const row of rows) {
-    runManager.update(row.id, {
+    runManager.updateLifecycle(row.id, {
       status: 'blocked',
       blockReason: 'merge_conflict',
       endedAt,

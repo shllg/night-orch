@@ -129,7 +129,7 @@ export async function applyRecoveryPlan(deps: ApplyRecoveryPlanDeps): Promise<vo
   // Always mark the run row as errored first — even on auto_retry we
   // want the row to carry the last-error string until the next poll
   // cycle picks it back up.
-  runManager.update(runId, {
+  runManager.updateLifecycle(runId, {
     status: 'error',
     lastError: plan.errorMessage,
     endedAt: nowUtcIso(),
