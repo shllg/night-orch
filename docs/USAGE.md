@@ -362,9 +362,25 @@ workflows:
       - { type: worker, id: cr, role: reviewer, prompt: prompts/code-review.md, reviewerKey: code-review }
       - { type: worker, id: review, role: reviewer }
       - { type: decide, id: decide, onIterate: code }
+
+  with-external-review:
+    steps:
+      - { type: worker, id: plan, role: planner, skipWhen: trivial }
+      - { type: worker, id: code, role: coder, continueFrom: plan }
+      - { type: verify, id: verify }
+      - { type: worker, id: review, role: reviewer }
+      - { type: decide, id: decide, onIterate: code }
+      - type: worker
+        id: cr
+        role: reviewer
+        runWhen: post-publish
+        prompt: .night-orch/prompts/cr-skill.md
+        commentPrefix: "[night-orch][cr]"
 ```
 
 Multiple reviewer steps are aggregated. Findings from each reviewer are grouped by reviewer slot and included in the next coder prompt; the decision gate applies the worst verdict across reviewers (`BLOCKED` over `CHANGES_REQUIRED` over `APPROVED`). A reviewer step's slot defaults to its step `id`; set `reviewerKey` when two steps should intentionally write the same reviewer slot.
+
+Post-publish reviewer steps run after PR creation. Use them for external review tools that need an open PR number. Non-approved findings are posted to the issue by default and queued as `external_review` feedback for a continue pass; set `onChangesRequired: comment-only` to avoid automatically continuing.
 
 ### DAG workflows
 
@@ -409,6 +425,10 @@ Rules:
 - `continueFrom: plan` — continue the AI session from a prior step when both steps use the same agent (reduces token usage, improves context)
 - `prompt: path/to/template.md` — use a custom system prompt instead of the default
 - `reviewerKey: code-review` — for reviewer steps, store the result under a specific reviewer slot instead of the step id
+- `runWhen: post-publish` — run a reviewer worker after the PR exists instead of before `decide`
+- `onChangesRequired: comment-only` — for post-publish reviewer steps, post findings without queuing continue
+- `commentOnIssue: false` — suppress the post-publish issue comment while still allowing continue behavior
+- `commentPrefix: "[night-orch][cr]"` — customize the post-publish issue comment prefix
 - `requireReview: false` — allow verification-only decisioning for lightweight workflows
 - `profile: strict` + `stage: smoke` (verify step) — run a specific verification profile stage
 - `roles` (workflow-level) — per-workflow default role assignment (`planner`/`coder`/`reviewer`)

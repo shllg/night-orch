@@ -10,6 +10,7 @@ import type { ForgeAdapter } from '../../src/forge/types.js'
 import type { Config, RepoConfig } from '../../src/config/schema.js'
 import type { RunContext } from '../../src/loop/types.js'
 import type { NotificationDispatcher } from '../../src/notify/dispatcher.js'
+import type { WorkerAdapter, WorkerTaskResult } from '../../src/workers/types.js'
 
 vi.mock('../../src/publishing/publisher.js', () => ({
   publishPR: vi.fn().mockResolvedValue({
@@ -76,7 +77,17 @@ function makeConfig(repoConfig: RepoConfig): Config {
     cost: { model: 'pay-per-use', subscriptionMetered: { advisoryThresholdUsd: null, enforcePerRunLimit: false, enforceDailyLimit: false }, allowEstimatedDuration: false },
     ai: { internal: { provider: null, model: null, apiKeyEnv: null, timeoutMs: 30_000, maxTokens: 1024, features: { conflictResolver: true }, enable: { triage: false, reviewerParseFallback: false, prBody: false } } },
     autoResolveConflicts: { enabled: true, maxAttempts: 2, maxFiles: 5 },
-    workerProfiles: {},
+    workerProfiles: {
+      codex: {
+        type: 'codex',
+        command: 'codex',
+        args: ['-p'],
+        workerTimeoutSeconds: 1800,
+        minimalEnv: true,
+        runtimeWrapper: null,
+        env: {},
+      },
+    },
     verificationProfiles: {},
     metrics: { enabled: false, port: 9090, host: '127.0.0.1' },
     observability: { agentStreaming: true, eventRetention: 1000, sessionLogs: true, sessionLogRetention: 7 },
@@ -87,7 +98,42 @@ function makeConfig(repoConfig: RepoConfig): Config {
   }
 }
 
-function makeForge(): ForgeAdapter {
+function makeExternalReviewResult(): WorkerTaskResult {
+  return {
+    rawOutput: '',
+    exitCode: 0,
+    timedOut: false,
+    durationMs: 25,
+    parsed: {
+      verdict: 'CHANGES_REQUIRED',
+      summary: 'CodeRabbit found a missing null guard',
+      findings: [
+        {
+          severity: 'major',
+          message: 'Add a null guard before reading config.name',
+          suggestedFix: 'Return early when config is null.',
+        },
+      ],
+      definitionOfDoneCheck: {
+        issueAddressed: false,
+        testsPassing: true,
+        noBlockingFindings: false,
+      },
+    },
+    parseError: null,
+    sessionId: 'sess-cr',
+    tokenUsage: { promptTokens: 10, completionTokens: 5 },
+  }
+}
+
+function makeReviewerAdapter(result: WorkerTaskResult = makeExternalReviewResult()): WorkerAdapter {
+  return {
+    runTask: vi.fn().mockResolvedValue(result),
+    checkAvailability: vi.fn().mockResolvedValue({ available: true, version: 'test' }),
+  }
+}
+
+function makeForge(overrides: Partial<ForgeAdapter> = {}): ForgeAdapter {
   return {
     getIssue: vi.fn().mockResolvedValue({
       number: 1,
@@ -116,6 +162,7 @@ function makeForge(): ForgeAdapter {
     listPRReviewComments: vi.fn(),
     mergePR: vi.fn(),
     closePR: vi.fn(),
+    ...overrides,
   } as unknown as ForgeAdapter
 }
 
@@ -211,5 +258,258 @@ describe('finalizeRunOutcome', () => {
     expect(row?.lastError).toBeNull()
     expect(row?.iterationCount).toBe(2)
     expect(row?.prNumber).toBe(42)
+  })
+
+  it('runs post-publish reviewer steps after PR publication and upserts a prefixed issue comment', async () => {
+    const runManager = new RunManager(db)
+    const run = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 1,
+      issueTitle: 'Issue',
+      issueNodeId: 'issue-node',
+      planner: 'codex',
+      coder: 'codex',
+      reviewer: 'codex',
+    })
+    runManager.update(run.id, { status: 'running' })
+
+    const repoConfig = makeRepoConfig()
+    const config = makeConfig(repoConfig)
+    const reviewer = makeReviewerAdapter()
+    const forge = makeForge({
+      listIssueComments: vi.fn().mockResolvedValue([]),
+      commentOnIssue: vi.fn().mockResolvedValue(undefined),
+    })
+    const finalCtx = {
+      runId: run.id,
+      repo: 'org/repo',
+      issueRepo: 'org/repo',
+      issueNumber: 1,
+      issue: { number: 1, nodeId: 'issue-node', title: 'Issue', body: '', labels: ['no:running'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      repoConfig,
+      roles: { planner: 'codex', coder: 'codex', reviewer: 'codex' },
+      triageResult: { level: 'standard', reason: 'test' },
+      adjustedLimits: { maxReviewIterations: 4, maxTotalAgentPasses: 10, workerTimeoutSeconds: 1800 },
+      branchName: 'orch/1-fix',
+      worktreePath: '/tmp/wt',
+      plan: null,
+      codeResult: null,
+      diff: 'diff',
+      verifyResults: [],
+      reviewResult: null,
+      reviewFindings: [],
+      iteration: 1,
+      totalAgentPasses: 0,
+      estimatedCostUsd: 0,
+      currentPhase: 'completed',
+      terminalStatus: 'publish',
+      phaseHistory: [],
+      dryRun: false,
+      runMode: 'fresh',
+      blockReason: null,
+      prReviewFeedback: null,
+      diffError: null,
+      emptyDiffRetries: 0,
+      sessionIds: {},
+      stepOutputs: {},
+      iterationSnapshots: [],
+    } satisfies RunContext
+
+    await finalizeRunOutcome({
+      finalCtx,
+      runId: run.id,
+      issue: { number: 1, title: 'Issue', url: '' },
+      runDurationSec: 3,
+      repo: 'org/repo',
+      repoConfig,
+      issueRepo: 'org/repo',
+      issueNumber: 1,
+      db,
+      forge,
+      runManager,
+      notifier: makeNotifier(),
+      maxAutoRetries: 0,
+      botUser: 'night-orch',
+      postPublish: {
+        config,
+        workflow: {
+          steps: [
+            {
+              type: 'worker',
+              id: 'cr',
+              role: 'reviewer',
+              runWhen: 'post-publish',
+              onChangesRequired: 'comment-only',
+              commentPrefix: '[night-orch][cr]',
+            },
+          ],
+        },
+        adapters: { reviewer },
+      },
+    })
+
+    expect(reviewer.runTask).toHaveBeenCalledWith(expect.objectContaining({
+      phase: 'cr',
+      role: 'reviewer',
+      worktreePath: '/tmp/wt',
+    }))
+    expect(forge.commentOnIssue).toHaveBeenCalledWith(
+      'org/repo',
+      1,
+      expect.stringContaining('<!-- night-orch:cr-'),
+    )
+    expect(forge.commentOnIssue).toHaveBeenCalledWith(
+      'org/repo',
+      1,
+      expect.stringContaining('[night-orch][cr]'),
+    )
+    expect(forge.commentOnIssue).toHaveBeenCalledWith(
+      'org/repo',
+      1,
+      expect.stringContaining('Add a null guard before reading config.name'),
+    )
+    const handoffRows = db
+      .prepare("SELECT step_id, kind, summary, content_md, content_json FROM agent_handoffs WHERE run_id = ?")
+      .all(run.id) as Array<{
+        step_id: string
+        kind: string
+        summary: string
+        content_md: string
+        content_json: string | null
+      }>
+    expect(handoffRows).toHaveLength(1)
+    expect(handoffRows[0]).toMatchObject({
+      step_id: 'cr',
+      kind: 'external-review-findings',
+      summary: 'CHANGES_REQUIRED: 1 finding',
+    })
+    expect(handoffRows[0]?.content_md).toContain('CodeRabbit found a missing null guard')
+    expect(JSON.parse(handoffRows[0]!.content_json!)).toMatchObject({
+      verdict: 'CHANGES_REQUIRED',
+      findings: [{ message: 'Add a null guard before reading config.name' }],
+    })
+    expect(runManager.getById(run.id)?.status).toBe('review_ready')
+    expect(runManager.getById(run.id)?.phaseData?.reactionType).toBeUndefined()
+  })
+
+  it('queues a continue pass for external_review findings when post-publish review requires changes', async () => {
+    const runManager = new RunManager(db)
+    const run = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 1,
+      issueTitle: 'Issue',
+      issueNodeId: 'issue-node',
+      planner: 'codex',
+      coder: 'codex',
+      reviewer: 'codex',
+    })
+    runManager.update(run.id, { status: 'running' })
+
+    const repoConfig = makeRepoConfig()
+    const config = makeConfig(repoConfig)
+    const reviewer = makeReviewerAdapter()
+    const forge = makeForge({
+      listIssueComments: vi.fn().mockResolvedValue([]),
+      commentOnIssue: vi.fn().mockResolvedValue(undefined),
+    })
+    const finalCtx = {
+      runId: run.id,
+      repo: 'org/repo',
+      issueRepo: 'org/repo',
+      issueNumber: 1,
+      issue: { number: 1, nodeId: 'issue-node', title: 'Issue', body: '', labels: ['no:running'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      repoConfig,
+      roles: { planner: 'codex', coder: 'codex', reviewer: 'codex' },
+      triageResult: { level: 'standard', reason: 'test' },
+      adjustedLimits: { maxReviewIterations: 4, maxTotalAgentPasses: 10, workerTimeoutSeconds: 1800 },
+      branchName: 'orch/1-fix',
+      worktreePath: '/tmp/wt',
+      plan: null,
+      codeResult: null,
+      diff: 'diff',
+      verifyResults: [],
+      reviewResult: null,
+      reviewResults: {
+        review: {
+          verdict: 'CHANGES_REQUIRED',
+          summary: 'Internal review found a missing test',
+          findings: [
+            {
+              severity: 'minor',
+              message: 'Add a regression test for empty config',
+              suggestedFix: null,
+            },
+          ],
+          definitionOfDoneCheck: {
+            issueAddressed: false,
+            testsPassing: true,
+            noBlockingFindings: false,
+          },
+        },
+      },
+      reviewFindings: [
+        {
+          severity: 'minor',
+          message: 'Add a regression test for empty config',
+          suggestedFix: null,
+          sourceStepId: 'review',
+          sourceRole: 'reviewer',
+        },
+      ],
+      iteration: 1,
+      totalAgentPasses: 1,
+      estimatedCostUsd: 0,
+      currentPhase: 'completed',
+      terminalStatus: 'publish',
+      phaseHistory: [],
+      dryRun: false,
+      runMode: 'fresh',
+      blockReason: null,
+      prReviewFeedback: null,
+      diffError: null,
+      emptyDiffRetries: 0,
+      sessionIds: {},
+      stepOutputs: {},
+      iterationSnapshots: [],
+    } satisfies RunContext
+
+    await finalizeRunOutcome({
+      finalCtx,
+      runId: run.id,
+      issue: { number: 1, title: 'Issue', url: '' },
+      runDurationSec: 3,
+      repo: 'org/repo',
+      repoConfig,
+      issueRepo: 'org/repo',
+      issueNumber: 1,
+      db,
+      forge,
+      runManager,
+      notifier: makeNotifier(),
+      maxAutoRetries: 0,
+      botUser: 'night-orch',
+      postPublish: {
+        config,
+        workflow: {
+          steps: [
+            {
+              type: 'worker',
+              id: 'cr',
+              role: 'reviewer',
+              runWhen: 'post-publish',
+              commentPrefix: '[night-orch][cr]',
+            },
+          ],
+        },
+        adapters: { reviewer },
+      },
+    })
+
+    const row = runManager.getById(run.id)
+    expect(row?.status).toBe('queued')
+    expect(row?.phaseData?.reactionType).toBe('external_review')
+    expect(row?.phaseData?.reactionSummary).toContain('cr')
+    expect(row?.phaseData?.reactionContext).toContain('Add a regression test for empty config')
+    expect(row?.phaseData?.reactionContext).toContain('Add a null guard before reading config.name')
   })
 })

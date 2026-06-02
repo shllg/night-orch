@@ -271,6 +271,45 @@ describe('ConfigSchema', () => {
     }
   })
 
+  it('accepts post-publish reviewer workflow step options with defaults', () => {
+    const raw = loadExampleConfig()
+    raw.workflows = {
+      externalReview: {
+        steps: [
+          { type: 'worker', id: 'code', role: 'coder' },
+          { type: 'decide', id: 'decide', onIterate: 'code', requireReview: false },
+          {
+            type: 'worker',
+            id: 'cr',
+            role: 'reviewer',
+            runWhen: 'post-publish',
+            prompt: '.night-orch/prompts/cr-skill.md',
+            commentPrefix: '[night-orch][cr]',
+          },
+        ],
+      },
+    }
+    raw.repos[0].workflow = 'externalReview'
+
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.workflows.externalReview?.steps?.[0]).toMatchObject({
+        id: 'code',
+        runWhen: 'pre-decide',
+        onChangesRequired: 'continue',
+        commentOnIssue: true,
+      })
+      expect(result.data.workflows.externalReview?.steps?.[2]).toMatchObject({
+        id: 'cr',
+        runWhen: 'post-publish',
+        onChangesRequired: 'continue',
+        commentOnIssue: true,
+        commentPrefix: '[night-orch][cr]',
+      })
+    }
+  })
+
   it('accepts verificationProfiles with repo and workflow stage selection', () => {
     const raw = loadExampleConfig()
     raw.verificationProfiles = {

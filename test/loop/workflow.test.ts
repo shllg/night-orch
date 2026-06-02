@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   resolveWorkflow,
+  getPostPublishSteps,
   DEFAULT_WORKFLOW,
   LIGHTWEIGHT_WORKFLOW,
   PLANNING_ONLY_WORKFLOW,
@@ -165,5 +166,20 @@ describe('DEFAULT_WORKFLOW', () => {
     if (decideStep.type === 'decide') {
       expect(decideStep.onIterate).toBe('code')
     }
+  })
+})
+
+describe('getPostPublishSteps', () => {
+  it('returns post-publish worker steps in declared order', () => {
+    const workflow = {
+      steps: [
+        { type: 'worker' as const, id: 'code', role: 'coder', runWhen: 'pre-decide' as const },
+        { type: 'decide' as const, id: 'decide', onIterate: 'code' },
+        { type: 'worker' as const, id: 'cr', role: 'reviewer', runWhen: 'post-publish' as const },
+        { type: 'worker' as const, id: 'snyk', role: 'reviewer', runWhen: 'post-publish' as const },
+      ],
+    }
+
+    expect(getPostPublishSteps(workflow).map((step) => step.id)).toEqual(['cr', 'snyk'])
   })
 })

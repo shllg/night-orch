@@ -5,6 +5,7 @@ import type { ForgeAdapter } from '../forge/types.js'
 import type { RunManager } from '../state/runs.js'
 import { publishPR } from '../publishing/publisher.js'
 import { MergeConflictError } from '../publishing/push.js'
+import { handleReaction } from '../reactions/handler.js'
 import { buildConflictSnapshot } from '../ops/conflict-snapshot.js'
 import { transitionLabels } from '../labels/manager.js'
 import { buildLabelConfig } from '../labels/config.js'
@@ -15,6 +16,7 @@ import type { NotificationDispatcher } from '../notify/dispatcher.js'
 import { nowUtcIso } from '../utils/time.js'
 import { logger } from '../utils/logger.js'
 import type { RunContext } from '../loop/types.js'
+import { runPostPublishSteps, type PostPublishReviewDeps } from '../loop/post-publish.js'
 import { blocked, blockedReasonFromLegacy } from '../loop/state.js'
 import {
   STATUS_MARKER,
@@ -47,6 +49,7 @@ export interface FinalizeRunOutcomeParams {
   metrics?: MetricsService
   maxAutoRetries: number
   botUser: string
+  postPublish?: PostPublishReviewDeps
 }
 
 export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Promise<'processed' | 'error'> {
@@ -66,6 +69,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
     metrics,
     maxAutoRetries,
     botUser,
+    postPublish,
   } = params
 
   let latestIssuePromise: ReturnType<ForgeAdapter['getIssue']> | null = null
@@ -102,6 +106,28 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
         endedAt: nowUtcIso(),
       })
       await transitionFromRunning('review_ready')
+      if (postPublish) {
+        const postPublishResult = await runPostPublishSteps({
+          ...postPublish,
+          ctx: finalCtx,
+          db,
+          forge,
+          issueRepo,
+          issueNumber,
+          prNumber: publishResult.prNumber,
+          prUrl: publishResult.prUrl,
+          botUser,
+        })
+        for (const reaction of postPublishResult.reactions) {
+          await handleReaction(reaction, {
+            db,
+            forge,
+            runManager,
+            repoConfig,
+            maxAttemptChainLength: postPublish.config.loop.maxAttemptChainLength,
+          })
+        }
+      }
       const notificationEvent = publishResult.created ? 'pr_ready' : 'pr_updated'
       const notifyResult = await notifier.dispatch(makePayload(notificationEvent, repo, issue, {
         prUrl: publishResult.prUrl,

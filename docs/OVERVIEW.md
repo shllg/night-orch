@@ -207,6 +207,7 @@ interface RunContext {
 - **Code** — Sends plan + review feedback to the coder worker. The coder works in the git worktree.
 - **Verify** — Runs configured shell commands (e.g., `pnpm test`, `pnpm lint`). Each command's exit code and output are captured.
 - **Review** — Sends the diff to one or more reviewer workers. Output: verdict (`APPROVED`, `CHANGES_REQUIRED`, `BLOCKED`) with comments, stored by reviewer step/slot and merged for coder retries.
+- **Post-publish review** — Optional reviewer workers with `runWhen: post-publish` run after PR creation for external tools that need an open PR. Non-approved findings are persisted as external-review handoffs, can be posted to the issue, and can queue a continue pass as `external_review` feedback.
 
 ### Decision (`src/loop/decision.ts`)
 

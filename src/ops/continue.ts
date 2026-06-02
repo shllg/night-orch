@@ -502,6 +502,8 @@ function summarizeReactionTypes(types: ReactionType[]): string[] {
         return 'requested review changes'
       case 'review_comment':
         return 'inline review comments'
+      case 'external_review':
+        return 'external review findings'
     }
   })
 }

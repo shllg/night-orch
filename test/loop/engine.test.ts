@@ -272,6 +272,33 @@ describe('executeLoop', () => {
     expect(lastPhase.result).toBe('success')
   })
 
+  it('does not execute post-publish worker steps during the normal loop', async () => {
+    const config = makeConfig()
+    config.loop.requireVerificationPass = false
+    const reviewerAdapter = makeMockAdapter([makeReviewerResult('APPROVED')])
+    const deps: LoopDependencies = {
+      db,
+      config,
+      adapters: {
+        planner: makeMockAdapter([makePlannerResult()]),
+        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: reviewerAdapter,
+      },
+      workflow: {
+        steps: [
+          { type: 'worker', id: 'code', role: 'coder' },
+          { type: 'worker', id: 'cr', role: 'reviewer', runWhen: 'post-publish' },
+          { type: 'decide', id: 'decide', onIterate: 'code', requireReview: false },
+        ],
+      },
+    }
+
+    const result = await executeLoop(makeCtx({ currentPhase: 'code' }), deps)
+
+    expect(reviewerAdapter.runTask).not.toHaveBeenCalled()
+    expect(result.terminalStatus).toBe('publish')
+  })
+
   it('calls onPlanReady after plan and before code', async () => {
     const callOrder: string[] = []
     const onPlanReady = vi.fn().mockImplementation(async () => {

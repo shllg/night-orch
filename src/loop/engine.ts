@@ -2,7 +2,7 @@ import type { RunContext } from './types.js'
 import type { Config } from '../config/schema.js'
 import type { WorkerAdapter } from '../workers/types.js'
 import type { MetricsService } from '../metrics/service.js'
-import type { ResolvedWorkflow } from './workflow.js'
+import { runWhenForStep, type ResolvedWorkflow } from './workflow.js'
 import {
   Checkpoint,
   applyPersistedDecisionOutcome,
@@ -109,6 +109,13 @@ export async function executeLoop(
 
   while (stepIndex < steps.length) {
     const step = steps[stepIndex]!
+
+    if (step.type === 'worker' && runWhenForStep(step) === 'post-publish') {
+      checkpoint.phaseSkipped(ctx.runId, step.id, ctx.iteration)
+      ctx = recordPhase(ctx, step.id, 'skipped')
+      stepIndex++
+      continue
+    }
 
     // Skip step if skipWhen matches triage level. Emit paired
     // phase_started/phase_completed events so the event stream stays

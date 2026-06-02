@@ -521,14 +521,15 @@ export async function dispatchAttempt(
 
     // Execute loop (single-issue path)
     const loopStart = Date.now()
+    const adapters = {
+      planner: createWorkerAdapter(plannerProfile),
+      coder: createWorkerAdapter(coderProfile),
+      reviewer: createWorkerAdapter(reviewerProfile),
+    }
     const finalCtx = await executeLoop(initialCtx, {
       db,
       config,
-      adapters: {
-        planner: createWorkerAdapter(plannerProfile),
-        coder: createWorkerAdapter(coderProfile),
-        reviewer: createWorkerAdapter(reviewerProfile),
-      },
+      adapters,
       workflow,
       envOverrides: envSetup?.envOverrides ?? {},
       metrics,
@@ -562,6 +563,12 @@ export async function dispatchAttempt(
       metrics,
       maxAutoRetries: config.loop.maxAutoRetries,
       botUser,
+      postPublish: {
+        config,
+        workflow,
+        adapters,
+        envOverrides: envSetup?.envOverrides ?? {},
+      },
     })
 
     outcome = finalizerOutcome === 'processed' ? 'processed' : 'errored'

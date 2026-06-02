@@ -13,6 +13,10 @@ export type WorkerStep = {
   continueFrom?: string
   prompt?: string
   reviewerKey?: string
+  runWhen?: 'pre-decide' | 'post-publish'
+  onChangesRequired?: 'continue' | 'comment-only'
+  commentOnIssue?: boolean
+  commentPrefix?: string
 }
 
 export type VerifyStep = {
@@ -45,6 +49,10 @@ type WorkflowDagWorkerStage = {
   continueFrom?: string
   prompt?: string
   reviewerKey?: string
+  runWhen?: 'pre-decide' | 'post-publish'
+  onChangesRequired?: 'continue' | 'comment-only'
+  commentOnIssue?: boolean
+  commentPrefix?: string
   next?: string
 }
 
@@ -181,6 +189,10 @@ function expandWorkflowDag(workflowName: string, dag: WorkflowDagDefinition): Wo
           ...(stage.continueFrom ? { continueFrom: stage.continueFrom } : {}),
           ...(stage.prompt ? { prompt: stage.prompt } : {}),
           ...(stage.reviewerKey ? { reviewerKey: stage.reviewerKey } : {}),
+          ...(stage.runWhen ? { runWhen: stage.runWhen } : {}),
+          ...(stage.onChangesRequired ? { onChangesRequired: stage.onChangesRequired } : {}),
+          ...(stage.commentOnIssue !== undefined ? { commentOnIssue: stage.commentOnIssue } : {}),
+          ...(stage.commentPrefix ? { commentPrefix: stage.commentPrefix } : {}),
         })
         if (!stage.next) {
           throw new Error(
@@ -230,4 +242,14 @@ function expandWorkflowDag(workflowName: string, dag: WorkflowDagDefinition): Wo
 
 export function reviewerKeyForStep(step: Pick<WorkerStep, 'id' | 'reviewerKey'>): string {
   return step.reviewerKey ?? step.id
+}
+
+export function runWhenForStep(step: Pick<WorkerStep, 'runWhen'>): 'pre-decide' | 'post-publish' {
+  return step.runWhen ?? 'pre-decide'
+}
+
+export function getPostPublishSteps(workflow: Pick<ResolvedWorkflow, 'steps'>): WorkerStep[] {
+  return workflow.steps.filter((step): step is WorkerStep =>
+    step.type === 'worker' && runWhenForStep(step) === 'post-publish',
+  )
 }

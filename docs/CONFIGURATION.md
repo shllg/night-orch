@@ -735,15 +735,31 @@ workflows:
       - { type: worker, id: cr, role: reviewer, prompt: code-review.md, reviewerKey: code-review }
       - { type: worker, id: review, role: reviewer }
       - { type: decide, id: decide, onIterate: code }
+
+  with-external-review:
+    steps:
+      - { type: worker, id: plan, role: planner, skipWhen: trivial }
+      - { type: worker, id: code, role: coder, continueFrom: plan }
+      - { type: verify, id: verify }
+      - { type: worker, id: review, role: reviewer }
+      - { type: decide, id: decide, onIterate: code }
+      - type: worker
+        id: cr
+        role: reviewer
+        runWhen: post-publish
+        prompt: .night-orch/prompts/cr-skill.md
+        commentPrefix: "[night-orch][cr]"
 ```
 
 When a workflow has multiple reviewer steps, Night-Orch stores each reviewer result by step id and merges the findings before the next coder iteration. `decide` uses a worst-of verdict: any `BLOCKED` blocks, otherwise any `CHANGES_REQUIRED` iterates, otherwise all-approved publishes when verification passes.
+
+Post-publish reviewer steps run only after the branch has been pushed and a PR exists. They are intended for external review tools such as CodeRabbit or Snyk invoked from a reviewer prompt. A non-approved result is stored as an `external-review-findings` handoff, posted to the issue when enabled, and by default queues a continue pass with the findings as `external_review` feedback.
 
 ### Step Types
 
 | Type | Fields | Description |
 | --- | --- | --- |
-| `worker` | `id`, `role`, `skipWhen?`, `continueFrom?`, `prompt?`, `reviewerKey?` | Invoke a worker adapter. Built-in roles: `planner`, `coder`, `reviewer`. |
+| `worker` | `id`, `role`, `skipWhen?`, `continueFrom?`, `prompt?`, `reviewerKey?`, `runWhen?`, `onChangesRequired?`, `commentOnIssue?`, `commentPrefix?` | Invoke a worker adapter. Built-in roles: `planner`, `coder`, `reviewer`. |
 | `verify` | `id`, `skipWhen?`, `profile?`, `stage?` | Run verify commands from `repos[].verify` or a named verification profile/stage. |
 | `decide` | `id`, `onIterate`, `requireReview?` | Evaluate review/verify results and route to publish, iterate (jump to `onIterate` step), or block. |
 
@@ -751,6 +767,10 @@ When a workflow has multiple reviewer steps, Night-Orch stores each reviewer res
 - `continueFrom` — continue the AI session from a prior step (e.g., coder continues planner's session). Session reuse is agent-specific; cross-agent handoffs (for example `planner=claude`, `coder=codex`) start a fresh session.
 - `prompt` — path to a custom system prompt template (overrides the default)
 - `reviewerKey` — reviewer result slot for `role: reviewer`; defaults to the step `id`. Set this when two reviewer steps should intentionally write the same slot.
+- `runWhen` — `pre-decide` by default. Set reviewer steps to `post-publish` to run after PR creation.
+- `onChangesRequired` — for post-publish reviewer steps, `continue` by default; set `comment-only` to post findings without queuing another pass.
+- `commentOnIssue` — for post-publish reviewer steps, default `true`; when enabled, upserts a per-attempt issue comment with the external findings.
+- `commentPrefix` — optional prefix for the post-publish issue comment, for example `[night-orch][cr]`.
 - `requireReview` — default `true`; set to `false` for no-review workflows (for example lightweight triage paths)
 - `profile` / `stage` on verify steps — override repo-level verification profile selection for this step
 

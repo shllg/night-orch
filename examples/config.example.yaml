@@ -237,6 +237,19 @@ commentCommands:
 #       - { type: worker, id: cr, role: reviewer, prompt: .night-orch/prompts/code-review.md, reviewerKey: code-review }
 #       - { type: worker, id: review, role: reviewer }
 #       - { type: decide, id: decide, onIterate: code }
+#   with-external-review:
+#     steps:
+#       - { type: worker, id: plan, role: planner, skipWhen: trivial }
+#       - { type: worker, id: code, role: coder, continueFrom: plan }
+#       - { type: verify, id: verify }
+#       - { type: worker, id: review, role: reviewer }
+#       - { type: decide, id: decide, onIterate: code }
+#       - type: worker
+#         id: cr
+#         role: reviewer
+#         runWhen: post-publish
+#         prompt: .night-orch/prompts/cr-skill.md
+#         commentPrefix: "[night-orch][cr]"
 #   dag-minimal:
 #     dag:
 #       entry: code
