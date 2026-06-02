@@ -17,6 +17,7 @@ const EXPECTED_TOOL_NAMES = [
   'night-orch-clear-setting',
   'night-orch-status',
   'night-orch-run-detail',
+  'night-orch-handoffs',
   'night-orch-list-runs',
   'night-orch-list-inbox',
   'night-orch-cost-report',

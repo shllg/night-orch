@@ -54,6 +54,8 @@ describe('MetricsService', () => {
       service.incVerifyRuns('pass')
       service.incPROperations('created')
       service.incNotifications('console', 'sent')
+      service.incHandoffs('plan')
+      service.incRecoveryFromHandoff()
       service.incRebaseConflict()
       service.incRebaseAutoResolved()
       service.incRebaseAutoResolveFailed('error')
@@ -165,6 +167,19 @@ describe('MetricsService', () => {
       const body = await getMetrics(port)
       expect(body).toContain('night_orch_rebase_fanouts_total{repo="org/repo",base_branch="main"} 1')
       expect(body).toContain('night_orch_rebase_fanout_siblings_queued_total{repo="org/repo"} 2')
+    })
+
+    it('handoff counters are reflected in output', async () => {
+      service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
+      await service.start()
+
+      service.incHandoffs('plan')
+      service.incHandoffs('plan')
+      service.incRecoveryFromHandoff()
+
+      const body = await getMetrics(port)
+      expect(body).toContain('night_orch_handoffs_total{kind="plan"} 2')
+      expect(body).toContain('night_orch_recovery_from_handoff_total 1')
     })
 
     it('histogram observation reflected in output', async () => {

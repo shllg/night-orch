@@ -8,6 +8,7 @@ import { WorkerAuthError } from '../../src/workers/errors.js'
 import { hashVerifyResults } from '../../src/loop/progress.js'
 import { createMetricsService } from '../../src/metrics/service.js'
 import { initDatabase } from '../../src/state/db.js'
+import { listHandoffs } from '../../src/state/handoffs.js'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -270,6 +271,70 @@ describe('executeLoop', () => {
     // Last phase record should be success
     const lastPhase = result.phaseHistory[result.phaseHistory.length - 1]!
     expect(lastPhase.result).toBe('success')
+  })
+
+  it('records ordered handoffs for each structured normal workflow output', async () => {
+    const metrics = createMetricsService({ enabled: false, host: '127.0.0.1', port: 9090 })
+    const incHandoffsSpy = vi.spyOn(metrics, 'incHandoffs')
+    const deps: LoopDependencies = {
+      db,
+      config: makeConfig(),
+      adapters: {
+        planner: makeMockAdapter([makePlannerResult()]),
+        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: makeMockAdapter([makeReviewerResult('APPROVED')]),
+      },
+      workflow: DEFAULT_WORKFLOW,
+      metrics,
+    }
+
+    await executeLoop(makeCtx(), deps)
+
+    const handoffs = listHandoffs(db, 'run-test-1')
+    expect(handoffs.map((handoff) => ({
+      stepId: handoff.stepId,
+      fromRole: handoff.fromRole,
+      toRole: handoff.toRole,
+      kind: handoff.kind,
+      summary: handoff.summary,
+    }))).toEqual([
+      {
+        stepId: 'plan',
+        fromRole: 'planner',
+        toRole: 'coder',
+        kind: 'plan',
+        summary: 'Plan: Fix it (1 step, 1 file)',
+      },
+      {
+        stepId: 'code',
+        fromRole: 'coder',
+        toRole: 'system',
+        kind: 'code-summary',
+        summary: 'Code: Fixed the bug (1 file)',
+      },
+      {
+        stepId: 'verify',
+        fromRole: 'system',
+        toRole: 'reviewer',
+        kind: 'verify-summary',
+        summary: 'Verify: 1/1 passed',
+      },
+      {
+        stepId: 'review',
+        fromRole: 'reviewer',
+        toRole: 'system',
+        kind: 'review-findings',
+        summary: 'Review: APPROVED (0 findings)',
+      },
+    ])
+    expect(handoffs[0]?.contentMd).toContain('## Plan')
+    expect(handoffs[3]?.contentJson).toMatchObject({ verdict: 'APPROVED' })
+    expect(incHandoffsSpy.mock.calls.map(([kind]) => kind)).toEqual([
+      'plan',
+      'code-summary',
+      'verify-summary',
+      'review-findings',
+    ])
   })
 
   it('does not execute post-publish worker steps during the normal loop', async () => {

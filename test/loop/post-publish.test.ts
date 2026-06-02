@@ -9,6 +9,7 @@ import { initDatabase } from '../../src/state/db.js'
 import type { ForgeAdapter } from '../../src/forge/types.js'
 import type { WorkerAdapter, WorkerTaskInput, WorkerTaskResult } from '../../src/workers/types.js'
 import { makeTestConfig } from '../helpers/factories.js'
+import { createMetricsService } from '../../src/metrics/service.js'
 
 const tokenUsage = { promptTokens: 10, completionTokens: 5 }
 
@@ -118,6 +119,8 @@ describe('runPostPublishSteps', () => {
   it('runs multiple post-publish reviewer steps in declared order and records handoffs for each', async () => {
     const calls: string[] = []
     const reviewer = makeReviewerAdapter(calls)
+    const metrics = createMetricsService({ enabled: false, host: '127.0.0.1', port: 9090 })
+    const incHandoffsSpy = vi.spyOn(metrics, 'incHandoffs')
     const config = makeTestConfig({
       workerProfiles: {
         codex: {
@@ -143,6 +146,7 @@ describe('runPostPublishSteps', () => {
       botUser: 'night-orch',
       config,
       adapters: { reviewer },
+      metrics,
       workflow: {
         steps: [
           { type: 'worker', id: 'cr', role: 'reviewer', runWhen: 'post-publish', onChangesRequired: 'comment-only' },
@@ -158,6 +162,10 @@ describe('runPostPublishSteps', () => {
     expect(rows).toEqual([
       { step_id: 'cr', kind: 'external-review-findings' },
       { step_id: 'snyk', kind: 'external-review-findings' },
+    ])
+    expect(incHandoffsSpy.mock.calls.map(([kind]) => kind)).toEqual([
+      'external-review-findings',
+      'external-review-findings',
     ])
   })
 })

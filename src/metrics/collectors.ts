@@ -184,6 +184,19 @@ export function createMetricsRegistry() {
     registers: [registry],
   })
 
+  const handoffsTotal = new Counter({
+    name: 'night_orch_handoffs_total',
+    help: 'Persisted agent handoffs by kind',
+    labelNames: ['kind'] as const,
+    registers: [registry],
+  })
+
+  const recoveryFromHandoffTotal = new Counter({
+    name: 'night_orch_recovery_from_handoff_total',
+    help: 'RunContext recoveries reconstructed from persisted handoffs',
+    registers: [registry],
+  })
+
   const rebaseConflictTotal = new Counter({
     name: 'night_orch_rebase_conflict_total',
     help: 'Rebase operations that encountered at least one textual conflict',
@@ -241,6 +254,8 @@ export function createMetricsRegistry() {
     costTokenSourceTotal,
     checkpointQuarantineRows,
     circuitBreakerTripsTotal,
+    handoffsTotal,
+    recoveryFromHandoffTotal,
     rebaseConflictTotal,
     rebaseAutoResolvedTotal,
     rebaseAutoResolveFailedTotal,

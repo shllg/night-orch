@@ -1,5 +1,6 @@
 import type { Config } from '../config/schema.js'
 import type { ForgeAdapter } from '../forge/types.js'
+import type { MetricsService } from '../metrics/service.js'
 import { markerTag, upsertBotComment } from '../forge/bot-comment.js'
 import type { Reaction } from '../reactions/types.js'
 import { recordHandoff } from '../state/handoffs.js'
@@ -9,6 +10,7 @@ import type { RunContext, ReviewerOutput } from './types.js'
 import { updateContext } from './context.js'
 import { executeWorkerStep, type StepDependencies } from './step-executor.js'
 import { getPostPublishSteps, type ResolvedWorkflow, type WorkerStep } from './workflow.js'
+import { renderExternalReviewHandoff } from './handoff-render.js'
 import { nowUtcIso } from '../utils/time.js'
 import type Database from 'better-sqlite3'
 
@@ -17,6 +19,7 @@ export interface PostPublishReviewDeps {
   workflow: ResolvedWorkflow
   adapters: Record<string, WorkerAdapter>
   envOverrides?: Record<string, string>
+  metrics?: MetricsService
 }
 
 export interface RunPostPublishStepsInput extends PostPublishReviewDeps {
@@ -51,7 +54,7 @@ export async function runPostPublishSteps(input: RunPostPublishStepsInput): Prom
     if (step.role === 'reviewer') {
       const review = ctx.reviewResults?.[step.reviewerKey ?? step.id] ?? ctx.reviewResult
       if (review) {
-        recordExternalReviewHandoff(input.db, ctx, step, review, result.tokenUsage)
+        recordExternalReviewHandoff(input.db, ctx, step, review, result.tokenUsage, input.metrics)
       }
       if (review && shouldCommentOnIssue(step)) {
         await upsertExternalReviewComment({
@@ -121,8 +124,9 @@ function recordExternalReviewHandoff(
   step: WorkerStep,
   review: ReviewerOutput,
   tokenUsage: Parameters<typeof recordHandoff>[1]['tokenUsage'],
+  metrics?: MetricsService,
 ): void {
-  const count = review.findings.length
+  const handoff = renderExternalReviewHandoff(review, step.id)
   recordHandoff(db, {
     runId: ctx.runId,
     attemptId: ctx.runId,
@@ -130,11 +134,12 @@ function recordExternalReviewHandoff(
     fromRole: 'reviewer',
     toRole: shouldQueueContinue(step, review) ? 'coder' : 'system',
     kind: 'external-review-findings',
-    summary: `${review.verdict}: ${count} ${count === 1 ? 'finding' : 'findings'}`,
-    contentMd: formatExternalReviewHandoff(step, review),
-    contentJson: review,
+    summary: handoff.summary,
+    contentMd: handoff.contentMd,
+    contentJson: handoff.contentJson,
     ...(tokenUsage ? { tokenUsage } : {}),
   })
+  try { metrics?.incHandoffs('external-review-findings') } catch { /* best-effort */ }
 }
 
 async function upsertExternalReviewComment(input: {
@@ -168,28 +173,6 @@ function formatExternalReviewComment(step: WorkerStep, review: ReviewerOutput): 
     for (const finding of review.findings) {
       lines.push(`- [${finding.severity}] ${finding.message}`)
       if (finding.suggestedFix) lines.push(`  Suggested fix: ${finding.suggestedFix}`)
-    }
-  }
-
-  return lines.join('\n')
-}
-
-function formatExternalReviewHandoff(step: WorkerStep, review: ReviewerOutput): string {
-  const lines = [
-    `## External Review: ${step.id}`,
-    '',
-    `Verdict: ${review.verdict}`,
-    '',
-    sanitizeUntrustedText(review.summary),
-  ]
-
-  if (review.findings.length > 0) {
-    lines.push('', 'Findings:')
-    for (const finding of review.findings) {
-      lines.push(`- [${finding.severity}] ${sanitizeUntrustedText(finding.message)}`)
-      if (finding.suggestedFix) {
-        lines.push(`  Suggested fix: ${sanitizeUntrustedText(finding.suggestedFix)}`)
-      }
     }
   }
 

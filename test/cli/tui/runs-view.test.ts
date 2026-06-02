@@ -3,7 +3,7 @@ import React from 'react'
 import type { ReactElement, ReactNode } from 'react'
 import { Text } from 'ink'
 import { RunsView } from '../../../src/cli/tui/runs-view.js'
-import type { AgentEventRow, IssueListRow, RunListRow } from '../../../src/cli/tui/data.js'
+import type { AgentEventRow, HandoffRow, IssueListRow, RunListRow } from '../../../src/cli/tui/data.js'
 import type { TitleLookup } from '../../../src/cli/tui/titles.js'
 import type { TuiStatsSnapshot } from '../../../src/state/stats.js'
 
@@ -147,6 +147,56 @@ describe('RunsView semantic run data display', () => {
     expect(hasExactTextWithColor(tree, 'i3', 'red')).toBe(true)
     expect(hasExactTextWithColor(tree, '$2.50', 'red')).toBe(true)
   })
+
+  it('renders handoffs in focus mode with expanded markdown for the selected row', () => {
+    const selectedRun = makeRunRow({ id: 'run-focus' })
+    const issue = makeIssueRow({ runs: [selectedRun] })
+    const handoffs: HandoffRow[] = [
+      makeHandoffRow({
+        id: 1,
+        stepId: 'plan',
+        fromRole: 'planner',
+        toRole: 'coder',
+        kind: 'plan',
+        summary: 'Plan: Fix issue',
+        contentMd: '## Plan\n\nObjective: Fix issue',
+      }),
+      makeHandoffRow({
+        id: 2,
+        stepId: 'review',
+        fromRole: 'reviewer',
+        toRole: 'system',
+        kind: 'review-findings',
+        summary: 'Review: APPROVED',
+        contentMd: '## Review Findings',
+      }),
+    ]
+
+    const tree = RunsView({
+      issues: [issue],
+      selectedIndex: 0,
+      selectedIssue: issue,
+      selectedRun,
+      selectedRunEvents: [],
+      selectedRunHandoffs: handoffs,
+      selectedHandoffIndex: 0,
+      expandedHandoffIds: new Set([1]),
+      mergeBatches: [],
+      stats: makeStats(),
+      titleLookup: emptyTitleLookup(),
+      mode: 'focus',
+      maxVisibleRuns: 20,
+      eventScrollOffset: 0,
+      eventWindowSize: 20,
+    })
+
+    expect(findTextNode(tree, 'Handoffs (2)')).toBeTruthy()
+    expect(findTextNode(tree, '[1] plan  plan')).toBeTruthy()
+    expect(hasColoredFragment(tree, '>', 'cyan')).toBe(true)
+    expect(findTextNode(tree, 'Plan: Fix issue')).toBeTruthy()
+    expect(findTextNode(tree, 'Objective: Fix issue')).toBeTruthy()
+    expect(findTextNode(tree, '[2] review-findings  review')).toBeTruthy()
+  })
 })
 
 function emptyTitleLookup(): TitleLookup {
@@ -195,6 +245,23 @@ function makeRunRow(partial: Partial<RunListRow>): RunListRow {
     pr_title: partial.pr_title ?? null,
     created_at: partial.created_at ?? '2026-04-01T10:00:00.000Z',
     updated_at: partial.updated_at ?? '2026-04-01T10:00:30.000Z',
+  }
+}
+
+function makeHandoffRow(partial: Partial<HandoffRow>): HandoffRow {
+  return {
+    id: partial.id ?? 1,
+    runId: partial.runId ?? 'run-focus',
+    attemptId: partial.attemptId ?? 'run-focus',
+    stepId: partial.stepId ?? 'plan',
+    fromRole: partial.fromRole ?? 'planner',
+    toRole: partial.toRole ?? 'coder',
+    kind: partial.kind ?? 'plan',
+    summary: partial.summary ?? 'Plan: Fix issue',
+    contentMd: partial.contentMd ?? '## Plan',
+    contentJson: partial.contentJson ?? { objective: 'Fix issue' },
+    tokenUsage: partial.tokenUsage ?? null,
+    createdAt: partial.createdAt ?? new Date('2026-04-01T10:00:00.000Z'),
   }
 }
 
@@ -360,5 +427,5 @@ function flattenText(node: ReactNode): string {
 
 function isLocalRenderableComponent(type: unknown): boolean {
   if (typeof type !== 'function') return false
-  return type.name === 'FocusedIssueView' || type.name === 'RunHistory'
+  return type.name === 'FocusedIssueView' || type.name === 'HandoffsPanel' || type.name === 'RunHistory'
 }

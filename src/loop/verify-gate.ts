@@ -13,6 +13,7 @@ import {
 import { allRequiredVerifyPassed } from './verifier.js'
 import type { RunContext } from './types.js'
 import type { VerifyStep, WorkflowStep } from './workflow.js'
+import { buildStepHandoff } from './handoff.js'
 
 export type VerifyGateResult =
   | { action: 'next'; ctx: RunContext }
@@ -61,7 +62,11 @@ export async function runVerifyGate(params: VerifyGateParams): Promise<VerifyGat
 
   const stepSuccess = determineStepSuccess(step, ctx)
   const artifacts = buildStepArtifacts(step, ctx)
-  checkpoint.phaseCompleted(ctx.runId, step.id, artifacts, ctx.iteration)
+  const handoff = buildStepHandoff({ ctx, step, steps, stepIndex })
+  checkpoint.phaseCompleted(ctx.runId, step.id, artifacts, ctx.iteration, handoff ?? undefined)
+  if (handoff) {
+    try { metrics?.incHandoffs(handoff.kind) } catch { /* best-effort */ }
+  }
   checkpoint.persistRunState(ctx.runId, ctx.sessionIds, ctx.stepOutputs)
 
   if (leaseHeartbeat) {

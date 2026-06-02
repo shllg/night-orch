@@ -26,6 +26,8 @@ export interface MetricsService {
   incCostTokenSource(source: 'reported_cli' | 'measured_api' | 'estimated_duration' | 'fallback_zero'): void
   setCheckpointQuarantineRows(count: number): void
   incCircuitBreakerTrip(repo: string): void
+  incHandoffs(kind: string): void
+  incRecoveryFromHandoff(): void
   incRebaseConflict(): void
   incRebaseAutoResolved(): void
   incRebaseAutoResolveFailed(reason: 'unresolved' | 'validation_failed' | 'error'): void
@@ -67,6 +69,8 @@ class NoopMetricsService implements MetricsService {
   incCostTokenSource(): void { /* no-op */ }
   setCheckpointQuarantineRows(): void { /* no-op */ }
   incCircuitBreakerTrip(): void { /* no-op */ }
+  incHandoffs(): void { /* no-op */ }
+  incRecoveryFromHandoff(): void { /* no-op */ }
   incRebaseConflict(): void { /* no-op */ }
   incRebaseAutoResolved(): void { /* no-op */ }
   incRebaseAutoResolveFailed(): void { /* no-op */ }
@@ -200,6 +204,14 @@ class LiveMetricsService implements MetricsService {
 
   incCircuitBreakerTrip(repo: string): void {
     try { this.metrics.circuitBreakerTripsTotal.inc({ repo }) } catch { /* best-effort */ }
+  }
+
+  incHandoffs(kind: string): void {
+    try { this.metrics.handoffsTotal.inc({ kind }) } catch { /* best-effort */ }
+  }
+
+  incRecoveryFromHandoff(): void {
+    try { this.metrics.recoveryFromHandoffTotal.inc() } catch { /* best-effort */ }
   }
 
   incRebaseConflict(): void {

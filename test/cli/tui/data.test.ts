@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type Database from 'better-sqlite3'
 import { initDatabase } from '../../../src/state/db.js'
-import { buildIssueList, loadRuns } from '../../../src/cli/tui/data.js'
+import { recordHandoff } from '../../../src/state/handoffs.js'
+import { buildIssueList, loadHandoffs, loadRuns } from '../../../src/cli/tui/data.js'
 
 describe('loadRuns', () => {
   let tmpDir: string
@@ -18,6 +19,40 @@ describe('loadRuns', () => {
   afterEach(() => {
     db.close()
     rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('loads agent handoffs for a run in insertion order', () => {
+    db.prepare(
+      "INSERT INTO runs (id, repo, issue_number, status) VALUES ('run-handoff-1', 'org/repo', 1, 'running')",
+    ).run()
+    recordHandoff(db, {
+      runId: 'run-handoff-1',
+      attemptId: 'run-handoff-1',
+      stepId: 'plan',
+      fromRole: 'planner',
+      toRole: 'coder',
+      kind: 'plan',
+      summary: 'Plan: Fix',
+      contentMd: '## Plan',
+      contentJson: { objective: 'Fix' },
+    })
+    recordHandoff(db, {
+      runId: 'run-handoff-1',
+      attemptId: 'run-handoff-1',
+      stepId: 'code',
+      fromRole: 'coder',
+      toRole: 'system',
+      kind: 'code-summary',
+      summary: 'Code: Done',
+      contentMd: '## Code Summary',
+      contentJson: { summary: 'Done' },
+    })
+
+    const rows = loadHandoffs(db, 'run-handoff-1')
+
+    expect(rows.map((row) => row.stepId)).toEqual(['plan', 'code'])
+    expect(rows[0]?.summary).toBe('Plan: Fix')
+    expect(rows[0]?.contentJson).toEqual({ objective: 'Fix' })
   })
 
   it('falls back to latest known issue/pr titles for the same issue and PR', () => {

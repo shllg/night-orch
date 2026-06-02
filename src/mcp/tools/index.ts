@@ -5,6 +5,7 @@ import { handleStatus, handleRunDetail, handleListRuns, handleListInbox, handleC
 import { handleRetry, handleSync, handleCleanup, handlePoll, handleRebase, handleContinue } from './operations.js'
 import { handleCostOverride, handleCostReset, handleDailyCostOverride, handleDailyCostReset, handleLabelsInit, handleDeleteEntry, handleUpdate } from './admin.js'
 import { handleFileLoop } from './file-loop.js'
+import { handleHandoffs } from './handoffs.js'
 import { z } from 'zod'
 
 interface ToolDefinition {
@@ -48,6 +49,9 @@ const StatusArgsSchema = z.object({
   repo: z.string().optional(),
 }).passthrough()
 const RunDetailArgsSchema = z.object({
+  runId: z.string(),
+}).passthrough()
+const HandoffsArgsSchema = z.object({
   runId: z.string(),
 }).passthrough()
 const ListRunsArgsSchema = z.object({
@@ -200,6 +204,17 @@ export function registerTools(): ToolDefinition[] {
     {
       name: 'night-orch-run-detail',
       description: 'Get detailed information about a specific run including phase history and artifacts.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          runId: { type: 'string', description: 'Run ID (e.g., run-abc123)' },
+        },
+        required: ['runId'],
+      },
+    },
+    {
+      name: 'night-orch-handoffs',
+      description: 'List persisted agent handoffs for a run, ordered oldest to newest with summaries and markdown.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -502,6 +517,8 @@ export async function handleToolCall(
       return handleStatus(parseToolArgs(name, StatusArgsSchema, args), runtimeDeps)
     case 'night-orch-run-detail':
       return handleRunDetail(parseToolArgs(name, RunDetailArgsSchema, args), runtimeDeps)
+    case 'night-orch-handoffs':
+      return handleHandoffs(parseToolArgs(name, HandoffsArgsSchema, args), runtimeDeps)
     case 'night-orch-list-runs':
       return handleListRuns(parseToolArgs(name, ListRunsArgsSchema, args), runtimeDeps)
     case 'night-orch-list-inbox':

@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3'
 import { loadRuns } from '../../state/run-list.js'
 import type { LoadRunsOptions, RunListRow } from '../../state/run-list.js'
+import { listHandoffs, type AgentHandoff } from '../../state/handoffs.js'
 import { parseUtcTimestampMs } from '../../utils/time.js'
 
 export interface IssueListRow {
@@ -39,6 +40,7 @@ export interface MergeBatchRow {
   pr_numbers: string
 }
 
+export type HandoffRow = AgentHandoff
 
 export { loadRuns, type LoadRunsOptions, type RunListRow }
 
@@ -150,6 +152,10 @@ export function loadAgentEvents(db: Database.Database, runId: string, maxLines: 
     )
     .all(runId, maxLines) as AgentEventRow[]
   return [...rows].reverse()
+}
+
+export function loadHandoffs(db: Database.Database, runId: string): HandoffRow[] {
+  return listHandoffs(db, runId)
 }
 
 export function loadMergeBatches(db: Database.Database, limit = 5): MergeBatchRow[] {

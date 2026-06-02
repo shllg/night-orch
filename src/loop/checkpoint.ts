@@ -2,9 +2,11 @@ import type Database from 'better-sqlite3'
 import type { LoopPhase, RunContext, PlannerOutput, CoderOutput, ReviewerOutput, VerifyResult } from './types.js'
 import type { WorkflowStep } from './workflow.js'
 import { RunManager } from '../state/runs.js'
+import { listHandoffs, recordHandoff, type AgentHandoff, type RecordHandoffInput } from '../state/handoffs.js'
 import { insertRunLogEvent } from '../state/run-log-events.js'
 import { nowUtcIso } from '../utils/time.js'
 import { logger } from '../utils/logger.js'
+import type { MetricsService } from '../metrics/service.js'
 import {
   extractCompletedPhases,
   extractDecisionOutcomes,
@@ -204,6 +206,7 @@ export class Checkpoint {
   constructor(
     private db: Database.Database,
     private artifactWriter?: CheckpointArtifactEventWriter,
+    private metrics?: MetricsService,
   ) {
     this.runManager = new RunManager(db)
   }
@@ -213,7 +216,13 @@ export class Checkpoint {
     this.recordEvent(runId, 'phase_started', phase, null)
   }
 
-  phaseCompleted(runId: string, phase: LoopPhase, artifacts: Record<string, unknown>, iteration?: number): void {
+  phaseCompleted(
+    runId: string,
+    phase: LoopPhase,
+    artifacts: Record<string, unknown>,
+    iteration?: number,
+    handoff?: RecordHandoffInput,
+  ): void {
     // Merge artifacts with existing phase_data in a single DB transaction
     // so concurrent writers (e.g. parallel sub-tasks on the same run)
     // cannot lose updates. Also track the set of completed phases in
@@ -227,6 +236,9 @@ export class Checkpoint {
       const merged = { ...existing, [phase]: artifacts, [COMPLETED_PHASES_KEY]: completed }
 
       this.runManager.updatePhaseCheckpoint(runId, phase, JSON.stringify(merged), iteration)
+      if (handoff) {
+        recordHandoff(this.db, handoff)
+      }
     })
     tx()
     this.recordEvent(runId, 'phase_completed', phase, artifacts)
@@ -367,6 +379,26 @@ export class Checkpoint {
       ? verifyArtifacts.emptyDiffRetries
       : baseCtx.emptyDiffRetries
     const reviewState = hydrateReviewState(phaseData, baseCtx)
+    const handoffRecovery = recoverFromHandoffs(
+      listHandoffs(this.db, runId),
+      {
+        plan: (planArtifacts?.plan as PlannerOutput) ?? baseCtx.plan,
+        codeResult: (codeArtifacts?.codeResult as CoderOutput) ?? baseCtx.codeResult,
+        verifyResults: Array.isArray(verifyArtifacts?.verifyResults)
+          ? verifyArtifacts.verifyResults as VerifyResult[]
+          : baseCtx.verifyResults,
+        reviewResult: reviewState.reviewResult ?? (reviewArtifacts?.reviewResult as ReviewerOutput) ?? baseCtx.reviewResult,
+        reviewResults: reviewState.reviewResults,
+        reviewFindings: reviewState.reviewFindings,
+      },
+    )
+
+    if (handoffRecovery.recoveredKinds.length > 0) {
+      this.recordEvent(runId, 'recovery_from_handoff', row.current_phase, {
+        recoveredKinds: handoffRecovery.recoveredKinds,
+      })
+      try { this.metrics?.incRecoveryFromHandoff() } catch { /* best-effort */ }
+    }
 
     return {
       ...baseCtx,
@@ -374,14 +406,12 @@ export class Checkpoint {
       terminalStatus: 'running',
       iteration: row.iteration_count ?? baseCtx.iteration,
       estimatedCostUsd: row.estimated_cost_usd ?? baseCtx.estimatedCostUsd,
-      plan: (planArtifacts?.plan as PlannerOutput) ?? baseCtx.plan,
-      codeResult: (codeArtifacts?.codeResult as CoderOutput) ?? baseCtx.codeResult,
-      verifyResults: Array.isArray(verifyArtifacts?.verifyResults)
-        ? verifyArtifacts.verifyResults as VerifyResult[]
-        : baseCtx.verifyResults,
-      reviewResult: reviewState.reviewResult ?? (reviewArtifacts?.reviewResult as ReviewerOutput) ?? baseCtx.reviewResult,
-      reviewResults: reviewState.reviewResults,
-      reviewFindings: reviewState.reviewFindings,
+      plan: handoffRecovery.plan,
+      codeResult: handoffRecovery.codeResult,
+      verifyResults: handoffRecovery.verifyResults,
+      reviewResult: handoffRecovery.reviewResult,
+      reviewResults: handoffRecovery.reviewResults,
+      reviewFindings: handoffRecovery.reviewFindings,
       sessionIds: isStringRecord(persistedSessionIds) ? persistedSessionIds : baseCtx.sessionIds,
       stepOutputs: isRecord(persistedStepOutputs) ? persistedStepOutputs : baseCtx.stepOutputs,
       diff: verifyDiff,
@@ -563,6 +593,95 @@ function hydrateReviewState(
     reviewResults,
     reviewFindings: mergeReviewFindings(baseCtx.reviewFindings, hydratedFindings),
   }
+}
+
+interface HandoffRecoveryState {
+  plan: PlannerOutput | null
+  codeResult: CoderOutput | null
+  verifyResults: VerifyResult[]
+  reviewResult: ReviewerOutput | null
+  reviewResults: Readonly<Record<string, ReviewerOutput>>
+  reviewFindings: RunContext['reviewFindings']
+}
+
+interface HandoffRecoveryResult extends HandoffRecoveryState {
+  recoveredKinds: string[]
+}
+
+function recoverFromHandoffs(
+  handoffs: AgentHandoff[],
+  state: HandoffRecoveryState,
+): HandoffRecoveryResult {
+  const recoveredKinds: string[] = []
+  let plan = state.plan
+  let codeResult = state.codeResult
+  let verifyResults = state.verifyResults
+  let reviewResult = state.reviewResult
+  let reviewResults = state.reviewResults
+  let reviewFindings = state.reviewFindings
+
+  if (!plan) {
+    const handoff = latestHandoff(handoffs, 'plan')
+    if (isRecord(handoff?.contentJson)) {
+      plan = handoff.contentJson as unknown as PlannerOutput
+      recoveredKinds.push('plan')
+    }
+  }
+
+  if (!codeResult) {
+    const handoff = latestHandoff(handoffs, 'code-summary')
+    if (isRecord(handoff?.contentJson)) {
+      codeResult = handoff.contentJson as unknown as CoderOutput
+      recoveredKinds.push('code-summary')
+    }
+  }
+
+  if (verifyResults.length === 0) {
+    const handoff = latestHandoff(handoffs, 'verify-summary')
+    if (Array.isArray(handoff?.contentJson)) {
+      verifyResults = handoff.contentJson as VerifyResult[]
+      recoveredKinds.push('verify-summary')
+    }
+  }
+
+  if (Object.keys(reviewResults).length === 0) {
+    const recoveredReviews: Record<string, ReviewerOutput> = {}
+    let latestReview: ReviewerOutput | null = reviewResult
+    for (const handoff of handoffs) {
+      if (handoff.kind !== 'review-findings') continue
+      if (!isRecord(handoff.contentJson)) continue
+      const review = handoff.contentJson as unknown as ReviewerOutput
+      recoveredReviews[handoff.stepId] = review
+      latestReview = review
+    }
+    if (Object.keys(recoveredReviews).length > 0) {
+      const hydratedFindings = Object.entries(recoveredReviews).flatMap(([sourceStepId, result]) =>
+        sourceReviewFindings(result, sourceStepId, 'reviewer'),
+      )
+      reviewResult = latestReview
+      reviewResults = recoveredReviews
+      reviewFindings = mergeReviewFindings(reviewFindings, hydratedFindings)
+      recoveredKinds.push('review-findings')
+    }
+  }
+
+  return {
+    plan,
+    codeResult,
+    verifyResults,
+    reviewResult,
+    reviewResults,
+    reviewFindings,
+    recoveredKinds,
+  }
+}
+
+function latestHandoff(handoffs: AgentHandoff[], kind: AgentHandoff['kind']): AgentHandoff | null {
+  for (let index = handoffs.length - 1; index >= 0; index--) {
+    const handoff = handoffs[index]
+    if (handoff?.kind === kind) return handoff
+  }
+  return null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

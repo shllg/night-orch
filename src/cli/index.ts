@@ -35,6 +35,7 @@ import { notifyTestCommand } from './commands/notify-test.js'
 import { mcpCommand } from './commands/mcp.js'
 import { labelsInitCommand } from './commands/labels-init.js'
 import { statusCommand } from './commands/status.js'
+import { handoffsCommand } from './commands/handoffs.js'
 import { deleteEntryCommand } from './commands/delete-entry.js'
 import { runInit } from './commands/init.js'
 import { runWatch } from './commands/watch.js'
@@ -202,6 +203,12 @@ program
   .command('status')
   .description('Show active runs, recent history, costs, and leases')
   .action((_opts, cmd) => statusCommand(cmd.parent?.opts()))
+
+program
+  .command('handoffs')
+  .argument('<run-id>', 'Run ID')
+  .description('Show persisted agent handoffs for a run')
+  .action((runId, _opts, cmd) => handoffsCommand(runId, cmd.parent?.opts()))
 
 program
   .command('labels-init')

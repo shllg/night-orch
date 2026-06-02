@@ -10,7 +10,9 @@ import {
   colorForRunStatus,
 } from './constants.js'
 import type { AgentEventRow, IssueListRow, MergeBatchRow, RunListRow } from './data.js'
+import type { HandoffRow } from './data.js'
 import { formatEventSummary, formatPrList, formatTime, truncate } from './format.js'
+import { HandoffsPanel } from './handoffs-panel.js'
 import { resolveIssueTitle, resolvePrTitle, type TitleLookup } from './titles.js'
 import type { RunsViewMode } from './types.js'
 import { partitionRowsByActivity, sliceWindow } from './view-model.js'
@@ -21,6 +23,9 @@ interface RunsViewProps {
   selectedIssue: IssueListRow | null
   selectedRun: RunListRow | null
   selectedRunEvents: AgentEventRow[]
+  selectedRunHandoffs?: HandoffRow[]
+  selectedHandoffIndex?: number
+  expandedHandoffIds?: ReadonlySet<number>
   mergeBatches: MergeBatchRow[]
   stats: TuiStatsSnapshot
   titleLookup: TitleLookup
@@ -36,6 +41,9 @@ export function RunsView({
   selectedIssue,
   selectedRun,
   selectedRunEvents,
+  selectedRunHandoffs = [],
+  selectedHandoffIndex = 0,
+  expandedHandoffIds = new Set<number>(),
   mergeBatches,
   stats,
   titleLookup,
@@ -50,6 +58,9 @@ export function RunsView({
         selectedIssue={selectedIssue}
         selectedRun={selectedRun}
         selectedRunEvents={selectedRunEvents}
+        selectedRunHandoffs={selectedRunHandoffs}
+        selectedHandoffIndex={selectedHandoffIndex}
+        expandedHandoffIds={expandedHandoffIds}
         titleLookup={titleLookup}
         stats={stats}
         mergeBatches={mergeBatches}
@@ -231,6 +242,9 @@ interface FocusedIssueViewProps {
   selectedIssue: IssueListRow | null
   selectedRun: RunListRow | null
   selectedRunEvents: AgentEventRow[]
+  selectedRunHandoffs: HandoffRow[]
+  selectedHandoffIndex: number
+  expandedHandoffIds: ReadonlySet<number>
   titleLookup: TitleLookup
   stats: TuiStatsSnapshot
   mergeBatches: MergeBatchRow[]
@@ -242,6 +256,9 @@ function FocusedIssueView({
   selectedIssue,
   selectedRun,
   selectedRunEvents,
+  selectedRunHandoffs,
+  selectedHandoffIndex,
+  expandedHandoffIds,
   titleLookup,
   stats,
   mergeBatches,
@@ -344,9 +361,16 @@ function FocusedIssueView({
                   showing {clampedOffset + 1}-{clampedOffset + visibleEvents.length} of {selectedRunEvents.length}
                 </Text>
               )}
+              <Box marginTop={1} flexDirection="column">
+                <HandoffsPanel
+                  handoffs={selectedRunHandoffs}
+                  selectedIndex={selectedHandoffIndex}
+                  expandedIds={expandedHandoffIds}
+                />
+              </Box>
             </Box>
           </Box>
-          <Text color="gray">Press j/k to scroll stream, esc or q to close detail</Text>
+          <Text color="gray">Press j/k to select handoff, Enter expands, J/K scroll stream, esc or q closes detail</Text>
         </>
       )}
     </Box>

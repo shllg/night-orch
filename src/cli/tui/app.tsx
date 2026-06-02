@@ -17,7 +17,7 @@ import type Database from 'better-sqlite3'
 import { loadTuiStats } from '../../state/stats.js'
 import { RebaseFanoutManager } from '../../state/rebase-fanouts.js'
 import { ActionsBar } from './actions-bar.js'
-import { buildIssueList, loadRuns, loadAgentEvents, loadMergeBatches, type IssueListRow } from './data.js'
+import { buildIssueList, loadRuns, loadAgentEvents, loadHandoffs, loadMergeBatches, type IssueListRow } from './data.js'
 import { Header } from './header.js'
 import { LogsView } from './logs-view.js'
 import { ProjectsView } from './projects-view.js'
@@ -276,6 +276,8 @@ export function App({
   const [manualStrategy, setManualStrategy] = useState<UpdateStrategy | null>(null)
   const [titleLookup, setTitleLookup] = useState<TitleLookup>({ issues: {}, prs: {} })
   const [runEventScrollOffset, setRunEventScrollOffset] = useState(0)
+  const [selectedHandoffIndex, setSelectedHandoffIndex] = useState(0)
+  const [expandedHandoffIds, setExpandedHandoffIds] = useState<ReadonlySet<number>>(() => new Set())
   const [selectedLogId, setSelectedLogId] = useState<number | null>(null)
   const [logDetailScrollOffset, setLogDetailScrollOffset] = useState(0)
   const [logLines, setLogLines] = useState<TuiLogLine[]>([])
@@ -408,6 +410,10 @@ export function App({
     () => (selectedRun ? loadAgentEvents(db, selectedRun.id, runsViewMode === 'focus' ? 240 : 12) : []),
     [db, tick, selectedRun?.id, runsViewMode],
   )
+  const selectedRunHandoffs = useMemo(
+    () => (selectedRun ? loadHandoffs(db, selectedRun.id) : []),
+    [db, tick, selectedRun?.id],
+  )
   const mergeBatches = useMemo(() => loadMergeBatches(db), [db, tick])
   const stats = useMemo(
     () => loadTuiStats(db, { costModel: runtimeConfig.cost.model }),
@@ -436,6 +442,16 @@ export function App({
     const maxOffset = Math.max(0, selectedRunEvents.length - FOCUSED_EVENT_WINDOW_SIZE)
     setRunEventScrollOffset((current) => Math.min(current, maxOffset))
   }, [selectedRunEvents.length])
+
+  useEffect(() => {
+    const maxIndex = Math.max(0, selectedRunHandoffs.length - 1)
+    setSelectedHandoffIndex((current) => Math.max(0, Math.min(maxIndex, current)))
+  }, [selectedRunHandoffs.length])
+
+  useEffect(() => {
+    setSelectedHandoffIndex(0)
+    setExpandedHandoffIds(new Set())
+  }, [selectedRun?.id])
 
   useEffect(() => {
     if (issues.length === 0) {
@@ -1070,11 +1086,42 @@ export function App({
         return
       }
       if (key.downArrow || input === 'j') {
-        setRunEventScrollOffset((current) => current + 1)
+        if (selectedRunHandoffs.length > 0) {
+          setSelectedHandoffIndex((current) => Math.min(selectedRunHandoffs.length - 1, current + 1))
+        } else {
+          setRunEventScrollOffset((current) => current + 1)
+        }
         return
       }
       if (key.upArrow || input === 'k') {
+        if (selectedRunHandoffs.length > 0) {
+          setSelectedHandoffIndex((current) => Math.max(0, current - 1))
+        } else {
+          setRunEventScrollOffset((current) => Math.max(0, current - 1))
+        }
+        return
+      }
+      if (input === 'J') {
+        setRunEventScrollOffset((current) => current + 1)
+        return
+      }
+      if (input === 'K') {
         setRunEventScrollOffset((current) => Math.max(0, current - 1))
+        return
+      }
+      if (key.return) {
+        const selectedHandoff = selectedRunHandoffs[selectedHandoffIndex]
+        if (selectedHandoff) {
+          setExpandedHandoffIds((current) => {
+            const next = new Set(current)
+            if (next.has(selectedHandoff.id)) {
+              next.delete(selectedHandoff.id)
+            } else {
+              next.add(selectedHandoff.id)
+            }
+            return next
+          })
+        }
         return
       }
     }
@@ -1342,6 +1389,9 @@ export function App({
           selectedIssue={selectedIssue}
           selectedRun={selectedRun}
           selectedRunEvents={selectedRunEvents}
+          selectedRunHandoffs={selectedRunHandoffs}
+          selectedHandoffIndex={selectedHandoffIndex}
+          expandedHandoffIds={expandedHandoffIds}
           mergeBatches={mergeBatches}
           stats={stats}
           titleLookup={titleLookup}

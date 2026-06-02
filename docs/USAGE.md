@@ -56,6 +56,7 @@ night-orch web       # web UI/API server (attach mode by default)
 night-orch web --standalone  # run daemon + web UI in one process
 night-orch run-once  # single poll cycle (useful for testing)
 night-orch demo      # web UI against synthetic demo data (UI dev mode)
+night-orch handoffs <run-id>  # inspect structured agent handoffs for a run
 ```
 
 The daemon polls each configured repo for issues labeled `no:ready`, processes them through the AI pipeline, and creates PRs. It runs continuously until you stop it (Ctrl+C).
@@ -704,7 +705,11 @@ The metrics line includes a runtime-override annotation when effective `metrics.
 
 ### `night-orch tui`
 
-Live-updating terminal dashboard. Refreshes every 2 seconds. Shows active runs, merge queue, cost bar, recent history, issue actions (`poll`, `sync`, `cleanup`, `retry`, `continue`, `rebase`, `delete entry`), a Settings tab (`5`) for runtime overrides (read-only keys are listed but cannot be changed), and a File-Loop tab (`6`) for starting/stopping repo-scoped file-loop sessions. Press `m` on the Runs list to cycle the manual action strategy override (`default` → `merge` → `rebase`) used by retry/continue/rebase. On the File-Loop tab, use `f` to start a session for the selected repo and `x` to request stop. Press Ctrl+C to exit.
+Live-updating terminal dashboard. Refreshes every 2 seconds. Shows active runs, merge queue, cost bar, recent history, issue actions (`poll`, `sync`, `cleanup`, `retry`, `continue`, `rebase`, `delete entry`), a Settings tab (`5`) for runtime overrides (read-only keys are listed but cannot be changed), and a File-Loop tab (`6`) for starting/stopping repo-scoped file-loop sessions. The run detail view includes persisted agent handoffs; use `j`/`k` to select a handoff, Enter to expand it, and `J`/`K` to scroll the agent stream. Press `m` on the Runs list to cycle the manual action strategy override (`default` → `merge` → `rebase`) used by retry/continue/rebase. On the File-Loop tab, use `f` to start a session for the selected repo and `x` to request stop. Press Ctrl+C to exit.
+
+### `night-orch handoffs <run-id>`
+
+Print the persisted structured handoffs for one run in chronological order. Handoffs include planner plans, coder summaries, verify summaries, reviewer findings, and post-publish external-review findings. Use this when a run resumed after a crash or when you need the exact cross-agent context without reading raw logs.
 
 ### `night-orch settings`
 
@@ -789,7 +794,7 @@ Send a test notification through all configured channels. Verifies webhook/Disco
 
 ### `night-orch mcp`
 
-Start the MCP server on stdio transport (for Claude Code integration). Exposes 23 tools and 3 resources for querying and controlling night-orch.
+Start the MCP server on stdio transport (for Claude Code integration). Exposes 24 tools and 3 resources for querying and controlling night-orch.
 
 ### `night-orch monitoring`
 
@@ -894,6 +899,8 @@ Core run metrics:
 | `night_orch_loop_iterations_total` | counter | Loop iterations per repo |
 | `night_orch_agent_invocations_total` | counter | Agent calls by role and adapter |
 | `night_orch_agent_duration_seconds` | histogram | Agent call duration (labels: role, adapter) |
+| `night_orch_handoffs_total{kind}` | counter | Persisted structured handoffs by kind (`plan`, `code-summary`, `verify-summary`, `review-findings`, `external-review-findings`) |
+| `night_orch_recovery_from_handoff_total` | counter | Crash recoveries that reconstructed missing `RunContext` state from persisted handoffs |
 | `night_orch_verify_runs_total` | counter | Verification pass/fail counts |
 | `night_orch_verify_duration_seconds` | histogram | Verify command duration |
 | `night_orch_pr_operations_total` | counter | PRs created/updated |
@@ -926,7 +933,7 @@ the Phase 4 gate without Prometheus access.
 
 Night-orch exposes an MCP server for integration with Claude Code and other MCP clients.
 
-### Tools (23)
+### Tools (24)
 
 | Tool | Description |
 |------|-------------|
@@ -935,6 +942,7 @@ Night-orch exposes an MCP server for integration with Claude Code and other MCP 
 | `night-orch-clear-setting` | Clear one DB-backed runtime override |
 | `night-orch-status` | Operational snapshot |
 | `night-orch-run-detail` | Full run history and events |
+| `night-orch-handoffs` | Persisted structured handoffs for a run |
 | `night-orch-list-runs` | Filtered run listing |
 | `night-orch-cost-report` | Daily cost breakdown |
 | `night-orch-retry` | Re-run an issue |

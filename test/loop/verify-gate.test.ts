@@ -81,6 +81,21 @@ describe('runVerifyGate', () => {
         emptyDiffRetries: 0,
       },
       1,
+      expect.objectContaining({
+        runId: 'run-test-1',
+        stepId: 'verify',
+        fromRole: 'system',
+        toRole: 'reviewer',
+        kind: 'verify-summary',
+        summary: 'Verify: 1/1 passed',
+        contentMd: expect.stringContaining('## Verify Summary'),
+        contentJson: [{
+          ...verifyResult,
+          required: true,
+          stageId: null,
+          onFailure: 'block',
+        }],
+      }),
     )
     expect(checkpoint.persistRunState).toHaveBeenCalledWith('run-test-1', {}, {})
   })

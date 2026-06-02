@@ -40,6 +40,7 @@ import type Database from 'better-sqlite3'
 import { buildPlanningPrdPath, isPlanningIssue } from '../planning/mode.js'
 import type { AgentEvent } from '../events/types.js'
 import { mergeReviewFindings } from './review-findings.js'
+import { buildStepHandoff } from './handoff.js'
 
 /** External services injected into the loop engine. Tests can substitute mocks for all of these. */
 export interface LoopDependencies {
@@ -74,7 +75,7 @@ export async function executeLoop(
   const artifactWriter = config.storage.logsRoot.trim().length > 0
     ? new FileRunArtifactWriter(config.storage.logsRoot)
     : undefined
-  const checkpoint = new Checkpoint(db, artifactWriter)
+  const checkpoint = new Checkpoint(db, artifactWriter, metrics)
   const costTracker = new CostTracker(db)
 
   const resumedCtx = checkpoint.resumeFromCheckpoint(initialCtx.runId, initialCtx)
@@ -316,7 +317,11 @@ export async function executeLoop(
     if (step.type === 'worker' && step.role === 'planner' && !stepSuccess && config.loop.stopOnPlannerFailure) {
       logger.error({ runId: ctx.runId }, 'Planner failed and stopOnPlannerFailure is true')
       const artifacts = buildStepArtifacts(step, ctx)
-      checkpoint.phaseCompleted(ctx.runId, step.id, artifacts, ctx.iteration)
+      const handoff = buildStepHandoff({ ctx, step, steps, stepIndex, tokenUsage: result.tokenUsage })
+      checkpoint.phaseCompleted(ctx.runId, step.id, artifacts, ctx.iteration, handoff ?? undefined)
+      if (handoff) {
+        try { metrics?.incHandoffs(handoff.kind) } catch { /* best-effort */ }
+      }
       return recordPhase(
         updateContext(ctx, { currentPhase: 'error', terminalStatus: 'error' }),
         step.id,
@@ -328,7 +333,11 @@ export async function executeLoop(
 
     // Checkpoint and record
     const artifacts = buildStepArtifacts(step, ctx)
-    checkpoint.phaseCompleted(ctx.runId, step.id, artifacts, ctx.iteration)
+    const handoff = buildStepHandoff({ ctx, step, steps, stepIndex, tokenUsage: result.tokenUsage })
+    checkpoint.phaseCompleted(ctx.runId, step.id, artifacts, ctx.iteration, handoff ?? undefined)
+    if (handoff) {
+      try { metrics?.incHandoffs(handoff.kind) } catch { /* best-effort */ }
+    }
     // Persist sessionIds + stepOutputs so crash recovery can rehydrate
     // multi-step workflow continuity (worker --continue chains and custom
     // step outputs not captured by the builtin artifact map).

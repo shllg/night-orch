@@ -3,6 +3,7 @@ import { registerTools, handleToolCall } from '../../src/mcp/tools/index.js'
 import type { MCPDependencies } from '../../src/mcp/server.js'
 import type { ForgeAdapter, ForgeIssue } from '../../src/forge/types.js'
 import { initDatabase } from '../../src/state/db.js'
+import { recordHandoff } from '../../src/state/handoffs.js'
 import { RunManager } from '../../src/state/runs.js'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
@@ -16,6 +17,7 @@ const EXPECTED_TOOL_NAMES = [
   'night-orch-clear-setting',
   'night-orch-status',
   'night-orch-run-detail',
+  'night-orch-handoffs',
   'night-orch-list-runs',
   'night-orch-list-inbox',
   'night-orch-cost-report',
@@ -175,6 +177,67 @@ describe('MCP Tools', () => {
 
   it('run-detail throws for unknown ID', async () => {
     await expect(handleToolCall('night-orch-run-detail', { runId: 'run-nonexistent' }, deps)).rejects.toThrow('Run not found')
+  })
+
+  it('handoffs tool returns run handoffs ordered by id with markdown content', async () => {
+    const runManager = new RunManager(db)
+    const run = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 42,
+      issueNodeId: '',
+      planner: 'claude',
+      coder: 'codex',
+      reviewer: 'claude',
+    })
+    recordHandoff(db, {
+      runId: run.id,
+      attemptId: run.id,
+      stepId: 'plan',
+      fromRole: 'planner',
+      toRole: 'coder',
+      kind: 'plan',
+      summary: 'Plan: Fix issue',
+      contentMd: '## Plan\n\nObjective: Fix issue',
+      contentJson: { objective: 'Fix issue' },
+    })
+    recordHandoff(db, {
+      runId: run.id,
+      attemptId: run.id,
+      stepId: 'review',
+      fromRole: 'reviewer',
+      toRole: 'system',
+      kind: 'review-findings',
+      summary: 'Review: APPROVED',
+      contentMd: '## Review Findings',
+      contentJson: { verdict: 'APPROVED' },
+      tokenUsage: { promptTokens: 10, completionTokens: 5 },
+    })
+
+    const result = await handleToolCall('night-orch-handoffs', { runId: run.id }, deps) as {
+      count: number
+      handoffs: Array<{
+        stepId: string
+        kind: string
+        summary: string
+        contentMd: string
+        contentJson: unknown
+        tokenUsage: unknown
+      }>
+    }
+
+    expect(result.count).toBe(2)
+    expect(result.handoffs.map((handoff) => handoff.stepId)).toEqual(['plan', 'review'])
+    expect(result.handoffs[0]).toMatchObject({
+      kind: 'plan',
+      summary: 'Plan: Fix issue',
+      contentMd: '## Plan\n\nObjective: Fix issue',
+      contentJson: { objective: 'Fix issue' },
+      tokenUsage: null,
+    })
+    expect(result.handoffs[1]).toMatchObject({
+      kind: 'review-findings',
+      tokenUsage: { promptTokens: 10, completionTokens: 5 },
+    })
   })
 
   it('list-runs returns filtered results', async () => {

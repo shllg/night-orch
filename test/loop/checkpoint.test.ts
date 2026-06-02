@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   Checkpoint,
   extractDecisionOutcomes,
@@ -7,11 +7,13 @@ import {
   type PersistedDecisionOutcome,
 } from '../../src/loop/checkpoint.js'
 import { initDatabase } from '../../src/state/db.js'
+import { listHandoffs, recordHandoff } from '../../src/state/handoffs.js'
 import type { RunContext } from '../../src/loop/types.js'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type Database from 'better-sqlite3'
+import { createMetricsService } from '../../src/metrics/service.js'
 
 function makeBaseCtx(): RunContext {
   return {
@@ -159,6 +161,36 @@ describe('Checkpoint', () => {
       const row = db.prepare('SELECT iteration_count FROM runs WHERE id = ?').get('run-test-1') as { iteration_count: number | null }
       expect(row.iteration_count).toBe(2)
     })
+
+    it('records a handoff in the same completion operation', () => {
+      checkpoint.phaseCompleted('run-test-1', 'plan', { plan: { objective: 'Fix login' } }, 1, {
+        runId: 'run-test-1',
+        attemptId: 'run-test-1',
+        stepId: 'plan',
+        fromRole: 'planner',
+        toRole: 'coder',
+        kind: 'plan',
+        summary: 'Plan: Fix login',
+        contentMd: '## Plan\n\nObjective: Fix login',
+        contentJson: { objective: 'Fix login' },
+      })
+
+      const phaseRow = db.prepare('SELECT current_phase, phase_data FROM runs WHERE id = ?').get('run-test-1') as {
+        current_phase: string
+        phase_data: string
+      }
+      expect(phaseRow.current_phase).toBe('plan')
+      expect(JSON.parse(phaseRow.phase_data).plan.plan.objective).toBe('Fix login')
+
+      const handoffs = listHandoffs(db, 'run-test-1')
+      expect(handoffs).toHaveLength(1)
+      expect(handoffs[0]).toMatchObject({
+        runId: 'run-test-1',
+        stepId: 'plan',
+        kind: 'plan',
+        summary: 'Plan: Fix login',
+      })
+    })
   })
 
   describe('getLastCompleted', () => {
@@ -206,6 +238,77 @@ describe('Checkpoint', () => {
       expect(resumed!.plan).toEqual(plan)
       expect(resumed!.iteration).toBe(2)
       expect(resumed!.estimatedCostUsd).toBe(1.5)
+    })
+
+    it('rehydrates structured state from handoffs when phase_data is missing', () => {
+      const metrics = createMetricsService({ enabled: false, host: '127.0.0.1', port: 9090 })
+      const incRecoverySpy = vi.spyOn(metrics, 'incRecoveryFromHandoff')
+      checkpoint = new Checkpoint(db, undefined, metrics)
+      const plan = {
+        objective: 'Fix login',
+        assumptions: [],
+        filesToChange: ['src/login.ts'],
+        steps: [{ order: 1, description: 'Fix guard', files: ['src/login.ts'] }],
+        risks: [],
+        testStrategy: 'unit tests',
+      }
+      const reviewResult = {
+        verdict: 'CHANGES_REQUIRED' as const,
+        summary: 'Needs a null guard',
+        findings: [{ severity: 'major' as const, message: 'Missing null guard', suggestedFix: 'Check config first' }],
+        definitionOfDoneCheck: {
+          issueAddressed: false,
+          testsPassing: true,
+          noBlockingFindings: false,
+        },
+      }
+      recordHandoff(db, {
+        runId: 'run-test-1',
+        attemptId: 'run-test-1',
+        stepId: 'plan',
+        fromRole: 'planner',
+        toRole: 'coder',
+        kind: 'plan',
+        summary: 'Plan: Fix login',
+        contentMd: '## Plan',
+        contentJson: plan,
+      })
+      recordHandoff(db, {
+        runId: 'run-test-1',
+        attemptId: 'run-test-1',
+        stepId: 'review',
+        fromRole: 'reviewer',
+        toRole: 'coder',
+        kind: 'review-findings',
+        summary: 'Review: CHANGES_REQUIRED',
+        contentMd: '## Review Findings',
+        contentJson: reviewResult,
+      })
+      db.prepare('UPDATE runs SET current_phase = ?, phase_data = NULL, iteration_count = ? WHERE id = ?')
+        .run('review', 2, 'run-test-1')
+
+      const resumed = checkpoint.resumeFromCheckpoint('run-test-1', makeBaseCtx())
+
+      expect(resumed?.currentPhase).toBe('review')
+      expect(resumed?.iteration).toBe(2)
+      expect(resumed?.plan).toEqual(plan)
+      expect(resumed?.reviewResults).toEqual({ review: reviewResult })
+      expect(resumed?.reviewFindings).toEqual([{
+        severity: 'major',
+        message: 'Missing null guard',
+        suggestedFix: 'Check config first',
+        sourceStepId: 'review',
+        sourceRole: 'reviewer',
+      }])
+
+      const event = db
+        .prepare('SELECT event_type, phase, data FROM run_log_events WHERE run_id = ? AND event_type = ? ORDER BY id DESC LIMIT 1')
+        .get('run-test-1', 'recovery_from_handoff') as { event_type: string; phase: string; data: string } | undefined
+      expect(event?.phase).toBe('review')
+      expect(JSON.parse(event?.data ?? '{}')).toEqual({
+        recoveredKinds: ['plan', 'review-findings'],
+      })
+      expect(incRecoverySpy).toHaveBeenCalledTimes(1)
     })
 
     it('returns null for run with no checkpoints', () => {
