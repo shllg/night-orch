@@ -123,6 +123,8 @@ AI agents invoked as CLI subprocesses. `claude.ts` and `codex.ts` implement the 
 
 Workers run through Sandcastle. Each worker profile can use the strict host sandbox or a Docker/Podman sandbox. Container sandboxes are configured per profile so reliability can be compared per agent while keeping host execution available as a fallback.
 
+Every worker task runs with `cwd` set to the issue worktree, so prompts execute inside the checked-out repository and can reach repo-local `.claude/skills/`, `.claude/commands/`, and `.night-orch/prompts/`.
+
 > **Watch out:** `env.ts` is a critical security file. It implements a whitelist+blacklist system that strips all tokens, secrets, and forge credentials from the worker's environment. If you add a new env var to workers, it must pass both the whitelist and the blacklist check.
 
 ### Loop Engine (`src/loop/`)

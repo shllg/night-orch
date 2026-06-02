@@ -389,6 +389,9 @@ repos:
       plannerSystem: .night-orch/prompts/planner-system.md
       coderSystem: .night-orch/prompts/coder-system.md
       reviewerSystem: .night-orch/prompts/reviewer-system.md
+      # Prompt files execute inside the issue worktree. Example prompt body:
+      #   $tdd
+      #   Use the repo-local .claude/skills/tdd skill for behavior changes.
     selectors:
       includeLabelsAny:
         - no:ready

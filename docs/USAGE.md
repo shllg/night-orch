@@ -435,6 +435,16 @@ Rules:
 - `roles` (workflow-level) — per-workflow default role assignment (`planner`/`coder`/`reviewer`)
 - `agents` (workflow-level) — per-workflow worker profile overrides (same shape as `repos[].agents`)
 
+### Prompt files and repo-local skills
+
+Worker steps run with their current working directory set to the issue worktree. That worktree is
+a full checkout, so prompt templates can rely on repo-local `.claude/skills/`,
+`.claude/commands/`, and `.night-orch/prompts/` being present. For example, a prompt file at
+`.night-orch/prompts/coder-system.md` may invoke a checked-in `$tdd` skill from `.claude/skills/`.
+
+Environment isolation is unchanged: worker env still goes through the `buildWorkerEnv()` whitelist,
+and forge tokens or other blacklisted secrets are not passed to the worker process.
+
 ### Staged verification profiles
 
 ```yaml

@@ -532,6 +532,19 @@ Worker `PATH` is normalized at runtime: if missing, `~/.local/bin`, `~/.local/sh
 
 `repos[].agents` references these profile names. Unknown profile references fail config load.
 
+### Worker Execution Context
+
+Worker processes are spawned with their current working directory set to the run's git worktree.
+That worktree is a full checkout of the target repository, so repo-local files such as
+`.claude/skills/`, `.claude/commands/`, and `.night-orch/prompts/` are visible to the worker.
+Custom prompt templates may rely on this: a prompt can invoke repo-scoped skills or commands
+that are checked into the repository under `.claude/`.
+
+This does not relax environment isolation. Worker subprocesses still receive only the
+whitelist-based environment built by `buildWorkerEnv()`, and forge credentials, API keys,
+webhook URLs, and other blacklisted secrets are still stripped even though the worker can see
+the worktree files.
+
 ### `workerProfiles.<name>.sandbox`
 
 Sandbox settings choose where Sandcastle runs the worker CLI.
@@ -770,7 +783,7 @@ Post-publish reviewer steps run only after the branch has been pushed and a PR e
 
 - `skipWhen` — skip the step when the triage level matches (e.g., `trivial`)
 - `continueFrom` — continue the AI session from a prior step (e.g., coder continues planner's session). Session reuse is agent-specific; cross-agent handoffs (for example `planner=claude`, `coder=codex`) start a fresh session.
-- `prompt` — path to a custom system prompt template (overrides the default)
+- `prompt` — path to a custom system prompt template (overrides the default). Worker CWD is the worktree, so repo-local prompt files can invoke repo-local `.claude/skills/` and `.claude/commands/`.
 - `reviewerKey` — reviewer result slot for `role: reviewer`; defaults to the step `id`. Set this when two reviewer steps should intentionally write the same slot.
 - `runWhen` — `pre-decide` by default. Set reviewer steps to `post-publish` to run after PR creation.
 - `onChangesRequired` — for post-publish reviewer steps, `continue` by default; set `comment-only` to post findings without queuing another pass.
@@ -1138,6 +1151,9 @@ Array of commands executed sequentially in worktree. Failures are collected per 
 | `reviewerSystem` | string path | no | If file exists, used instead of default reviewer system prompt. |
 
 If a configured template file is missing, a warning is logged and built-in defaults are used.
+Prompt templates execute inside the worktree. A template stored at `.night-orch/prompts/coder-system.md`
+can refer to repo-local `.claude/skills/` or `.claude/commands/`, and the worker CLI resolves them
+from the checked-out repository for that run.
 
 ### `repos[].selectors`
 
