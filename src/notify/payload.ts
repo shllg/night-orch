@@ -1,6 +1,7 @@
 import type { RunContext } from '../loop/types.js'
 import { nowUtcIso } from '../utils/time.js'
 import type { NotificationEvent, NotificationPayload } from './types.js'
+import { formatReviewSummary } from '../loop/review-results.js'
 
 export function makePayload(
   event: NotificationPayload['event'],
@@ -46,7 +47,7 @@ export function buildPayload(
     prNumber: extra.prNumber ?? null,
     summary: buildSummary(ctx, event),
     blockingReason: extra.blockingReason ?? null,
-    reviewSummary: ctx.reviewResult ? `${ctx.reviewResult.verdict}: ${ctx.reviewResult.summary}` : null,
+    reviewSummary: formatReviewSummary(ctx.reviewResults, ctx.reviewResult),
     iterationCount: ctx.iteration,
     timestamp: nowUtcIso(),
   }

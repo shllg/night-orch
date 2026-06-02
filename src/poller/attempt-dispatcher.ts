@@ -432,6 +432,7 @@ export async function dispatchAttempt(
       diff: null,
       verifyResults: preLoopVerifyResults,
       reviewResult: null,
+      reviewResults: {},
       reviewFindings: [],
       iteration: startingIteration,
       totalAgentPasses: 0,

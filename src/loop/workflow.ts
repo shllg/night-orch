@@ -12,6 +12,7 @@ export type WorkerStep = {
   skipWhen?: string
   continueFrom?: string
   prompt?: string
+  reviewerKey?: string
 }
 
 export type VerifyStep = {
@@ -43,6 +44,7 @@ type WorkflowDagWorkerStage = {
   skipWhen?: string
   continueFrom?: string
   prompt?: string
+  reviewerKey?: string
   next?: string
 }
 
@@ -178,6 +180,7 @@ function expandWorkflowDag(workflowName: string, dag: WorkflowDagDefinition): Wo
           ...(stage.skipWhen ? { skipWhen: stage.skipWhen } : {}),
           ...(stage.continueFrom ? { continueFrom: stage.continueFrom } : {}),
           ...(stage.prompt ? { prompt: stage.prompt } : {}),
+          ...(stage.reviewerKey ? { reviewerKey: stage.reviewerKey } : {}),
         })
         if (!stage.next) {
           throw new Error(
@@ -223,4 +226,8 @@ function expandWorkflowDag(workflowName: string, dag: WorkflowDagDefinition): Wo
   }
 
   return steps
+}
+
+export function reviewerKeyForStep(step: Pick<WorkerStep, 'id' | 'reviewerKey'>): string {
+  return step.reviewerKey ?? step.id
 }

@@ -131,6 +131,7 @@ export async function executeParallelSubtasks(
             diff: null,
             verifyResults: [],
             reviewResult: null,
+            reviewResults: {},
             reviewFindings: [],
             iteration: 1,
             totalAgentPasses: 0,

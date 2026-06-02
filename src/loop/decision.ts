@@ -4,6 +4,19 @@ import { isPlanningIssue } from '../planning/mode.js'
 import { costLimitRecoveryHint } from './cost.js'
 import { blocked } from './state.js'
 import { allRequiredVerifyPassed } from './verifier.js'
+import type { ReviewerOutput, ReviewFinding } from '../workers/types.js'
+
+export type AggregateVerdict = 'BLOCKED' | 'CHANGES_REQUIRED' | 'APPROVED'
+
+export function aggregateReviewVerdict(
+  results: Readonly<Record<string, ReviewerOutput>>,
+): AggregateVerdict | null {
+  const verdicts = Object.values(results).map((result) => result.verdict)
+  if (verdicts.length === 0) return null
+  if (verdicts.includes('BLOCKED')) return 'BLOCKED'
+  if (verdicts.includes('CHANGES_REQUIRED')) return 'CHANGES_REQUIRED'
+  return 'APPROVED'
+}
 
 /**
  * Determine next action based on review verdict, verify results,
@@ -86,7 +99,8 @@ export function decide(
     return { action: 'publish', reason: 'Planning-only mode: PRD ready for publishing' }
   }
 
-  const review = ctx.reviewResult
+  const reviewResults = reviewResultsFromContext(ctx)
+  const aggregateVerdict = aggregateReviewVerdict(reviewResults)
   const verifyCommandsConfigured = (ctx.repoConfig.verify?.length ?? 0) > 0 || ctx.verifyResults.length > 0
   const verifyResultsAvailable = ctx.verifyResults.length > 0
   const allRequiredPassed = verifyResultsAvailable && allRequiredVerifyPassed(ctx.verifyResults)
@@ -95,7 +109,7 @@ export function decide(
     : ctx.verifyResults.length === 0 || allRequiredPassed
 
   // No review result = parse failure
-  if (!review) {
+  if (!aggregateVerdict) {
     // Lightweight workflows may intentionally omit reviewer phases.
     if (!requireReview) {
       if (loopConfig.requireVerificationPass && !verifyCommandsConfigured) {
@@ -167,7 +181,7 @@ export function decide(
     return { action: 'iterate', reason: 'Review output not parseable — retrying', findings: [] }
   }
 
-  switch (review.verdict) {
+  switch (aggregateVerdict) {
     case 'APPROVED': {
       // Rules 3, 4
       if (loopConfig.requireVerificationPass && !verifyCommandsConfigured) {
@@ -218,23 +232,47 @@ export function decide(
       return {
         action: 'iterate',
         reason: `Review requested changes (iteration ${ctx.iteration}/${maxReviewIter})`,
-        findings: review.findings,
+        findings: ctx.reviewFindings.length > 0
+          ? ctx.reviewFindings
+          : collectReviewFindings(reviewResults),
       }
     }
 
     case 'BLOCKED': {
       // Rule 7
-      const reason = `Reviewer blocked: ${review.summary}`
+      const blockedReview = firstReviewWithVerdict(reviewResults, 'BLOCKED')
+      const summary = blockedReview?.summary ?? 'Reviewer blocked'
+      const reason = `Reviewer blocked: ${summary}`
       return {
         action: 'block',
         reason,
-        state: blocked({ type: 'reviewerBlocked', summary: review.summary }, { message: reason }),
+        state: blocked({ type: 'reviewerBlocked', summary }, { message: reason }),
       }
     }
 
     default:
-      return { action: 'error', reason: `Unknown review verdict: ${review.verdict as string}` }
+      return { action: 'error', reason: `Unknown review verdict: ${aggregateVerdict as string}` }
   }
+}
+
+function reviewResultsFromContext(ctx: RunContext): Readonly<Record<string, ReviewerOutput>> {
+  if (ctx.reviewResults && Object.keys(ctx.reviewResults).length > 0) {
+    return ctx.reviewResults
+  }
+  return ctx.reviewResult ? { review: ctx.reviewResult } : {}
+}
+
+function collectReviewFindings(
+  results: Readonly<Record<string, ReviewerOutput>>,
+): ReviewFinding[] {
+  return Object.values(results).flatMap((result) => result.findings)
+}
+
+function firstReviewWithVerdict(
+  results: Readonly<Record<string, ReviewerOutput>>,
+  verdict: AggregateVerdict,
+): ReviewerOutput | null {
+  return Object.values(results).find((result) => result.verdict === verdict) ?? null
 }
 
 /**

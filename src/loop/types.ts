@@ -2,7 +2,7 @@ import type { ForgeIssue } from '../forge/types.js'
 import type { RepoConfig } from '../config/schema.js'
 import type { ResolvedRoles } from '../discovery/roles.js'
 import type { TriageResult, TriageAdjustedLimits } from '../discovery/triage.js'
-import type { PlannerOutput, CoderOutput, ReviewerOutput, ReviewFinding, VerifyResult } from '../workers/types.js'
+import type { PlannerOutput, CoderOutput, ReviewerOutput, ReviewFinding, SourcedReviewFinding, VerifyResult } from '../workers/types.js'
 import type { IterationSnapshot } from './progress.js'
 import type { BlockedState } from './state.js'
 import type { WorkItem } from '../work-items/types.js'
@@ -62,8 +62,11 @@ export interface RunContext {
   readonly codeResult: CoderOutput | null
   readonly diff: string | null
   readonly verifyResults: VerifyResult[]
+  /** Reviewer outputs keyed by workflow reviewer slot (`reviewerKey` or step id). */
+  readonly reviewResults?: Readonly<Record<string, ReviewerOutput>>
+  /** @deprecated Legacy scalar reviewer slot, retained for old checkpoints and summaries. */
   readonly reviewResult: ReviewerOutput | null
-  readonly reviewFindings: ReviewFinding[]
+  readonly reviewFindings: ReadonlyArray<ReviewFinding | SourcedReviewFinding>
 
   readonly iteration: number
   readonly totalAgentPasses: number
@@ -119,7 +122,7 @@ export type LoopDecision =
   | {
       action: 'iterate'
       reason: string
-      findings: ReviewFinding[]
+      findings: ReadonlyArray<ReviewFinding | SourcedReviewFinding>
       jumpTo?: 'coder'
     }
   | { action: 'block'; reason: string; state: BlockedState }
@@ -128,4 +131,4 @@ export type LoopDecision =
 /** Final disposition of a run. `running` is the initial value; the others are terminal. */
 export type TerminalStatus = 'running' | 'publish' | 'blocked' | 'error'
 
-export type { PlannerOutput, CoderOutput, ReviewerOutput, ReviewFinding, VerifyResult }
+export type { PlannerOutput, CoderOutput, ReviewerOutput, ReviewFinding, SourcedReviewFinding, VerifyResult }

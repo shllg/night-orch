@@ -1,5 +1,6 @@
 import type { RunContext, LoopDecision } from './types.js'
 import type { WorkflowStep, WorkerStep, VerifyStep, DecideStep } from './workflow.js'
+import { reviewerKeyForStep } from './workflow.js'
 import type {
   WorkerAdapter,
   WorkerTaskInput,
@@ -36,6 +37,7 @@ import { logger } from '../utils/logger.js'
 import { buildPlanningPrdPath, isPlanningIssue } from '../planning/mode.js'
 import { coerceConflictSnapshot } from '../ops/conflict-types.js'
 import { sanitizeErrorMessage } from '../utils/sanitize-error.js'
+import { mergeReviewFindings, sourceReviewFindings } from './review-findings.js'
 import type { z } from 'zod'
 
 export interface StepDependencies {
@@ -285,7 +287,10 @@ export function determineStepSuccess(step: WorkflowStep, ctx: RunContext): boole
     case 'worker':
       if (step.role === 'planner') return ctx.plan !== null
       if (step.role === 'coder') return ctx.codeResult !== null
-      if (step.role === 'reviewer') return ctx.reviewResult !== null
+      if (step.role === 'reviewer') {
+        const key = reviewerKeyForStep(step)
+        return ctx.reviewResults?.[key] !== undefined || (key === 'review' && ctx.reviewResult !== null)
+      }
       return true
     case 'verify':
       return ctx.verifyResults.length > 0 && allRequiredVerifyPassed(ctx.verifyResults)
@@ -299,7 +304,15 @@ export function buildStepArtifacts(step: WorkflowStep, ctx: RunContext): Record<
     case 'worker':
       if (step.role === 'planner') return { plan: ctx.plan }
       if (step.role === 'coder') return { codeResult: ctx.codeResult }
-      if (step.role === 'reviewer') return { reviewResult: ctx.reviewResult }
+      if (step.role === 'reviewer') {
+        const key = reviewerKeyForStep(step)
+        const reviewResult = ctx.reviewResults?.[key] ?? (key === 'review' ? ctx.reviewResult : null)
+        return {
+          reviewerKey: key,
+          reviewResult,
+          reviewResults: reviewResult ? { [key]: reviewResult } : {},
+        }
+      }
       return { stepOutput: ctx.stepOutputs[step.id] ?? null }
     case 'verify':
       return {
@@ -365,7 +378,7 @@ export function buildPromptContext(ctx: RunContext, role: string): PromptContext
     },
     plan: ctx.plan?.objective ?? null,
     diff: ctx.diff ?? null,
-    reviewFindings: ctx.reviewFindings.length > 0 ? ctx.reviewFindings : null,
+    reviewFindings: ctx.reviewFindings.length > 0 ? [...ctx.reviewFindings] : null,
     verifyResults: ctx.verifyResults.length > 0
       ? ctx.verifyResults.map((result) => ({
           ...result,
@@ -549,20 +562,51 @@ function buildWorkerCtxPatch(
       }
 
     case 'reviewer':
-      return {
-        ...basePatch,
-        reviewResult: parseWorkerOutputForRole(
-          step,
-          result,
-          profileType,
-          ReviewerOutputContractSchema,
-          'reviewer',
-        ),
-      }
+      return buildReviewerCtxPatch(ctx, step, result, profileType, basePatch)
 
     default:
       // Custom roles: only populate stepOutputs (already in basePatch)
       return basePatch
+  }
+}
+
+function buildReviewerCtxPatch(
+  ctx: RunContext,
+  step: WorkerStep,
+  result: WorkerTaskResult,
+  profileType: string,
+  basePatch: Partial<RunContext>,
+): Partial<RunContext> {
+  const reviewResult = parseWorkerOutputForRole(
+    step,
+    result,
+    profileType,
+    ReviewerOutputContractSchema,
+    'reviewer',
+  )
+
+  if (!reviewResult) {
+    return {
+      ...basePatch,
+      reviewResult: null,
+      reviewResults: {},
+    }
+  }
+
+  const key = reviewerKeyForStep(step)
+  const nextFindings = mergeReviewFindings(
+    ctx.reviewFindings,
+    sourceReviewFindings(reviewResult, key, step.role),
+  )
+
+  return {
+    ...basePatch,
+    reviewResult,
+    reviewResults: {
+      ...(ctx.reviewResults ?? {}),
+      [key]: reviewResult,
+    },
+    reviewFindings: nextFindings,
   }
 }
 

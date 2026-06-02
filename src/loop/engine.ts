@@ -39,6 +39,7 @@ import { utcIsoFromMs } from '../utils/time.js'
 import type Database from 'better-sqlite3'
 import { buildPlanningPrdPath, isPlanningIssue } from '../planning/mode.js'
 import type { AgentEvent } from '../events/types.js'
+import { mergeReviewFindings } from './review-findings.js'
 
 /** External services injected into the loop engine. Tests can substitute mocks for all of these. */
 export interface LoopDependencies {
@@ -426,8 +427,9 @@ export async function executeLoop(
 
           ctx = updateContext(ctx, {
             iteration: ctx.iteration + 1,
-            reviewFindings: [...ctx.reviewFindings, ...decision.findings],
+            reviewFindings: mergeReviewFindings(ctx.reviewFindings, decision.findings),
             reviewResult: null,
+            reviewResults: {},
             verifyResults: [],
             iterationSnapshots: updatedSnapshots,
           })

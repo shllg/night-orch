@@ -120,6 +120,27 @@ function makeReviewerResult(verdict: 'APPROVED' | 'CHANGES_REQUIRED' | 'BLOCKED'
   }
 }
 
+function makeReviewerResultWithFinding(
+  summary: string,
+  message: string,
+  suggestedFix: string | null = null,
+): WorkerTaskResult {
+  const result = makeReviewerResult('CHANGES_REQUIRED')
+  return {
+    ...result,
+    parsed: {
+      ...(result.parsed as NonNullable<WorkerTaskResult['parsed']>),
+      summary,
+      findings: [{ severity: 'major' as const, message, suggestedFix }],
+      definitionOfDoneCheck: {
+        issueAddressed: false,
+        testsPassing: true,
+        noBlockingFindings: false,
+      },
+    },
+  }
+}
+
 function makeMockAdapter(results: WorkerTaskResult[]): WorkerAdapter {
   let callIndex = 0
   return {
@@ -339,6 +360,48 @@ describe('executeLoop', () => {
 
     const row = db.prepare('SELECT iteration_count FROM runs WHERE id = ?').get('run-test-1') as { iteration_count: number | null }
     expect(row.iteration_count).toBe(2)
+  })
+
+  it('two reviewer steps both contribute unique sourced findings to the next coder attempt', async () => {
+    const coderAdapter = makeMockAdapter([makeCoderResult(), makeCoderResult()])
+    const reviewerAdapter = makeMockAdapter([
+      makeReviewerResultWithFinding('Reviewer found missing tests', 'Add unit coverage', 'Add a unit test'),
+      makeReviewerResultWithFinding('Code review found unsafe parsing', 'Harden parser input', 'Validate input first'),
+      makeReviewerResult('APPROVED'),
+      makeReviewerResult('APPROVED'),
+    ])
+    const workflow = {
+      steps: [
+        { type: 'worker' as const, id: 'plan', role: 'planner', skipWhen: 'trivial' },
+        { type: 'worker' as const, id: 'code', role: 'coder', continueFrom: 'plan' },
+        { type: 'verify' as const, id: 'verify' },
+        { type: 'worker' as const, id: 'review', role: 'reviewer' },
+        { type: 'worker' as const, id: 'cr', role: 'reviewer' },
+        { type: 'decide' as const, id: 'decide', onIterate: 'code' },
+      ],
+    }
+
+    const deps: LoopDependencies = {
+      db,
+      config: makeConfig(),
+      adapters: {
+        planner: makeMockAdapter([makePlannerResult()]),
+        coder: coderAdapter,
+        reviewer: reviewerAdapter,
+      },
+      workflow,
+    }
+
+    const result = await executeLoop(makeCtx(), deps)
+
+    expect(result.terminalStatus).toBe('publish')
+    expect(coderAdapter.runTask).toHaveBeenCalledTimes(2)
+
+    const retryPrompt = vi.mocked(coderAdapter.runTask).mock.calls[1]?.[0].prompt ?? ''
+    expect(retryPrompt).toContain('review')
+    expect(retryPrompt).toContain('cr')
+    expect(retryPrompt.match(/Add unit coverage/g)).toHaveLength(1)
+    expect(retryPrompt.match(/Harden parser input/g)).toHaveLength(1)
   })
 
   it('max iterations → blocked', async () => {

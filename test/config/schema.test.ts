@@ -239,6 +239,38 @@ describe('ConfigSchema', () => {
     expect(result.success).toBe(true)
   })
 
+  it('accepts reviewerKey on reviewer workflow steps', () => {
+    const raw = loadExampleConfig()
+    raw.workflows = {
+      multiReview: {
+        steps: [
+          { type: 'worker', id: 'code', role: 'coder' },
+          { type: 'worker', id: 'review', role: 'reviewer' },
+          { type: 'worker', id: 'cr', role: 'reviewer', reviewerKey: 'code-review' },
+          { type: 'decide', id: 'decide', onIterate: 'code' },
+        ],
+      },
+      dagReview: {
+        dag: {
+          entry: 'code',
+          stages: {
+            code: { type: 'worker', role: 'coder', next: 'cr' },
+            cr: { type: 'worker', role: 'reviewer', reviewerKey: 'code-review', next: 'decide' },
+            decide: { type: 'decide', onIterate: 'code' },
+          },
+        },
+      },
+    }
+    raw.repos[0].workflow = 'multiReview'
+
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.workflows.multiReview?.steps?.[2]).toMatchObject({ reviewerKey: 'code-review' })
+      expect(result.data.workflows.dagReview?.dag?.stages.cr).toMatchObject({ reviewerKey: 'code-review' })
+    }
+  })
+
   it('accepts verificationProfiles with repo and workflow stage selection', () => {
     const raw = loadExampleConfig()
     raw.verificationProfiles = {

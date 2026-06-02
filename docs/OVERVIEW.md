@@ -194,7 +194,8 @@ interface RunContext {
   readonly plan?: PlannerOutput;       // set after Plan phase
   readonly codeResult?: CoderOutput;   // set after Code phase
   readonly verifyResults?: VerifyResult[]; // set after Verify phase
-  readonly reviewResult?: ReviewerOutput;  // set after Review phase
+  readonly reviewResults?: Record<string, ReviewerOutput>; // keyed by reviewer step/slot
+  readonly reviewFindings?: ReviewFinding[]; // merged reviewer findings for coder retries
   readonly iterationCount: number;
   readonly cost: CostAccumulator;
 }
@@ -205,7 +206,7 @@ interface RunContext {
 - **Plan** — Sends issue + context to the planner worker. Output: structured plan with steps. Skipped for trivial issues.
 - **Code** — Sends plan + review feedback to the coder worker. The coder works in the git worktree.
 - **Verify** — Runs configured shell commands (e.g., `pnpm test`, `pnpm lint`). Each command's exit code and output are captured.
-- **Review** — Sends the diff to the reviewer worker. Output: verdict (`APPROVED`, `CHANGES_REQUIRED`, `BLOCKED`) with comments.
+- **Review** — Sends the diff to one or more reviewer workers. Output: verdict (`APPROVED`, `CHANGES_REQUIRED`, `BLOCKED`) with comments, stored by reviewer step/slot and merged for coder retries.
 
 ### Decision (`src/loop/decision.ts`)
 
@@ -221,11 +222,11 @@ Rules (in priority order):
 1. Cost over budget → `blocked { costLimit }`
 2. Max agent passes exceeded → `blocked { agentPassLimit }`
 3. Empty diff + no review findings → `iterate` (R3, bounded by `loop.maxEmptyDiffRetries`)
-4. `APPROVED` + verify pass → `publish`
-5. `APPROVED` + verify fail → `iterate` (tests broke, try again)
-6. `CHANGES_REQUIRED` under iteration limit → `iterate`
-7. `CHANGES_REQUIRED` at max iterations → `blocked { iterationLimit }`
-8. `BLOCKED` verdict → `blocked { reviewerBlocked }`
+4. Aggregate review verdict `APPROVED` + verify pass → `publish`
+5. Aggregate review verdict `APPROVED` + verify fail → `iterate` (tests broke, try again)
+6. Any `CHANGES_REQUIRED` reviewer under iteration limit → `iterate`
+7. Any `CHANGES_REQUIRED` reviewer at max iterations → `blocked { iterationLimit }`
+8. Any `BLOCKED` reviewer → `blocked { reviewerBlocked }`
 9. Parse failure → `blocked { ambiguousReview }` or `iterate` (configurable)
 
 > **Watch out:** `decide()` must never do I/O, read the DB, or call APIs. If you need new information for a decision, add it to `RunContext` in a prior phase. Putting side effects in `decide()` breaks crash recovery because the function may be re-executed after a checkpoint restore.

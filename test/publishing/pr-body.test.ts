@@ -74,6 +74,31 @@ describe('compilePRBody', () => {
     expect(body).toContain(':white_check_mark:')
   })
 
+  it('includes each reviewer result when multiple reviewer slots ran', () => {
+    const body = compilePRBody(makeContext({
+      reviewResult: null,
+      reviewResults: {
+        review: {
+          verdict: 'APPROVED',
+          summary: 'Main review passed',
+          findings: [],
+          definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+        },
+        cr: {
+          verdict: 'CHANGES_REQUIRED',
+          summary: 'Code review requested parser hardening',
+          findings: [],
+          definitionOfDoneCheck: { issueAddressed: false, testsPassing: true, noBlockingFindings: false },
+        },
+      },
+    }))
+
+    expect(body).toContain('### review')
+    expect(body).toContain('Main review passed')
+    expect(body).toContain('### cr')
+    expect(body).toContain('Code review requested parser hardening')
+  })
+
   it('includes agent roles and metadata', () => {
     const body = compilePRBody(makeContext())
     expect(body).toContain('plan=claude')

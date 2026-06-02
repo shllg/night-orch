@@ -359,9 +359,12 @@ workflows:
       - { type: worker, id: code, role: coder, continueFrom: plan }
       - { type: verify, id: verify }
       - { type: worker, id: security-review, role: reviewer, prompt: prompts/security.md }
+      - { type: worker, id: cr, role: reviewer, prompt: prompts/code-review.md, reviewerKey: code-review }
       - { type: worker, id: review, role: reviewer }
       - { type: decide, id: decide, onIterate: code }
 ```
+
+Multiple reviewer steps are aggregated. Findings from each reviewer are grouped by reviewer slot and included in the next coder prompt; the decision gate applies the worst verdict across reviewers (`BLOCKED` over `CHANGES_REQUIRED` over `APPROVED`). A reviewer step's slot defaults to its step `id`; set `reviewerKey` when two steps should intentionally write the same reviewer slot.
 
 ### DAG workflows
 
@@ -405,6 +408,7 @@ Rules:
 - `skipWhen: trivial` — skip this step for trivially-triaged issues
 - `continueFrom: plan` — continue the AI session from a prior step when both steps use the same agent (reduces token usage, improves context)
 - `prompt: path/to/template.md` — use a custom system prompt instead of the default
+- `reviewerKey: code-review` — for reviewer steps, store the result under a specific reviewer slot instead of the step id
 - `requireReview: false` — allow verification-only decisioning for lightweight workflows
 - `profile: strict` + `stage: smoke` (verify step) — run a specific verification profile stage
 - `roles` (workflow-level) — per-workflow default role assignment (`planner`/`coder`/`reviewer`)

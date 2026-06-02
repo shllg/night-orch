@@ -4,6 +4,7 @@ import type { TriageLevel } from '../discovery/triage.js'
 import type { AiClient } from '../ai/types.js'
 import { isAiError } from '../ai/errors.js'
 import { logger } from '../utils/logger.js'
+import { listReviewResults } from '../loop/review-results.js'
 
 export interface PRBodyContext {
   issue: { number: number; title: string; url: string }
@@ -11,6 +12,7 @@ export interface PRBodyContext {
   codeResult: CoderOutput | null
   verifyResults: VerifyResult[]
   reviewResult: ReviewerOutput | null
+  reviewResults?: Readonly<Record<string, ReviewerOutput>>
   roles: ResolvedRoles
   iterationCount: number
   triageLevel: TriageLevel
@@ -99,10 +101,20 @@ export function compilePRBody(ctx: PRBodyContext): string {
   }
 
   // Review summary
-  if (ctx.reviewResult) {
+  const reviewEntries = listReviewResults(ctx.reviewResults, ctx.reviewResult)
+  if (reviewEntries.length > 0) {
     sections.push('## Review')
-    sections.push(`**Verdict:** ${ctx.reviewResult.verdict}`)
-    sections.push(ctx.reviewResult.summary)
+    if (reviewEntries.length === 1) {
+      const { result } = reviewEntries[0]!
+      sections.push(`**Verdict:** ${result.verdict}`)
+      sections.push(result.summary)
+    } else {
+      for (const { key, result } of reviewEntries) {
+        sections.push(`### ${key}`)
+        sections.push(`**Verdict:** ${result.verdict}`)
+        sections.push(result.summary)
+      }
+    }
     sections.push('')
   }
 
@@ -206,10 +218,19 @@ function buildSummaryPrompt(ctx: PRBodyContext): string {
       parts.push(`Changed files: ${files}${ctx.codeResult.changedFiles.length > 10 ? ', …' : ''}`)
     }
   }
-  if (ctx.reviewResult) {
+  const reviewEntries = listReviewResults(ctx.reviewResults, ctx.reviewResult)
+  if (reviewEntries.length > 0) {
     parts.push('')
-    parts.push(`Review verdict: ${ctx.reviewResult.verdict}`)
-    parts.push(`Review summary: ${ctx.reviewResult.summary}`)
+    if (reviewEntries.length === 1) {
+      const { result } = reviewEntries[0]!
+      parts.push(`Review verdict: ${result.verdict}`)
+      parts.push(`Review summary: ${result.summary}`)
+    } else {
+      parts.push('Review results:')
+      for (const { key, result } of reviewEntries) {
+        parts.push(`  ${key}: ${result.verdict} - ${result.summary}`)
+      }
+    }
   }
   parts.push('')
   parts.push('Write a 2-3 sentence plain-English summary a reviewer can scan on a phone notification.')

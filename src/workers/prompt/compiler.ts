@@ -119,10 +119,15 @@ function buildUserPrompt(ctx: PromptContext): string {
   if (ctx.reviewFindings && ctx.reviewFindings.length > 0) {
     parts.push('')
     parts.push('## Review Findings to Address')
-    ctx.reviewFindings.forEach((f, i) => {
-      parts.push(`${i + 1}. [${f.severity}] ${f.message}`)
-      if (f.suggestedFix) parts.push(`   Suggested fix: ${f.suggestedFix}`)
-    })
+    for (const group of groupReviewFindings(ctx.reviewFindings)) {
+      if (group.sourceStepId) {
+        parts.push(`### ${group.sourceStepId}`)
+      }
+      group.findings.forEach((f, i) => {
+        parts.push(`${i + 1}. [${f.severity}] ${f.message}`)
+        if (f.suggestedFix) parts.push(`   Suggested fix: ${f.suggestedFix}`)
+      })
+    }
   }
 
   if (ctx.verifyResults && ctx.verifyResults.length > 0) {
@@ -282,9 +287,44 @@ function sanitizeVerifyStderr(stderr: string): string {
 
 function formatReviewFindings(ctx: PromptContext): string {
   if (!ctx.reviewFindings || ctx.reviewFindings.length === 0) return '(none)'
-  return ctx.reviewFindings
-    .map((f, i) => `${i + 1}. [${f.severity}] ${f.message}`)
+  return groupReviewFindings(ctx.reviewFindings)
+    .flatMap((group) => {
+      const heading = group.sourceStepId ? [`[${group.sourceStepId}]`] : []
+      return [
+        ...heading,
+        ...group.findings.map((f, i) => `${i + 1}. [${f.severity}] ${f.message}`),
+      ]
+    })
     .join('\n')
+}
+
+function groupReviewFindings(findings: NonNullable<PromptContext['reviewFindings']>): Array<{
+  sourceStepId: string | null
+  findings: NonNullable<PromptContext['reviewFindings']>
+}> {
+  const groups: Array<{
+    sourceStepId: string | null
+    findings: NonNullable<PromptContext['reviewFindings']>
+  }> = []
+  const bySource = new Map<string, NonNullable<PromptContext['reviewFindings']>>()
+  const unsourced: NonNullable<PromptContext['reviewFindings']> = []
+
+  for (const finding of findings) {
+    const sourceStepId = 'sourceStepId' in finding ? finding.sourceStepId : null
+    if (!sourceStepId) {
+      unsourced.push(finding)
+      continue
+    }
+    const current = bySource.get(sourceStepId) ?? []
+    current.push(finding)
+    bySource.set(sourceStepId, current)
+  }
+
+  if (unsourced.length > 0) groups.push({ sourceStepId: null, findings: unsourced })
+  for (const [sourceStepId, sourceFindings] of bySource) {
+    groups.push({ sourceStepId, findings: sourceFindings })
+  }
+  return groups
 }
 
 function formatVerifyResults(ctx: PromptContext): string {

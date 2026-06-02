@@ -65,6 +65,7 @@ export function handlePostVerifyGuard(params: {
         ctx = updateContext(ctx, {
           verifyResults: [],
           reviewResult: null,
+          reviewResults: {},
           diff: null,
           diffError: null,
         })
@@ -77,6 +78,7 @@ export function handlePostVerifyGuard(params: {
           emptyDiffRetries: ctx.emptyDiffRetries + 1,
           verifyResults: [],
           reviewResult: null,
+          reviewResults: {},
           diff: null,
           diffError: null,
         })

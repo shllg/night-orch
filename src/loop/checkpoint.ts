@@ -14,6 +14,7 @@ import {
 } from './checkpoint-schema.js'
 import { recordPhase, updateContext } from './context.js'
 import { LEGACY_BLOCK_REASON_VALUES } from './state.js'
+import { mergeReviewFindings, sourceReviewFindings } from './review-findings.js'
 
 export interface CheckpointArtifactEvent {
   runId: string
@@ -166,7 +167,11 @@ function isStepCheckpointComplete(step: WorkflowStep, rawArtifacts: unknown): bo
     case 'worker':
       if (step.role === 'planner') return artifacts['plan'] !== null && artifacts['plan'] !== undefined
       if (step.role === 'coder') return artifacts['codeResult'] !== null && artifacts['codeResult'] !== undefined
-      if (step.role === 'reviewer') return artifacts['reviewResult'] !== null && artifacts['reviewResult'] !== undefined
+      if (step.role === 'reviewer') {
+        const reviewResults = artifacts['reviewResults']
+        return (artifacts['reviewResult'] !== null && artifacts['reviewResult'] !== undefined)
+          || (isRecord(reviewResults) && Object.keys(reviewResults).length > 0)
+      }
       return 'stepOutput' in artifacts
     case 'verify':
       return Array.isArray(artifacts['verifyResults'])
@@ -361,6 +366,7 @@ export class Checkpoint {
     const verifyEmptyDiffRetries = typeof verifyArtifacts?.emptyDiffRetries === 'number'
       ? verifyArtifacts.emptyDiffRetries
       : baseCtx.emptyDiffRetries
+    const reviewState = hydrateReviewState(phaseData, baseCtx)
 
     return {
       ...baseCtx,
@@ -373,7 +379,9 @@ export class Checkpoint {
       verifyResults: Array.isArray(verifyArtifacts?.verifyResults)
         ? verifyArtifacts.verifyResults as VerifyResult[]
         : baseCtx.verifyResults,
-      reviewResult: (reviewArtifacts?.reviewResult as ReviewerOutput) ?? baseCtx.reviewResult,
+      reviewResult: reviewState.reviewResult ?? (reviewArtifacts?.reviewResult as ReviewerOutput) ?? baseCtx.reviewResult,
+      reviewResults: reviewState.reviewResults,
+      reviewFindings: reviewState.reviewFindings,
       sessionIds: isStringRecord(persistedSessionIds) ? persistedSessionIds : baseCtx.sessionIds,
       stepOutputs: isRecord(persistedStepOutputs) ? persistedStepOutputs : baseCtx.stepOutputs,
       diff: verifyDiff,
@@ -496,6 +504,64 @@ export class Checkpoint {
         )
       }
     }
+  }
+}
+
+function hydrateReviewState(
+  phaseData: Record<string, unknown>,
+  baseCtx: RunContext,
+): {
+  reviewResult: ReviewerOutput | null
+  reviewResults: Readonly<Record<string, ReviewerOutput>>
+  reviewFindings: RunContext['reviewFindings']
+} {
+  const reviewResults: Record<string, ReviewerOutput> = { ...(baseCtx.reviewResults ?? {}) }
+  let latestReviewResult: ReviewerOutput | null = baseCtx.reviewResult
+
+  if (Object.keys(reviewResults).length === 0 && baseCtx.reviewResult) {
+    reviewResults.review = baseCtx.reviewResult
+  }
+
+  for (const [phase, rawArtifacts] of Object.entries(phaseData)) {
+    if (!isRecord(rawArtifacts)) continue
+
+    const artifactResults = rawArtifacts['reviewResults']
+    if (isRecord(artifactResults)) {
+      for (const [key, value] of Object.entries(artifactResults)) {
+        if (!isRecord(value)) continue
+        const review = value as unknown as ReviewerOutput
+        reviewResults[key] = review
+        latestReviewResult = review
+      }
+    }
+
+    const legacyReview = rawArtifacts['reviewResult']
+    if (isRecord(legacyReview)) {
+      const reviewerKey = typeof rawArtifacts['reviewerKey'] === 'string'
+        ? rawArtifacts['reviewerKey']
+        : phase
+      const review = legacyReview as unknown as ReviewerOutput
+      reviewResults[reviewerKey] = review
+      latestReviewResult = review
+    }
+  }
+
+  if (Object.keys(reviewResults).length === 0) {
+    return {
+      reviewResult: latestReviewResult,
+      reviewResults,
+      reviewFindings: baseCtx.reviewFindings,
+    }
+  }
+
+  const hydratedFindings = Object.entries(reviewResults).flatMap(([sourceStepId, result]) =>
+    sourceReviewFindings(result, sourceStepId, 'reviewer'),
+  )
+
+  return {
+    reviewResult: latestReviewResult,
+    reviewResults,
+    reviewFindings: mergeReviewFindings(baseCtx.reviewFindings, hydratedFindings),
   }
 }
 

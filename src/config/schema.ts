@@ -328,6 +328,7 @@ const WorkflowWorkerStepSchema = z.object({
   skipWhen: z.string().optional(),
   continueFrom: z.string().optional(),
   prompt: z.string().optional(),
+  reviewerKey: z.string().optional(),
 })
 
 const WorkflowVerifyStepSchema = z.object({
@@ -357,6 +358,7 @@ const WorkflowDagWorkerStageSchema = z.object({
   skipWhen: z.string().optional(),
   continueFrom: z.string().optional(),
   prompt: z.string().optional(),
+  reviewerKey: z.string().optional(),
   next: z.string().optional(),
   retry: z.number().int().min(0).optional(),
   timeoutSeconds: z.number().int().positive().optional(),

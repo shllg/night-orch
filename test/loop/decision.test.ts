@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { decide, decideEmptyDiffRetry } from '../../src/loop/decision.js'
+import { aggregateReviewVerdict, decide, decideEmptyDiffRetry } from '../../src/loop/decision.js'
 import type { RunContext } from '../../src/loop/types.js'
 import type { Config } from '../../src/config/schema.js'
 
@@ -61,6 +61,63 @@ function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
 }
 
 describe('decide', () => {
+  it.each([
+    [{}, null],
+    [
+      {
+        review: {
+          verdict: 'APPROVED',
+          summary: 'Reviewer approved',
+          findings: [],
+          definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+        },
+        cr: {
+          verdict: 'APPROVED',
+          summary: 'CR approved',
+          findings: [],
+          definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+        },
+      },
+      'APPROVED',
+    ],
+    [
+      {
+        review: {
+          verdict: 'APPROVED',
+          summary: 'Reviewer approved',
+          findings: [],
+          definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+        },
+        cr: {
+          verdict: 'CHANGES_REQUIRED',
+          summary: 'CR requested changes',
+          findings: [{ severity: 'major', message: 'Missing tests', suggestedFix: null }],
+          definitionOfDoneCheck: { issueAddressed: false, testsPassing: true, noBlockingFindings: false },
+        },
+      },
+      'CHANGES_REQUIRED',
+    ],
+    [
+      {
+        review: {
+          verdict: 'CHANGES_REQUIRED',
+          summary: 'Reviewer requested changes',
+          findings: [{ severity: 'minor', message: 'Naming', suggestedFix: null }],
+          definitionOfDoneCheck: { issueAddressed: false, testsPassing: true, noBlockingFindings: false },
+        },
+        cr: {
+          verdict: 'BLOCKED',
+          summary: 'CR blocked',
+          findings: [{ severity: 'critical', message: 'Unsafe change', suggestedFix: null }],
+          definitionOfDoneCheck: { issueAddressed: false, testsPassing: false, noBlockingFindings: false },
+        },
+      },
+      'BLOCKED',
+    ],
+  ] as const)('aggregates reviewer verdicts with worst verdict winning', (results, expected) => {
+    expect(aggregateReviewVerdict(results)).toBe(expected)
+  })
+
   it('APPROVED + verify pass → publish', () => {
     const ctx = makeCtx({
       reviewResult: {
@@ -71,6 +128,29 @@ describe('decide', () => {
       },
       verifyResults: [{ command: 'test', exitCode: 0, stdout: '', stderr: '', durationMs: 100, passed: true }],
     })
+    const d = decide(ctx, loopConfig, securityConfig)
+    expect(d.action).toBe('publish')
+  })
+
+  it('APPROVED reviewer map + verify pass → publish without legacy reviewResult', () => {
+    const ctx = makeCtx({
+      reviewResult: null,
+      reviewResults: {
+        review: {
+          verdict: 'APPROVED',
+          summary: 'Good',
+          findings: [],
+          definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+        },
+        cr: {
+          verdict: 'APPROVED',
+          summary: 'Also good',
+          findings: [],
+          definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+        },
+      },
+      verifyResults: [{ command: 'test', exitCode: 0, stdout: '', stderr: '', durationMs: 100, passed: true }],
+    } as Partial<RunContext>)
     const d = decide(ctx, loopConfig, securityConfig)
     expect(d.action).toBe('publish')
   })

@@ -10,6 +10,7 @@ import { transitionLabels } from '../labels/manager.js'
 import { buildLabelConfig } from '../labels/config.js'
 import { upsertBotComment } from '../forge/bot-comment.js'
 import { formatStatusComment } from '../forge/status-comment.js'
+import { formatReviewSummary } from '../loop/review-results.js'
 import type { NotificationDispatcher } from '../notify/dispatcher.js'
 import { nowUtcIso } from '../utils/time.js'
 import { logger } from '../utils/logger.js'
@@ -266,7 +267,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
     const notifyResult = await notifier.dispatch(makePayload('blocked', repo, issue, {
       summary: blockReason,
       blockingReason: blockReason,
-      reviewSummary: finalCtx.reviewResult?.summary ?? null,
+      reviewSummary: formatReviewSummary(finalCtx.reviewResults, finalCtx.reviewResult),
     }))
     try {
       metrics?.incRunsTotal('blocked')

@@ -4,6 +4,7 @@ import { blockedReasonFromLegacy, blockReasonSummary } from '../loop/state.js'
 import { markerTag, upsertBotComment } from '../forge/bot-comment.js'
 import { formatStatusComment } from '../forge/status-comment.js'
 import { logger } from '../utils/logger.js'
+import { listReviewResults } from '../loop/review-results.js'
 
 export const STATUS_MARKER = markerTag('status')
 
@@ -24,14 +25,19 @@ export function buildBlockReason(ctx: RunContext): string {
     return blockMessage
   }
 
-  if (ctx.reviewResult) {
-    const findings = ctx.reviewResult.findings
+  const reviewEntries = listReviewResults(ctx.reviewResults, ctx.reviewResult)
+  if (reviewEntries.length > 0) {
+    const findings = reviewEntries.flatMap(({ key, result }) =>
+      getReviewFindings(result)
       .filter((f) => f.severity === 'critical' || f.severity === 'major')
-      .map((f) => `[${f.severity}] ${f.message}`)
-      .join('; ')
+      .map((f) => `[${key}/${f.severity}] ${f.message}`),
+    ).join('; ')
+    const summary = reviewEntries.length === 1
+      ? reviewEntries[0]!.result.summary
+      : reviewEntries.map(({ key, result }) => `${key}: ${result.summary}`).join('; ')
     return findings
-      ? `${ctx.reviewResult.summary} — ${findings}`
-      : ctx.reviewResult.summary
+      ? `${summary} - ${findings}`
+      : summary
   }
 
   if (ctx.blockReason) {
@@ -46,15 +52,24 @@ export function buildBlockReason(ctx: RunContext): string {
 
 export function formatBlockComment(reason: string, ctx: RunContext): string {
   const parts = [`⛔ **night-orch**: Run blocked.\n\n**Reason:** ${reason}`]
-  if (ctx.reviewResult?.findings && ctx.reviewResult.findings.length > 0) {
+  const reviewEntries = listReviewResults(ctx.reviewResults, ctx.reviewResult)
+  if (reviewEntries.some(({ result }) => getReviewFindings(result).length > 0)) {
     parts.push('\n**Findings:**')
-    for (const f of ctx.reviewResult.findings) {
-      const fix = f.suggestedFix ? ` → ${f.suggestedFix}` : ''
-      parts.push(`- **${f.severity}**: ${f.message}${fix}`)
+    for (const { key, result } of reviewEntries) {
+      for (const f of getReviewFindings(result)) {
+        const fix = f.suggestedFix ? ` -> ${f.suggestedFix}` : ''
+        parts.push(`- **${key}/${f.severity}**: ${f.message}${fix}`)
+      }
     }
   }
   parts.push(`\n*Iteration ${ctx.iteration}, cost: $${ctx.estimatedCostUsd.toFixed(4)}*`)
   return parts.join('\n')
+}
+
+function getReviewFindings(
+  result: ReturnType<typeof listReviewResults>[number]['result'],
+) {
+  return Array.isArray(result.findings) ? result.findings : []
 }
 
 export interface PostStatusCommentParams {

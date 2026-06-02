@@ -110,6 +110,11 @@ export interface ReviewFinding {
   suggestedFix: string | null
 }
 
+export interface SourcedReviewFinding extends ReviewFinding {
+  sourceStepId: string
+  sourceRole: string
+}
+
 export interface VerifyResult {
   command: string
   exitCode: number
@@ -137,7 +142,7 @@ export interface PromptContext {
   }
   plan: string | null
   diff: string | null
-  reviewFindings: ReviewFinding[] | null
+  reviewFindings: (ReviewFinding | SourcedReviewFinding)[] | null
   verifyResults: VerifyResult[] | null
   iteration: {
     current: number

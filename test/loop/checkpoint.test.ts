@@ -232,6 +232,70 @@ describe('Checkpoint', () => {
       expect(resumed!.codeResult).toEqual(codeResult)
     })
 
+    it('hydrates legacy reviewResult checkpoint data into reviewResults.review', () => {
+      const reviewResult = {
+        verdict: 'CHANGES_REQUIRED' as const,
+        summary: 'Needs tests',
+        findings: [{ severity: 'major' as const, message: 'Add unit coverage', suggestedFix: null }],
+        definitionOfDoneCheck: { issueAddressed: false, testsPassing: true, noBlockingFindings: false },
+      }
+      checkpoint.phaseCompleted('run-test-1', 'review', { reviewResult })
+
+      const resumed = checkpoint.resumeFromCheckpoint('run-test-1', makeBaseCtx())
+
+      expect(resumed).not.toBeNull()
+      expect(resumed!.reviewResult).toEqual(reviewResult)
+      expect(resumed!.reviewResults?.review).toEqual(reviewResult)
+      expect(resumed!.reviewFindings).toEqual([
+        {
+          severity: 'major',
+          message: 'Add unit coverage',
+          suggestedFix: null,
+          sourceStepId: 'review',
+          sourceRole: 'reviewer',
+        },
+      ])
+    })
+
+    it('hydrates reviewResults from multiple reviewer phase artifacts', () => {
+      const reviewResult = {
+        verdict: 'APPROVED' as const,
+        summary: 'Main review approved',
+        findings: [],
+        definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+      }
+      const crResult = {
+        verdict: 'CHANGES_REQUIRED' as const,
+        summary: 'CR requested changes',
+        findings: [{ severity: 'major' as const, message: 'Harden parser input', suggestedFix: 'Validate input first' }],
+        definitionOfDoneCheck: { issueAddressed: false, testsPassing: true, noBlockingFindings: false },
+      }
+      checkpoint.phaseCompleted('run-test-1', 'review', {
+        reviewerKey: 'review',
+        reviewResult,
+        reviewResults: { review: reviewResult },
+      })
+      checkpoint.phaseCompleted('run-test-1', 'cr', {
+        reviewerKey: 'cr',
+        reviewResult: crResult,
+        reviewResults: { cr: crResult },
+      })
+
+      const resumed = checkpoint.resumeFromCheckpoint('run-test-1', makeBaseCtx())
+
+      expect(resumed?.reviewResults).toEqual({ review: reviewResult, cr: crResult })
+      expect(resumed?.reviewResult).toEqual(crResult)
+      expect(resumed?.reviewFindings).toEqual([
+        {
+          severity: 'major',
+          message: 'Harden parser input',
+          suggestedFix: 'Validate input first',
+          sourceStepId: 'cr',
+          sourceRole: 'reviewer',
+        },
+      ])
+    })
+
     it('preserves base context fields not in DB', () => {
       checkpoint.phaseCompleted('run-test-1', 'plan', { plan: { objective: 'Fix' } })
 

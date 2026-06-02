@@ -234,6 +234,7 @@ commentCommands:
 #       - { type: worker, id: code, role: coder, continueFrom: plan }
 #       - { type: verify, id: verify }
 #       - { type: worker, id: security, role: reviewer }
+#       - { type: worker, id: cr, role: reviewer, prompt: .night-orch/prompts/code-review.md, reviewerKey: code-review }
 #       - { type: worker, id: review, role: reviewer }
 #       - { type: decide, id: decide, onIterate: code }
 #   dag-minimal:

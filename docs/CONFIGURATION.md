@@ -732,21 +732,25 @@ workflows:
       - { type: worker, id: code, role: coder, continueFrom: plan }
       - { type: verify, id: verify }
       - { type: worker, id: security, role: reviewer, prompt: security-review.md }
+      - { type: worker, id: cr, role: reviewer, prompt: code-review.md, reviewerKey: code-review }
       - { type: worker, id: review, role: reviewer }
       - { type: decide, id: decide, onIterate: code }
 ```
+
+When a workflow has multiple reviewer steps, Night-Orch stores each reviewer result by step id and merges the findings before the next coder iteration. `decide` uses a worst-of verdict: any `BLOCKED` blocks, otherwise any `CHANGES_REQUIRED` iterates, otherwise all-approved publishes when verification passes.
 
 ### Step Types
 
 | Type | Fields | Description |
 | --- | --- | --- |
-| `worker` | `id`, `role`, `skipWhen?`, `continueFrom?`, `prompt?` | Invoke a worker adapter. Built-in roles: `planner`, `coder`, `reviewer`. |
+| `worker` | `id`, `role`, `skipWhen?`, `continueFrom?`, `prompt?`, `reviewerKey?` | Invoke a worker adapter. Built-in roles: `planner`, `coder`, `reviewer`. |
 | `verify` | `id`, `skipWhen?`, `profile?`, `stage?` | Run verify commands from `repos[].verify` or a named verification profile/stage. |
 | `decide` | `id`, `onIterate`, `requireReview?` | Evaluate review/verify results and route to publish, iterate (jump to `onIterate` step), or block. |
 
 - `skipWhen` — skip the step when the triage level matches (e.g., `trivial`)
 - `continueFrom` — continue the AI session from a prior step (e.g., coder continues planner's session). Session reuse is agent-specific; cross-agent handoffs (for example `planner=claude`, `coder=codex`) start a fresh session.
 - `prompt` — path to a custom system prompt template (overrides the default)
+- `reviewerKey` — reviewer result slot for `role: reviewer`; defaults to the step `id`. Set this when two reviewer steps should intentionally write the same slot.
 - `requireReview` — default `true`; set to `false` for no-review workflows (for example lightweight triage paths)
 - `profile` / `stage` on verify steps — override repo-level verification profile selection for this step
 

@@ -293,6 +293,34 @@ describe('executeWorkerStep', () => {
     expect(result.ctx.totalAgentPasses).toBe(1)
   })
 
+  it('reviewer role records results by reviewerKey and sources findings', async () => {
+    const step: WorkerStep = { type: 'worker', id: 'cr', role: 'reviewer', reviewerKey: 'code-review' }
+    const deps = makeDeps({ reviewer: makeMockAdapter(makeReviewerResult('CHANGES_REQUIRED')) })
+    const result = await executeWorkerStep(makeCtx({
+      reviewResults: {
+        review: {
+          verdict: 'APPROVED',
+          summary: 'Looks good',
+          findings: [],
+          definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+        },
+      },
+    } as Partial<RunContext>), step, deps)
+
+    expect(result.ctx.reviewResults?.['review']?.verdict).toBe('APPROVED')
+    expect(result.ctx.reviewResults?.['code-review']?.verdict).toBe('CHANGES_REQUIRED')
+    expect(result.ctx.reviewResult?.verdict).toBe('CHANGES_REQUIRED')
+    expect(result.ctx.reviewFindings).toEqual([
+      {
+        severity: 'major',
+        message: 'Missing tests',
+        suggestedFix: 'Add tests',
+        sourceStepId: 'code-review',
+        sourceRole: 'reviewer',
+      },
+    ])
+  })
+
   it('custom role populates ctx.stepOutputs only', async () => {
     const customResult: WorkerTaskResult = {
       rawOutput: '',
