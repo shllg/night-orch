@@ -69,7 +69,6 @@ function makeCtx(): RunContext {
     codeResult: null,
     diff: 'diff',
     verifyResults: [],
-    reviewResult: null,
     reviewResults: {},
     reviewFindings: [],
     iteration: 1,

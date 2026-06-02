@@ -47,7 +47,7 @@ export function buildPayload(
     prNumber: extra.prNumber ?? null,
     summary: buildSummary(ctx, event),
     blockingReason: extra.blockingReason ?? null,
-    reviewSummary: formatReviewSummary(ctx.reviewResults, ctx.reviewResult),
+    reviewSummary: formatReviewSummary(ctx.reviewResults),
     iterationCount: ctx.iteration,
     timestamp: nowUtcIso(),
   }

@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 import type { LoopPhase, RunContext, PlannerOutput, CoderOutput, ReviewerOutput, VerifyResult } from './types.js'
-import type { WorkflowStep } from './workflow.js'
+import { reviewerKeyForStep, type WorkflowStep } from './workflow.js'
 import { RunManager } from '../state/runs.js'
 import { listHandoffs, recordHandoff, type AgentHandoff, type RecordHandoffInput } from '../state/handoffs.js'
 import { insertRunLogEvent } from '../state/run-log-events.js'
@@ -92,7 +92,7 @@ export function resolveStartingStepIndex(
 
   const resumedStep = steps[resumedPhaseIndex]!
   const hasCompletedSentinel = completedPhases.length > 0
-  const artifactComplete = isStepCheckpointComplete(resumedStep, checkpointPhaseData[resumedStep.id])
+  const artifactComplete = isStepCheckpointComplete(resumedStep, checkpointPhaseData[resumedStep.id], resumedCtx)
   const isCompletedCheckpoint = hasCompletedSentinel
     ? completedPhases.includes(resumedStep.id) && artifactComplete
     : artifactComplete
@@ -158,7 +158,7 @@ function coercePersistedBlockReason(
     : null
 }
 
-function isStepCheckpointComplete(step: WorkflowStep, rawArtifacts: unknown): boolean {
+function isStepCheckpointComplete(step: WorkflowStep, rawArtifacts: unknown, resumedCtx: RunContext): boolean {
   if (typeof rawArtifacts !== 'object' || rawArtifacts === null || Array.isArray(rawArtifacts)) {
     return false
   }
@@ -170,8 +170,9 @@ function isStepCheckpointComplete(step: WorkflowStep, rawArtifacts: unknown): bo
       if (step.role === 'coder') return artifacts['codeResult'] !== null && artifacts['codeResult'] !== undefined
       if (step.role === 'reviewer') {
         const reviewResults = artifacts['reviewResults']
-        return (artifacts['reviewResult'] !== null && artifacts['reviewResult'] !== undefined)
-          || (isRecord(reviewResults) && Object.keys(reviewResults).length > 0)
+        const key = reviewerKeyForStep(step)
+        return (isRecord(reviewResults) && Object.keys(reviewResults).length > 0)
+          || resumedCtx.reviewResults[key] !== undefined
       }
       return 'stepOutput' in artifacts
     case 'verify':
@@ -366,7 +367,6 @@ export class Checkpoint {
     // Reconstruct context from persisted phase artifacts
     const planArtifacts = phaseData['plan'] as Record<string, unknown> | undefined
     const codeArtifacts = phaseData['code'] as Record<string, unknown> | undefined
-    const reviewArtifacts = phaseData['review'] as Record<string, unknown> | undefined
     const verifyArtifacts = phaseData['verify'] as Record<string, unknown> | undefined
     const persistedSessionIds = phaseData[SESSION_IDS_KEY]
     const persistedStepOutputs = phaseData[STEP_OUTPUTS_KEY]
@@ -386,7 +386,6 @@ export class Checkpoint {
         verifyResults: Array.isArray(verifyArtifacts?.verifyResults)
           ? verifyArtifacts.verifyResults as VerifyResult[]
           : baseCtx.verifyResults,
-        reviewResult: reviewState.reviewResult ?? (reviewArtifacts?.reviewResult as ReviewerOutput) ?? baseCtx.reviewResult,
         reviewResults: reviewState.reviewResults,
         reviewFindings: reviewState.reviewFindings,
       },
@@ -408,7 +407,6 @@ export class Checkpoint {
       plan: handoffRecovery.plan,
       codeResult: handoffRecovery.codeResult,
       verifyResults: handoffRecovery.verifyResults,
-      reviewResult: handoffRecovery.reviewResult,
       reviewResults: handoffRecovery.reviewResults,
       reviewFindings: handoffRecovery.reviewFindings,
       sessionIds: isStringRecord(persistedSessionIds) ? persistedSessionIds : baseCtx.sessionIds,
@@ -540,16 +538,10 @@ function hydrateReviewState(
   phaseData: Record<string, unknown>,
   baseCtx: RunContext,
 ): {
-  reviewResult: ReviewerOutput | null
   reviewResults: Readonly<Record<string, ReviewerOutput>>
   reviewFindings: RunContext['reviewFindings']
 } {
-  const reviewResults: Record<string, ReviewerOutput> = { ...(baseCtx.reviewResults ?? {}) }
-  let latestReviewResult: ReviewerOutput | null = baseCtx.reviewResult
-
-  if (Object.keys(reviewResults).length === 0 && baseCtx.reviewResult) {
-    reviewResults.review = baseCtx.reviewResult
-  }
+  const reviewResults: Record<string, ReviewerOutput> = { ...baseCtx.reviewResults }
 
   for (const [phase, rawArtifacts] of Object.entries(phaseData)) {
     if (!isRecord(rawArtifacts)) continue
@@ -560,7 +552,6 @@ function hydrateReviewState(
         if (!isRecord(value)) continue
         const review = value as unknown as ReviewerOutput
         reviewResults[key] = review
-        latestReviewResult = review
       }
     }
 
@@ -571,13 +562,11 @@ function hydrateReviewState(
         : phase
       const review = legacyReview as unknown as ReviewerOutput
       reviewResults[reviewerKey] = review
-      latestReviewResult = review
     }
   }
 
   if (Object.keys(reviewResults).length === 0) {
     return {
-      reviewResult: latestReviewResult,
       reviewResults,
       reviewFindings: baseCtx.reviewFindings,
     }
@@ -588,7 +577,6 @@ function hydrateReviewState(
   )
 
   return {
-    reviewResult: latestReviewResult,
     reviewResults,
     reviewFindings: mergeReviewFindings(baseCtx.reviewFindings, hydratedFindings),
   }
@@ -598,7 +586,6 @@ interface HandoffRecoveryState {
   plan: PlannerOutput | null
   codeResult: CoderOutput | null
   verifyResults: VerifyResult[]
-  reviewResult: ReviewerOutput | null
   reviewResults: Readonly<Record<string, ReviewerOutput>>
   reviewFindings: RunContext['reviewFindings']
 }
@@ -615,7 +602,6 @@ function recoverFromHandoffs(
   let plan = state.plan
   let codeResult = state.codeResult
   let verifyResults = state.verifyResults
-  let reviewResult = state.reviewResult
   let reviewResults = state.reviewResults
   let reviewFindings = state.reviewFindings
 
@@ -645,19 +631,16 @@ function recoverFromHandoffs(
 
   if (Object.keys(reviewResults).length === 0) {
     const recoveredReviews: Record<string, ReviewerOutput> = {}
-    let latestReview: ReviewerOutput | null = reviewResult
     for (const handoff of handoffs) {
       if (handoff.kind !== 'review-findings') continue
       if (!isRecord(handoff.contentJson)) continue
       const review = handoff.contentJson as unknown as ReviewerOutput
       recoveredReviews[handoff.stepId] = review
-      latestReview = review
     }
     if (Object.keys(recoveredReviews).length > 0) {
       const hydratedFindings = Object.entries(recoveredReviews).flatMap(([sourceStepId, result]) =>
         sourceReviewFindings(result, sourceStepId, 'reviewer'),
       )
-      reviewResult = latestReview
       reviewResults = recoveredReviews
       reviewFindings = mergeReviewFindings(reviewFindings, hydratedFindings)
       recoveredKinds.push('review-findings')
@@ -668,7 +651,6 @@ function recoverFromHandoffs(
     plan,
     codeResult,
     verifyResults,
-    reviewResult,
     reviewResults,
     reviewFindings,
     recoveredKinds,

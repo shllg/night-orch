@@ -74,9 +74,7 @@ describe('Checkpoint.resumeFromCheckpoint — legacy single reviewer compatibili
 
     expect(resumed).not.toBeNull()
     expect(resumed!.reviewResults).toEqual({ review: reviewFixture('CHANGES_REQUIRED') })
-    // Legacy scalar slot still populated so any code path that reads it
-    // pre-migration continues to work.
-    expect(resumed!.reviewResult).toEqual(reviewFixture('CHANGES_REQUIRED'))
+    expect(resumed).not.toHaveProperty('reviewResult')
     // Findings flow into the sourced list with the originating step id so the
     // multi-reviewer aggregation in `decide()` can keep them straight.
     expect(resumed!.reviewFindings.length).toBe(1)
@@ -166,7 +164,7 @@ function makeBaseCtx(): RunContext {
     codeResult: null,
     diff: null,
     verifyResults: [],
-    reviewResult: null,
+    reviewResults: {},
     reviewFindings: [],
     iteration: 1,
     totalAgentPasses: 0,

@@ -95,7 +95,7 @@ function makeCtx(): RunContext {
     codeResult: null,
     diff: null,
     verifyResults: [],
-    reviewResult: null,
+    reviewResults: {},
     reviewFindings: [],
     iteration: 1,
     totalAgentPasses: 0,
@@ -190,7 +190,7 @@ describe('Full loop integration', () => {
     expect(result.terminalStatus).toBe('publish')
     expect(result.plan).not.toBeNull()
     expect(result.codeResult).not.toBeNull()
-    expect(result.reviewResult).not.toBeNull()
+    expect(result.reviewResults.review).not.toBeNull()
 
     // Last phase record should be success
     const lastPhase = result.phaseHistory[result.phaseHistory.length - 1]!
@@ -288,7 +288,7 @@ describe('Full loop integration', () => {
     // Context should have accumulated all phase outputs
     expect(result.plan!.objective).toBe('Accumulation test')
     expect(result.codeResult!.summary).toBe('Coded')
-    expect(result.reviewResult!.verdict).toBe('APPROVED')
+    expect(result.reviewResults.review!.verdict).toBe('APPROVED')
 
     // Agent passes should be tracked
     expect(result.totalAgentPasses).toBe(3) // planner + coder + reviewer

@@ -76,7 +76,6 @@ describe('Checkpoint.resumeFromCheckpoint — restart recovery from handoffs', (
     expect(resumed!.plan).toEqual(planFixture())
     expect(resumed!.codeResult).toEqual(codeFixture())
     expect(resumed!.reviewResults).toEqual({ review: reviewFixture() })
-    expect(resumed!.reviewResult).toEqual(reviewFixture())
     expect(resumed!.verifyResults).toEqual(verifyFixture())
 
     // Findings are surfaced with the originating step id so multi-reviewer
@@ -225,7 +224,7 @@ function makeBaseCtx(runId: string): RunContext {
     codeResult: null,
     diff: null,
     verifyResults: [],
-    reviewResult: null,
+    reviewResults: {},
     reviewFindings: [],
     iteration: 1,
     totalAgentPasses: 0,

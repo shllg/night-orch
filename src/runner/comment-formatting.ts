@@ -25,7 +25,7 @@ export function buildBlockReason(ctx: RunContext): string {
     return blockMessage
   }
 
-  const reviewEntries = listReviewResults(ctx.reviewResults, ctx.reviewResult)
+  const reviewEntries = listReviewResults(ctx.reviewResults)
   if (reviewEntries.length > 0) {
     const findings = reviewEntries.flatMap(({ key, result }) =>
       getReviewFindings(result)
@@ -52,7 +52,7 @@ export function buildBlockReason(ctx: RunContext): string {
 
 export function formatBlockComment(reason: string, ctx: RunContext): string {
   const parts = [`⛔ **night-orch**: Run blocked.\n\n**Reason:** ${reason}`]
-  const reviewEntries = listReviewResults(ctx.reviewResults, ctx.reviewResult)
+  const reviewEntries = listReviewResults(ctx.reviewResults)
   if (reviewEntries.some(({ result }) => getReviewFindings(result).length > 0)) {
     parts.push('\n**Findings:**')
     for (const { key, result } of reviewEntries) {

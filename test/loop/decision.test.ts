@@ -41,7 +41,7 @@ function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
     codeResult: null,
     diff: null,
     verifyResults: [],
-    reviewResult: null,
+    reviewResults: {},
     reviewFindings: [],
     iteration: 1,
     totalAgentPasses: 3,
@@ -120,11 +120,13 @@ describe('decide', () => {
 
   it('APPROVED + verify pass → publish', () => {
     const ctx = makeCtx({
-      reviewResult: {
-        verdict: 'APPROVED',
-        summary: 'Good',
-        findings: [],
-        definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+      reviewResults: {
+        review: {
+          verdict: 'APPROVED',
+          summary: 'Good',
+          findings: [],
+          definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+        },
       },
       verifyResults: [{ command: 'test', exitCode: 0, stdout: '', stderr: '', durationMs: 100, passed: true }],
     })
@@ -132,9 +134,8 @@ describe('decide', () => {
     expect(d.action).toBe('publish')
   })
 
-  it('APPROVED reviewer map + verify pass → publish without legacy reviewResult', () => {
+  it('APPROVED reviewer map + verify pass → publish', () => {
     const ctx = makeCtx({
-      reviewResult: null,
       reviewResults: {
         review: {
           verdict: 'APPROVED',
@@ -164,7 +165,6 @@ describe('decide', () => {
         remainingUncertainty: null,
         blockers: null,
       },
-      reviewResult: null,
       verifyResults: [],
     })
     const d = decide(ctx, loopConfig, securityConfig)
@@ -175,7 +175,6 @@ describe('decide', () => {
     const ctx = makeCtx({
       issue: { ...makeCtx().issue, labels: ['no:planning'] },
       codeResult: null,
-      reviewResult: null,
       verifyResults: [],
     })
     const d = decide(ctx, loopConfig, securityConfig)
@@ -184,11 +183,13 @@ describe('decide', () => {
 
   it('APPROVED + verify fail → iterate', () => {
     const ctx = makeCtx({
-      reviewResult: {
-        verdict: 'APPROVED',
-        summary: 'Good',
-        findings: [],
-        definitionOfDoneCheck: { issueAddressed: true, testsPassing: false, noBlockingFindings: true },
+      reviewResults: {
+        review: {
+          verdict: 'APPROVED',
+          summary: 'Good',
+          findings: [],
+          definitionOfDoneCheck: { issueAddressed: true, testsPassing: false, noBlockingFindings: true },
+        },
       },
       verifyResults: [{ command: 'test', exitCode: 1, stdout: '', stderr: 'FAIL', durationMs: 100, passed: false }],
     })
@@ -199,11 +200,13 @@ describe('decide', () => {
   it('CHANGES_REQUIRED + under limit → iterate with findings', () => {
     const ctx = makeCtx({
       iteration: 2,
-      reviewResult: {
-        verdict: 'CHANGES_REQUIRED',
-        summary: 'Fix it',
-        findings: [{ severity: 'major', message: 'Missing error handling', suggestedFix: null }],
-        definitionOfDoneCheck: { issueAddressed: false, testsPassing: true, noBlockingFindings: false },
+      reviewResults: {
+        review: {
+          verdict: 'CHANGES_REQUIRED',
+          summary: 'Fix it',
+          findings: [{ severity: 'major', message: 'Missing error handling', suggestedFix: null }],
+          definitionOfDoneCheck: { issueAddressed: false, testsPassing: true, noBlockingFindings: false },
+        },
       },
     })
     const d = decide(ctx, loopConfig, securityConfig)
@@ -216,11 +219,13 @@ describe('decide', () => {
   it('CHANGES_REQUIRED + at max iterations → block', () => {
     const ctx = makeCtx({
       iteration: 4,
-      reviewResult: {
-        verdict: 'CHANGES_REQUIRED',
-        summary: 'Still broken',
-        findings: [],
-        definitionOfDoneCheck: { issueAddressed: false, testsPassing: false, noBlockingFindings: false },
+      reviewResults: {
+        review: {
+          verdict: 'CHANGES_REQUIRED',
+          summary: 'Still broken',
+          findings: [],
+          definitionOfDoneCheck: { issueAddressed: false, testsPassing: false, noBlockingFindings: false },
+        },
       },
     })
     const d = decide(ctx, loopConfig, securityConfig)
@@ -229,11 +234,13 @@ describe('decide', () => {
 
   it('BLOCKED verdict → block', () => {
     const ctx = makeCtx({
-      reviewResult: {
-        verdict: 'BLOCKED',
-        summary: 'Needs human',
-        findings: [],
-        definitionOfDoneCheck: { issueAddressed: false, testsPassing: false, noBlockingFindings: false },
+      reviewResults: {
+        review: {
+          verdict: 'BLOCKED',
+          summary: 'Needs human',
+          findings: [],
+          definitionOfDoneCheck: { issueAddressed: false, testsPassing: false, noBlockingFindings: false },
+        },
       },
     })
     const d = decide(ctx, loopConfig, securityConfig)
@@ -241,20 +248,20 @@ describe('decide', () => {
   })
 
   it('parse failure + blockOnAmbiguousReview → block', () => {
-    const ctx = makeCtx({ reviewResult: null })
+    const ctx = makeCtx({ reviewResults: {} })
     const d = decide(ctx, loopConfig, securityConfig)
     expect(d.action).toBe('block')
   })
 
   it('parse failure + !blockOnAmbiguousReview → iterate', () => {
-    const ctx = makeCtx({ reviewResult: null })
+    const ctx = makeCtx({ reviewResults: {} })
     const d = decide(ctx, { ...loopConfig, blockOnAmbiguousReview: false }, securityConfig)
     expect(d.action).toBe('iterate')
   })
 
   it('no-review workflow + verify pass → publish', () => {
     const ctx = makeCtx({
-      reviewResult: null,
+      reviewResults: {},
       verifyResults: [{ command: 'test', exitCode: 0, stdout: '', stderr: '', durationMs: 100, passed: true }],
     })
     const d = decide(ctx, loopConfig, securityConfig, { requireReview: false })
@@ -263,7 +270,7 @@ describe('decide', () => {
 
   it('no-review workflow + verify fail → iterate', () => {
     const ctx = makeCtx({
-      reviewResult: null,
+      reviewResults: {},
       verifyResults: [{ command: 'test', exitCode: 1, stdout: '', stderr: 'FAIL', durationMs: 100, passed: false }],
     })
     const d = decide(ctx, loopConfig, securityConfig, { requireReview: false })
@@ -273,11 +280,13 @@ describe('decide', () => {
   it('cost over budget → block', () => {
     const ctx = makeCtx({
       estimatedCostUsd: 15,
-      reviewResult: {
-        verdict: 'APPROVED',
-        summary: 'Good',
-        findings: [],
-        definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+      reviewResults: {
+        review: {
+          verdict: 'APPROVED',
+          summary: 'Good',
+          findings: [],
+          definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+        },
       },
     })
     const d = decide(ctx, loopConfig, securityConfig)
@@ -290,11 +299,13 @@ describe('decide', () => {
   it('subscription mode skips cost-over-budget block (reaches publish)', () => {
     const ctx = makeCtx({
       estimatedCostUsd: 500,
-      reviewResult: {
-        verdict: 'APPROVED',
-        summary: 'Good',
-        findings: [],
-        definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+      reviewResults: {
+        review: {
+          verdict: 'APPROVED',
+          summary: 'Good',
+          findings: [],
+          definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+        },
       },
       verifyResults: [{ command: 'test', exitCode: 0, stdout: '', stderr: '', durationMs: 100, passed: true }],
     })
@@ -305,11 +316,13 @@ describe('decide', () => {
   it('max total passes → block', () => {
     const ctx = makeCtx({
       totalAgentPasses: 10,
-      reviewResult: {
-        verdict: 'CHANGES_REQUIRED',
-        summary: 'More work',
-        findings: [],
-        definitionOfDoneCheck: { issueAddressed: false, testsPassing: false, noBlockingFindings: false },
+      reviewResults: {
+        review: {
+          verdict: 'CHANGES_REQUIRED',
+          summary: 'More work',
+          findings: [],
+          definitionOfDoneCheck: { issueAddressed: false, testsPassing: false, noBlockingFindings: false },
+        },
       },
     })
     const d = decide(ctx, loopConfig, securityConfig)
@@ -322,11 +335,13 @@ describe('decide', () => {
   it('APPROVED with empty verify results + requireVerificationPass → block', () => {
     const ctx = makeCtx({
       verifyResults: [],
-      reviewResult: {
-        verdict: 'APPROVED',
-        summary: 'Good',
-        findings: [],
-        definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+      reviewResults: {
+        review: {
+          verdict: 'APPROVED',
+          summary: 'Good',
+          findings: [],
+          definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+        },
       },
     })
     const d = decide(ctx, loopConfig, securityConfig)
@@ -337,11 +352,13 @@ describe('decide', () => {
     const ctx = makeCtx({
       repoConfig: { ...makeCtx().repoConfig, verify: [] },
       verifyResults: [],
-      reviewResult: {
-        verdict: 'APPROVED',
-        summary: 'Good',
-        findings: [],
-        definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+      reviewResults: {
+        review: {
+          verdict: 'APPROVED',
+          summary: 'Good',
+          findings: [],
+          definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+        },
       },
     })
     const d = decide(ctx, { ...loopConfig, requireVerificationPass: false }, securityConfig)
@@ -352,11 +369,13 @@ describe('decide', () => {
     it('cost limit block carries blockReason=cost_limit', () => {
       const ctx = makeCtx({
         estimatedCostUsd: 999,
-        reviewResult: {
-          verdict: 'APPROVED',
-          summary: 'ok',
-          findings: [],
-          definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+        reviewResults: {
+          review: {
+            verdict: 'APPROVED',
+            summary: 'ok',
+            findings: [],
+            definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+          },
         },
       })
       const d = decide(ctx, loopConfig, securityConfig)
@@ -374,11 +393,13 @@ describe('decide', () => {
     it('CHANGES_REQUIRED at max iterations carries blockReason=iteration_limit', () => {
       const ctx = makeCtx({
         iteration: 4,
-        reviewResult: {
-          verdict: 'CHANGES_REQUIRED',
-          summary: 'more work',
-          findings: [],
-          definitionOfDoneCheck: { issueAddressed: false, testsPassing: false, noBlockingFindings: false },
+        reviewResults: {
+          review: {
+            verdict: 'CHANGES_REQUIRED',
+            summary: 'more work',
+            findings: [],
+            definitionOfDoneCheck: { issueAddressed: false, testsPassing: false, noBlockingFindings: false },
+          },
         },
       })
       const d = decide(ctx, loopConfig, securityConfig)
@@ -388,11 +409,13 @@ describe('decide', () => {
 
     it('BLOCKED verdict carries blockReason=reviewer_blocked', () => {
       const ctx = makeCtx({
-        reviewResult: {
-          verdict: 'BLOCKED',
-          summary: 'Security concern',
-          findings: [],
-          definitionOfDoneCheck: { issueAddressed: false, testsPassing: false, noBlockingFindings: false },
+        reviewResults: {
+          review: {
+            verdict: 'BLOCKED',
+            summary: 'Security concern',
+            findings: [],
+            definitionOfDoneCheck: { issueAddressed: false, testsPassing: false, noBlockingFindings: false },
+          },
         },
       })
       const d = decide(ctx, loopConfig, securityConfig)
@@ -401,7 +424,7 @@ describe('decide', () => {
     })
 
     it('ambiguous review with blockOnAmbiguousReview carries blockReason=ambiguous_review', () => {
-      const ctx = makeCtx({ reviewResult: null })
+      const ctx = makeCtx({ reviewResults: {} })
       const d = decide(ctx, loopConfig, securityConfig)
       expect(d.action).toBe('block')
       if (d.action === 'block') expect(d.state.reason.type).toBe('ambiguousReview')
@@ -411,11 +434,13 @@ describe('decide', () => {
       const ctx = makeCtx({
         repoConfig: { ...makeCtx().repoConfig, verify: [] },
         verifyResults: [],
-        reviewResult: {
-          verdict: 'APPROVED',
-          summary: 'ok',
-          findings: [],
-          definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+        reviewResults: {
+          review: {
+            verdict: 'APPROVED',
+            summary: 'ok',
+            findings: [],
+            definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+          },
         },
       })
       const d = decide(ctx, loopConfig, securityConfig)
@@ -426,7 +451,7 @@ describe('decide', () => {
 
   describe('no-review workflow (options.requireReview=false)', () => {
     const noReviewCtx = (overrides: Partial<RunContext> = {}): RunContext =>
-      makeCtx({ reviewResult: null, ...overrides })
+      makeCtx({ reviewResults: {}, ...overrides })
 
     it('blocks with verify_config when verify required but no commands configured', () => {
       const ctx = noReviewCtx({

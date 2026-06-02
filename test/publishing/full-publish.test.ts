@@ -92,7 +92,9 @@ function makeCtx(): RunContext {
     plan: { objective: 'Fix', assumptions: [], filesToChange: [], steps: [], risks: [], testStrategy: '' },
     codeResult: { summary: 'Fixed', changedFiles: ['a.ts'], remainingUncertainty: null, blockers: null },
     verifyResults: [{ command: 'pnpm test', exitCode: 0, stdout: '', stderr: '', durationMs: 100, passed: true }],
-    reviewResult: { verdict: 'APPROVED', summary: 'OK', findings: [], definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true } },
+    reviewResults: {
+      review: { verdict: 'APPROVED', summary: 'OK', findings: [], definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true } },
+    },
     reviewFindings: [],
     iteration: 1,
     totalAgentPasses: 3,

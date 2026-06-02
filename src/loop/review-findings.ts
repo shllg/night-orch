@@ -1,11 +1,11 @@
 import type { ReviewFinding, ReviewerOutput, SourcedReviewFinding } from '../workers/types.js'
 
 export function sourceReviewFindings(
-  reviewResult: ReviewerOutput,
+  review: ReviewerOutput,
   sourceStepId: string,
   sourceRole: string,
 ): SourcedReviewFinding[] {
-  return reviewResult.findings.map((finding) => ({
+  return review.findings.map((finding) => ({
     ...finding,
     sourceStepId,
     sourceRole,

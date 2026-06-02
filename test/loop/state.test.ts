@@ -409,7 +409,7 @@ function makeSummaryCtx(): RunContext {
     codeResult: null,
     diff: null,
     verifyResults: [],
-    reviewResult: null,
+    reviewResults: {},
     reviewFindings: [],
     iteration: 4,
     totalAgentPasses: 10,

@@ -159,7 +159,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
           const notifyResult = await notifier.dispatch(makePayload('blocked', repo, issue, {
             summary: blockReason,
             blockingReason: blockReason,
-            reviewSummary: formatReviewSummary(blockedCtx.reviewResults, blockedCtx.reviewResult),
+            reviewSummary: formatReviewSummary(blockedCtx.reviewResults),
           }))
           try {
             metrics?.incRunsTotal('blocked')
@@ -356,7 +356,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
     const notifyResult = await notifier.dispatch(makePayload('blocked', repo, issue, {
       summary: blockReason,
       blockingReason: blockReason,
-      reviewSummary: formatReviewSummary(finalCtx.reviewResults, finalCtx.reviewResult),
+      reviewSummary: formatReviewSummary(finalCtx.reviewResults),
     }))
     try {
       metrics?.incRunsTotal('blocked')

@@ -171,7 +171,7 @@ function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
     codeResult: null,
     diff: null,
     verifyResults: [],
-    reviewResult: null,
+    reviewResults: {},
     reviewFindings: [],
     iteration: 1,
     totalAgentPasses: 0,

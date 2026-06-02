@@ -31,7 +31,7 @@ function makeBaseCtx(): RunContext {
     codeResult: null,
     diff: null,
     verifyResults: [],
-    reviewResult: null,
+    reviewResults: {},
     reviewFindings: [],
     iteration: 1,
     totalAgentPasses: 0,
@@ -347,7 +347,6 @@ describe('Checkpoint', () => {
       const resumed = checkpoint.resumeFromCheckpoint('run-test-1', makeBaseCtx())
 
       expect(resumed).not.toBeNull()
-      expect(resumed!.reviewResult).toEqual(reviewResult)
       expect(resumed!.reviewResults?.review).toEqual(reviewResult)
       expect(resumed!.reviewFindings).toEqual([
         {
@@ -375,19 +374,16 @@ describe('Checkpoint', () => {
       }
       checkpoint.phaseCompleted('run-test-1', 'review', {
         reviewerKey: 'review',
-        reviewResult,
         reviewResults: { review: reviewResult },
       })
       checkpoint.phaseCompleted('run-test-1', 'cr', {
         reviewerKey: 'cr',
-        reviewResult: crResult,
         reviewResults: { cr: crResult },
       })
 
       const resumed = checkpoint.resumeFromCheckpoint('run-test-1', makeBaseCtx())
 
       expect(resumed?.reviewResults).toEqual({ review: reviewResult, cr: crResult })
-      expect(resumed?.reviewResult).toEqual(crResult)
       expect(resumed?.reviewFindings).toEqual([
         {
           severity: 'major',

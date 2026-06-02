@@ -420,7 +420,7 @@ describe('pollOnce', () => {
       adjustedLimits: { maxReviewIterations: 4 },
       blockReason: 'reviewer_blocked',
       stepOutputs: { blockMessage: 'Reviewer blocked: needs human sign-off' },
-      reviewResult: { summary: 'needs human sign-off' },
+      reviewResults: { review: { summary: 'needs human sign-off' } },
     })
 
     const config = makeConfig(join(tmpDir, 'test.db'))
@@ -516,7 +516,7 @@ describe('pollOnce', () => {
       adjustedLimits: { maxReviewIterations: 4 },
       blockReason: 'reviewer_blocked',
       stepOutputs: { blockMessage: 'Reviewer blocked: follow-up required' },
-      reviewResult: null,
+      reviewResults: {},
     }))
 
     const runManager = new RunManager(db)

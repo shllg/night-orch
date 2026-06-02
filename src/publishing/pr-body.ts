@@ -11,8 +11,7 @@ export interface PRBodyContext {
   plan: PlannerOutput | null
   codeResult: CoderOutput | null
   verifyResults: VerifyResult[]
-  reviewResult: ReviewerOutput | null
-  reviewResults?: Readonly<Record<string, ReviewerOutput>>
+  reviewResults: Readonly<Record<string, ReviewerOutput>>
   roles: ResolvedRoles
   iterationCount: number
   triageLevel: TriageLevel
@@ -101,7 +100,7 @@ export function compilePRBody(ctx: PRBodyContext): string {
   }
 
   // Review summary
-  const reviewEntries = listReviewResults(ctx.reviewResults, ctx.reviewResult)
+  const reviewEntries = listReviewResults(ctx.reviewResults)
   if (reviewEntries.length > 0) {
     sections.push('## Review')
     if (reviewEntries.length === 1) {
@@ -218,7 +217,7 @@ function buildSummaryPrompt(ctx: PRBodyContext): string {
       parts.push(`Changed files: ${files}${ctx.codeResult.changedFiles.length > 10 ? ', …' : ''}`)
     }
   }
-  const reviewEntries = listReviewResults(ctx.reviewResults, ctx.reviewResult)
+  const reviewEntries = listReviewResults(ctx.reviewResults)
   if (reviewEntries.length > 0) {
     parts.push('')
     if (reviewEntries.length === 1) {

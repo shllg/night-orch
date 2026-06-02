@@ -431,7 +431,6 @@ export async function dispatchAttempt(
       codeResult: null,
       diff: null,
       verifyResults: preLoopVerifyResults,
-      reviewResult: null,
       reviewResults: {},
       reviewFindings: [],
       iteration: startingIteration,

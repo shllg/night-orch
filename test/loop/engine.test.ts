@@ -207,7 +207,7 @@ function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
     codeResult: null,
     diff: null,
     verifyResults: [],
-    reviewResult: null,
+    reviewResults: {},
     reviewFindings: [],
     iteration: 1,
     totalAgentPasses: 0,
@@ -380,7 +380,7 @@ describe('executeLoop', () => {
     const parsedPhaseData = JSON.parse(phaseData.phase_data) as Record<string, unknown>
     expect(parsedPhaseData['cr']).toMatchObject({
       reviewerKey: 'cr',
-      reviewResult: { verdict: 'APPROVED' },
+      reviewResults: { cr: { verdict: 'APPROVED' } },
     })
     expect(parsedPhaseData['__completedPhases']).toEqual(['cr'])
     expect(parsedPhaseData['__sessionIds']).toEqual({})
@@ -451,7 +451,6 @@ describe('executeLoop', () => {
       JSON.stringify({
         cr: {
           reviewerKey: 'cr',
-          reviewResult: persistedReview,
           reviewResults: { cr: persistedReview },
         },
         __completedPhases: ['cr'],
@@ -1386,7 +1385,7 @@ describe('executeLoop', () => {
       JSON.stringify({
         plan: { plan: persistedPlan },
         code: { codeResult: persistedCode },
-        review: { reviewResult: persistedReview },
+        review: { reviewResults: { review: persistedReview } },
       }),
       'run-test-1',
     )

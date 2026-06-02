@@ -22,11 +22,13 @@ function makeContext(overrides: Partial<PRBodyContext> = {}): PRBodyContext {
       { command: 'pnpm test', exitCode: 0, stdout: '', stderr: '', durationMs: 1000, passed: true },
       { command: 'pnpm lint', exitCode: 0, stdout: '', stderr: '', durationMs: 500, passed: true },
     ],
-    reviewResult: {
-      verdict: 'APPROVED',
-      summary: 'Looks good',
-      findings: [],
-      definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+    reviewResults: {
+      review: {
+        verdict: 'APPROVED',
+        summary: 'Looks good',
+        findings: [],
+        definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+      },
     },
     roles: { planner: 'claude', coder: 'codex', reviewer: 'claude' },
     iterationCount: 1,
@@ -76,7 +78,6 @@ describe('compilePRBody', () => {
 
   it('includes each reviewer result when multiple reviewer slots ran', () => {
     const body = compilePRBody(makeContext({
-      reviewResult: null,
       reviewResults: {
         review: {
           verdict: 'APPROVED',

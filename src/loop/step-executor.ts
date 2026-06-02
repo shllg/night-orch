@@ -289,7 +289,7 @@ export function determineStepSuccess(step: WorkflowStep, ctx: RunContext): boole
       if (step.role === 'coder') return ctx.codeResult !== null
       if (step.role === 'reviewer') {
         const key = reviewerKeyForStep(step)
-        return ctx.reviewResults?.[key] !== undefined || (key === 'review' && ctx.reviewResult !== null)
+        return ctx.reviewResults[key] !== undefined
       }
       return true
     case 'verify':
@@ -306,11 +306,10 @@ export function buildStepArtifacts(step: WorkflowStep, ctx: RunContext): Record<
       if (step.role === 'coder') return { codeResult: ctx.codeResult }
       if (step.role === 'reviewer') {
         const key = reviewerKeyForStep(step)
-        const reviewResult = ctx.reviewResults?.[key] ?? (key === 'review' ? ctx.reviewResult : null)
+        const review = ctx.reviewResults[key] ?? null
         return {
           reviewerKey: key,
-          reviewResult,
-          reviewResults: reviewResult ? { [key]: reviewResult } : {},
+          reviewResults: review ? { [key]: review } : {},
         }
       }
       return { stepOutput: ctx.stepOutputs[step.id] ?? null }
@@ -577,7 +576,7 @@ function buildReviewerCtxPatch(
   profileType: string,
   basePatch: Partial<RunContext>,
 ): Partial<RunContext> {
-  const reviewResult = parseWorkerOutputForRole(
+  const review = parseWorkerOutputForRole(
     step,
     result,
     profileType,
@@ -585,10 +584,9 @@ function buildReviewerCtxPatch(
     'reviewer',
   )
 
-  if (!reviewResult) {
+  if (!review) {
     return {
       ...basePatch,
-      reviewResult: null,
       reviewResults: {},
     }
   }
@@ -596,15 +594,14 @@ function buildReviewerCtxPatch(
   const key = reviewerKeyForStep(step)
   const nextFindings = mergeReviewFindings(
     ctx.reviewFindings,
-    sourceReviewFindings(reviewResult, key, step.role),
+    sourceReviewFindings(review, key, step.role),
   )
 
   return {
     ...basePatch,
-    reviewResult,
     reviewResults: {
-      ...(ctx.reviewResults ?? {}),
-      [key]: reviewResult,
+      ...ctx.reviewResults,
+      [key]: review,
     },
     reviewFindings: nextFindings,
   }

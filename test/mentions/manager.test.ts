@@ -78,7 +78,7 @@ function makeCtx(labels: string[] = [], prMentions: string[] = []): RunContext {
     codeResult: null,
     diff: null,
     verifyResults: [],
-    reviewResult: null,
+    reviewResults: {},
     reviewFindings: [],
     iteration: 1,
     totalAgentPasses: 0,

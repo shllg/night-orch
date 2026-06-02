@@ -82,7 +82,9 @@ function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
     plan: { objective: 'Fix it', assumptions: [], filesToChange: [], steps: [], risks: [], testStrategy: '' },
     codeResult: { summary: 'Fixed', changedFiles: ['a.ts'], remainingUncertainty: null, blockers: null },
     verifyResults: [],
-    reviewResult: { verdict: 'APPROVED', summary: 'OK', findings: [], definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true } },
+    reviewResults: {
+      review: { verdict: 'APPROVED', summary: 'OK', findings: [], definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true } },
+    },
     reviewFindings: [],
     iteration: 1,
     totalAgentPasses: 3,

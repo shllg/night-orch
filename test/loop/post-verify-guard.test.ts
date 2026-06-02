@@ -33,7 +33,7 @@ function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
     codeResult: null,
     diff: 'diff --git a/file.ts b/file.ts\n+change',
     verifyResults: [],
-    reviewResult: null,
+    reviewResults: {},
     reviewFindings: [],
     iteration: 2,
     totalAgentPasses: 0,
@@ -124,11 +124,13 @@ describe('handlePostVerifyGuard', () => {
       ctx: makeCtx({
         diff: null,
         verifyResults: [{ command: 'pnpm test', exitCode: 0, stdout: '', stderr: '', durationMs: 10, passed: true }],
-        reviewResult: {
-          verdict: 'APPROVED',
-          summary: 'ok',
-          findings: [],
-          definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+        reviewResults: {
+          review: {
+            verdict: 'APPROVED',
+            summary: 'ok',
+            findings: [],
+            definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+          },
         },
       }),
       checkpoint: makeCheckpoint(),
@@ -142,7 +144,7 @@ describe('handlePostVerifyGuard', () => {
     expect(result.stepIndex).toBe(0)
     expect(result.ctx.emptyDiffRetries).toBe(1)
     expect(result.ctx.verifyResults).toEqual([])
-    expect(result.ctx.reviewResult).toBeNull()
+    expect(result.ctx.reviewResults).toEqual({})
     expect(result.ctx.diff).toBeNull()
     expect(result.ctx.diffError).toBeNull()
     expect(metrics.incLoopIterations).toHaveBeenCalledWith('org/repo')

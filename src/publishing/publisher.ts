@@ -105,7 +105,6 @@ export async function publishPR(
     plan: ctx.plan,
     codeResult: ctx.codeResult,
     verifyResults: ctx.verifyResults,
-    reviewResult: ctx.reviewResult,
     reviewResults: ctx.reviewResults,
     roles: ctx.roles,
     iterationCount: ctx.iteration,

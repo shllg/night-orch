@@ -345,7 +345,6 @@ export async function executeLoop(
           ctx = updateContext(ctx, {
             iteration: ctx.iteration + 1,
             reviewFindings: mergeReviewFindings(ctx.reviewFindings, decision.findings),
-            reviewResult: null,
             reviewResults: {},
             verifyResults: [],
             iterationSnapshots: updatedSnapshots,
@@ -483,7 +482,7 @@ interface ExecuteGuardedWorkerStepInput {
 
 function getReviewerOutputForStep(ctx: RunContext, step: WorkerStep): ReviewerOutput | null {
   const key = reviewerKeyForStep(step)
-  return ctx.reviewResults?.[key] ?? (key === 'review' ? ctx.reviewResult : null)
+  return ctx.reviewResults[key] ?? null
 }
 
 async function executeGuardedWorkerStep(

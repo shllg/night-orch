@@ -1,5 +1,5 @@
 import type { RecordHandoffInput } from '../state/handoffs.js'
-import type { TokenUsage } from '../workers/types.js'
+import type { ReviewerOutput, TokenUsage } from '../workers/types.js'
 import type { RunContext } from './types.js'
 import {
   renderCodeHandoff,
@@ -56,7 +56,7 @@ export function buildStepHandoff(input: BuildStepHandoffInput): RecordHandoffInp
 
     if (step.role === 'reviewer') {
       const key = reviewerKeyForStep(step)
-      const review = ctx.reviewResults?.[key] ?? (key === 'review' ? ctx.reviewResult : null)
+      const review = ctx.reviewResults[key] ?? null
       if (!review) return null
       if (runWhenForStep(step) === 'post-publish') {
         const rendered = renderExternalReviewHandoff(review, step.id)
@@ -117,6 +117,6 @@ function withTokenUsage(input: RecordHandoffInput, tokenUsage: TokenUsage | unde
   return tokenUsage ? { ...input, tokenUsage } : input
 }
 
-function shouldQueuePostPublishContinue(step: WorkerStep, review: NonNullable<RunContext['reviewResult']>): boolean {
+function shouldQueuePostPublishContinue(step: WorkerStep, review: ReviewerOutput): boolean {
   return review.verdict !== 'APPROVED' && (step.onChangesRequired ?? 'continue') === 'continue'
 }

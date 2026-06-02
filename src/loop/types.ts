@@ -63,9 +63,7 @@ export interface RunContext {
   readonly diff: string | null
   readonly verifyResults: VerifyResult[]
   /** Reviewer outputs keyed by workflow reviewer slot (`reviewerKey` or step id). */
-  readonly reviewResults?: Readonly<Record<string, ReviewerOutput>>
-  /** @deprecated Legacy scalar reviewer slot, retained for old checkpoints and summaries. */
-  readonly reviewResult: ReviewerOutput | null
+  readonly reviewResults: Readonly<Record<string, ReviewerOutput>>
   readonly reviewFindings: ReadonlyArray<ReviewFinding | SourcedReviewFinding>
 
   readonly iteration: number

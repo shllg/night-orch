@@ -4,6 +4,7 @@ import {
   executeWorkerStep,
   executeVerifyStep,
   executeDecideStep,
+  buildStepArtifacts,
   buildPromptContext,
   getWorkerProfile,
   resolveContinueSession,
@@ -12,7 +13,7 @@ import {
 import type { RunContext } from '../../src/loop/types.js'
 import type { WorkerStep, VerifyStep, DecideStep } from '../../src/loop/workflow.js'
 import type { Config } from '../../src/config/schema.js'
-import type { WorkerAdapter, WorkerTaskResult } from '../../src/workers/types.js'
+import type { ReviewerOutput, WorkerAdapter, WorkerTaskResult } from '../../src/workers/types.js'
 import { makeTestConfig } from '../helpers/factories.js'
 import { WorkerParseError } from '../../src/workers/errors.js'
 
@@ -111,6 +112,10 @@ function makeReviewerResult(verdict: 'APPROVED' | 'CHANGES_REQUIRED' | 'BLOCKED'
   }
 }
 
+function reviewOutput(verdict: ReviewerOutput['verdict'] = 'APPROVED'): ReviewerOutput {
+  return makeReviewerResult(verdict).parsed as ReviewerOutput
+}
+
 function makeMockAdapter(result: WorkerTaskResult): WorkerAdapter {
   return {
     runTask: vi.fn().mockResolvedValue(result),
@@ -162,7 +167,7 @@ function makeCtx(overrides: Partial<RunContext> = {}): RunContext {
     codeResult: null,
     diff: null,
     verifyResults: [],
-    reviewResult: null,
+    reviewResults: {},
     reviewFindings: [],
     iteration: 1,
     totalAgentPasses: 0,
@@ -209,11 +214,13 @@ describe('executeStep dispatcher', () => {
 
   it('routes decide steps to executeDecideStep', async () => {
     const ctx = makeCtx({
-      reviewResult: {
+      reviewResults: {
+        review: {
         verdict: 'APPROVED',
         summary: 'Good',
         findings: [],
         definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+        },
       },
       verifyResults: [{ command: 'pnpm test', exitCode: 0, stdout: '', stderr: '', durationMs: 100, passed: true }],
     })
@@ -283,13 +290,13 @@ describe('executeWorkerStep', () => {
     expect(adapter.runTask).toHaveBeenCalledWith(expect.objectContaining({ continueSessionId: null }))
   })
 
-  it('reviewer role populates ctx.reviewResult', async () => {
+  it('reviewer role populates ctx.reviewResults', async () => {
     const step: WorkerStep = { type: 'worker', id: 'review', role: 'reviewer' }
     const deps = makeDeps({ reviewer: makeMockAdapter(makeReviewerResult('APPROVED')) })
     const result = await executeWorkerStep(makeCtx(), step, deps)
 
-    expect(result.ctx.reviewResult).not.toBeNull()
-    expect(result.ctx.reviewResult!.verdict).toBe('APPROVED')
+    expect(result.ctx.reviewResults.review).not.toBeNull()
+    expect(result.ctx.reviewResults.review!.verdict).toBe('APPROVED')
     expect(result.ctx.totalAgentPasses).toBe(1)
   })
 
@@ -309,7 +316,6 @@ describe('executeWorkerStep', () => {
 
     expect(result.ctx.reviewResults?.['review']?.verdict).toBe('APPROVED')
     expect(result.ctx.reviewResults?.['code-review']?.verdict).toBe('CHANGES_REQUIRED')
-    expect(result.ctx.reviewResult?.verdict).toBe('CHANGES_REQUIRED')
     expect(result.ctx.reviewFindings).toEqual([
       {
         severity: 'major',
@@ -319,6 +325,22 @@ describe('executeWorkerStep', () => {
         sourceRole: 'reviewer',
       },
     ])
+  })
+
+  it('reviewer artifacts persist reviewResults without legacy reviewResult', async () => {
+    const step: WorkerStep = { type: 'worker', id: 'cr', role: 'reviewer', reviewerKey: 'code-review' }
+    const deps = makeDeps({ reviewer: makeMockAdapter(makeReviewerResult('CHANGES_REQUIRED')) })
+    const result = await executeWorkerStep(makeCtx(), step, deps)
+
+    const artifacts = buildStepArtifacts(step, result.ctx)
+
+    expect(artifacts).toEqual({
+      reviewerKey: 'code-review',
+      reviewResults: {
+        'code-review': result.ctx.reviewResults?.['code-review'],
+      },
+    })
+    expect(artifacts).not.toHaveProperty('reviewResult')
   })
 
   it('custom role populates ctx.stepOutputs only', async () => {
@@ -344,7 +366,7 @@ describe('executeWorkerStep', () => {
     expect(result.ctx.stepOutputs['lint-fix']).toEqual({ custom: 'data' })
     expect(result.ctx.plan).toBeNull() // untouched
     expect(result.ctx.codeResult).toBeNull() // untouched
-    expect(result.ctx.reviewResult).toBeNull() // untouched
+    expect(result.ctx.reviewResults).toEqual({}) // untouched
     expect(result.ctx.totalAgentPasses).toBe(1)
     expect(result.ctx.sessionIds['linter']).toBe('sess-custom-1')
   })
@@ -591,11 +613,13 @@ describe('executeVerifyStep', () => {
 describe('executeDecideStep', () => {
   it('APPROVED review + verify pass → publish', async () => {
     const ctx = makeCtx({
-      reviewResult: {
+      reviewResults: {
+        review: {
         verdict: 'APPROVED',
         summary: 'Good',
         findings: [],
         definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+        },
       },
       verifyResults: [{ command: 'pnpm test', exitCode: 0, stdout: '', stderr: '', durationMs: 100, passed: true }],
     })
@@ -608,11 +632,13 @@ describe('executeDecideStep', () => {
 
   it('CHANGES_REQUIRED → iterate', async () => {
     const ctx = makeCtx({
-      reviewResult: {
+      reviewResults: {
+        review: {
         verdict: 'CHANGES_REQUIRED',
         summary: 'Needs tests',
         findings: [{ severity: 'major', message: 'Missing tests', suggestedFix: 'Add tests' }],
         definitionOfDoneCheck: { issueAddressed: false, testsPassing: true, noBlockingFindings: false },
+        },
       },
       verifyResults: [{ command: 'pnpm test', exitCode: 0, stdout: '', stderr: '', durationMs: 100, passed: true }],
     })
@@ -625,11 +651,13 @@ describe('executeDecideStep', () => {
 
   it('BLOCKED → block', async () => {
     const ctx = makeCtx({
-      reviewResult: {
+      reviewResults: {
+        review: {
         verdict: 'BLOCKED',
         summary: 'Fundamentally wrong approach',
         findings: [{ severity: 'critical', message: 'Wrong approach', suggestedFix: null }],
         definitionOfDoneCheck: { issueAddressed: false, testsPassing: false, noBlockingFindings: false },
+        },
       },
     })
     const step: DecideStep = { type: 'decide', id: 'decide', onIterate: 'code' }
@@ -640,7 +668,7 @@ describe('executeDecideStep', () => {
   })
 
   it('no review result + blockOnAmbiguousReview → block', async () => {
-    const ctx = makeCtx({ reviewResult: null })
+    const ctx = makeCtx({ reviewResults: {} })
     const step: DecideStep = { type: 'decide', id: 'decide', onIterate: 'code' }
     const deps = makeDeps({})
     const result = await executeDecideStep(ctx, step, deps)
@@ -651,12 +679,7 @@ describe('executeDecideStep', () => {
   it('propagates subscription cost model from config to decide()', async () => {
     const ctx = makeCtx({
       estimatedCostUsd: 250,
-      reviewResult: {
-        verdict: 'APPROVED',
-        summary: 'Good',
-        findings: [],
-        definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
-      },
+      reviewResults: { review: reviewOutput('APPROVED') },
       verifyResults: [{ command: 'pnpm test', exitCode: 0, stdout: '', stderr: '', durationMs: 100, passed: true }],
     })
     const step: DecideStep = { type: 'decide', id: 'decide', onIterate: 'code' }

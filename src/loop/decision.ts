@@ -99,7 +99,7 @@ export function decide(
     return { action: 'publish', reason: 'Planning-only mode: PRD ready for publishing' }
   }
 
-  const reviewResults = reviewResultsFromContext(ctx)
+  const reviewResults = ctx.reviewResults
   const aggregateVerdict = aggregateReviewVerdict(reviewResults)
   const verifyCommandsConfigured = (ctx.repoConfig.verify?.length ?? 0) > 0 || ctx.verifyResults.length > 0
   const verifyResultsAvailable = ctx.verifyResults.length > 0
@@ -253,13 +253,6 @@ export function decide(
     default:
       return { action: 'error', reason: `Unknown review verdict: ${aggregateVerdict as string}` }
   }
-}
-
-function reviewResultsFromContext(ctx: RunContext): Readonly<Record<string, ReviewerOutput>> {
-  if (ctx.reviewResults && Object.keys(ctx.reviewResults).length > 0) {
-    return ctx.reviewResults
-  }
-  return ctx.reviewResult ? { review: ctx.reviewResult } : {}
 }
 
 function collectReviewFindings(

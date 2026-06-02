@@ -220,7 +220,7 @@ describe('finalizeRunOutcome', () => {
       codeResult: null,
       diff: 'diff',
       verifyResults: [],
-      reviewResult: null,
+      reviewResults: {},
       reviewFindings: [],
       iteration: 2,
       totalAgentPasses: 3,
@@ -299,7 +299,7 @@ describe('finalizeRunOutcome', () => {
       codeResult: null,
       diff: 'diff',
       verifyResults: [],
-      reviewResult: null,
+      reviewResults: {},
       reviewFindings: [],
       iteration: 1,
       totalAgentPasses: 0,
@@ -393,8 +393,10 @@ describe('finalizeRunOutcome', () => {
     })
     expect(runManager.getById(run.id)?.phaseData?.['cr']).toMatchObject({
       reviewerKey: 'cr',
-      reviewResult: {
-        verdict: 'CHANGES_REQUIRED',
+      reviewResults: {
+        cr: {
+          verdict: 'CHANGES_REQUIRED',
+        },
       },
     })
     expect(runManager.getById(run.id)?.phaseData?.['__completedPhases']).toContain('cr')
@@ -443,7 +445,6 @@ describe('finalizeRunOutcome', () => {
       codeResult: null,
       diff: 'diff',
       verifyResults: [],
-      reviewResult: null,
       reviewResults: {
         review: {
           verdict: 'CHANGES_REQUIRED',
@@ -567,7 +568,6 @@ describe('finalizeRunOutcome', () => {
       codeResult: null,
       diff: 'diff',
       verifyResults: [],
-      reviewResult: null,
       reviewResults: {},
       reviewFindings: [],
       iteration: 1,
