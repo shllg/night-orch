@@ -3,7 +3,7 @@ import type { ForgeAdapter, ForgeComment } from '../forge/types.js'
 import type { RepoConfig } from '../config/schema.js'
 import type { UpdateStrategy } from '../git/worktree.js'
 import { coerceConflictSnapshot, type ConflictSnapshot } from './conflict-types.js'
-import type { Reaction, ReactionCursor, ReactionType } from '../reactions/types.js'
+import type { ReactionCursor, ReactionEnvelope, ReactionType } from '../reactions/types.js'
 import { clearResumeDecisionArtifacts } from '../loop/checkpoint.js'
 import { RunManager } from '../state/runs.js'
 import { LeaseManager } from '../state/leases.js'
@@ -403,7 +403,7 @@ interface CollectReactionsParams {
   prNumber: number | null
 }
 
-async function collectReactions(params: CollectReactionsParams): Promise<Reaction[]> {
+async function collectReactions(params: CollectReactionsParams): Promise<ReactionEnvelope[]> {
   const { forge, issueRepo, issueNumber, prNumber } = params
   if (!prNumber) return []
 
@@ -467,7 +467,7 @@ async function collectConversationComments(params: CollectConversationCommentsPa
   return selected.slice(-10)
 }
 
-function formatReactionSection(reactions: Reaction[]): string {
+function formatReactionSection(reactions: ReactionEnvelope[]): string {
   const lines = ['## PR Signals Since Last Pass']
 
   for (const reaction of reactions) {

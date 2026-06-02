@@ -1,4 +1,4 @@
-import type { MentionFeedbackReaction, Reaction } from './types.js'
+import type { MentionFeedbackReaction, ReactionEnvelope } from './types.js'
 import type { ForgeAdapter } from '../forge/types.js'
 import type { RunManager } from '../state/runs.js'
 import type Database from 'better-sqlite3'
@@ -29,7 +29,7 @@ export interface ReactionHandlerDeps {
  * reaction context on phase data.
  */
 export async function handleReaction(
-  reaction: Reaction,
+  reaction: ReactionEnvelope,
   deps: ReactionHandlerDeps,
 ): Promise<void> {
   const { db, forge, runManager, repoConfig } = deps
@@ -129,21 +129,13 @@ export async function handleReaction(
     )
   }
 
-  if (isMentionFeedbackReaction(reaction) && deps.botUser) {
+  if (reaction.type === 'mention_feedback' && deps.botUser) {
     await acknowledgeMentionFeedback(forge, issueRepo, reaction, deps.botUser)
   }
 
   logger.info(
     { repo: reaction.repo, issueNumber: reaction.issueNumber, type: reaction.type },
     'Reaction handled — issue queued for follow-up',
-  )
-}
-
-function isMentionFeedbackReaction(reaction: Reaction): reaction is MentionFeedbackReaction {
-  return (
-    reaction.type === 'mention_feedback'
-    && typeof (reaction as Partial<MentionFeedbackReaction>).author === 'string'
-    && typeof (reaction as Partial<MentionFeedbackReaction>).commentId === 'number'
   )
 }
 

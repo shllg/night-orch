@@ -244,6 +244,20 @@ export function createMetricsRegistry() {
     registers: [registry],
   })
 
+  const postPublishStepsTotal = new Counter({
+    name: 'night_orch_post_publish_steps_total',
+    help: 'Post-publish workflow steps executed by step id and result',
+    labelNames: ['step_id', 'result'] as const,
+    registers: [registry],
+  })
+
+  const externalReviewFindingsTotal = new Counter({
+    name: 'night_orch_external_review_findings_total',
+    help: 'External review outcomes by step id and aggregate verdict',
+    labelNames: ['step_id', 'verdict'] as const,
+    registers: [registry],
+  })
+
   return {
     registry,
     runsTotal,
@@ -277,6 +291,8 @@ export function createMetricsRegistry() {
     rebaseFanoutSiblingsTotal,
     mentionFeedbackTotal,
     reviewBotCommentsTotal,
+    postPublishStepsTotal,
+    externalReviewFindingsTotal,
   }
 }
 

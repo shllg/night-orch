@@ -10,6 +10,23 @@ export interface MetricsServiceConfig {
   port: number
 }
 
+/**
+ * Post-publish step execution outcomes used for the
+ * `night_orch_post_publish_steps_total` metric.
+ *
+ * - `ok`              — step ran successfully, no follow-up reaction
+ * - `comment_only`    — reviewer requested changes but step is configured `comment-only`
+ * - `continue_queued` — reviewer requested changes and a `continue` reaction was enqueued
+ * - `error`           — step threw before producing a parsed output
+ */
+export type PostPublishStepResult =
+  | 'ok'
+  | 'comment_only'
+  | 'continue_queued'
+  | 'error'
+
+export type ExternalReviewVerdict = 'APPROVED' | 'CHANGES_REQUIRED' | 'BLOCKED'
+
 export interface MetricsService {
   start(): Promise<void>
   stop(): Promise<void>
@@ -33,6 +50,10 @@ export interface MetricsService {
   incRebaseAutoResolveFailed(reason: 'unresolved' | 'validation_failed' | 'error'): void
   incRebaseFanout(repo: string, baseBranch: string): void
   incRebaseFanoutSibling(repo: string): void
+  incMentionFeedback(location: 'issue_comment' | 'review' | 'review_comment'): void
+  incReviewBotComments(author: string): void
+  incPostPublishStep(stepId: string, result: PostPublishStepResult): void
+  incExternalReviewFindings(stepId: string, verdict: ExternalReviewVerdict): void
 
   observeRunDuration(durationSeconds: number): void
   observePhaseDuration(phase: string, durationSeconds: number): void
@@ -76,6 +97,10 @@ class NoopMetricsService implements MetricsService {
   incRebaseAutoResolveFailed(): void { /* no-op */ }
   incRebaseFanout(): void { /* no-op */ }
   incRebaseFanoutSibling(): void { /* no-op */ }
+  incMentionFeedback(): void { /* no-op */ }
+  incReviewBotComments(): void { /* no-op */ }
+  incPostPublishStep(): void { /* no-op */ }
+  incExternalReviewFindings(): void { /* no-op */ }
   observeRunDuration(): void { /* no-op */ }
   observePhaseDuration(): void { /* no-op */ }
   observeAgentDuration(): void { /* no-op */ }
@@ -234,6 +259,22 @@ class LiveMetricsService implements MetricsService {
 
   incRebaseFanoutSibling(repo: string): void {
     try { this.metrics.rebaseFanoutSiblingsTotal.inc({ repo }) } catch { /* best-effort */ }
+  }
+
+  incMentionFeedback(location: 'issue_comment' | 'review' | 'review_comment'): void {
+    try { this.metrics.mentionFeedbackTotal.inc({ location }) } catch { /* best-effort */ }
+  }
+
+  incReviewBotComments(author: string): void {
+    try { this.metrics.reviewBotCommentsTotal.inc({ author }) } catch { /* best-effort */ }
+  }
+
+  incPostPublishStep(stepId: string, result: PostPublishStepResult): void {
+    try { this.metrics.postPublishStepsTotal.inc({ step_id: stepId, result }) } catch { /* best-effort */ }
+  }
+
+  incExternalReviewFindings(stepId: string, verdict: ExternalReviewVerdict): void {
+    try { this.metrics.externalReviewFindingsTotal.inc({ step_id: stepId, verdict }) } catch { /* best-effort */ }
   }
 
   observeRunDuration(durationSeconds: number): void {

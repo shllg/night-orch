@@ -1,5 +1,5 @@
 import type { ForgeAdapter, PRCheckStatus, ForgePRReview, ForgePRReviewComment } from '../forge/types.js'
-import type { MentionFeedbackReaction, Reaction, ReactionCursor, ReactionScanResult } from './types.js'
+import type { MentionFeedbackReaction, ReactionCursor, ReactionEnvelope, ReactionScanResult } from './types.js'
 import { isBotAuthored } from '../forge/bot-comment.js'
 import { parseMentions } from '../runner/comment-commands.js'
 import { logger } from '../utils/logger.js'
@@ -41,7 +41,7 @@ export async function scanForReactions(
   cursor: ReactionCursor = EMPTY_CURSOR,
   options: ReactionScanOptions = {},
 ): Promise<ReactionScanResult> {
-  const reactions: Reaction[] = []
+  const reactions: ReactionEnvelope[] = []
   const newCursor: ReactionCursor = {
     ...cursor,
     lastIssueCommentId: cursor.lastIssueCommentId ?? 0,
@@ -91,6 +91,7 @@ export async function scanForReactions(
           summary: `CI failed: ${failedNames}`,
           context: formatCIContext(status),
           detectedAt: now,
+          checkStatus: status,
         })
       }
       newCursor.lastCheckConclusion = status.overall
@@ -119,6 +120,7 @@ export async function scanForReactions(
         summary: `Human review: ${actionableReviews.map((r) => `${r.user} (${r.state})`).join(', ')}`,
         context: formatReviewContext(actionableReviews),
         detectedAt: now,
+        reviews: actionableReviews,
       })
     }
 
@@ -144,6 +146,7 @@ export async function scanForReactions(
         summary: `${newComments.length} new inline comment(s) from ${[...new Set(newComments.map((c) => c.user))].join(', ')}`,
         context: formatCommentContext(newComments),
         detectedAt: now,
+        comments: newComments,
       })
     }
 

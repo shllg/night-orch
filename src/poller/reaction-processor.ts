@@ -6,6 +6,7 @@ import type { RunManager } from '../state/runs.js'
 import { scanAndHandleReactions } from '../runner/reaction-scan.js'
 import { processCommentCommands } from '../runner/comment-commands.js'
 import type { OrchestrationCache } from '../runner/orchestration-cache.js'
+import type { MetricsService } from '../metrics/service.js'
 import { processMergeQueue } from '../merge-queue/runner.js'
 import { scanCostBlockedRuns } from '../ops/cost-resume.js'
 import { logger } from '../utils/logger.js'
@@ -34,12 +35,13 @@ export interface ProcessRepoReactionsParams {
   leaseManager: LeaseManager
   botUser: string
   cache: OrchestrationCache
+  metrics?: MetricsService
 }
 
 export async function processRepoReactions(
   params: ProcessRepoReactionsParams,
 ): Promise<void> {
-  const { config, db, forge, repoConfig, runManager, leaseManager, botUser, cache } = params
+  const { config, db, forge, repoConfig, runManager, leaseManager, botUser, cache, metrics } = params
 
   const results = await Promise.allSettled([
     scanAndHandleReactions({
@@ -51,6 +53,7 @@ export async function processRepoReactions(
       cache,
       config,
       botUser,
+      metrics,
     }),
     processMergeQueue(db, forge, repoConfig, { config, botUser }),
     scanCostBlockedRuns(db, config, forge, repoConfig, botUser),

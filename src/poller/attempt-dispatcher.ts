@@ -568,6 +568,7 @@ export async function dispatchAttempt(
         workflow,
         adapters,
         envOverrides: envSetup?.envOverrides ?? {},
+        metrics,
       },
     })
 

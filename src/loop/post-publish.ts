@@ -2,7 +2,7 @@ import type { Config } from '../config/schema.js'
 import type { ForgeAdapter } from '../forge/types.js'
 import type { MetricsService } from '../metrics/service.js'
 import { markerTag, upsertBotComment } from '../forge/bot-comment.js'
-import type { Reaction } from '../reactions/types.js'
+import type { ExternalReviewReaction, ReactionEnvelope } from '../reactions/types.js'
 import { recordHandoff } from '../state/handoffs.js'
 import type { WorkerAdapter } from '../workers/types.js'
 import { sanitizeUntrustedText } from '../workers/prompt/compiler.js'
@@ -35,12 +35,12 @@ export interface RunPostPublishStepsInput extends PostPublishReviewDeps {
 
 export interface PostPublishResult {
   ctx: RunContext
-  reactions: Reaction[]
+  reactions: ReactionEnvelope[]
 }
 
 export async function runPostPublishSteps(input: RunPostPublishStepsInput): Promise<PostPublishResult> {
   let ctx = withPublishedPrContext(input.ctx, input.prNumber, input.prUrl)
-  const reactions: Reaction[] = []
+  const reactions: ReactionEnvelope[] = []
   const stepDeps: StepDependencies = {
     adapters: input.adapters,
     config: input.config,
@@ -48,34 +48,48 @@ export async function runPostPublishSteps(input: RunPostPublishStepsInput): Prom
   }
 
   for (const step of getPostPublishSteps(input.workflow)) {
-    const result = await executeWorkerStep(ctx, step, stepDeps)
-    ctx = result.ctx
+    let stepResult: 'ok' | 'comment_only' | 'continue_queued' | 'error' = 'ok'
+    try {
+      const result = await executeWorkerStep(ctx, step, stepDeps)
+      ctx = result.ctx
 
-    if (step.role === 'reviewer') {
-      const review = ctx.reviewResults?.[step.reviewerKey ?? step.id] ?? ctx.reviewResult
-      if (review) {
-        recordExternalReviewHandoff(input.db, ctx, step, review, result.tokenUsage, input.metrics)
+      if (step.role === 'reviewer') {
+        const review = ctx.reviewResults?.[step.reviewerKey ?? step.id] ?? ctx.reviewResult
+        if (review) {
+          recordExternalReviewHandoff(input.db, ctx, step, review, result.tokenUsage, input.metrics)
+          try { input.metrics?.incExternalReviewFindings(step.id, review.verdict) } catch { /* best-effort */ }
+        }
+        if (review && shouldCommentOnIssue(step)) {
+          await upsertExternalReviewComment({
+            forge: input.forge,
+            issueRepo: input.issueRepo,
+            issueNumber: input.issueNumber,
+            botUser: input.botUser,
+            runId: ctx.runId,
+            step,
+            review,
+          })
+        }
+        if (review && review.verdict !== 'APPROVED') {
+          if (shouldQueueContinue(step, review)) {
+            reactions.push(buildExternalReviewReaction({
+              ctx,
+              step,
+              review,
+              prNumber: input.prNumber,
+              issueNumber: input.issueNumber,
+            }))
+            stepResult = 'continue_queued'
+          } else {
+            stepResult = 'comment_only'
+          }
+        }
       }
-      if (review && shouldCommentOnIssue(step)) {
-        await upsertExternalReviewComment({
-          forge: input.forge,
-          issueRepo: input.issueRepo,
-          issueNumber: input.issueNumber,
-          botUser: input.botUser,
-          runId: ctx.runId,
-          step,
-          review,
-        })
-      }
-      if (review && shouldQueueContinue(step, review)) {
-        reactions.push(buildExternalReviewReaction({
-          ctx,
-          step,
-          review,
-          prNumber: input.prNumber,
-          issueNumber: input.issueNumber,
-        }))
-      }
+    } catch (err) {
+      stepResult = 'error'
+      throw err
+    } finally {
+      try { input.metrics?.incPostPublishStep(step.id, stepResult) } catch { /* best-effort */ }
     }
   }
 
@@ -106,7 +120,7 @@ function buildExternalReviewReaction(input: {
   review: ReviewerOutput
   prNumber: number
   issueNumber: number
-}): Reaction {
+}): ExternalReviewReaction {
   return {
     type: 'external_review',
     repo: input.ctx.repo,
@@ -115,6 +129,9 @@ function buildExternalReviewReaction(input: {
     summary: `External review ${input.step.id}: ${input.review.verdict}`,
     context: formatExternalReviewFeedback(input.ctx, input.step, input.review),
     detectedAt: nowUtcIso(),
+    stepId: input.step.id,
+    verdict: input.review.verdict,
+    findings: input.review.findings,
   }
 }
 
@@ -160,7 +177,14 @@ async function upsertExternalReviewComment(input: {
   await input.forge.commentOnIssue(input.issueRepo, input.issueNumber, `${marker}\n${body}`)
 }
 
-function formatExternalReviewComment(step: WorkerStep, review: ReviewerOutput): string {
+/**
+ * Render the body of the issue-level comment posted for an external review
+ * step. Exposed so the comment-prefix contract can be verified without
+ * spinning up the full post-publish orchestrator. The `commentPrefix` field
+ * defaults to `[night-orch]`; tests should not rely on the default falling
+ * through silently — set it explicitly when asserting on prefix-aware output.
+ */
+export function formatExternalReviewComment(step: WorkerStep, review: ReviewerOutput): string {
   const prefix = step.commentPrefix ?? '[night-orch]'
   const lines = [
     `${prefix} External review: ${review.verdict}`,

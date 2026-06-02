@@ -1,4 +1,5 @@
 import type { PRCheckStatus, ForgePRReview, ForgePRReviewComment } from '../forge/types.js'
+import type { ReviewFinding, ReviewerOutput } from '../workers/types.js'
 
 export type ReactionType =
   | 'ci_failure'
@@ -8,6 +9,12 @@ export type ReactionType =
   | 'external_review'
   | 'mention_feedback'
 
+/**
+ * Common envelope fields shared by every reaction subtype. Consumers should
+ * prefer the discriminated `ReactionEnvelope` union below over this base
+ * interface so a missing `case` in a `switch (reaction.type)` becomes a
+ * compile-time error instead of silently dropping events.
+ */
 export interface Reaction {
   type: ReactionType
   repo: string
@@ -36,6 +43,26 @@ export interface ReviewCommentReaction extends Reaction {
   comments: ForgePRReviewComment[]
 }
 
+export interface MergeConflictReaction extends Reaction {
+  type: 'merge_conflict'
+}
+
+/**
+ * Synthesised by the post-publish orchestrator when an external reviewer
+ * (CodeRabbit-style worker step running with `runWhen: post-publish`)
+ * returns a non-APPROVED verdict. Carries the structured `verdict` and
+ * `findings` from the parsed reviewer output so downstream consumers (the
+ * `continue` op, metrics, handoff renderer) do not need to re-parse the
+ * markdown `context` payload.
+ */
+export interface ExternalReviewReaction extends Reaction {
+  type: 'external_review'
+  /** Workflow step id that produced this reaction (e.g. 'cr', 'snyk'). */
+  stepId: string
+  verdict: ReviewerOutput['verdict']
+  findings: ReadonlyArray<ReviewFinding>
+}
+
 export interface MentionFeedbackReaction extends Reaction {
   type: 'mention_feedback'
   author: string
@@ -45,8 +72,21 @@ export interface MentionFeedbackReaction extends Reaction {
   commentUrl: string | null
 }
 
+/**
+ * Discriminated union over every reaction subtype. Use this in function
+ * signatures that route on `reaction.type` so the TypeScript compiler can
+ * verify exhaustiveness via `assertNever`-style fall-through guards.
+ */
+export type ReactionEnvelope =
+  | CIFailureReaction
+  | HumanReviewReaction
+  | ReviewCommentReaction
+  | MergeConflictReaction
+  | ExternalReviewReaction
+  | MentionFeedbackReaction
+
 export interface ReactionScanResult {
-  reactions: Reaction[]
+  reactions: ReactionEnvelope[]
   /** Opaque state to persist for deduplication across scans. */
   cursor: ReactionCursor
 }

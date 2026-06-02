@@ -194,7 +194,7 @@ async function pollRepo(params: PollRepoParams): Promise<PollResult> {
     }
 
     await processRepoReactions({
-      config, db, forge, repoConfig, runManager, leaseManager, botUser, cache,
+      config, db, forge, repoConfig, runManager, leaseManager, botUser, cache, metrics,
     })
 
     const discovered = await discoverIssuesForRepo({
