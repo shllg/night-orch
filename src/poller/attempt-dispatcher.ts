@@ -526,6 +526,13 @@ export async function dispatchAttempt(
       coder: createWorkerAdapter(coderProfile),
       reviewer: createWorkerAdapter(reviewerProfile),
     }
+    const leaseHeartbeat = () =>
+      leaseManager.heartbeat(
+        issueRepo,
+        discoveredIssue.issue.number,
+        'poller',
+        1800,
+      )
     const finalCtx = await executeLoop(initialCtx, {
       db,
       config,
@@ -537,13 +544,7 @@ export async function dispatchAttempt(
       onPlanReady: async (ctx) => {
         await postPlanSummaryComment(forge, ctx.issueRepo ?? ctx.repo, ctx.issueNumber, ctx.plan, botUser)
       },
-      leaseHeartbeat: () =>
-        leaseManager.heartbeat(
-          issueRepo,
-          discoveredIssue.issue.number,
-          'poller',
-          1800,
-        ),
+      leaseHeartbeat,
     })
 
     const runDurationSec = (Date.now() - loopStart) / 1000
@@ -569,6 +570,8 @@ export async function dispatchAttempt(
         adapters,
         envOverrides: envSetup?.envOverrides ?? {},
         metrics,
+        onAgentEvent: (event) => observability.record(event),
+        leaseHeartbeat,
       },
     })
 

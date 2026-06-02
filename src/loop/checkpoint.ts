@@ -105,8 +105,7 @@ export function resolveStartingStepIndex(
     return iterateTargetIndex >= 0 ? iterateTargetIndex : 0
   }
 
-  const nextStepIndex = resumedPhaseIndex + 1
-  return nextStepIndex < steps.length ? nextStepIndex : resumedPhaseIndex
+  return resumedPhaseIndex + 1
 }
 
 export function applyPersistedDecisionOutcome(

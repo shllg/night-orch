@@ -3,10 +3,9 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type Database from 'better-sqlite3'
-import { runPostPublishSteps } from '../../src/loop/post-publish.js'
+import { executePostPublishSteps } from '../../src/loop/engine.js'
 import type { RunContext } from '../../src/loop/types.js'
 import { initDatabase } from '../../src/state/db.js'
-import type { ForgeAdapter } from '../../src/forge/types.js'
 import type { WorkerAdapter, WorkerTaskInput, WorkerTaskResult } from '../../src/workers/types.js'
 import { makeTestConfig } from '../helpers/factories.js'
 import { createMetricsService } from '../../src/metrics/service.js'
@@ -52,14 +51,6 @@ function makeReviewerAdapter(calls: string[]): WorkerAdapter {
   }
 }
 
-function makeForge(): ForgeAdapter {
-  return {
-    listIssueComments: vi.fn().mockResolvedValue([]),
-    commentOnIssue: vi.fn().mockResolvedValue(undefined),
-    updateComment: vi.fn().mockResolvedValue(undefined),
-  } as unknown as ForgeAdapter
-}
-
 function makeCtx(): RunContext {
   const config = makeTestConfig()
   return {
@@ -99,7 +90,7 @@ function makeCtx(): RunContext {
   }
 }
 
-describe('runPostPublishSteps', () => {
+describe('executePostPublishSteps', () => {
   let tmpDir: string
   let db: Database.Database
 
@@ -135,15 +126,11 @@ describe('runPostPublishSteps', () => {
       },
     })
 
-    await runPostPublishSteps({
+    await executePostPublishSteps({
       ctx: makeCtx(),
       db,
-      forge: makeForge(),
-      issueRepo: 'org/repo',
-      issueNumber: 1,
       prNumber: 42,
       prUrl: 'https://example.com/pr/42',
-      botUser: 'night-orch',
       config,
       adapters: { reviewer },
       metrics,

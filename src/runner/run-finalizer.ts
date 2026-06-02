@@ -6,6 +6,7 @@ import type { RunManager } from '../state/runs.js'
 import { publishPR } from '../publishing/publisher.js'
 import { MergeConflictError } from '../publishing/push.js'
 import { handleReaction } from '../reactions/handler.js'
+import type { ReactionEnvelope } from '../reactions/types.js'
 import { buildConflictSnapshot } from '../ops/conflict-snapshot.js'
 import { transitionLabels } from '../labels/manager.js'
 import { buildLabelConfig } from '../labels/config.js'
@@ -16,7 +17,8 @@ import type { NotificationDispatcher } from '../notify/dispatcher.js'
 import { nowUtcIso } from '../utils/time.js'
 import { logger } from '../utils/logger.js'
 import type { RunContext } from '../loop/types.js'
-import { runPostPublishSteps, type PostPublishReviewDeps } from '../loop/post-publish.js'
+import { executePostPublishSteps } from '../loop/engine.js'
+import { handlePostPublishReview, type PostPublishReviewDeps } from '../loop/post-publish.js'
 import { blocked, blockedReasonFromLegacy } from '../loop/state.js'
 import {
   STATUS_MARKER,
@@ -72,12 +74,11 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
     postPublish,
   } = params
 
-  let latestIssuePromise: ReturnType<ForgeAdapter['getIssue']> | null = null
   const getLatestIssue = (): ReturnType<ForgeAdapter['getIssue']> => {
-    latestIssuePromise ??= forge.getIssue(issueRepo, issueNumber)
-    return latestIssuePromise
+    return forge.getIssue(issueRepo, issueNumber)
   }
-  const transitionFromRunning = async (
+  const transitionIssueLabels = async (
+    from: Parameters<typeof transitionLabels>[4],
     to: Parameters<typeof transitionLabels>[5],
     blockReason?: Parameters<typeof transitionLabels>[7],
   ): Promise<void> => {
@@ -87,46 +88,108 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
       issueRepo,
       issueNumber,
       latestIssue.labels,
-      'running',
+      from,
       to,
       buildLabelConfig(repoConfig, latestIssue.labels),
       blockReason,
     )
   }
+  const transitionFromRunning = async (
+    to: Parameters<typeof transitionLabels>[5],
+    blockReason?: Parameters<typeof transitionLabels>[7],
+  ): Promise<void> => {
+    await transitionIssueLabels('running', to, blockReason)
+  }
 
   if (finalCtx.terminalStatus === 'publish') {
     try {
       const publishResult = await publishPR(finalCtx, forge, db)
+      runManager.updatePullRequest(runId, {
+        prNumber: publishResult.prNumber,
+        prTitle: publishResult.prTitle,
+      })
+      let readyCtx = finalCtx
+      let postPublishReactions: ReactionEnvelope[] = []
+      if (postPublish) {
+        const postPublishResult = await executePostPublishSteps({
+          ...postPublish,
+          ctx: finalCtx,
+          db,
+          prNumber: publishResult.prNumber,
+          prUrl: publishResult.prUrl,
+          onPostPublishReview: async ({ ctx, step, review }) => handlePostPublishReview({
+            ctx,
+            step,
+            review,
+            forge,
+            issueRepo,
+            issueNumber,
+            prNumber: publishResult.prNumber,
+            botUser,
+            metrics,
+          }),
+        })
+        if (postPublishResult.ctx.terminalStatus === 'blocked') {
+          const blockedCtx = postPublishResult.ctx
+          const blockReason = buildBlockReason(blockedCtx)
+          runManager.updateAndClearCostBudgetOverride(runId, {
+            status: 'blocked',
+            iterationCount: blockedCtx.iteration,
+            lastError: blockReason,
+            blockReason: blockedCtx.blockReason ?? null,
+            endedAt: nowUtcIso(),
+          })
+          const typedBlockReason = blockedCtx.blockReason
+            ? blockedReasonFromLegacy(blockedCtx.blockReason)
+            : undefined
+          await transitionFromRunning('blocked', typedBlockReason)
+          await postStatusComment({
+            forge,
+            issueRepo,
+            issueNumber,
+            botUser,
+            body: formatStatusComment({
+              blockReason,
+              iteration: blockedCtx.iteration,
+              maxIterations: blockedCtx.adjustedLimits.maxReviewIterations,
+              cost: blockedCtx.estimatedCostUsd,
+            }),
+            warnMessage: 'Failed to post post-publish block reason comment',
+          })
+          const notifyResult = await notifier.dispatch(makePayload('blocked', repo, issue, {
+            summary: blockReason,
+            blockingReason: blockReason,
+            reviewSummary: formatReviewSummary(blockedCtx.reviewResults, blockedCtx.reviewResult),
+          }))
+          try {
+            metrics?.incRunsTotal('blocked')
+            metrics?.observeRunDuration(runDurationSec)
+            for (const s of notifyResult.sent) {
+              metrics?.incNotifications(s.channel, s.success ? 'sent' : 'failed')
+            }
+          } catch { /* best-effort */ }
+          return 'processed'
+        }
+        readyCtx = postPublishResult.ctx
+        postPublishReactions = postPublishResult.reactions
+      }
       runManager.updateAndClearCostBudgetOverride(runId, {
         status: 'review_ready',
-        iterationCount: finalCtx.iteration,
+        iterationCount: readyCtx.iteration,
         prNumber: publishResult.prNumber,
         prTitle: publishResult.prTitle,
         lastError: null,
         endedAt: nowUtcIso(),
       })
       await transitionFromRunning('review_ready')
-      if (postPublish) {
-        const postPublishResult = await runPostPublishSteps({
-          ...postPublish,
-          ctx: finalCtx,
+      for (const reaction of postPublishReactions) {
+        await handleReaction(reaction, {
           db,
           forge,
-          issueRepo,
-          issueNumber,
-          prNumber: publishResult.prNumber,
-          prUrl: publishResult.prUrl,
-          botUser,
+          runManager,
+          repoConfig,
+          maxAttemptChainLength: postPublish?.config.loop.maxAttemptChainLength,
         })
-        for (const reaction of postPublishResult.reactions) {
-          await handleReaction(reaction, {
-            db,
-            forge,
-            runManager,
-            repoConfig,
-            maxAttemptChainLength: postPublish.config.loop.maxAttemptChainLength,
-          })
-        }
       }
       const notificationEvent = publishResult.created ? 'pr_ready' : 'pr_updated'
       const notifyResult = await notifier.dispatch(makePayload(notificationEvent, repo, issue, {

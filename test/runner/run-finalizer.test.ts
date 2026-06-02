@@ -6,11 +6,14 @@ import type Database from 'better-sqlite3'
 import { initDatabase } from '../../src/state/db.js'
 import { RunManager } from '../../src/state/runs.js'
 import { finalizeRunOutcome } from '../../src/runner/run-finalizer.js'
+import { transitionLabels } from '../../src/labels/manager.js'
 import type { ForgeAdapter } from '../../src/forge/types.js'
 import type { Config, RepoConfig } from '../../src/config/schema.js'
 import type { RunContext } from '../../src/loop/types.js'
 import type { NotificationDispatcher } from '../../src/notify/dispatcher.js'
 import type { WorkerAdapter, WorkerTaskResult } from '../../src/workers/types.js'
+import { CostTracker } from '../../src/loop/cost.js'
+import { WorkerAuthError } from '../../src/workers/errors.js'
 
 vi.mock('../../src/publishing/publisher.js', () => ({
   publishPR: vi.fn().mockResolvedValue({
@@ -388,6 +391,18 @@ describe('finalizeRunOutcome', () => {
       verdict: 'CHANGES_REQUIRED',
       findings: [{ message: 'Add a null guard before reading config.name' }],
     })
+    expect(runManager.getById(run.id)?.phaseData?.['cr']).toMatchObject({
+      reviewerKey: 'cr',
+      reviewResult: {
+        verdict: 'CHANGES_REQUIRED',
+      },
+    })
+    expect(runManager.getById(run.id)?.phaseData?.['__completedPhases']).toContain('cr')
+    expect(new CostTracker(db).getRunTokenUsage(run.id)).toMatchObject({
+      promptTokens: 10,
+      completionTokens: 5,
+      totalTokens: 15,
+    })
     expect(runManager.getById(run.id)?.status).toBe('review_ready')
     expect(runManager.getById(run.id)?.phaseData?.reactionType).toBeUndefined()
   })
@@ -511,5 +526,126 @@ describe('finalizeRunOutcome', () => {
     expect(row?.phaseData?.reactionSummary).toContain('cr')
     expect(row?.phaseData?.reactionContext).toContain('Add a regression test for empty config')
     expect(row?.phaseData?.reactionContext).toContain('Add a null guard before reading config.name')
+  })
+
+  it('marks the run blocked when a post-publish reviewer hits a typed worker error', async () => {
+    const runManager = new RunManager(db)
+    const run = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 1,
+      issueTitle: 'Issue',
+      issueNodeId: 'issue-node',
+      planner: 'codex',
+      coder: 'codex',
+      reviewer: 'codex',
+    })
+    runManager.update(run.id, { status: 'running' })
+
+    const repoConfig = makeRepoConfig()
+    const config = makeConfig(repoConfig)
+    const reviewer: WorkerAdapter = {
+      runTask: vi.fn().mockRejectedValue(new WorkerAuthError('codex', 'Run codex login', 'signed out', 'cr')),
+      checkAvailability: vi.fn().mockResolvedValue({ available: true, version: 'test' }),
+    }
+    const forge = makeForge({
+      listIssueComments: vi.fn().mockResolvedValue([]),
+      commentOnIssue: vi.fn().mockResolvedValue(undefined),
+    })
+    const finalCtx = {
+      runId: run.id,
+      repo: 'org/repo',
+      issueRepo: 'org/repo',
+      issueNumber: 1,
+      issue: { number: 1, nodeId: 'issue-node', title: 'Issue', body: '', labels: ['no:running'], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+      repoConfig,
+      roles: { planner: 'codex', coder: 'codex', reviewer: 'codex' },
+      triageResult: { level: 'standard', reason: 'test' },
+      adjustedLimits: { maxReviewIterations: 4, maxTotalAgentPasses: 10, workerTimeoutSeconds: 1800 },
+      branchName: 'orch/1-fix',
+      worktreePath: '/tmp/wt',
+      plan: null,
+      codeResult: null,
+      diff: 'diff',
+      verifyResults: [],
+      reviewResult: null,
+      reviewResults: {},
+      reviewFindings: [],
+      iteration: 1,
+      totalAgentPasses: 0,
+      estimatedCostUsd: 0,
+      currentPhase: 'completed',
+      terminalStatus: 'publish',
+      phaseHistory: [],
+      dryRun: false,
+      runMode: 'fresh',
+      blockReason: null,
+      prReviewFeedback: null,
+      diffError: null,
+      emptyDiffRetries: 0,
+      sessionIds: {},
+      stepOutputs: {},
+      iterationSnapshots: [],
+    } satisfies RunContext
+
+    const outcome = await finalizeRunOutcome({
+      finalCtx,
+      runId: run.id,
+      issue: { number: 1, title: 'Issue', url: '' },
+      runDurationSec: 3,
+      repo: 'org/repo',
+      repoConfig,
+      issueRepo: 'org/repo',
+      issueNumber: 1,
+      db,
+      forge,
+      runManager,
+      notifier: makeNotifier(),
+      maxAutoRetries: 3,
+      botUser: 'night-orch',
+      postPublish: {
+        config,
+        workflow: {
+          steps: [
+            {
+              type: 'worker',
+              id: 'cr',
+              role: 'reviewer',
+              runWhen: 'post-publish',
+              commentPrefix: '[night-orch][cr]',
+            },
+          ],
+        },
+        adapters: { reviewer },
+      },
+    })
+
+    expect(outcome).toBe('processed')
+    const row = runManager.getById(run.id)
+    expect(row?.status).toBe('blocked')
+    expect(row?.blockReason).toBe('auth_failure')
+    expect(row?.lastError).toBe('Worker authentication failed: codex')
+    expect(row?.prNumber).toBe(42)
+    expect(row?.phaseData?.['cr']).toMatchObject({
+      blocked: true,
+      reason: 'Worker authentication failed: codex',
+    })
+    expect(transitionLabels).toHaveBeenCalledWith(
+      forge,
+      'org/repo',
+      1,
+      ['no:running'],
+      'running',
+      'blocked',
+      expect.anything(),
+      expect.objectContaining({ type: 'authFailure' }),
+    )
+    expect(vi.mocked(transitionLabels).mock.calls.some((call) =>
+      call[4] === 'review_ready' && call[5] === 'blocked',
+    )).toBe(false)
+    expect(forge.commentOnIssue).toHaveBeenCalledWith(
+      'org/repo',
+      1,
+      expect.stringContaining('Worker authentication failed: codex'),
+    )
   })
 })

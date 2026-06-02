@@ -3,11 +3,12 @@ import type { TokenUsage } from '../workers/types.js'
 import type { RunContext } from './types.js'
 import {
   renderCodeHandoff,
+  renderExternalReviewHandoff,
   renderPlanHandoff,
   renderReviewHandoff,
   renderVerifyHandoff,
 } from './handoff-render.js'
-import { reviewerKeyForStep, type WorkflowStep } from './workflow.js'
+import { reviewerKeyForStep, runWhenForStep, type WorkerStep, type WorkflowStep } from './workflow.js'
 
 export interface BuildStepHandoffInput {
   readonly ctx: RunContext
@@ -57,6 +58,20 @@ export function buildStepHandoff(input: BuildStepHandoffInput): RecordHandoffInp
       const key = reviewerKeyForStep(step)
       const review = ctx.reviewResults?.[key] ?? (key === 'review' ? ctx.reviewResult : null)
       if (!review) return null
+      if (runWhenForStep(step) === 'post-publish') {
+        const rendered = renderExternalReviewHandoff(review, step.id)
+        return withTokenUsage({
+          runId: ctx.runId,
+          attemptId: ctx.runId,
+          stepId: step.id,
+          fromRole: 'reviewer',
+          toRole: shouldQueuePostPublishContinue(step, review) ? 'coder' : 'system',
+          kind: 'external-review-findings',
+          summary: rendered.summary,
+          contentMd: rendered.contentMd,
+          contentJson: rendered.contentJson,
+        }, tokenUsage)
+      }
       const rendered = renderReviewHandoff(review, step.id)
       return withTokenUsage({
         runId: ctx.runId,
@@ -100,4 +115,8 @@ function nextHandoffRole(steps: readonly WorkflowStep[], stepIndex: number): str
 
 function withTokenUsage(input: RecordHandoffInput, tokenUsage: TokenUsage | undefined): RecordHandoffInput {
   return tokenUsage ? { ...input, tokenUsage } : input
+}
+
+function shouldQueuePostPublishContinue(step: WorkerStep, review: NonNullable<RunContext['reviewResult']>): boolean {
+  return review.verdict !== 'APPROVED' && (step.onChangesRequired ?? 'continue') === 'continue'
 }

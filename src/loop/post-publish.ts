@@ -2,17 +2,15 @@ import type { Config } from '../config/schema.js'
 import type { ForgeAdapter } from '../forge/types.js'
 import type { MetricsService } from '../metrics/service.js'
 import { markerTag, upsertBotComment } from '../forge/bot-comment.js'
-import type { ExternalReviewReaction, ReactionEnvelope } from '../reactions/types.js'
-import { recordHandoff } from '../state/handoffs.js'
+import type { ExternalReviewReaction } from '../reactions/types.js'
 import type { WorkerAdapter } from '../workers/types.js'
 import { sanitizeUntrustedText } from '../workers/prompt/compiler.js'
 import type { RunContext, ReviewerOutput } from './types.js'
 import { updateContext } from './context.js'
-import { executeWorkerStep, type StepDependencies } from './step-executor.js'
-import { getPostPublishSteps, type ResolvedWorkflow, type WorkerStep } from './workflow.js'
-import { renderExternalReviewHandoff } from './handoff-render.js'
+import type { ResolvedWorkflow, WorkerStep } from './workflow.js'
 import { nowUtcIso } from '../utils/time.js'
-import type Database from 'better-sqlite3'
+import { logger } from '../utils/logger.js'
+import type { AgentEvent } from '../events/types.js'
 
 export interface PostPublishReviewDeps {
   config: Config
@@ -20,83 +18,23 @@ export interface PostPublishReviewDeps {
   adapters: Record<string, WorkerAdapter>
   envOverrides?: Record<string, string>
   metrics?: MetricsService
+  onAgentEvent?: (event: AgentEvent) => void
+  leaseHeartbeat?: () => boolean
 }
 
-export interface RunPostPublishStepsInput extends PostPublishReviewDeps {
+export interface HandlePostPublishReviewInput {
   ctx: RunContext
-  db: Database.Database
+  step: WorkerStep
+  review: ReviewerOutput
   forge: ForgeAdapter
   issueRepo: string
   issueNumber: number
   prNumber: number
-  prUrl: string
   botUser: string
+  metrics?: MetricsService
 }
 
-export interface PostPublishResult {
-  ctx: RunContext
-  reactions: ReactionEnvelope[]
-}
-
-export async function runPostPublishSteps(input: RunPostPublishStepsInput): Promise<PostPublishResult> {
-  let ctx = withPublishedPrContext(input.ctx, input.prNumber, input.prUrl)
-  const reactions: ReactionEnvelope[] = []
-  const stepDeps: StepDependencies = {
-    adapters: input.adapters,
-    config: input.config,
-    envOverrides: input.envOverrides,
-  }
-
-  for (const step of getPostPublishSteps(input.workflow)) {
-    let stepResult: 'ok' | 'comment_only' | 'continue_queued' | 'error' = 'ok'
-    try {
-      const result = await executeWorkerStep(ctx, step, stepDeps)
-      ctx = result.ctx
-
-      if (step.role === 'reviewer') {
-        const review = ctx.reviewResults?.[step.reviewerKey ?? step.id] ?? ctx.reviewResult
-        if (review) {
-          recordExternalReviewHandoff(input.db, ctx, step, review, result.tokenUsage, input.metrics)
-          try { input.metrics?.incExternalReviewFindings(step.id, review.verdict) } catch { /* best-effort */ }
-        }
-        if (review && shouldCommentOnIssue(step)) {
-          await upsertExternalReviewComment({
-            forge: input.forge,
-            issueRepo: input.issueRepo,
-            issueNumber: input.issueNumber,
-            botUser: input.botUser,
-            runId: ctx.runId,
-            step,
-            review,
-          })
-        }
-        if (review && review.verdict !== 'APPROVED') {
-          if (shouldQueueContinue(step, review)) {
-            reactions.push(buildExternalReviewReaction({
-              ctx,
-              step,
-              review,
-              prNumber: input.prNumber,
-              issueNumber: input.issueNumber,
-            }))
-            stepResult = 'continue_queued'
-          } else {
-            stepResult = 'comment_only'
-          }
-        }
-      }
-    } catch (err) {
-      stepResult = 'error'
-      throw err
-    } finally {
-      try { input.metrics?.incPostPublishStep(step.id, stepResult) } catch { /* best-effort */ }
-    }
-  }
-
-  return { ctx, reactions }
-}
-
-function withPublishedPrContext(ctx: RunContext, prNumber: number, prUrl: string): RunContext {
+export function withPublishedPrContext(ctx: RunContext, prNumber: number, prUrl: string): RunContext {
   return updateContext(ctx, {
     prReviewFeedback: {
       type: 'post_publish',
@@ -104,6 +42,51 @@ function withPublishedPrContext(ctx: RunContext, prNumber: number, prUrl: string
       context: `PR number: #${prNumber}\nPR URL: ${prUrl}`,
     },
   })
+}
+
+export async function handlePostPublishReview(input: HandlePostPublishReviewInput): Promise<{
+  reaction?: ExternalReviewReaction | null
+  result: 'ok' | 'comment_only' | 'continue_queued'
+}> {
+  try { input.metrics?.incExternalReviewFindings(input.step.id, input.review.verdict) } catch { /* best-effort */ }
+
+  if (shouldCommentOnIssue(input.step)) {
+    try {
+      await upsertExternalReviewComment({
+        forge: input.forge,
+        issueRepo: input.issueRepo,
+        issueNumber: input.issueNumber,
+        botUser: input.botUser,
+        runId: input.ctx.runId,
+        step: input.step,
+        review: input.review,
+      })
+    } catch (err) {
+      logger.warn(
+        { repo: input.issueRepo, issueNumber: input.issueNumber, stepId: input.step.id, err },
+        'Failed to upsert post-publish external review comment',
+      )
+    }
+  }
+
+  if (input.review.verdict === 'APPROVED') {
+    return { result: 'ok' }
+  }
+
+  if (!shouldQueueContinue(input.step, input.review)) {
+    return { result: 'comment_only' }
+  }
+
+  return {
+    result: 'continue_queued',
+    reaction: buildExternalReviewReaction({
+      ctx: input.ctx,
+      step: input.step,
+      review: input.review,
+      prNumber: input.prNumber,
+      issueNumber: input.issueNumber,
+    }),
+  }
 }
 
 function shouldCommentOnIssue(step: WorkerStep): boolean {
@@ -133,30 +116,6 @@ function buildExternalReviewReaction(input: {
     verdict: input.review.verdict,
     findings: input.review.findings,
   }
-}
-
-function recordExternalReviewHandoff(
-  db: Database.Database,
-  ctx: RunContext,
-  step: WorkerStep,
-  review: ReviewerOutput,
-  tokenUsage: Parameters<typeof recordHandoff>[1]['tokenUsage'],
-  metrics?: MetricsService,
-): void {
-  const handoff = renderExternalReviewHandoff(review, step.id)
-  recordHandoff(db, {
-    runId: ctx.runId,
-    attemptId: ctx.runId,
-    stepId: step.id,
-    fromRole: 'reviewer',
-    toRole: shouldQueueContinue(step, review) ? 'coder' : 'system',
-    kind: 'external-review-findings',
-    summary: handoff.summary,
-    contentMd: handoff.contentMd,
-    contentJson: handoff.contentJson,
-    ...(tokenUsage ? { tokenUsage } : {}),
-  })
-  try { metrics?.incHandoffs('external-review-findings') } catch { /* best-effort */ }
 }
 
 async function upsertExternalReviewComment(input: {

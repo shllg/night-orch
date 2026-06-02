@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { executeLoop, type LoopDependencies } from '../../src/loop/engine.js'
+import { executeLoop, executePostPublishSteps, type LoopDependencies } from '../../src/loop/engine.js'
 import { DEFAULT_WORKFLOW } from '../../src/loop/workflow.js'
 import type { RunContext } from '../../src/loop/types.js'
 import type { Config } from '../../src/config/schema.js'
@@ -337,31 +337,173 @@ describe('executeLoop', () => {
     ])
   })
 
-  it('does not execute post-publish worker steps during the normal loop', async () => {
+  it('executes post-publish worker steps through the checkpointed engine worker path', async () => {
     const config = makeConfig()
     config.loop.requireVerificationPass = false
     const reviewerAdapter = makeMockAdapter([makeReviewerResult('APPROVED')])
-    const deps: LoopDependencies = {
+    const leaseHeartbeat = vi.fn().mockReturnValue(true)
+    const workflow: LoopDependencies['workflow'] = {
+      steps: [
+        { type: 'worker', id: 'code', role: 'coder' },
+        { type: 'worker', id: 'cr', role: 'reviewer', runWhen: 'post-publish' },
+        { type: 'decide', id: 'decide', onIterate: 'code', requireReview: false },
+      ],
+    }
+
+    const result = await executePostPublishSteps({
+      ctx: makeCtx({ currentPhase: 'publish', terminalStatus: 'publish' }),
       db,
       config,
       adapters: {
-        planner: makeMockAdapter([makePlannerResult()]),
-        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: reviewerAdapter,
+      },
+      workflow,
+      leaseHeartbeat,
+      prNumber: 42,
+      prUrl: 'https://example.com/pr/42',
+    })
+
+    expect(reviewerAdapter.runTask).toHaveBeenCalledWith(expect.objectContaining({
+      phase: 'cr',
+      role: 'reviewer',
+      worktreePath: '/tmp/wt',
+    }))
+    expect(result.ctx.terminalStatus).toBe('publish')
+    expect(result.ctx.phaseHistory.map((phase) => [phase.phase, phase.result])).toEqual([
+      ['cr', 'success'],
+    ])
+    expect(leaseHeartbeat).toHaveBeenCalledTimes(1)
+
+    const phaseData = db
+      .prepare('SELECT phase_data FROM runs WHERE id = ?')
+      .get('run-test-1') as { phase_data: string }
+    const parsedPhaseData = JSON.parse(phaseData.phase_data) as Record<string, unknown>
+    expect(parsedPhaseData['cr']).toMatchObject({
+      reviewerKey: 'cr',
+      reviewResult: { verdict: 'APPROVED' },
+    })
+    expect(parsedPhaseData['__completedPhases']).toEqual(['cr'])
+    expect(parsedPhaseData['__sessionIds']).toEqual({})
+
+    const handoffs = listHandoffs(db, 'run-test-1')
+    expect(handoffs.map((handoff) => ({
+      stepId: handoff.stepId,
+      toRole: handoff.toRole,
+      kind: handoff.kind,
+      summary: handoff.summary,
+    }))).toEqual([
+      {
+        stepId: 'cr',
+        toRole: 'system',
+        kind: 'external-review-findings',
+        summary: 'APPROVED: 0 findings',
+      },
+    ])
+  })
+
+  it('maps post-publish worker errors to blocked state instead of rethrowing', async () => {
+    const config = makeConfig()
+    config.loop.requireVerificationPass = false
+    const reviewerAdapter: WorkerAdapter = {
+      runTask: vi.fn().mockRejectedValue(new WorkerAuthError('claude', 'Run claude login', 'signed out', 'cr')),
+      checkAvailability: vi.fn().mockResolvedValue({ available: true, version: '1.0' }),
+    }
+
+    const result = await executePostPublishSteps({
+      ctx: makeCtx({ currentPhase: 'publish', terminalStatus: 'publish' }),
+      db,
+      config,
+      adapters: {
         reviewer: reviewerAdapter,
       },
       workflow: {
         steps: [
-          { type: 'worker', id: 'code', role: 'coder' },
           { type: 'worker', id: 'cr', role: 'reviewer', runWhen: 'post-publish' },
-          { type: 'decide', id: 'decide', onIterate: 'code', requireReview: false },
         ],
       },
-    }
+      prNumber: 42,
+      prUrl: 'https://example.com/pr/42',
+    })
 
-    const result = await executeLoop(makeCtx({ currentPhase: 'code' }), deps)
+    expect(result.ctx.terminalStatus).toBe('blocked')
+    expect(result.ctx.blockReason).toBe('auth_failure')
+    expect(result.ctx.stepOutputs['blockMessage']).toBe('Worker authentication failed: claude')
 
-    expect(reviewerAdapter.runTask).not.toHaveBeenCalled()
-    expect(result.terminalStatus).toBe('publish')
+    const phaseData = db
+      .prepare('SELECT phase_data FROM runs WHERE id = ?')
+      .get('run-test-1') as { phase_data: string }
+    const parsedPhaseData = JSON.parse(phaseData.phase_data) as Record<string, unknown>
+    expect(parsedPhaseData['cr']).toMatchObject({
+      blocked: true,
+      reason: 'Worker authentication failed: claude',
+    })
+  })
+
+  it('resumes post-publish execution after completed post-publish checkpoints', async () => {
+    const config = makeConfig()
+    config.loop.requireVerificationPass = false
+    const persistedReview = makeReviewerResultWithFinding(
+      'Persisted CodeRabbit findings',
+      'Persisted null guard finding',
+    ).parsed
+    db.prepare('UPDATE runs SET current_phase = ?, phase_data = ? WHERE id = ?').run(
+      'cr',
+      JSON.stringify({
+        cr: {
+          reviewerKey: 'cr',
+          reviewResult: persistedReview,
+          reviewResults: { cr: persistedReview },
+        },
+        __completedPhases: ['cr'],
+        __sessionIds: {
+          cr: 'sess-cr',
+          reviewer: 'sess-cr',
+          'cr::claude': 'sess-cr',
+          'reviewer::claude': 'sess-cr',
+        },
+        __stepOutputs: {
+          cr: persistedReview,
+        },
+      }),
+      'run-test-1',
+    )
+
+    const reviewerAdapter = makeMockAdapter([makeReviewerResult('APPROVED')])
+
+    const result = await executePostPublishSteps({
+      ctx: makeCtx({ currentPhase: 'publish', terminalStatus: 'publish' }),
+      db,
+      config,
+      adapters: {
+        reviewer: reviewerAdapter,
+      },
+      workflow: {
+        steps: [
+          { type: 'worker', id: 'cr', role: 'reviewer', runWhen: 'post-publish' },
+          { type: 'worker', id: 'snyk', role: 'reviewer', runWhen: 'post-publish', continueFrom: 'cr' },
+        ],
+      },
+      prNumber: 42,
+      prUrl: 'https://example.com/pr/42',
+    })
+
+    expect(reviewerAdapter.runTask).toHaveBeenCalledTimes(1)
+    expect(reviewerAdapter.runTask).toHaveBeenCalledWith(expect.objectContaining({
+      phase: 'snyk',
+      continueSessionId: 'sess-cr',
+    }))
+    expect(result.ctx.reviewResults?.['cr']).toMatchObject({
+      summary: 'Persisted CodeRabbit findings',
+    })
+    expect(result.ctx.reviewResults?.['snyk']).toMatchObject({
+      verdict: 'APPROVED',
+    })
+
+    const phaseData = db
+      .prepare('SELECT phase_data FROM runs WHERE id = ?')
+      .get('run-test-1') as { phase_data: string }
+    const parsedPhaseData = JSON.parse(phaseData.phase_data) as Record<string, unknown>
+    expect(parsedPhaseData['__completedPhases']).toEqual(['cr', 'snyk'])
   })
 
   it('calls onPlanReady after plan and before code', async () => {

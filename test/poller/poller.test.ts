@@ -87,10 +87,15 @@ vi.mock('../../src/notify/dispatcher.js', () => {
 })
 
 const mockExecuteLoop = vi.fn()
+const mockExecutePostPublishSteps = vi.fn(async (input: { ctx: unknown }) => ({
+  ctx: input.ctx,
+  reactions: [],
+}))
 const mockFileLoopGetActiveSession = vi.fn().mockReturnValue(null)
 const mockFileLoopTickRepo = vi.fn().mockResolvedValue(null)
 vi.mock('../../src/loop/engine.js', () => ({
   executeLoop: (...args: unknown[]) => mockExecuteLoop(...args),
+  executePostPublishSteps: (...args: unknown[]) => mockExecutePostPublishSteps(...args),
 }))
 vi.mock('../../src/fileloop/engine.js', () => ({
   FileLoopEngine: class MockFileLoopEngine {
@@ -191,6 +196,10 @@ describe('pollOnce', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mockExecutePostPublishSteps.mockImplementation(async (input: { ctx: unknown }) => ({
+      ctx: input.ctx,
+      reactions: [],
+    }))
     mockFileLoopGetActiveSession.mockReturnValue(null)
     mockFileLoopTickRepo.mockResolvedValue(null)
     mockCreatePR.mockResolvedValue({
