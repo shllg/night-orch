@@ -66,9 +66,14 @@ export async function rebaseCommand(
   }
 
   try {
-    const result = await queueRebase(db, forge, repoConfig, num, botUser, {
+    const result = await queueRebase({
+      db,
+      forge,
+      repoConfig,
+      issueNumber: num,
+      botUser,
       strategyOverride: strategy,
-      actor: 'cli',
+      trigger: { kind: 'cli' },
       maxAttemptChainLength: config.loop.maxAttemptChainLength,
     })
 

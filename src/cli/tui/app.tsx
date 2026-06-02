@@ -793,9 +793,14 @@ export function App({
       } catch {
         // Best effort only.
       }
-      const result = await queueRebase(db, forge, repoConfig, target.issue_number, botUser, {
+      const result = await queueRebase({
+        db,
+        forge,
+        repoConfig,
+        issueNumber: target.issue_number,
+        botUser,
         strategyOverride: manualStrategy ?? undefined,
-        actor: 'tui',
+        trigger: { kind: 'tui' },
       })
       if (!dryRun && result.queued && enableBackgroundPoller) {
         await runPollCycle('manual', target)

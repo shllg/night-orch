@@ -5,7 +5,7 @@ import { hasOpenRebaseAttempt } from '../state/attempts.js'
 import { RebaseFanoutManager } from '../state/rebase-fanouts.js'
 import { RunManager, type RunOperationIntent, type RunStatus } from '../state/runs.js'
 import { logger } from '../utils/logger.js'
-import { queueRebase as defaultQueueRebase } from './rebase-and-check.js'
+import { queueRebase as defaultQueueRebase, type QueueRebaseParams } from './rebase-and-check.js'
 
 const BENIGN_SKIP_REASONS = new Set([
   'Run is already queued',
@@ -55,16 +55,7 @@ export function selectFanoutCandidates(
     }))
 }
 
-type QueueRebaseFn = (
-  db: Database.Database,
-  forge: ForgeAdapter,
-  repoConfig: RepoConfig,
-  issueNumber: number,
-  botUser: string,
-  options?: Parameters<typeof defaultQueueRebase>[5] & {
-    triggeredBy?: { kind: 'merge-fanout'; sourcePr: number }
-  },
-) => Promise<{ queued: boolean; reason: string }>
+type QueueRebaseFn = (params: QueueRebaseParams) => Promise<{ queued: boolean; reason: string }>
 
 export interface FanoutDeps {
   db: Database.Database
@@ -94,7 +85,7 @@ export async function fanoutRebaseAfterMerge(deps: FanoutDeps): Promise<FanoutRe
   const { db, repoConfig, forge, config, sourcePrNumber, baseBranch, botUser } = deps
   const fanouts = deps.fanouts ?? new RebaseFanoutManager(db)
   const queueRebase = deps.queueRebase ?? defaultQueueRebase
-  const autoRebase = repoConfig.autoRebaseOnMerge ?? { enabled: false, maxFanout: 10, strategy: 'rebase' as 'merge' | 'rebase' }
+  const autoRebase = repoConfig.autoRebaseOnMerge
 
   if (!autoRebase.enabled) {
     return { queued: 0, skipped: 0, failures: 0, alreadyFannedOut: false, skippedDisabled: true }
@@ -156,11 +147,15 @@ export async function fanoutRebaseAfterMerge(deps: FanoutDeps): Promise<FanoutRe
 
   for (const candidate of enriched) {
     try {
-      const result = await queueRebase(db, forge, repoConfig, candidate.issueNumber, botUser, {
-        actor: 'fanout',
+      const result = await queueRebase({
+        db,
+        forge,
+        repoConfig,
+        issueNumber: candidate.issueNumber,
+        botUser,
         maxAttemptChainLength,
-        triggeredBy: { kind: 'merge-fanout', sourcePr: sourcePrNumber },
-        ...(autoRebase.strategy ? { strategyOverride: autoRebase.strategy } : {}),
+        trigger: { kind: 'fanout', sourcePr: sourcePrNumber },
+        strategyOverride: autoRebase.strategy,
       })
 
       if (result.queued) {

@@ -288,7 +288,12 @@ async function executeCommentCommand(params: ExecuteCommentCommandParams): Promi
         return result.queued ? { ok: true } : { ok: false, reason: result.reason }
       }
     case 'rebase': {
-      const result = await queueRebase(db, forge, repoConfig, issueNumber, botUser, {
+      const result = await queueRebase({
+        db,
+        forge,
+        repoConfig,
+        issueNumber,
+        botUser,
         maxAttemptChainLength: config.loop.maxAttemptChainLength,
       })
       return result.queued ? { ok: true } : { ok: false, reason: result.reason }

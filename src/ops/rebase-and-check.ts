@@ -21,6 +21,25 @@ import type { ConflictResolutionMetadata } from './conflict-types.js'
 
 const STATUS_MARKER = markerTag('status')
 
+export type RebaseTrigger =
+  | { kind: 'manual' }
+  | { kind: 'cli' }
+  | { kind: 'mcp' }
+  | { kind: 'tui' }
+  | { kind: 'fanout'; sourcePr: number }
+
+export interface QueueRebaseParams {
+  db: Database.Database
+  forge: ForgeAdapter
+  repoConfig: RepoConfig
+  issueNumber: number
+  botUser: string
+  check?: boolean
+  strategyOverride?: UpdateStrategy
+  trigger?: RebaseTrigger
+  maxAttemptChainLength?: number
+}
+
 /**
  * Queue an issue for rebase-and-re-evaluate.
  *
@@ -35,19 +54,19 @@ const STATUS_MARKER = markerTag('status')
  * a git rebase might succeed but the code could be semantically broken.
  */
 export async function queueRebase(
-  db: Database.Database,
-  forge: ForgeAdapter,
-  repoConfig: RepoConfig,
-  issueNumber: number,
-  botUser: string,
-  options: {
-    check?: boolean
-    strategyOverride?: UpdateStrategy
-    actor?: string
-    maxAttemptChainLength?: number
-    triggeredBy?: { kind: 'merge-fanout'; sourcePr: number }
-  } = {},
+  params: QueueRebaseParams,
 ): Promise<{ queued: boolean; reason: string }> {
+  const {
+    db,
+    forge,
+    repoConfig,
+    issueNumber,
+    botUser,
+    check,
+    strategyOverride,
+    maxAttemptChainLength,
+  } = params
+  const trigger = params.trigger ?? { kind: 'manual' }
   const runManager = new RunManager(db)
 
   // Find the latest run with a branch for this issue
@@ -71,8 +90,8 @@ export async function queueRebase(
       previousAttemptId: run.id,
       intent: 'rebase',
       resetBranch: false,
-      ...(options.maxAttemptChainLength !== undefined
-        ? { maxSequenceNumber: options.maxAttemptChainLength }
+      ...(maxAttemptChainLength !== undefined
+        ? { maxSequenceNumber: maxAttemptChainLength }
         : {}),
       phaseData: {
         ...existingPhaseData,
@@ -84,21 +103,21 @@ export async function queueRebase(
       },
       controlPayload: {
         issueRepo,
-        checkAfter: options.check ?? true,
+        checkAfter: check ?? true,
         requestedAt: new Date().toISOString(),
         preserveBranchState: true,
-        ...(options.strategyOverride ? { updateStrategy: options.strategyOverride } : {}),
+        ...(strategyOverride ? { updateStrategy: strategyOverride } : {}),
       },
     })
   } catch (err) {
     if (err instanceof AttemptChainLimitError) {
-      if (options.triggeredBy?.kind === 'merge-fanout') {
+      if (trigger.kind === 'fanout') {
         await commentStatus(
           forge,
           issueRepo,
           issueNumber,
           botUser,
-          `Skipped automatic rebase after #${options.triggeredBy.sourcePr} merged because the attempt chain limit is exhausted. Run /orch rebase or /orch retry when ready to continue manually.`,
+          `Skipped automatic rebase after #${trigger.sourcePr} merged because the attempt chain limit is exhausted. Run /orch rebase or /orch retry when ready to continue manually.`,
         )
       }
       return { queued: false, reason: 'chain_exhausted' }
@@ -109,14 +128,11 @@ export async function queueRebase(
 
   const queuedRun = runManager.getByRepoAndIssue(repoConfig.repo, issueNumber)
   if (queuedRun) {
-    const details: Record<string, unknown> = {}
-    if (options.strategyOverride) details.strategy = options.strategyOverride
-    if (options.triggeredBy) details.triggeredBy = options.triggeredBy
     recordUserAction(db, {
       runId: queuedRun.id,
       kind: 'rebase',
-      actor: options.actor ?? (options.triggeredBy ? 'fanout' : 'manual'),
-      details: Object.keys(details).length > 0 ? details : null,
+      actor: trigger.kind,
+      details: buildRebaseActionDetails(trigger, strategyOverride),
     })
   }
 
@@ -135,13 +151,24 @@ export async function queueRebase(
   }
 
   // Post status comment
-  const queuedMessage = options.triggeredBy?.kind === 'merge-fanout'
-    ? `Queued for automatic rebase and re-evaluation because #${options.triggeredBy.sourcePr} merged into the base branch. The branch will be rebased onto the latest base, verified, and if anything breaks the coder will fix it.`
+  const queuedMessage = trigger.kind === 'fanout'
+    ? `Queued for automatic rebase and re-evaluation because #${trigger.sourcePr} merged into the base branch. The branch will be rebased onto the latest base, verified, and if anything breaks the coder will fix it.`
     : 'Queued for rebase and re-evaluation. The branch will be rebased onto the latest base, verified, and if anything breaks the coder will fix it.'
   await commentStatus(forge, issueRepo, issueNumber, botUser, queuedMessage)
 
   logger.info({ repo: issueRepo, issueNumber, runId: run.id }, 'Queued issue for rebase-and-re-evaluate')
   return { queued: true, reason: 'Queued for rebase and re-evaluation on next poll cycle' }
+}
+
+function buildRebaseActionDetails(
+  trigger: RebaseTrigger,
+  strategyOverride: UpdateStrategy | undefined,
+): Record<string, unknown> | null {
+  const details: Record<string, unknown> = {
+    ...(strategyOverride ? { strategy: strategyOverride } : {}),
+    ...(trigger.kind === 'fanout' ? { triggeredBy: trigger } : {}),
+  }
+  return Object.keys(details).length > 0 ? details : null
 }
 
 /**

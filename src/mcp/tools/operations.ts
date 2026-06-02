@@ -100,10 +100,15 @@ export async function handleRebase(
   } catch { /* best effort */ }
 
   const { queueRebase } = await import('../../ops/rebase-and-check.js')
-  const result = await queueRebase(deps.db, forge, repoConfig, args.issueNumber, botUser, {
+  const result = await queueRebase({
+    db: deps.db,
+    forge,
+    repoConfig,
+    issueNumber: args.issueNumber,
+    botUser,
     check: args.check,
     strategyOverride: args.strategy,
-    actor: 'mcp',
+    trigger: { kind: 'mcp' },
     maxAttemptChainLength: deps.config.loop.maxAttemptChainLength,
   })
   const trigger = result.queued ? triggerPoller(deps) : null

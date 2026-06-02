@@ -79,6 +79,8 @@ export function detectFinalizerOrphan(
 export class SyncEngine {
   private leaseManager: LeaseManager
   private runManager: RunManager
+  private botUsersByRepo = new Map<string, string>()
+  private botUserWarningRepos = new Set<string>()
 
   constructor(
     private db: Database.Database,
@@ -350,18 +352,6 @@ export class SyncEngine {
       }
     }
 
-    // Resolve the bot identity so sibling-PR fan-out comments go through
-    // upsertBotComment (idempotent) instead of plain commentOnIssue.
-    // Best-effort: an empty botUser still works but produces duplicate
-    // comments across retries.
-    let botUser = ''
-    try {
-      const authInfo = await forge.validateAuth()
-      botUser = authInfo.user
-    } catch (err) {
-      logger.debug({ repo: run.repo, err }, 'Failed to resolve bot user for fan-out — comments will not be deduplicated')
-    }
-
     await this.fanoutAfterMerge({
       db: this.db,
       repoConfig,
@@ -369,8 +359,26 @@ export class SyncEngine {
       config: this.config,
       sourcePrNumber: run.pr_number,
       baseBranch,
-      botUser,
+      botUser: await this.resolveBotUser(run.repo, forge),
     })
+  }
+
+  private async resolveBotUser(repo: string, forge: ForgeAdapter): Promise<string> {
+    const cached = this.botUsersByRepo.get(repo)
+    if (cached !== undefined) return cached
+
+    try {
+      const authInfo = await forge.validateAuth()
+      this.botUsersByRepo.set(repo, authInfo.user)
+      return authInfo.user
+    } catch (err) {
+      this.botUsersByRepo.set(repo, '')
+      if (!this.botUserWarningRepos.has(repo)) {
+        this.botUserWarningRepos.add(repo)
+        logger.warn({ repo, err }, 'Failed to resolve bot user for fan-out; comments will not be deduplicated')
+      }
+      return ''
+    }
   }
 
   private markClosed(run: ActiveRunRow, dryRun: boolean, reason: string, forge: ForgeAdapter): SyncAction {

@@ -4,6 +4,8 @@ import { queueRebase } from '../../src/ops/rebase-and-check.js'
 import { initDatabase } from '../../src/state/db.js'
 import { RunManager } from '../../src/state/runs.js'
 import { makeTestRepoConfig } from '../helpers/factories.js'
+import type { ForgeAdapter } from '../../src/forge/types.js'
+import { resolveControlPayload } from '../../src/runner/intent.js'
 
 function seedRun(db: Database.Database, opts: { issueNumber: number; prNumber: number; status?: 'review_ready' | 'blocked' | 'error' } = { issueNumber: 7, prNumber: 100 }): string {
   const mgr = new RunManager(db)
@@ -41,18 +43,28 @@ function latestUserAction(db: Database.Database, runId: string): UserActionRecor
   return { actor: row.role ?? '', data }
 }
 
-function makeForge(opts: { findCommentsResult?: unknown[] } = {}) {
+function makeForge(opts: { findCommentsResult?: unknown[] } = {}): { forge: ForgeAdapter; comments: RecordedComment[] } {
   const comments: RecordedComment[] = []
-  const forge = {
+  const forge: ForgeAdapter = {
+    listEligibleIssues: vi.fn(),
     getIssue: vi.fn().mockResolvedValue({ labels: [] }),
     addLabels: vi.fn().mockResolvedValue(undefined),
     removeLabels: vi.fn().mockResolvedValue(undefined),
     commentOnIssue: vi.fn(async (repo: string, issueNumber: number, body: string) => {
       comments.push({ repo, issueNumber, body })
     }),
+    validateAuth: vi.fn(),
+    createPR: vi.fn(),
+    updatePR: vi.fn(),
+    findPRByBranch: vi.fn(),
+    getPRDiff: vi.fn(),
     listIssueComments: vi.fn().mockResolvedValue(opts.findCommentsResult ?? []),
-    updateIssueComment: vi.fn().mockResolvedValue(undefined),
-  } as never
+    updateComment: vi.fn().mockResolvedValue(undefined),
+    listPRReviews: vi.fn(),
+    listPRReviewComments: vi.fn(),
+    mergePR: vi.fn(),
+    closePR: vi.fn(),
+  }
   return { forge, comments }
 }
 
@@ -62,7 +74,13 @@ describe('queueRebase', () => {
     seedRun(db)
     const { forge, comments } = makeForge()
 
-    const result = await queueRebase(db, forge, makeTestRepoConfig(), 7, '')
+    const result = await queueRebase({
+      db,
+      forge,
+      repoConfig: makeTestRepoConfig(),
+      issueNumber: 7,
+      botUser: '',
+    })
 
     expect(result.queued).toBe(true)
     const joined = comments.map((c) => c.body).join('\n')
@@ -70,26 +88,36 @@ describe('queueRebase', () => {
     expect(joined).not.toMatch(/#\d+ merged/i)
   })
 
-  it('emits a fan-out-flavoured comment referencing the source PR when triggeredBy is set', async () => {
+  it('emits a fan-out-flavoured comment referencing the source PR when trigger is fanout', async () => {
     const db = initDatabase(':memory:')
     seedRun(db)
     const { forge, comments } = makeForge()
 
-    await queueRebase(db, forge, makeTestRepoConfig({ baseBranch: 'develop' }), 7, '', {
-      triggeredBy: { kind: 'merge-fanout', sourcePr: 42 },
+    await queueRebase({
+      db,
+      forge,
+      repoConfig: makeTestRepoConfig({ baseBranch: 'develop' }),
+      issueNumber: 7,
+      botUser: '',
+      trigger: { kind: 'fanout', sourcePr: 42 },
     })
 
     const joined = comments.map((c) => c.body).join('\n')
     expect(joined).toMatch(/#42 merged/)
   })
 
-  it('records actor=fanout when triggeredBy is set and actor is not overridden', async () => {
+  it('records actor=fanout when trigger is fanout', async () => {
     const db = initDatabase(':memory:')
     const runId = seedRun(db)
     const { forge } = makeForge()
 
-    await queueRebase(db, forge, makeTestRepoConfig(), 7, '', {
-      triggeredBy: { kind: 'merge-fanout', sourcePr: 42 },
+    await queueRebase({
+      db,
+      forge,
+      repoConfig: makeTestRepoConfig(),
+      issueNumber: 7,
+      botUser: '',
+      trigger: { kind: 'fanout', sourcePr: 42 },
     })
 
     const newRunId = new RunManager(db).getByRepoAndIssue('org/repo', 7)?.id
@@ -99,28 +127,38 @@ describe('queueRebase', () => {
     const event = latestUserAction(db, newRunId!)
     expect(event?.actor).toBe('fanout')
     expect(event?.data.kind).toBe('rebase')
-    expect(event?.data.triggeredBy).toEqual({ kind: 'merge-fanout', sourcePr: 42 })
+    expect(event?.data.triggeredBy).toEqual({ kind: 'fanout', sourcePr: 42 })
   })
 
-  it('records actor=manual when triggeredBy is unset', async () => {
+  it('records actor=manual when trigger is unset', async () => {
     const db = initDatabase(':memory:')
     seedRun(db)
     const { forge } = makeForge()
 
-    await queueRebase(db, forge, makeTestRepoConfig(), 7, '')
+    await queueRebase({
+      db,
+      forge,
+      repoConfig: makeTestRepoConfig(),
+      issueNumber: 7,
+      botUser: '',
+    })
 
     const newRunId = new RunManager(db).getByRepoAndIssue('org/repo', 7)!.id
     expect(latestUserAction(db, newRunId)?.actor).toBe('manual')
   })
 
-  it('honours an explicit actor override regardless of triggeredBy', async () => {
+  it('records actor=cli when trigger is cli', async () => {
     const db = initDatabase(':memory:')
     seedRun(db)
     const { forge } = makeForge()
 
-    await queueRebase(db, forge, makeTestRepoConfig(), 7, '', {
-      actor: 'cli',
-      triggeredBy: { kind: 'merge-fanout', sourcePr: 9 },
+    await queueRebase({
+      db,
+      forge,
+      repoConfig: makeTestRepoConfig(),
+      issueNumber: 7,
+      botUser: '',
+      trigger: { kind: 'cli' },
     })
 
     const newRunId = new RunManager(db).getByRepoAndIssue('org/repo', 7)!.id
@@ -133,8 +171,13 @@ describe('queueRebase', () => {
     const { forge, comments } = makeForge()
 
     // Force the chain to be considered full by setting maxAttemptChainLength to 0.
-    const result = await queueRebase(db, forge, makeTestRepoConfig(), 7, '', {
-      triggeredBy: { kind: 'merge-fanout', sourcePr: 42 },
+    const result = await queueRebase({
+      db,
+      forge,
+      repoConfig: makeTestRepoConfig(),
+      issueNumber: 7,
+      botUser: '',
+      trigger: { kind: 'fanout', sourcePr: 42 },
       maxAttemptChainLength: 0,
     })
 
@@ -150,7 +193,12 @@ describe('queueRebase', () => {
     seedRun(db)
     const { forge, comments } = makeForge()
 
-    const result = await queueRebase(db, forge, makeTestRepoConfig(), 7, '', {
+    const result = await queueRebase({
+      db,
+      forge,
+      repoConfig: makeTestRepoConfig(),
+      issueNumber: 7,
+      botUser: '',
       maxAttemptChainLength: 0,
     })
 
@@ -166,7 +214,13 @@ describe('queueRebase', () => {
     new RunManager(db).updateLifecycle(runId, { status: 'running' })
     const { forge } = makeForge()
 
-    const result = await queueRebase(db, forge, makeTestRepoConfig(), 7, '')
+    const result = await queueRebase({
+      db,
+      forge,
+      repoConfig: makeTestRepoConfig(),
+      issueNumber: 7,
+      botUser: '',
+    })
 
     expect(result.queued).toBe(false)
     expect(result.reason).toBe('Run is already running')
@@ -178,7 +232,13 @@ describe('queueRebase', () => {
     mgr.create({ repo: 'org/repo', issueNumber: 7, issueNodeId: 'node-7', planner: 'claude', coder: 'codex', reviewer: 'codex' })
     const { forge } = makeForge()
 
-    const result = await queueRebase(db, forge, makeTestRepoConfig(), 7, '')
+    const result = await queueRebase({
+      db,
+      forge,
+      repoConfig: makeTestRepoConfig(),
+      issueNumber: 7,
+      botUser: '',
+    })
 
     expect(result.queued).toBe(false)
     expect(result.reason).toBe('No run with branch found for this issue')
@@ -189,12 +249,16 @@ describe('queueRebase', () => {
     seedRun(db)
     const { forge } = makeForge()
 
-    await queueRebase(db, forge, makeTestRepoConfig(), 7, '', { strategyOverride: 'merge' })
+    await queueRebase({
+      db,
+      forge,
+      repoConfig: makeTestRepoConfig(),
+      issueNumber: 7,
+      botUser: '',
+      strategyOverride: 'merge',
+    })
 
-    const newRunId = new RunManager(db).getByRepoAndIssue('org/repo', 7)!.id
-    const row = db.prepare('SELECT control_payload FROM runs WHERE id = ?').get(newRunId) as { control_payload: string } | undefined
-    expect(row?.control_payload).toBeTruthy()
-    const parsed = JSON.parse(row!.control_payload) as { updateStrategy?: string }
-    expect(parsed.updateStrategy).toBe('merge')
+    const newRun = new RunManager(db).getByRepoAndIssue('org/repo', 7)
+    expect(resolveControlPayload(newRun)?.updateStrategy).toBe('merge')
   })
 })

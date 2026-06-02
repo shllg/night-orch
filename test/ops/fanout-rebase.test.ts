@@ -5,6 +5,7 @@ import { RebaseFanoutManager } from '../../src/state/rebase-fanouts.js'
 import { RunManager, type RunStatus } from '../../src/state/runs.js'
 import { fanoutRebaseAfterMerge, selectFanoutCandidates } from '../../src/ops/fanout-rebase.js'
 import { makeTestConfig, makeTestRepoConfig } from '../helpers/factories.js'
+import type { ForgeAdapter } from '../../src/forge/types.js'
 
 describe('selectFanoutCandidates', () => {
   it('keeps tracked sibling PRs and excludes source, terminal, active, missing-PR, and open-rebase rows', () => {
@@ -50,12 +51,13 @@ describe('fanoutRebaseAfterMerge', () => {
   it('no-ops when autoRebaseOnMerge is disabled', async () => {
     const db = initDatabase(':memory:')
     const queueRebase = vi.fn().mockResolvedValue({ queued: true, reason: 'ok' })
-    const forge = { getPR: vi.fn() }
+    const getPR = vi.fn()
+    const forge = makeForge({ getPR })
 
     const result = await fanoutRebaseAfterMerge({
       db,
       repoConfig: makeTestRepoConfig({ autoRebaseOnMerge: { enabled: false } }),
-      forge: forge as never,
+      forge,
       config: makeTestConfig(),
       sourcePrNumber: 42,
       baseBranch: 'main',
@@ -65,7 +67,7 @@ describe('fanoutRebaseAfterMerge', () => {
 
     expect(result.skippedDisabled).toBe(true)
     expect(queueRebase).not.toHaveBeenCalled()
-    expect(forge.getPR).not.toHaveBeenCalled()
+    expect(getPR).not.toHaveBeenCalled()
   })
 
   it('no-ops when the source PR was already fanned out', async () => {
@@ -77,7 +79,7 @@ describe('fanoutRebaseAfterMerge', () => {
     const result = await fanoutRebaseAfterMerge({
       db,
       repoConfig: makeTestRepoConfig({ autoRebaseOnMerge: { enabled: true } }),
-      forge: {} as never,
+      forge: makeForge(),
       config: makeTestConfig(),
       sourcePrNumber: 42,
       baseBranch: 'main',
@@ -97,18 +99,17 @@ describe('fanoutRebaseAfterMerge', () => {
     seedSibling(db, 3, 103)
     const fanouts = new RebaseFanoutManager(db)
     const queueRebase = vi.fn().mockResolvedValue({ queued: true, reason: 'ok' })
-    const forge = {
-      getPR: vi.fn(async (_repo: string, prNumber: number) => {
+    const getPR = vi.fn(async (_repo: string, prNumber: number) => {
         if (prNumber === 101) return { state: 'open', baseBranch: 'main' }
         if (prNumber === 102) return { state: 'open', baseBranch: 'develop' }
         return { state: 'closed', baseBranch: 'main' }
-      }),
-    }
+      })
+    const forge = makeForge({ getPR })
 
     const result = await fanoutRebaseAfterMerge({
       db,
       repoConfig: makeTestRepoConfig({ autoRebaseOnMerge: { enabled: true } }),
-      forge: forge as never,
+      forge,
       config: makeTestConfig(),
       sourcePrNumber: 99,
       baseBranch: 'main',
@@ -119,7 +120,11 @@ describe('fanoutRebaseAfterMerge', () => {
 
     expect(result).toMatchObject({ queued: 1, skipped: 0, failures: 0 })
     expect(queueRebase).toHaveBeenCalledTimes(1)
-    expect(queueRebase.mock.calls[0]?.[3]).toBe(1)
+    expect(queueRebase).toHaveBeenCalledWith(expect.objectContaining({
+      issueNumber: 1,
+      trigger: { kind: 'fanout', sourcePr: 99 },
+      strategyOverride: 'rebase',
+    }))
     expect(fanouts.has('org/repo', 99)).toBe(true)
   })
 
@@ -128,12 +133,12 @@ describe('fanoutRebaseAfterMerge', () => {
     seedSibling(db, 1, 101)
     const fanouts = new RebaseFanoutManager(db)
     const queueRebase = vi.fn().mockResolvedValue({ queued: false, reason: 'Run is already queued' })
-    const forge = { getPR: vi.fn().mockResolvedValue({ state: 'open', baseBranch: 'main' }) }
+    const forge = makeForge({ getPR: vi.fn().mockResolvedValue({ state: 'open', baseBranch: 'main' }) })
 
     const result = await fanoutRebaseAfterMerge({
       db,
       repoConfig: makeTestRepoConfig({ autoRebaseOnMerge: { enabled: true } }),
-      forge: forge as never,
+      forge,
       config: makeTestConfig(),
       sourcePrNumber: 99,
       baseBranch: 'main',
@@ -151,12 +156,12 @@ describe('fanoutRebaseAfterMerge', () => {
     seedSibling(db, 1, 101)
     const fanouts = new RebaseFanoutManager(db)
     const queueRebase = vi.fn().mockRejectedValue(new Error('forge unavailable'))
-    const forge = { getPR: vi.fn().mockResolvedValue({ state: 'open', baseBranch: 'main' }) }
+    const forge = makeForge({ getPR: vi.fn().mockResolvedValue({ state: 'open', baseBranch: 'main' }) })
 
     const result = await fanoutRebaseAfterMerge({
       db,
       repoConfig: makeTestRepoConfig({ autoRebaseOnMerge: { enabled: true } }),
-      forge: forge as never,
+      forge,
       config: makeTestConfig(),
       sourcePrNumber: 99,
       baseBranch: 'main',
@@ -174,12 +179,12 @@ describe('fanoutRebaseAfterMerge', () => {
     seedSibling(db, 1, 101)
     const fanouts = new RebaseFanoutManager(db)
     const queueRebase = vi.fn().mockResolvedValue({ queued: true, reason: 'ok' })
-    const forge = { getPR: vi.fn().mockResolvedValue({ state: 'open', baseBranch: 'main' }) }
+    const forge = makeForge({ getPR: vi.fn().mockResolvedValue({ state: 'open', baseBranch: 'main' }) })
 
     await fanoutRebaseAfterMerge({
       db,
       repoConfig: makeTestRepoConfig({ autoRebaseOnMerge: { enabled: true, maxChainLength: 12 } }),
-      forge: forge as never,
+      forge,
       config: makeTestConfig(),
       sourcePrNumber: 99,
       baseBranch: 'main',
@@ -187,13 +192,13 @@ describe('fanoutRebaseAfterMerge', () => {
       queueRebase,
       fanouts,
     })
-    expect(queueRebase.mock.calls[0]?.[5].maxAttemptChainLength).toBe(12)
+    expect(queueRebase).toHaveBeenCalledWith(expect.objectContaining({ maxAttemptChainLength: 12 }))
 
     queueRebase.mockClear()
     await fanoutRebaseAfterMerge({
       db,
       repoConfig: makeTestRepoConfig({ autoRebaseOnMerge: { enabled: true } }),
-      forge: forge as never,
+      forge,
       config: makeTestConfig(),
       sourcePrNumber: 100,
       baseBranch: 'main',
@@ -201,7 +206,7 @@ describe('fanoutRebaseAfterMerge', () => {
       queueRebase,
       fanouts,
     })
-    expect(queueRebase.mock.calls[0]?.[5].maxAttemptChainLength).toBe(6)
+    expect(queueRebase).toHaveBeenCalledWith(expect.objectContaining({ maxAttemptChainLength: 6 }))
   })
 
   it('forwards autoRebaseOnMerge.strategy as strategyOverride to queueRebase', async () => {
@@ -209,12 +214,12 @@ describe('fanoutRebaseAfterMerge', () => {
     seedSibling(db, 1, 101)
     const fanouts = new RebaseFanoutManager(db)
     const queueRebase = vi.fn().mockResolvedValue({ queued: true, reason: 'ok' })
-    const forge = { getPR: vi.fn().mockResolvedValue({ state: 'open', baseBranch: 'main' }) }
+    const forge = makeForge({ getPR: vi.fn().mockResolvedValue({ state: 'open', baseBranch: 'main' }) })
 
     await fanoutRebaseAfterMerge({
       db,
       repoConfig: makeTestRepoConfig({ autoRebaseOnMerge: { enabled: true, strategy: 'merge' } }),
-      forge: forge as never,
+      forge,
       config: makeTestConfig(),
       sourcePrNumber: 99,
       baseBranch: 'main',
@@ -223,7 +228,7 @@ describe('fanoutRebaseAfterMerge', () => {
       fanouts,
     })
 
-    expect(queueRebase.mock.calls[0]?.[5].strategyOverride).toBe('merge')
+    expect(queueRebase).toHaveBeenCalledWith(expect.objectContaining({ strategyOverride: 'merge' }))
   })
 })
 
@@ -255,4 +260,27 @@ function seedSibling(db: Database.Database, issueNumber: number, prNumber: numbe
   runs.updateWorktree(run.id, { branchName: `orch/${issueNumber}` })
   runs.updatePullRequest(run.id, { prNumber })
   runs.updateLifecycle(run.id, { status: 'review_ready' })
+}
+
+function makeForge(overrides: Partial<ForgeAdapter> = {}): ForgeAdapter {
+  return {
+    listEligibleIssues: vi.fn(),
+    getIssue: vi.fn(),
+    addLabels: vi.fn(),
+    removeLabels: vi.fn(),
+    commentOnIssue: vi.fn(),
+    validateAuth: vi.fn(),
+    createPR: vi.fn(),
+    updatePR: vi.fn(),
+    findPRByBranch: vi.fn(),
+    getPRDiff: vi.fn(),
+    listIssueComments: vi.fn(),
+    updateComment: vi.fn(),
+    listPRReviews: vi.fn(),
+    listPRReviewComments: vi.fn(),
+    mergePR: vi.fn(),
+    closePR: vi.fn(),
+    getPR: vi.fn(),
+    ...overrides,
+  }
 }

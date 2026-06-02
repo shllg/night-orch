@@ -10,6 +10,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type Database from 'better-sqlite3'
+import { logger } from '../../src/utils/logger.js'
 
 vi.mock('../../src/utils/logger.js', () => ({
   logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -172,6 +173,89 @@ describe('SyncEngine', () => {
       baseBranch: 'develop',
       botUser: '',
     }))
+  })
+
+  it('caches bot identity per engine repo for merged fan-out comments', async () => {
+    config = makeTestConfig({
+      notifications: { channels: [] },
+      repos: [{
+        autoRebaseOnMerge: { enabled: true },
+        selectors: { includeLabelsAny: [], excludeLabelsAny: [] },
+      }],
+    })
+    const validateAuth = vi.fn().mockResolvedValue({ user: 'bot', scopes: [] })
+    const forge = makeMockForge({
+      validateAuth,
+      getPR: vi.fn().mockResolvedValue({
+        number: 10,
+        state: 'merged',
+        title: 'Fix',
+        body: '',
+        headBranch: 'orch/fix',
+        headSha: 'sha',
+        baseBranch: 'develop',
+        url: '',
+      }),
+    })
+    insertRun(db, { issue_number: 1, status: 'review_ready', pr_number: 10, branch_name: 'orch/1-fix' })
+    insertRun(db, { issue_number: 2, status: 'review_ready', pr_number: 11, branch_name: 'orch/2-fix' })
+    const fanout = vi.fn().mockResolvedValue({
+      queued: 0,
+      skipped: 0,
+      failures: 0,
+      alreadyFannedOut: false,
+      skippedDisabled: false,
+    })
+
+    const engine = new SyncEngine(db, config, () => forge, fanout)
+    await engine.reconcile(false)
+
+    expect(validateAuth).toHaveBeenCalledTimes(1)
+    expect(fanout).toHaveBeenCalledTimes(2)
+    expect(fanout.mock.calls.map((call) => call[0].botUser)).toEqual(['bot', 'bot'])
+  })
+
+  it('warns once per engine repo when bot identity cannot be resolved for fan-out', async () => {
+    config = makeTestConfig({
+      notifications: { channels: [] },
+      repos: [{
+        autoRebaseOnMerge: { enabled: true },
+        selectors: { includeLabelsAny: [], excludeLabelsAny: [] },
+      }],
+    })
+    const validateAuth = vi.fn().mockRejectedValue(new Error('auth unavailable'))
+    const forge = makeMockForge({
+      validateAuth,
+      getPR: vi.fn().mockResolvedValue({
+        number: 10,
+        state: 'merged',
+        title: 'Fix',
+        body: '',
+        headBranch: 'orch/fix',
+        headSha: 'sha',
+        baseBranch: 'develop',
+        url: '',
+      }),
+    })
+    insertRun(db, { issue_number: 1, status: 'review_ready', pr_number: 10, branch_name: 'orch/1-fix' })
+    insertRun(db, { issue_number: 2, status: 'review_ready', pr_number: 11, branch_name: 'orch/2-fix' })
+    const fanout = vi.fn().mockResolvedValue({
+      queued: 0,
+      skipped: 0,
+      failures: 0,
+      alreadyFannedOut: false,
+      skippedDisabled: false,
+    })
+
+    const engine = new SyncEngine(db, config, () => forge, fanout)
+    await engine.reconcile(false)
+
+    const warnCalls = vi.mocked(logger.warn).mock.calls.filter(
+      (call) => call[1] === 'Failed to resolve bot user for fan-out; comments will not be deduplicated',
+    )
+    expect(validateAuth).toHaveBeenCalledTimes(1)
+    expect(warnCalls).toHaveLength(1)
+    expect(fanout.mock.calls.map((call) => call[0].botUser)).toEqual(['', ''])
   })
 
   it('running run + issue closed → completed', async () => {
