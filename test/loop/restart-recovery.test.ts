@@ -22,17 +22,19 @@ import type {
 import type { MetricsService } from '../../src/metrics/service.js'
 
 /**
- * Verifies the contract from `multi-agent-workflow-completeness-prd.md` §Phase 2:
+ * Restart recovery contract for `Checkpoint.resumeFromCheckpoint`:
  *
- *   "Restart recovery: when `phase_data` is corrupted (forced in a test by
- *   NULLing it), the engine reconstructs `ctx.plan` and `ctx.reviewResults`
- *   from the handoffs and resumes the workflow. Emits `recovery_from_handoff`
- *   event in `run_log_events`."
+ * When `phase_data` is corrupted (NULL, malformed JSON, or otherwise
+ * unrecoverable through the normal path), the engine must reconstruct
+ * `ctx.plan`, `ctx.codeResult`, `ctx.reviewResults`, and `ctx.verifyResults`
+ * from the `agent_handoffs` table and resume the workflow. It must emit a
+ * `recovery_from_handoff` event in `run_log_events` and increment the
+ * matching metric so the operator can see when the fallback was used.
  *
- * The previous test surface only covered the happy path of `recordHandoff` and
- * the render helpers; this exercises the failure path end-to-end against a
- * real SQLite database so a regression that silently dropped the handoff
- * rehydration branch in `Checkpoint.resumeFromCheckpoint` would surface here.
+ * The previous test surface only covered the happy path of `recordHandoff`
+ * and the render helpers; this exercises the failure path end-to-end against
+ * a real SQLite database so a regression that silently dropped the handoff
+ * rehydration branch would surface here.
  */
 describe('Checkpoint.resumeFromCheckpoint — restart recovery from handoffs', () => {
   let tmpDir: string
