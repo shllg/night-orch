@@ -827,7 +827,7 @@ Stage keys:
 | `workflow` | string | no | none | Name of a workflow from `workflows` section. Uses default pipeline if omitted. |
 | `workflowByTriage` | object | no | none | Per-triage workflow selection (`trivial`/`standard`). |
 | `mergeQueue` | object | no | object with defaults | Merge queue configuration. |
-| `autoRebaseOnMerge` | object | no | `{ enabled: false, maxFanout: 10 }` | Automatic rebase fan-out after a tracked PR merges. |
+| `autoRebaseOnMerge` | object | no | `{ enabled: false, maxFanout: 10, strategy: 'rebase' }` | Automatic rebase fan-out after a tracked PR merges. |
 
 Poll execution model:
 - Repos are polled in parallel.
@@ -1168,6 +1168,7 @@ When enabled, a merged tracked PR queues rebase attempts for open tracked siblin
 | --- | --- | --- | --- |
 | `enabled` | boolean | `false` | Turn fan-out rebasing on for this repo. |
 | `maxFanout` | int 1-50 | `10` | Maximum sibling PRs queued from one merged source PR. |
+| `strategy` | `rebase` \| `merge` | `rebase` | How sibling worktrees pick up the merged base. Forwarded to the queued rebase attempt's `updateStrategy`. |
 | `maxChainLength` | int >= 1 | `loop.maxAttemptChainLength * 2` | Optional cap for fan-out rebase attempt chains. Exhausted chains are skipped with a PR comment. |
 
 Fan-out is idempotent per `(repo, source PR)` through the `rebase_fanouts` table. Retention pruning removes old fan-out markers with the normal archive cutoff.

@@ -152,6 +152,7 @@ describe('ConfigSchema', () => {
       expect(result.data.repos[0]?.autoRebaseOnMerge).toEqual({
         enabled: true,
         maxFanout: 4,
+        strategy: 'rebase',
         maxChainLength: 8,
       })
       expect(result.data.repos[0]?.labels.rebasing).toBe('no:rebasing')

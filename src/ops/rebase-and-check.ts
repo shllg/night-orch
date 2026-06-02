@@ -109,11 +109,14 @@ export async function queueRebase(
 
   const queuedRun = runManager.getByRepoAndIssue(repoConfig.repo, issueNumber)
   if (queuedRun) {
+    const details: Record<string, unknown> = {}
+    if (options.strategyOverride) details.strategy = options.strategyOverride
+    if (options.triggeredBy) details.triggeredBy = options.triggeredBy
     recordUserAction(db, {
       runId: queuedRun.id,
       kind: 'rebase',
-      actor: options.actor ?? 'manual',
-      details: options.strategyOverride ? { strategy: options.strategyOverride } : null,
+      actor: options.actor ?? (options.triggeredBy ? 'fanout' : 'manual'),
+      details: Object.keys(details).length > 0 ? details : null,
     })
   }
 

@@ -163,8 +163,8 @@ describe('MetricsService', () => {
       service.incRebaseFanoutSibling('org/repo')
 
       const body = await getMetrics(port)
-      expect(body).toContain('night_orch_rebase_fanout_total{repo="org/repo",base_branch="main"} 1')
-      expect(body).toContain('night_orch_rebase_fanout_siblings_total{repo="org/repo"} 2')
+      expect(body).toContain('night_orch_rebase_fanouts_total{repo="org/repo",base_branch="main"} 1')
+      expect(body).toContain('night_orch_rebase_fanout_siblings_queued_total{repo="org/repo"} 2')
     })
 
     it('histogram observation reflected in output', async () => {

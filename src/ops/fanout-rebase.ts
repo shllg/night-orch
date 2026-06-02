@@ -42,6 +42,9 @@ export function selectFanoutCandidates(
     .filter((run) => run.prNumber !== source.sourcePrNumber)
     .filter((run) => run.status === 'review_ready' || run.status === 'blocked' || run.status === 'error')
     .filter((run) => !run.hasOpenRebaseAttempt)
+    // Deterministic ordering by issueNumber asc — makes maxFanout truncation
+    // predictable so tests and operators see the same surviving set.
+    .sort((a, b) => a.issueNumber - b.issueNumber)
     .slice(0, options.maxFanout)
     .map((run) => ({
       id: run.id,
@@ -91,7 +94,7 @@ export async function fanoutRebaseAfterMerge(deps: FanoutDeps): Promise<FanoutRe
   const { db, repoConfig, forge, config, sourcePrNumber, baseBranch, botUser } = deps
   const fanouts = deps.fanouts ?? new RebaseFanoutManager(db)
   const queueRebase = deps.queueRebase ?? defaultQueueRebase
-  const autoRebase = repoConfig.autoRebaseOnMerge ?? { enabled: false, maxFanout: 10 }
+  const autoRebase = repoConfig.autoRebaseOnMerge ?? { enabled: false, maxFanout: 10, strategy: 'rebase' as 'merge' | 'rebase' }
 
   if (!autoRebase.enabled) {
     return { queued: 0, skipped: 0, failures: 0, alreadyFannedOut: false, skippedDisabled: true }
@@ -157,6 +160,7 @@ export async function fanoutRebaseAfterMerge(deps: FanoutDeps): Promise<FanoutRe
         actor: 'fanout',
         maxAttemptChainLength,
         triggeredBy: { kind: 'merge-fanout', sourcePr: sourcePrNumber },
+        ...(autoRebase.strategy ? { strategyOverride: autoRebase.strategy } : {}),
       })
 
       if (result.queued) {

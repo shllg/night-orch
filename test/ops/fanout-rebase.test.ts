@@ -32,6 +32,18 @@ describe('selectFanoutCandidates', () => {
 
     expect(candidates.map((c) => c.issueNumber)).toEqual([1, 2])
   })
+
+  it('orders candidates by issueNumber ascending so maxFanout truncation is deterministic', () => {
+    const candidates = selectFanoutCandidates([
+      candidate({ issueNumber: 50, prNumber: 150, status: 'review_ready' }),
+      candidate({ issueNumber: 10, prNumber: 110, status: 'review_ready' }),
+      candidate({ issueNumber: 30, prNumber: 130, status: 'review_ready' }),
+      candidate({ issueNumber: 20, prNumber: 120, status: 'review_ready' }),
+      candidate({ issueNumber: 40, prNumber: 140, status: 'review_ready' }),
+    ], { sourcePrNumber: 99 }, { maxFanout: 3 })
+
+    expect(candidates.map((c) => c.issueNumber)).toEqual([10, 20, 30])
+  })
 })
 
 describe('fanoutRebaseAfterMerge', () => {
@@ -190,6 +202,28 @@ describe('fanoutRebaseAfterMerge', () => {
       fanouts,
     })
     expect(queueRebase.mock.calls[0]?.[5].maxAttemptChainLength).toBe(6)
+  })
+
+  it('forwards autoRebaseOnMerge.strategy as strategyOverride to queueRebase', async () => {
+    const db = initDatabase(':memory:')
+    seedSibling(db, 1, 101)
+    const fanouts = new RebaseFanoutManager(db)
+    const queueRebase = vi.fn().mockResolvedValue({ queued: true, reason: 'ok' })
+    const forge = { getPR: vi.fn().mockResolvedValue({ state: 'open', baseBranch: 'main' }) }
+
+    await fanoutRebaseAfterMerge({
+      db,
+      repoConfig: makeTestRepoConfig({ autoRebaseOnMerge: { enabled: true, strategy: 'merge' } }),
+      forge: forge as never,
+      config: makeTestConfig(),
+      sourcePrNumber: 99,
+      baseBranch: 'main',
+      botUser: 'bot',
+      queueRebase,
+      fanouts,
+    })
+
+    expect(queueRebase.mock.calls[0]?.[5].strategyOverride).toBe('merge')
   })
 })
 

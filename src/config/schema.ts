@@ -455,6 +455,9 @@ const MergeQueueSchema = z.object({
 const AutoRebaseOnMergeSchema = z.object({
   enabled: z.boolean().default(false),
   maxFanout: z.number().int().min(1).max(50).default(10),
+  /** How the worktree picks up the merged base. Forwarded to
+   *  `queueRebase` as `strategyOverride`. Defaults to `rebase`. */
+  strategy: z.enum(['merge', 'rebase']).default('rebase'),
   maxChainLength: z.number().int().min(1).optional(),
 }).default({})
 

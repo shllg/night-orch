@@ -350,6 +350,18 @@ export class SyncEngine {
       }
     }
 
+    // Resolve the bot identity so sibling-PR fan-out comments go through
+    // upsertBotComment (idempotent) instead of plain commentOnIssue.
+    // Best-effort: an empty botUser still works but produces duplicate
+    // comments across retries.
+    let botUser = ''
+    try {
+      const authInfo = await forge.validateAuth()
+      botUser = authInfo.user
+    } catch (err) {
+      logger.debug({ repo: run.repo, err }, 'Failed to resolve bot user for fan-out — comments will not be deduplicated')
+    }
+
     await this.fanoutAfterMerge({
       db: this.db,
       repoConfig,
@@ -357,7 +369,7 @@ export class SyncEngine {
       config: this.config,
       sourcePrNumber: run.pr_number,
       baseBranch,
-      botUser: '',
+      botUser,
     })
   }
 

@@ -204,14 +204,14 @@ export function createMetricsRegistry() {
   })
 
   const rebaseFanoutTotal = new Counter({
-    name: 'night_orch_rebase_fanout_total',
+    name: 'night_orch_rebase_fanouts_total',
     help: 'Merge fan-out events evaluated by repo and base branch',
     labelNames: ['repo', 'base_branch'] as const,
     registers: [registry],
   })
 
   const rebaseFanoutSiblingsTotal = new Counter({
-    name: 'night_orch_rebase_fanout_siblings_total',
+    name: 'night_orch_rebase_fanout_siblings_queued_total',
     help: 'Sibling PRs queued by merge fan-out by repo',
     labelNames: ['repo'] as const,
     registers: [registry],

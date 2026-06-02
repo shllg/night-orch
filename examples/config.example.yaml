@@ -392,6 +392,7 @@ repos:
     # autoRebaseOnMerge:
     #   enabled: false
     #   maxFanout: 10
+    #   strategy: rebase
     #   # maxChainLength: 6
     # mergeQueue:
     #   enabled: true
