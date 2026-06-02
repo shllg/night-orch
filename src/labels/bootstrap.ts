@@ -6,7 +6,7 @@ export interface LabelBootstrapDefinition {
   description: string
 }
 
-type LabelRole = 'ready' | 'running' | 'blocked' | 'reviewReady' | 'error' | 'retry' | 'planning' | 'mergeQueued' | 'merging' | 'mergeFailed'
+type LabelRole = 'ready' | 'running' | 'blocked' | 'reviewReady' | 'error' | 'retry' | 'planning' | 'mergeQueued' | 'merging' | 'mergeFailed' | 'rebasing'
   | 'kanbanTrigger'
 
 const DEFAULT_LABEL_PRESENTATION: Record<LabelRole, { color: string; description: string }> = {
@@ -50,6 +50,10 @@ const DEFAULT_LABEL_PRESENTATION: Record<LabelRole, { color: string; description
     color: 'E4E669',
     description: 'Merge attempt failed; manual action required',
   },
+  rebasing: {
+    color: '5319E7',
+    description: 'Rebase attempt is queued or running',
+  },
   kanbanTrigger: {
     color: '5319E7',
     description: 'Use kanban state flow instead of default orchestration labels',
@@ -90,6 +94,7 @@ export function buildLabelBootstrapDefinitions(
   add(repoConfig.labels.mergeQueued, 'mergeQueued')
   add(repoConfig.labels.merging, 'merging')
   add(repoConfig.labels.mergeFailed, 'mergeFailed')
+  if (repoConfig.labels.rebasing) add(repoConfig.labels.rebasing, 'rebasing')
 
   if (repoConfig.kanban) {
     add(repoConfig.kanban.triggerLabel, 'kanbanTrigger')
@@ -104,6 +109,7 @@ export function buildLabelBootstrapDefinitions(
     add(repoConfig.kanban.labels.mergeQueued, 'mergeQueued')
     add(repoConfig.kanban.labels.merging, 'merging')
     add(repoConfig.kanban.labels.mergeFailed, 'mergeFailed')
+    if (repoConfig.kanban.labels.rebasing) add(repoConfig.kanban.labels.rebasing, 'rebasing')
   }
 
   return definitions

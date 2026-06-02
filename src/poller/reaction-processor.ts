@@ -50,7 +50,7 @@ export async function processRepoReactions(
       maxAttemptChainLength: config.loop.maxAttemptChainLength,
       cache,
     }),
-    processMergeQueue(db, forge, repoConfig),
+    processMergeQueue(db, forge, repoConfig, { config, botUser }),
     scanCostBlockedRuns(db, config, forge, repoConfig, botUser),
     processCommentCommands({
       config,

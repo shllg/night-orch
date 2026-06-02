@@ -491,6 +491,12 @@ Each poll cycle:
 
 With `retryFlakyOnce: true` (default), a failed batch is retried once before bisecting. This avoids unnecessary bisection due to flaky tests.
 
+### Automatic rebase fan-out
+
+Set `repos[].autoRebaseOnMerge.enabled: true` to queue rebase attempts for open sibling PRs after a tracked PR merges into the same base branch. The daemon detects merges during sync and merge-queue finalization, filters siblings by repo/base/open state, and records a `rebase_fanouts` marker so the same source PR is not fanned out twice.
+
+Use `maxFanout` to cap how many siblings are queued from one merge. Use `maxChainLength` to cap follow-up attempts for these automatic rebase chains; when the cap is exhausted, night-orch skips that sibling and leaves a PR comment for manual review.
+
 ### Labels
 
 - `no:merge-queued` — PR has entered the merge queue
@@ -858,6 +864,8 @@ Core run metrics:
 | `night_orch_pr_operations_total` | counter | PRs created/updated |
 | `night_orch_notifications_total` | counter | Notification deliveries by channel + result |
 | `night_orch_errors_total` | counter | Errors by repo + error_type |
+| `night_orch_rebase_fanouts_total` | counter | Automatic fan-out events by repo and base branch |
+| `night_orch_rebase_fanout_siblings_queued_total` | counter | Sibling PRs queued by automatic rebase fan-out |
 | `night_orch_daily_cost_usd` | gauge | Today's spend |
 | `night_orch_estimated_cost_dollars` | counter | Estimated cost rate per repo/agent |
 | `night_orch_build_info{version,commit}` | gauge | Constant `1` build marker for scrape diagnostics |

@@ -57,6 +57,8 @@ describe('MetricsService', () => {
       service.incRebaseConflict()
       service.incRebaseAutoResolved()
       service.incRebaseAutoResolveFailed('error')
+      service.incRebaseFanout('org/repo', 'main')
+      service.incRebaseFanoutSibling('org/repo')
       service.observeRunDuration(10)
       service.observePhaseDuration('plan', 5)
       service.observeAgentDuration('planner', 'claude', 3)
@@ -150,6 +152,19 @@ describe('MetricsService', () => {
       expect(body).toContain('night_orch_rebase_conflict_total 1')
       expect(body).toContain('night_orch_rebase_auto_resolved_total 1')
       expect(body).toContain('night_orch_rebase_auto_resolve_failed_total{reason="validation_failed"} 1')
+    })
+
+    it('rebase fan-out counters are reflected in output', async () => {
+      service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
+      await service.start()
+
+      service.incRebaseFanout('org/repo', 'main')
+      service.incRebaseFanoutSibling('org/repo')
+      service.incRebaseFanoutSibling('org/repo')
+
+      const body = await getMetrics(port)
+      expect(body).toContain('night_orch_rebase_fanout_total{repo="org/repo",base_branch="main"} 1')
+      expect(body).toContain('night_orch_rebase_fanout_siblings_total{repo="org/repo"} 2')
     })
 
     it('histogram observation reflected in output', async () => {

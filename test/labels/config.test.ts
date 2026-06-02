@@ -15,6 +15,7 @@ describe('label flow config', () => {
       mergeQueued: 'no:merge-queued',
       merging: 'no:merging',
       mergeFailed: 'no:merge-failed',
+      rebasing: 'no:rebasing',
     },
     selectors: {
       includeLabelsAny: ['no:ready'],
@@ -34,6 +35,7 @@ describe('label flow config', () => {
         mergeQueued: 'kanban:merge-queued',
         merging: 'kanban:merging',
         mergeFailed: 'kanban:merge-failed',
+        rebasing: 'kanban:rebasing',
       },
     },
   }
@@ -42,12 +44,14 @@ describe('label flow config', () => {
     const result = buildLabelConfig(repoConfig, ['no:ready'])
     expect(result.running).toBe('no:running')
     expect(result.ready).toEqual(['no:ready'])
+    expect(result.rebasing).toBe('no:rebasing')
   })
 
   it('uses kanban labels when trigger label is present', () => {
     const result = buildLabelConfig(repoConfig, ['flow:kanban', 'kanban:todo'])
     expect(result.running).toBe('kanban:doing')
     expect(result.ready).toEqual(['kanban:todo'])
+    expect(result.rebasing).toBe('kanban:rebasing')
   })
 
   it('adds kanban ready labels to discovery include labels', () => {

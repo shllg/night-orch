@@ -289,6 +289,7 @@ repos:
       # mergeQueued: no:merge-queued
       # merging: no:merging
       # mergeFailed: no:merge-failed
+      # rebasing: no:rebasing
     # Optional kanban-state flow. If triggerLabel is present on an issue,
     # these labels are used for state transitions instead of labels above.
     # kanban:
@@ -305,6 +306,7 @@ repos:
     #     mergeQueued: kanban:merge-queued
     #     merging: kanban:merging
     #     mergeFailed: kanban:merge-failed
+    #     rebasing: kanban:rebasing
     planning:
       prdDirectory: docs/prd
     # Optional repo-specific file-loop overrides. Values merge over the
@@ -387,6 +389,10 @@ repos:
     # workflowByTriage:
     #   trivial: fast-trivial
     #   standard: minimal
+    # autoRebaseOnMerge:
+    #   enabled: false
+    #   maxFanout: 10
+    #   # maxChainLength: 6
     # mergeQueue:
     #   enabled: true
     #   batchSize: 5

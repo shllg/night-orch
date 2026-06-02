@@ -45,6 +45,7 @@ export function buildLabelConfig(
     mergeQueued: asSingleLabel(source.mergeQueued, 'no:merge-queued'),
     merging: asSingleLabel(source.merging, 'no:merging'),
     mergeFailed: asSingleLabel(source.mergeFailed, 'no:merge-failed'),
+    rebasing: source.rebasing ? asSingleLabel(source.rebasing, 'no:rebasing') : undefined,
   }
 }
 

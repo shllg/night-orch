@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 import type { ForgeAdapter } from '../forge/types.js'
-import type { RepoConfig } from '../config/schema.js'
+import type { Config, RepoConfig } from '../config/schema.js'
 import { runGit } from '../git/process.js'
 import { MergeBatchManager } from './batch.js'
 import { findMergeEligiblePRs } from './eligibility.js'
@@ -11,6 +11,7 @@ import { logger } from '../utils/logger.js'
 import type { MergeBatchRecord } from './types.js'
 import { RunManager } from '../state/runs.js'
 import { nowUtcIso } from '../utils/time.js'
+import { fanoutRebaseAfterMerge, type FanoutDeps, type FanoutResult } from '../ops/fanout-rebase.js'
 
 /**
  * Batches left in `building` longer than this are considered stuck and
@@ -33,6 +34,11 @@ export async function processMergeQueue(
   db: Database.Database,
   forge: ForgeAdapter,
   repoConfig: RepoConfig,
+  options: {
+    config?: Config
+    botUser?: string
+    fanoutAfterMerge?: (deps: FanoutDeps) => Promise<FanoutResult>
+  } = {},
 ): Promise<void> {
   if (!repoConfig.mergeQueue.enabled) return
 
@@ -40,7 +46,7 @@ export async function processMergeQueue(
   const activeBatch = batchManager.getActiveBatch(repoConfig.repo)
 
   if (activeBatch) {
-    await handleActiveBatch(db, forge, repoConfig, batchManager, activeBatch)
+    await handleActiveBatch(db, forge, repoConfig, batchManager, activeBatch, options)
   } else {
     await formNewBatch(db, forge, repoConfig, batchManager)
   }
@@ -52,6 +58,11 @@ async function handleActiveBatch(
   repoConfig: RepoConfig,
   batchManager: MergeBatchManager,
   batch: MergeBatchRecord,
+  options: {
+    config?: Config
+    botUser?: string
+    fanoutAfterMerge?: (deps: FanoutDeps) => Promise<FanoutResult>
+  },
 ): Promise<void> {
   if (batch.status === 'pending') {
     return
@@ -113,7 +124,7 @@ async function handleActiveBatch(
       }
 
       batchManager.update(batch.id, { status: 'passed' })
-      transitionMergedRuns(db, repoConfig.repo, mergedPrNumbers)
+      await transitionMergedRuns(db, forge, repoConfig, mergedPrNumbers, options)
     } else if (ciStatus.overall === 'failure') {
       logger.warn({ repo: repoConfig.repo, batchId: batch.id }, 'Merge batch CI failed — bisecting')
       batchManager.update(batch.id, { status: 'failed' })
@@ -192,12 +203,19 @@ function isBatchStuckBuilding(batch: MergeBatchRecord): boolean {
  * leave their runs stuck in `review_ready` forever — only the failure
  * path (`quarantineCulpritPR`) previously updated run state.
  */
-function transitionMergedRuns(
+async function transitionMergedRuns(
   db: Database.Database,
-  repo: string,
+  forge: ForgeAdapter,
+  repoConfig: RepoConfig,
   mergedPrNumbers: number[],
-): void {
+  options: {
+    config?: Config
+    botUser?: string
+    fanoutAfterMerge?: (deps: FanoutDeps) => Promise<FanoutResult>
+  },
+): Promise<void> {
   if (mergedPrNumbers.length === 0) return
+  const repo = repoConfig.repo
   const placeholders = mergedPrNumbers.map(() => '?').join(', ')
   const rows = db
     .prepare(
@@ -212,6 +230,7 @@ function transitionMergedRuns(
 
   const runManager = new RunManager(db)
   const endedAt = nowUtcIso()
+  const fanout = options.fanoutAfterMerge ?? fanoutRebaseAfterMerge
   for (const row of rows) {
     try {
       runManager.updateLifecycle(row.id, { status: 'completed', lastError: null, endedAt })
@@ -219,6 +238,17 @@ function transitionMergedRuns(
         { repo, runId: row.id, prNumber: row.pr_number },
         'Transitioned run out of review_ready after successful merge',
       )
+      if (options.config) {
+        await fanout({
+          db,
+          repoConfig,
+          forge,
+          config: options.config,
+          sourcePrNumber: row.pr_number,
+          baseBranch: repoConfig.baseBranch,
+          botUser: options.botUser ?? '',
+        })
+      }
     } catch (err) {
       logger.warn(
         { repo, runId: row.id, prNumber: row.pr_number, err },

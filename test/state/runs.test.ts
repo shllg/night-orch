@@ -45,6 +45,23 @@ describe('RunManager', () => {
     expect(run.coder).toBe('codex')
   })
 
+  it('listLiveTopLevelByRepo returns only non-terminated top-level rows for the repo', () => {
+    const live = makeRun({ issueNumber: 301 })
+    const terminated = makeRun({ issueNumber: 302 })
+    const otherRepo = makeRun({ repo: 'org/other', issueNumber: 303 })
+    const subRun = makeRun({ issueNumber: 304, parentRunId: live.id })
+
+    runManager.updateLifecycle(terminated.id, { status: 'completed', endedAt: new Date().toISOString() })
+
+    const result = runManager.listLiveTopLevelByRepo('org/repo')
+    const ids = result.map((run) => run.id)
+
+    expect(ids).toContain(live.id)
+    expect(ids).not.toContain(terminated.id)
+    expect(ids).not.toContain(otherRepo.id)
+    expect(ids).not.toContain(subRun.id)
+  })
+
   it('updates specific fields', () => {
     const run = makeRun()
 

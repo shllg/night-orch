@@ -175,6 +175,26 @@ export function getHeadAttempt(
   return chain.length > 0 ? chain[chain.length - 1]! : null
 }
 
+export function hasOpenRebaseAttempt(
+  db: Database.Database,
+  repo: string,
+  issueNumber: number,
+): boolean {
+  const row = db
+    .prepare(
+      `SELECT 1 AS present
+       FROM runs
+       WHERE repo = ?
+         AND issue_number = ?
+         AND operation_intent = 'rebase'
+         AND terminated_at IS NULL
+         AND status IN ('queued', 'running')
+       LIMIT 1`,
+    )
+    .get(repo, issueNumber) as { present: number } | undefined
+  return row !== undefined
+}
+
 export type FollowupIntent = Exclude<AttemptIntent, 'initial'>
 
 export interface CreateFollowupAttemptInput {

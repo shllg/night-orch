@@ -827,6 +827,7 @@ Stage keys:
 | `workflow` | string | no | none | Name of a workflow from `workflows` section. Uses default pipeline if omitted. |
 | `workflowByTriage` | object | no | none | Per-triage workflow selection (`trivial`/`standard`). |
 | `mergeQueue` | object | no | object with defaults | Merge queue configuration. |
+| `autoRebaseOnMerge` | object | no | `{ enabled: false, maxFanout: 10 }` | Automatic rebase fan-out after a tracked PR merges. |
 
 Poll execution model:
 - Repos are polled in parallel.
@@ -920,6 +921,7 @@ Note: `architectural` issues are intentionally handled outside workflow executio
 | `mergeQueued` | string | `no:merge-queued` | Set when PR enters the merge queue. |
 | `merging` | string | `no:merging` | Set while staging branch CI is running. |
 | `mergeFailed` | string | `no:merge-failed` | Set when the merge queue identifies this PR as the culprit. |
+| `rebasing` | string | unset | Optional distinct label used while a queued or running attempt has `operationIntent: rebase`; falls back to `running` when unset. |
 
 ### `repos[].linkedProjects`
 
@@ -958,6 +960,7 @@ repos:
         mergeQueued: kanban:merge-queued
         merging: kanban:merging
         mergeFailed: kanban:merge-failed
+        rebasing: kanban:rebasing
 ```
 
 ### `repos[].labelConfig`
@@ -1156,6 +1159,18 @@ When enabled, each poll cycle:
 4. Conflicting PRs are ejected from the batch and continue to the next eligible PR
 
 Labels used: `no:merge-queued`, `no:merging`, `no:merge-failed`.
+
+### `repos[].autoRebaseOnMerge`
+
+When enabled, a merged tracked PR queues rebase attempts for open tracked sibling PRs in the same repo and base branch. Detection runs during the existing sync poll cycle and merge-queue finalization path; it does not require webhooks.
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `false` | Turn fan-out rebasing on for this repo. |
+| `maxFanout` | int 1-50 | `10` | Maximum sibling PRs queued from one merged source PR. |
+| `maxChainLength` | int >= 1 | `loop.maxAttemptChainLength * 2` | Optional cap for fan-out rebase attempt chains. Exhausted chains are skipped with a PR comment. |
+
+Fan-out is idempotent per `(repo, source PR)` through the `rebase_fanouts` table. Retention pruning removes old fan-out markers with the normal archive cutoff.
 
 ## Forge-Specific Notes
 

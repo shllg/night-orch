@@ -203,6 +203,7 @@ const LabelsSchema = z.object({
   mergeQueued: z.string().default('no:merge-queued'),
   merging: z.string().default('no:merging'),
   mergeFailed: z.string().default('no:merge-failed'),
+  rebasing: z.string().optional(),
 })
 
 const LinkedProjectSchema = z
@@ -451,6 +452,12 @@ const MergeQueueSchema = z.object({
   stagingBranchPrefix: z.string().default('orch/staging'),
 })
 
+const AutoRebaseOnMergeSchema = z.object({
+  enabled: z.boolean().default(false),
+  maxFanout: z.number().int().min(1).max(50).default(10),
+  maxChainLength: z.number().int().min(1).optional(),
+}).default({})
+
 // --- Repo schema ---
 
 const RepoConfigSchema = z.object({
@@ -483,6 +490,7 @@ const RepoConfigSchema = z.object({
   workflow: z.string().optional(),
   workflowByTriage: WorkflowByTriageSchema.optional(),
   mergeQueue: MergeQueueSchema.default({}),
+  autoRebaseOnMerge: AutoRebaseOnMergeSchema,
 }).superRefine((repo, ctx) => {
   // The merge queue relies on `getPRCheckStatus`, `getRefCheckStatus`, and
   // `updateRef` which are only implemented in the GitHub adapter. Enabling

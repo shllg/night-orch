@@ -26,6 +26,7 @@ export interface ProjectLabels {
   mergeQueued: string
   merging: string
   mergeFailed: string
+  rebasing?: string
 }
 
 export interface ProjectRepoSummary {
@@ -118,6 +119,11 @@ export interface ProjectRepoSummary {
     requireApproval: boolean
     stagingBranchPrefix: string
   }
+  autoRebaseOnMerge: {
+    enabled: boolean
+    maxFanout: number
+    maxChainLength?: number
+  }
 }
 
 export function sanitizeWorkerProfile(profile: WorkerProfile): ProjectWorkerProfileSummary {
@@ -193,6 +199,13 @@ export function sanitizeProjectRepo(repo: RepoConfig): ProjectRepoSummary {
       retryFlakyOnce: repo.mergeQueue.retryFlakyOnce,
       requireApproval: repo.mergeQueue.requireApproval,
       stagingBranchPrefix: repo.mergeQueue.stagingBranchPrefix,
+    },
+    autoRebaseOnMerge: {
+      enabled: repo.autoRebaseOnMerge.enabled,
+      maxFanout: repo.autoRebaseOnMerge.maxFanout,
+      ...(repo.autoRebaseOnMerge.maxChainLength
+        ? { maxChainLength: repo.autoRebaseOnMerge.maxChainLength }
+        : {}),
     },
   }
 }
@@ -272,6 +285,7 @@ function sanitizeLabels(labels: RepoConfig['labels']): ProjectLabels {
     mergeQueued: labels.mergeQueued,
     merging: labels.merging,
     mergeFailed: labels.mergeFailed,
+    ...(labels.rebasing ? { rebasing: labels.rebasing } : {}),
   }
 }
 

@@ -336,6 +336,19 @@ export class RunManager {
     return row ? this.mapRow(row) : null
   }
 
+  listLiveTopLevelByRepo(repo: string): RunRecord[] {
+    const rows = this.db
+      .prepare(
+        `SELECT *
+         FROM runs
+         WHERE repo = ?
+           AND parent_run_id IS NULL
+           AND terminated_at IS NULL`,
+      )
+      .all(repo) as RawRunRow[]
+    return rows.map((row) => this.mapRow(row))
+  }
+
   getLatestQueuedByIssue(repo: string, issueNumber: number): RunRecord | null {
     const row = this.db
       .prepare("SELECT * FROM runs WHERE repo = ? AND issue_number = ? AND status = 'queued' ORDER BY created_at DESC LIMIT 1")

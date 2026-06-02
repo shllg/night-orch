@@ -7,7 +7,7 @@ import { runVerifyCommands, allVerifyPassed } from '../loop/verifier.js'
 import { buildVerifierEnv } from '../workers/env.js'
 import type { VerifyResult } from '../workers/types.js'
 import { RunManager } from '../state/runs.js'
-import { createFollowupAttempt } from '../state/attempts.js'
+import { AttemptChainLimitError, createFollowupAttempt } from '../state/attempts.js'
 import { recordUserAction } from '../state/run-log-events.js'
 import { transitionLabels } from '../labels/manager.js'
 import { buildLabelConfig } from '../labels/config.js'
@@ -40,7 +40,13 @@ export async function queueRebase(
   repoConfig: RepoConfig,
   issueNumber: number,
   botUser: string,
-  options: { check?: boolean; strategyOverride?: UpdateStrategy; actor?: string; maxAttemptChainLength?: number } = {},
+  options: {
+    check?: boolean
+    strategyOverride?: UpdateStrategy
+    actor?: string
+    maxAttemptChainLength?: number
+    triggeredBy?: { kind: 'merge-fanout'; sourcePr: number }
+  } = {},
 ): Promise<{ queued: boolean; reason: string }> {
   const runManager = new RunManager(db)
 
@@ -85,6 +91,18 @@ export async function queueRebase(
       },
     })
   } catch (err) {
+    if (err instanceof AttemptChainLimitError) {
+      if (options.triggeredBy?.kind === 'merge-fanout') {
+        await commentStatus(
+          forge,
+          issueRepo,
+          issueNumber,
+          botUser,
+          `Skipped automatic rebase after #${options.triggeredBy.sourcePr} merged because the attempt chain limit is exhausted. Run /orch rebase or /orch retry when ready to continue manually.`,
+        )
+      }
+      return { queued: false, reason: 'chain_exhausted' }
+    }
     logger.warn({ runId: run.id, err }, 'Failed to queue rebase attempt')
     return { queued: false, reason: 'Run state changed while queuing rebase' }
   }
@@ -106,14 +124,18 @@ export async function queueRebase(
     await transitionLabels(
       forge, issueRepo, issueNumber, issue.labels,
       fromState, 'queued', buildLabelConfig(repoConfig, issue.labels),
+      undefined,
+      'rebase',
     )
   } catch (err) {
     logger.warn({ repo: issueRepo, issueNumber, err }, 'Failed to transition labels for rebase queue')
   }
 
   // Post status comment
-  await commentStatus(forge, issueRepo, issueNumber, botUser,
-    'Queued for rebase and re-evaluation. The branch will be rebased onto the latest base, verified, and if anything breaks the coder will fix it.')
+  const queuedMessage = options.triggeredBy?.kind === 'merge-fanout'
+    ? `Queued for automatic rebase and re-evaluation because #${options.triggeredBy.sourcePr} merged into the base branch. The branch will be rebased onto the latest base, verified, and if anything breaks the coder will fix it.`
+    : 'Queued for rebase and re-evaluation. The branch will be rebased onto the latest base, verified, and if anything breaks the coder will fix it.'
+  await commentStatus(forge, issueRepo, issueNumber, botUser, queuedMessage)
 
   logger.info({ repo: issueRepo, issueNumber, runId: run.id }, 'Queued issue for rebase-and-re-evaluate')
   return { queued: true, reason: 'Queued for rebase and re-evaluation on next poll cycle' }

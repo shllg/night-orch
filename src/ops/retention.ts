@@ -18,6 +18,7 @@ export interface RetentionResult {
   deletedRuns: number
   deletedEvents: number
   deletedMentions: number
+  deletedRebaseFanouts: number
   vacuumed: boolean
 }
 
@@ -36,6 +37,7 @@ export class RetentionEngine {
       deletedRuns: 0,
       deletedEvents: 0,
       deletedMentions: 0,
+      deletedRebaseFanouts: 0,
       vacuumed: false,
     }
 
@@ -52,6 +54,11 @@ export class RetentionEngine {
         .prepare("SELECT COUNT(*) as c FROM runs WHERE ended_at < ? AND status IN ('completed', 'error')")
         .get(archiveCutoff) as { c: number }
       result.deletedRuns = deleteCount.c
+
+      const fanoutCount = this.db
+        .prepare('SELECT COUNT(*) as c FROM rebase_fanouts WHERE fanned_out_at < ?')
+        .get(archiveCutoff) as { c: number }
+      result.deletedRebaseFanouts = fanoutCount.c
 
       return result
     }
@@ -117,6 +124,11 @@ export class RetentionEngine {
         .prepare('DELETE FROM mention_tracking WHERE posted_at < ?')
         .run(archiveCutoff)
       result.deletedMentions = mentionInfo.changes
+
+      const fanoutInfo = this.db
+        .prepare('DELETE FROM rebase_fanouts WHERE fanned_out_at < ?')
+        .run(archiveCutoff)
+      result.deletedRebaseFanouts = fanoutInfo.changes
     })
 
     runPrune()

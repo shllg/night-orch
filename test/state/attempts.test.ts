@@ -14,6 +14,7 @@ import {
   finalizeAttempt,
   getAttemptChain,
   getHeadAttempt,
+  hasOpenRebaseAttempt,
 } from '../../src/state/attempts.js'
 
 describe('attempts immutability invariant', () => {
@@ -60,6 +61,59 @@ describe('attempts immutability invariant', () => {
       })
       finalizeAttempt(db, { attemptId: row.id })
       expect(() => assertMutable(db, row.id)).toThrow(AttemptTerminatedError)
+    })
+  })
+
+  describe('hasOpenRebaseAttempt', () => {
+    it('returns true for queued or running unterminated rebase attempts', () => {
+      const queued = runs.create({
+        repo: 'foo/bar',
+        issueNumber: 40,
+        issueNodeId: null,
+        planner: 'claude',
+        coder: 'claude',
+        reviewer: 'claude',
+      })
+      runs.updateControl(queued.id, { operationIntent: 'rebase' })
+
+      const running = runs.create({
+        repo: 'foo/bar',
+        issueNumber: 41,
+        issueNodeId: null,
+        planner: 'claude',
+        coder: 'claude',
+        reviewer: 'claude',
+      })
+      runs.updateControl(running.id, { operationIntent: 'rebase' })
+      runs.updateLifecycle(running.id, { status: 'running' })
+
+      expect(hasOpenRebaseAttempt(db, 'foo/bar', 40)).toBe(true)
+      expect(hasOpenRebaseAttempt(db, 'foo/bar', 41)).toBe(true)
+    })
+
+    it('returns false for terminated rebase attempts and non-rebase attempts', () => {
+      const terminated = runs.create({
+        repo: 'foo/bar',
+        issueNumber: 42,
+        issueNodeId: null,
+        planner: 'claude',
+        coder: 'claude',
+        reviewer: 'claude',
+      })
+      runs.updateControl(terminated.id, { operationIntent: 'rebase' })
+      finalizeAttempt(db, { attemptId: terminated.id })
+
+      runs.create({
+        repo: 'foo/bar',
+        issueNumber: 43,
+        issueNodeId: null,
+        planner: 'claude',
+        coder: 'claude',
+        reviewer: 'claude',
+      })
+
+      expect(hasOpenRebaseAttempt(db, 'foo/bar', 42)).toBe(false)
+      expect(hasOpenRebaseAttempt(db, 'foo/bar', 43)).toBe(false)
     })
   })
 

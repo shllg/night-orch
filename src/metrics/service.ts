@@ -29,6 +29,8 @@ export interface MetricsService {
   incRebaseConflict(): void
   incRebaseAutoResolved(): void
   incRebaseAutoResolveFailed(reason: 'unresolved' | 'validation_failed' | 'error'): void
+  incRebaseFanout(repo: string, baseBranch: string): void
+  incRebaseFanoutSibling(repo: string): void
 
   observeRunDuration(durationSeconds: number): void
   observePhaseDuration(phase: string, durationSeconds: number): void
@@ -68,6 +70,8 @@ class NoopMetricsService implements MetricsService {
   incRebaseConflict(): void { /* no-op */ }
   incRebaseAutoResolved(): void { /* no-op */ }
   incRebaseAutoResolveFailed(): void { /* no-op */ }
+  incRebaseFanout(): void { /* no-op */ }
+  incRebaseFanoutSibling(): void { /* no-op */ }
   observeRunDuration(): void { /* no-op */ }
   observePhaseDuration(): void { /* no-op */ }
   observeAgentDuration(): void { /* no-op */ }
@@ -210,6 +214,14 @@ class LiveMetricsService implements MetricsService {
     reason: 'unresolved' | 'validation_failed' | 'error',
   ): void {
     try { this.metrics.rebaseAutoResolveFailedTotal.inc({ reason }) } catch { /* best-effort */ }
+  }
+
+  incRebaseFanout(repo: string, baseBranch: string): void {
+    try { this.metrics.rebaseFanoutTotal.inc({ repo, base_branch: baseBranch }) } catch { /* best-effort */ }
+  }
+
+  incRebaseFanoutSibling(repo: string): void {
+    try { this.metrics.rebaseFanoutSiblingsTotal.inc({ repo }) } catch { /* best-effort */ }
   }
 
   observeRunDuration(durationSeconds: number): void {

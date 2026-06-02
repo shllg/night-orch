@@ -119,6 +119,7 @@ export class RunStateController {
       ...fields,
       status: 'running',
     })
+    const operationIntent = this.params.runManager.getById(runId)?.operationIntent
     await transitionLabels(
       this.params.forge,
       this.params.issueRepo,
@@ -127,6 +128,8 @@ export class RunStateController {
       from,
       'running',
       buildLabelConfig(this.params.repoConfig, this.params.issue.labels ?? []),
+      undefined,
+      operationIntent,
     )
     await this.params.pollerNotifier.runStarted(this.params.repoConfig.repo, this.params.issue)
   }

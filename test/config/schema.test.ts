@@ -113,11 +113,48 @@ describe('ConfigSchema', () => {
       expect(result.data.repos[0]?.maxConcurrentRuns).toBe(1)
       expect(result.data.repos[0]?.baseBranch).toBe('main')
       expect(result.data.repos[0]?.branchPrefix).toBe('orch')
+      expect(result.data.repos[0]?.autoRebaseOnMerge.enabled).toBe(false)
+      expect(result.data.repos[0]?.autoRebaseOnMerge.maxFanout).toBe(10)
       expect(result.data.repos[0]?.defaults.planner).toBe('claude')
       expect(result.data.repos[0]?.defaults.coder).toBe('codex')
       expect(result.data.repos[0]?.defaults.reviewer).toBe('codex')
       expect(result.data.workerProfiles).toEqual({})
       expect(result.data.notifications.events.onPrUpdated).toBe(true)
+    }
+  })
+
+  it('accepts autoRebaseOnMerge and labels.rebasing repo configuration', () => {
+    const minimal = {
+      version: 1,
+      github: {
+        tokenEnv: 'GITHUB_TOKEN',
+      },
+      repos: [
+        {
+          repo: 'org/repo',
+          localPath: '/tmp/repo',
+          autoRebaseOnMerge: {
+            enabled: true,
+            maxFanout: 4,
+            maxChainLength: 8,
+          },
+          labels: {
+            ready: ['no:ready'],
+            rebasing: 'no:rebasing',
+          },
+        },
+      ],
+    }
+
+    const result = ConfigSchema.safeParse(minimal)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.repos[0]?.autoRebaseOnMerge).toEqual({
+        enabled: true,
+        maxFanout: 4,
+        maxChainLength: 8,
+      })
+      expect(result.data.repos[0]?.labels.rebasing).toBe('no:rebasing')
     }
   })
 

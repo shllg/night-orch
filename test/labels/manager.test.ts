@@ -33,6 +33,7 @@ const labelConfig: LabelConfig = {
   mergeQueued: 'no:merge-queued',
   merging: 'no:merging',
   mergeFailed: 'no:merge-failed',
+  rebasing: 'no:rebasing',
 }
 
 function makeMockForge(): ForgeAdapter {
@@ -171,5 +172,14 @@ describe('transitionLabels', () => {
     )
 
     expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['no:running', 'no:needs-human'])
+  })
+
+  it('passes rebase intent through to label mutation', async () => {
+    const forge = makeMockForge()
+
+    await transitionLabels(forge, 'org/repo', 1, ['no:ready'], 'queued', 'running', labelConfig, undefined, 'rebase')
+
+    expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 1, ['no:rebasing'])
+    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 1, ['no:ready'])
   })
 })

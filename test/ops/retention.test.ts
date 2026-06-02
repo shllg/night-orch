@@ -106,4 +106,26 @@ describe('RetentionEngine', () => {
     const count = db.prepare('SELECT COUNT(*) as c FROM runs').get() as { c: number }
     expect(count.c).toBe(1)
   })
+
+  it('prunes rebase_fanouts older than archiveDays and reports dry-run count', () => {
+    const oldDate = new Date(Date.now() - 100 * 24 * 60 * 60 * 1000).toISOString()
+    const recentDate = new Date().toISOString()
+    db.prepare(
+      `INSERT INTO rebase_fanouts (repo, source_pr_number, fanned_out_at, siblings_queued)
+       VALUES (?, ?, ?, ?)`,
+    ).run('org/repo', 1, oldDate, 2)
+    db.prepare(
+      `INSERT INTO rebase_fanouts (repo, source_pr_number, fanned_out_at, siblings_queued)
+       VALUES (?, ?, ?, ?)`,
+    ).run('org/repo', 2, recentDate, 1)
+
+    const engine = new RetentionEngine(db)
+    const dryRun = engine.prune({ detailDays: 30, archiveDays: 90, vacuum: false, dryRun: true })
+    expect(dryRun.deletedRebaseFanouts).toBe(1)
+    expect(db.prepare('SELECT COUNT(*) as c FROM rebase_fanouts').get()).toMatchObject({ c: 2 })
+
+    const result = engine.prune({ detailDays: 30, archiveDays: 90, vacuum: false, dryRun: false })
+    expect(result.deletedRebaseFanouts).toBe(1)
+    expect(db.prepare('SELECT COUNT(*) as c FROM rebase_fanouts').get()).toMatchObject({ c: 1 })
+  })
 })

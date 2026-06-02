@@ -43,6 +43,35 @@ function makeForge(issue: ForgeIssue): ForgeAdapter {
 }
 
 describe('RunStateController', () => {
+  it('marks a rebase attempt running with the rebasing label', async () => {
+    const issue = makeIssue(['no:ready'])
+    const forge = makeForge(issue)
+    const runManager = {
+      transitionRunState: vi.fn(),
+      getById: vi.fn().mockReturnValue({ operationIntent: 'rebase' }),
+    } as unknown as RunManager
+    const pollerNotifier = { runStarted: vi.fn() } as unknown as PollerNotifier
+    const controller = new RunStateController({
+      forge,
+      repoConfig: makeTestRepoConfig({ labels: { rebasing: 'no:rebasing' } }),
+      issueRepo: 'org/repo',
+      issue,
+      runManager,
+      pollerNotifier,
+      botUser: '',
+    })
+
+    await controller.markRunning('run-1', { currentPhase: 'plan' }, 'queued')
+
+    expect(runManager.transitionRunState).toHaveBeenCalledWith('run-1', {
+      currentPhase: 'plan',
+      status: 'running',
+    })
+    expect(forge.addLabels).toHaveBeenCalledWith('org/repo', 42, ['no:rebasing'])
+    expect(forge.removeLabels).toHaveBeenCalledWith('org/repo', 42, ['no:ready'])
+    expect(pollerNotifier.runStarted).toHaveBeenCalledWith('org/repo', issue)
+  })
+
   it('marks a run blocked through state, labels, status comment, and notification', async () => {
     const issue = makeIssue()
     const forge = makeForge(issue)

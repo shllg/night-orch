@@ -131,6 +131,49 @@ describe('SyncEngine', () => {
     expect(row.status).toBe('completed')
   })
 
+  it('running run + PR merged invokes rebase fan-out with source PR base branch', async () => {
+    config = makeTestConfig({
+      notifications: { channels: [] },
+      repos: [{
+        autoRebaseOnMerge: { enabled: true },
+        selectors: { includeLabelsAny: [], excludeLabelsAny: [] },
+      }],
+    })
+    const forge = makeMockForge({
+      getPR: vi.fn().mockResolvedValue({
+        number: 10,
+        state: 'merged',
+        title: 'Fix',
+        body: '',
+        headBranch: 'orch/1-fix',
+        headSha: 'sha-10',
+        baseBranch: 'develop',
+        url: '',
+      }),
+    })
+    insertRun(db, { pr_number: 10, branch_name: 'orch/1-fix' })
+    const fanout = vi.fn().mockResolvedValue({
+      queued: 0,
+      skipped: 0,
+      failures: 0,
+      alreadyFannedOut: false,
+      skippedDisabled: false,
+    })
+
+    const engine = new SyncEngine(db, config, () => forge, fanout)
+    await engine.reconcile(false)
+
+    expect(fanout).toHaveBeenCalledWith(expect.objectContaining({
+      db,
+      repoConfig: config.repos[0],
+      forge,
+      config,
+      sourcePrNumber: 10,
+      baseBranch: 'develop',
+      botUser: '',
+    }))
+  })
+
   it('running run + issue closed → completed', async () => {
     const forge = makeMockForge({
       getIssue: vi.fn().mockResolvedValue({

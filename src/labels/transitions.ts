@@ -1,4 +1,5 @@
 import type { RunStatus } from '../state/runs.js'
+import type { RunOperationIntent } from '../state/runs.js'
 import type { BlockedReason } from '../loop/state.js'
 import type { MergeBatchStatus } from '../merge-queue/types.js'
 
@@ -19,6 +20,7 @@ export interface LabelConfig {
   mergeQueued: string
   merging: string
   mergeFailed: string
+  rebasing?: string
 }
 
 /**
@@ -49,15 +51,20 @@ export function computeLabelMutation(
   currentLabels: string[],
   config: LabelConfig,
   blockReason?: BlockedReason,
+  intent?: RunOperationIntent,
 ): LabelMutation {
   const current = new Set(currentLabels)
   let add: string[] = []
   let remove: string[] = []
+  const transient = [config.running, config.rebasing].filter((label): label is string => Boolean(label))
+  const queuedLabel = intent === 'rebase' && config.rebasing ? [config.rebasing] : [...config.ready]
+  const runningLabel = intent === 'rebase' && config.rebasing ? config.rebasing : config.running
 
   switch (to) {
     case 'running':
-      add = [config.running]
-      remove = [...config.ready, config.blocked, config.needsHuman, config.error, config.retry]
+      add = [runningLabel]
+      remove = [...config.ready, ...transient, config.blocked, config.needsHuman, config.error, config.retry]
+        .filter((label) => label !== runningLabel)
       break
     case 'blocked':
       if (blockReason && isHumanRequired(blockReason)) {
@@ -72,7 +79,7 @@ export function computeLabelMutation(
       add = [config.reviewReady]
       remove = [
         ...config.ready,
-        config.running,
+        ...transient,
         config.blocked,
         config.needsHuman,
         config.error,
@@ -81,14 +88,15 @@ export function computeLabelMutation(
       break
     case 'error':
       add = [config.error]
-      remove = [config.running]
+      remove = transient
       break
     case 'completed':
-      remove = [...config.ready, config.running, config.blocked, config.needsHuman, config.reviewReady, config.error, config.retry]
+      remove = [...config.ready, ...transient, config.blocked, config.needsHuman, config.reviewReady, config.error, config.retry]
       break
     case 'queued':
-      add = [...config.ready]
-      remove = [config.running, config.blocked, config.needsHuman, config.error, config.reviewReady, config.retry]
+      add = queuedLabel
+      remove = [...config.ready, ...transient, config.blocked, config.needsHuman, config.error, config.reviewReady, config.retry]
+        .filter((label) => !queuedLabel.includes(label))
       break
   }
 

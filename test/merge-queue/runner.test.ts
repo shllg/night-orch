@@ -7,6 +7,7 @@ import type Database from 'better-sqlite3'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { makeTestConfig } from '../helpers/factories.js'
 
 vi.mock('../../src/utils/logger.js', () => ({
   logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -162,6 +163,38 @@ describe('processMergeQueue', () => {
     expect(r1.status).toBe('completed')
     const batchRow = db.prepare("SELECT status FROM merge_batches WHERE id = 'b-ok'").get() as { status: string }
     expect(batchRow.status).toBe('passed')
+  })
+
+  it('fans out rebase after merge queue completes PRs', async () => {
+    db.prepare(
+      "INSERT INTO runs (id, repo, issue_number, status, pr_number) VALUES ('r1', 'org/repo', 1, 'review_ready', 100)",
+    ).run()
+    db.prepare(
+      `INSERT INTO merge_batches (id, repo, base_branch, base_sha, status, staging_branch, staging_sha, pr_numbers, approved_shas, merged_pr_numbers, retry_count)
+       VALUES ('b-fanout', 'org/repo', 'main', 'abc', 'testing', 'orch/staging/x', 'ssha', '[100]', '["sha-100"]', '[100]', 0)`,
+    ).run()
+    const fanout = vi.fn().mockResolvedValue({
+      queued: 0,
+      skipped: 0,
+      failures: 0,
+      alreadyFannedOut: false,
+      skippedDisabled: false,
+    })
+    const repoConfig = makeRepoConfig({ autoRebaseOnMerge: { enabled: true, maxFanout: 10 } } as Partial<RepoConfig>)
+    const config = makeTestConfig({ repos: [repoConfig] })
+    const forge = makeForge()
+
+    await processMergeQueue(db, forge, repoConfig, { config, botUser: 'bot', fanoutAfterMerge: fanout })
+
+    expect(fanout).toHaveBeenCalledWith(expect.objectContaining({
+      db,
+      repoConfig,
+      forge,
+      config,
+      sourcePrNumber: 100,
+      baseBranch: 'main',
+      botUser: 'bot',
+    }))
   })
 
   it('recovers stuck-building batch by marking failed', async () => {

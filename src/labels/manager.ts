@@ -1,5 +1,5 @@
 import type { ForgeAdapter } from '../forge/types.js'
-import type { RunStatus } from '../state/runs.js'
+import type { RunOperationIntent, RunStatus } from '../state/runs.js'
 import type { BlockedReason } from '../loop/state.js'
 import { computeLabelMutation, type LabelConfig } from './transitions.js'
 import { logger } from '../utils/logger.js'
@@ -17,8 +17,9 @@ export async function transitionLabels(
   to: RunStatus,
   labelConfig: LabelConfig,
   blockReason?: BlockedReason,
+  intent?: RunOperationIntent,
 ): Promise<void> {
-  const mutation = computeLabelMutation(from, to, currentLabels, labelConfig, blockReason)
+  const mutation = computeLabelMutation(from, to, currentLabels, labelConfig, blockReason, intent)
 
   if (mutation.add.length === 0 && mutation.remove.length === 0) {
     return

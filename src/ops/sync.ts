@@ -17,6 +17,7 @@ import {
   type PersistedDecisionOutcome,
 } from '../loop/checkpoint.js'
 import { parsePhaseData } from '../loop/checkpoint-schema.js'
+import { fanoutRebaseAfterMerge, type FanoutDeps, type FanoutResult } from './fanout-rebase.js'
 
 export interface SyncAction {
   repo: string
@@ -87,6 +88,7 @@ export class SyncEngine {
       if (!repoConfig) throw new Error(`No config for repo ${repo}`)
       return createForgeAdapter(repoConfig, config)
     },
+    private fanoutAfterMerge: (deps: FanoutDeps) => Promise<FanoutResult> = fanoutRebaseAfterMerge,
   ) {
     this.leaseManager = new LeaseManager(db)
     this.runManager = new RunManager(db)
@@ -312,7 +314,7 @@ export class SyncEngine {
     return stateByNumber
   }
 
-  private markCompleted(run: ActiveRunRow, dryRun: boolean, reason: string, forge: ForgeAdapter): SyncAction {
+  private async markCompleted(run: ActiveRunRow, dryRun: boolean, reason: string, forge: ForgeAdapter): Promise<SyncAction> {
     if (!dryRun) {
       this.runManager.updateLifecycle(run.id, {
         status: 'completed',
@@ -327,9 +329,36 @@ export class SyncEngine {
       this.updateLabels(forge, run, 'completed').catch((err) => {
         logger.debug({ repo: run.repo, issue: run.issue_number, err }, 'Label update failed while marking run completed')
       })
+      await this.fanoutFromMergedRun(run, forge)
     }
     logger.info({ runId: run.id, repo: run.repo, issue: run.issue_number }, reason)
     return { repo: run.repo, issueNumber: run.issue_number, action: 'completed', reason, prNumber: run.pr_number }
+  }
+
+  private async fanoutFromMergedRun(run: ActiveRunRow, forge: ForgeAdapter): Promise<void> {
+    if (!run.pr_number) return
+    const repoConfig = this.config.repos.find((repo) => repo.repo === run.repo)
+    if (!repoConfig) return
+
+    let baseBranch = repoConfig.baseBranch
+    if (forge.getPR) {
+      try {
+        const pr = await forge.getPR(run.repo, run.pr_number)
+        baseBranch = pr.baseBranch
+      } catch (err) {
+        logger.debug({ repo: run.repo, prNumber: run.pr_number, err }, 'Failed to read merged PR base branch for fan-out')
+      }
+    }
+
+    await this.fanoutAfterMerge({
+      db: this.db,
+      repoConfig,
+      forge,
+      config: this.config,
+      sourcePrNumber: run.pr_number,
+      baseBranch,
+      botUser: '',
+    })
   }
 
   private markClosed(run: ActiveRunRow, dryRun: boolean, reason: string, forge: ForgeAdapter): SyncAction {

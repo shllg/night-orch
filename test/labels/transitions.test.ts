@@ -28,6 +28,7 @@ const config: LabelConfig = {
   mergeQueued: 'no:merge-queued',
   merging: 'no:merging',
   mergeFailed: 'no:merge-failed',
+  rebasing: 'no:rebasing',
 }
 
 describe('isHumanRequired', () => {
@@ -180,6 +181,34 @@ describe('computeLabelMutation', () => {
       multiReadyConfig,
     )
     expect(mutation).toEqual({ add: [], remove: [] })
+  })
+
+  it('running with rebase intent uses rebasing label when configured', () => {
+    const mutation = computeLabelMutation(
+      'queued',
+      'running',
+      ['no:ready'],
+      multiReadyConfig,
+      undefined,
+      'rebase',
+    )
+
+    expect(mutation.add).toEqual(['no:rebasing'])
+    expect(mutation.remove).toEqual(['no:ready'])
+  })
+
+  it('queued with rebase intent uses rebasing label when configured', () => {
+    const mutation = computeLabelMutation(
+      'review_ready',
+      'queued',
+      ['no:review-ready'],
+      multiReadyConfig,
+      undefined,
+      'rebase',
+    )
+
+    expect(mutation.add).toEqual(['no:rebasing'])
+    expect(mutation.remove).toEqual(['no:review-ready'])
   })
 })
 

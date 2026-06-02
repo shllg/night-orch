@@ -15,6 +15,7 @@ describe('buildLabelBootstrapDefinitions', () => {
         mergeQueued: 'no:merge-queued',
         merging: 'no:merging',
         mergeFailed: 'no:merge-failed',
+        rebasing: 'no:rebasing',
       },
       labelConfig: {},
     })
@@ -31,7 +32,13 @@ describe('buildLabelBootstrapDefinitions', () => {
       'no:merge-queued',
       'no:merging',
       'no:merge-failed',
+      'no:rebasing',
     ])
+    expect(result.find((l) => l.name === 'no:rebasing')).toEqual({
+      name: 'no:rebasing',
+      color: '5319E7',
+      description: 'Rebase attempt is queued or running',
+    })
     expect(result.find((l) => l.name === 'no:ready')).toEqual({
       name: 'no:ready',
       color: '0E8A16',
@@ -106,6 +113,7 @@ describe('buildLabelBootstrapDefinitions', () => {
         mergeQueued: 'no:merge-queued',
         merging: 'no:merging',
         mergeFailed: 'no:merge-failed',
+        rebasing: 'no:rebasing',
       },
       kanban: {
         triggerLabel: 'flow:kanban',
@@ -121,6 +129,7 @@ describe('buildLabelBootstrapDefinitions', () => {
           mergeQueued: 'kanban:merge-queued',
           merging: 'kanban:merging',
           mergeFailed: 'kanban:merge-failed',
+          rebasing: 'kanban:rebasing',
         },
       },
       labelConfig: {},
@@ -139,6 +148,7 @@ describe('buildLabelBootstrapDefinitions', () => {
       'kanban:merge-queued',
       'kanban:merging',
       'kanban:merge-failed',
+      'kanban:rebasing',
     ]))
   })
 })
