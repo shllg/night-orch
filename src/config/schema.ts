@@ -97,6 +97,7 @@ export const WorkerProfileSchema = z.object({
   runtimeWrapper: z.string().nullable().default(null),
   env: z.record(z.string()).default({}),
   sandbox: WorkerSandboxSchema.default({ type: 'host' }),
+  allowAgentSessionBypass: z.boolean().default(false),
 })
 
 const CommandSpecSchema = z.union([
@@ -736,6 +737,10 @@ export const ConfigSchema = z.object({
     authTokenEnv: z.string().nullable().default(null),
     httpPort: z.number().int().positive().default(3100),
     httpHost: z.string().default('127.0.0.1'),
+  }).default({}),
+
+  web: z.object({
+    trustedProxy: z.boolean().default(false),
   }).default({}),
 
   commentCommands: z.object({

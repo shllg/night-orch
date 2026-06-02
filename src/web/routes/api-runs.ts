@@ -32,12 +32,11 @@ export const handleRunRoutes: RouteHandler = async (_req, res, method, pathname,
 
   if (method === 'GET' && pathname === '/api/session') {
     writeJson(res, 200, {
-      mutationToken: security.operatorAuthMode ? null : security.webMutationToken,
       operationsEnabled: ctx.operationsEnabled,
       requiresExternalAuth: security.operatorAuthMode,
-      // Phase 2a: advertise the cookie-auth bootstrap endpoint so the
-      // frontend can choose between auto-handed token (loopback mode)
-      // and the token-entry dialog (operator auth mode).
+      loopbackTokenHint: security.authRequired && !security.operatorAuthMode
+        ? { path: security.loopbackTokenPath, stdoutPrinted: true }
+        : null,
       supportsSessionCookie: true,
     })
     return true

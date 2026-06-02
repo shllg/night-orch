@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { createHmac, randomBytes } from 'node:crypto'
 import {
+  CSRF_COOKIE_NAME,
   SESSION_COOKIE_NAME,
+  buildCsrfCookie,
   buildClearSessionCookie,
   buildSessionCookie,
   extractSessionCookie,
@@ -17,14 +19,14 @@ function makeReq(cookieHeader?: string): IncomingMessage {
 
 describe('web/auth — session cookie helpers', () => {
   describe('buildSessionCookie', () => {
-    it('emits a well-formed Set-Cookie value with HttpOnly and SameSite=Lax', () => {
+    it('emits a well-formed Set-Cookie value with HttpOnly and SameSite=Strict', () => {
       const secret = randomBytes(32)
       const header = buildSessionCookie(secret)
       expect(header).toMatch(new RegExp(`^${SESSION_COOKIE_NAME}=`))
       expect(header).toContain('Path=/')
-      expect(header).toContain('Max-Age=')
+      expect(header).toContain('Max-Age=28800')
       expect(header).toContain('HttpOnly')
-      expect(header).toContain('SameSite=Lax')
+      expect(header).toContain('SameSite=Strict')
     })
 
     it('includes a signed payload that roundtrips through verify', () => {
@@ -35,6 +37,17 @@ describe('web/auth — session cookie helpers', () => {
       expect(payload).not.toBeNull()
       expect(payload?.version).toBe(1)
       expect(payload?.expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000))
+    })
+  })
+
+  describe('buildCsrfCookie', () => {
+    it('emits a readable SameSite=Strict CSRF cookie', () => {
+      const header = buildCsrfCookie('csrf-token')
+      expect(header).toContain(`${CSRF_COOKIE_NAME}=csrf-token`)
+      expect(header).toContain('Path=/')
+      expect(header).toContain('Max-Age=28800')
+      expect(header).toContain('SameSite=Strict')
+      expect(header).not.toContain('HttpOnly')
     })
   })
 

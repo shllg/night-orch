@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage } from 'node:http'
 
 /**
@@ -26,16 +26,13 @@ import type { IncomingMessage } from 'node:http'
  */
 
 export const SESSION_COOKIE_NAME = 'norch_session'
+export const CSRF_COOKIE_NAME = 'norch_csrf'
+export const SECURE_SESSION_COOKIE_NAME = '__Host-night-orch-session'
+export const SECURE_CSRF_COOKIE_NAME = '__Host-night-orch-csrf'
+export const CSRF_HEADER_NAME = 'x-csrf-token'
 
-/** Session cookie TTL: 1 year. The signing secret is regenerated
- * on every daemon restart, which is the real security boundary —
- * a stolen cookie stops working the next time night-orch recycles
- * regardless of the exposed Max-Age. The long Max-Age exists so
- * mobile browsers on the same daemon uptime don't have to re-enter
- * the operator token every week. Operators who rely on
- * reverse-proxy auth (Caddy, Tailscale) can skip night-orch auth
- * entirely via `web.requireAuth: false` instead. */
-const SESSION_TTL_SECONDS = 365 * 24 * 60 * 60
+/** Session cookie TTL: 8 hours. */
+const SESSION_TTL_SECONDS = 8 * 60 * 60
 
 /** Version byte on the payload so we can rotate the cookie format
  * without having to read the old signature. */
@@ -47,46 +44,103 @@ interface SessionPayload {
 }
 
 /** Build the Set-Cookie header value for a fresh session. */
-export function buildSessionCookie(secret: Buffer): string {
+export function buildSessionCookie(secret: Buffer, options: { secure?: boolean } = {}): string {
   const expiresAt = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS
   const payload: SessionPayload = { version: SESSION_VERSION, expiresAt }
   const token = encodePayload(payload, secret)
+  const name = options.secure ? SECURE_SESSION_COOKIE_NAME : SESSION_COOKIE_NAME
   return [
-    `${SESSION_COOKIE_NAME}=${token}`,
+    `${name}=${token}`,
     'Path=/',
     `Max-Age=${SESSION_TTL_SECONDS}`,
     'HttpOnly',
-    // SameSite=Lax lets the cookie ride along on top-level navigations
-    // (useful for GitHub OAuth redirects in Phase 3) while blocking
-    // cross-site subrequests. Secure is omitted on HTTP because Chrome
-    // refuses to accept Secure cookies on insecure origins; callers
-    // that need it over HTTPS should set it via a reverse proxy or
-    // future TLS support.
-    'SameSite=Lax',
+    'SameSite=Strict',
+    ...(options.secure ? ['Secure'] : []),
+  ].join('; ')
+}
+
+export function createCsrfToken(): string {
+  return randomBytes(32).toString('base64url')
+}
+
+export function buildCsrfCookie(token: string, options: { secure?: boolean } = {}): string {
+  const name = options.secure ? SECURE_CSRF_COOKIE_NAME : CSRF_COOKIE_NAME
+  return [
+    `${name}=${token}`,
+    'Path=/',
+    `Max-Age=${SESSION_TTL_SECONDS}`,
+    'SameSite=Strict',
+    ...(options.secure ? ['Secure'] : []),
   ].join('; ')
 }
 
 /** Build the Set-Cookie header value that clears the session cookie. */
-export function buildClearSessionCookie(): string {
+export function buildClearSessionCookie(options: { secure?: boolean } = {}): string {
+  const name = options.secure ? SECURE_SESSION_COOKIE_NAME : SESSION_COOKIE_NAME
   return [
-    `${SESSION_COOKIE_NAME}=`,
+    `${name}=`,
     'Path=/',
     'Max-Age=0',
     'HttpOnly',
-    'SameSite=Lax',
+    'SameSite=Strict',
+    ...(options.secure ? ['Secure'] : []),
   ].join('; ')
+}
+
+export function buildClearCsrfCookie(options: { secure?: boolean } = {}): string {
+  const name = options.secure ? SECURE_CSRF_COOKIE_NAME : CSRF_COOKIE_NAME
+  return [
+    `${name}=`,
+    'Path=/',
+    'Max-Age=0',
+    'SameSite=Strict',
+    ...(options.secure ? ['Secure'] : []),
+  ].join('; ')
+}
+
+export function buildClearAuthCookies(): string[] {
+  return [
+    buildClearSessionCookie(),
+    buildClearCsrfCookie(),
+    buildClearSessionCookie({ secure: true }),
+    buildClearCsrfCookie({ secure: true }),
+  ]
 }
 
 /** Parse the `Cookie` header and extract the session cookie value, or null. */
 export function extractSessionCookie(req: IncomingMessage): string | null {
+  return extractCookie(req, SECURE_SESSION_COOKIE_NAME) ?? extractCookie(req, SESSION_COOKIE_NAME)
+}
+
+export function requireCsrfToken(req: IncomingMessage): boolean {
+  const cookieToken = extractCookie(req, SECURE_CSRF_COOKIE_NAME) ?? extractCookie(req, CSRF_COOKIE_NAME)
+  const headerToken = getSingleHeaderValue(req.headers[CSRF_HEADER_NAME])
+  if (!cookieToken || !headerToken) return false
+
+  const cookieBuffer = Buffer.from(cookieToken)
+  const headerBuffer = Buffer.from(headerToken)
+  if (cookieBuffer.length !== headerBuffer.length) return false
+  return timingSafeEqual(cookieBuffer, headerBuffer)
+}
+
+function extractCookie(req: IncomingMessage, name: string): string | null {
   const raw = req.headers.cookie
   if (!raw) return null
   const cookies = raw.split(';')
   for (const entry of cookies) {
     const trimmed = entry.trim()
-    if (!trimmed.startsWith(`${SESSION_COOKIE_NAME}=`)) continue
-    const value = trimmed.slice(SESSION_COOKIE_NAME.length + 1)
+    if (!trimmed.startsWith(`${name}=`)) continue
+    const value = trimmed.slice(name.length + 1)
     return value.length > 0 ? value : null
+  }
+  return null
+}
+
+function getSingleHeaderValue(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) return value[0]?.trim() || null
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return trimmed.length > 0 ? trimmed : null
   }
   return null
 }

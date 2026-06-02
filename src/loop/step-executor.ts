@@ -35,6 +35,7 @@ import { getRemediation } from '../workers/auth-check.js'
 import { logger } from '../utils/logger.js'
 import { buildPlanningPrdPath, isPlanningIssue } from '../planning/mode.js'
 import { coerceConflictSnapshot } from '../ops/conflict-types.js'
+import { sanitizeErrorMessage } from '../utils/sanitize-error.js'
 import type { z } from 'zod'
 
 export interface StepDependencies {
@@ -365,7 +366,12 @@ export function buildPromptContext(ctx: RunContext, role: string): PromptContext
     plan: ctx.plan?.objective ?? null,
     diff: ctx.diff ?? null,
     reviewFindings: ctx.reviewFindings.length > 0 ? ctx.reviewFindings : null,
-    verifyResults: ctx.verifyResults.length > 0 ? ctx.verifyResults : null,
+    verifyResults: ctx.verifyResults.length > 0
+      ? ctx.verifyResults.map((result) => ({
+          ...result,
+          stderr: sanitizeErrorMessage(result.stderr),
+        }))
+      : null,
     iteration: {
       current: ctx.iteration,
       max: ctx.adjustedLimits.maxReviewIterations,

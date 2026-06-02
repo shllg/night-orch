@@ -672,6 +672,26 @@ describe('buildPromptContext', () => {
     expect(result.iteration.isRetry).toBe(false)
   })
 
+  it('scrubs verify stderr before exposing it to worker prompts', () => {
+    const token = 'ghp_abcdefghijklmnopqrstuvwxyz1234567890'
+    const ctx = makeCtx({
+      verifyResults: [{
+        command: 'pnpm test',
+        exitCode: 1,
+        stdout: '',
+        stderr: `GITHUB_TOKEN=${token}`,
+        durationMs: 100,
+        passed: false,
+      }],
+    })
+
+    const result = buildPromptContext(ctx, 'coder')
+
+    expect(ctx.verifyResults[0]?.stderr).toContain(token)
+    expect(result.verifyResults?.[0]?.stderr).toContain('[REDACTED]')
+    expect(result.verifyResults?.[0]?.stderr).not.toContain(token)
+  })
+
   it('maps follow-up context from prReviewFeedback', () => {
     const ctx = makeCtx({
       prReviewFeedback: {

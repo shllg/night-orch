@@ -15,8 +15,10 @@ import {
 } from '../../web/src/types/dashboard.js'
 
 const SESSION_RESPONSE: SessionResponse = {
-  mutationToken: 'test-token',
   operationsEnabled: true,
+  requiresExternalAuth: false,
+  loopbackTokenHint: null,
+  supportsSessionCookie: true,
 }
 
 const DASHBOARD_SNAPSHOT: DashboardSnapshot = {

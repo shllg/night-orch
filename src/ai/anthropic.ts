@@ -7,6 +7,7 @@ import {
   AiTransientError,
 } from './errors.js'
 import { extractAndValidateJson } from './json-extract.js'
+import { sanitizeErrorMessage } from '../utils/sanitize-error.js'
 
 /**
  * Hand-rolled Anthropic Messages API client.
@@ -147,7 +148,7 @@ export class AnthropicClient implements AiClient {
   }
 
   private throwForStatus(status: number, body: string): never {
-    const snippet = body.slice(0, 500)
+    const snippet = sanitizeErrorMessage(body.slice(0, 500))
     if (status === 401 || status === 403) {
       throw new AiAuthError(this.provider, this.model, `HTTP ${status}: ${snippet}`)
     }

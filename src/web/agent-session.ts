@@ -105,7 +105,11 @@ export class InteractiveAgentSessionManager {
     private readonly config: Config,
     options: ManagerOptions = {},
   ) {
-    this.workspacePath = resolve(options.workspacePath ?? process.cwd())
+    const workspacePath = options.workspacePath?.trim()
+    if (!workspacePath) {
+      throw new Error('agent-session workspacePath is required; configure storage.worktreeRoot before using web agent sessions')
+    }
+    this.workspacePath = resolve(workspacePath)
     this.maxEventsPerSession = clampInt(
       options.maxEventsPerSession ?? DEFAULT_MAX_EVENTS_PER_SESSION,
       100,
@@ -507,6 +511,7 @@ function buildFallbackProfile(agent: InteractiveAgentType): WorkerProfile {
     runtimeWrapper: null,
     env: {},
     sandbox: { type: 'host', mounts: [], env: {} },
+    allowAgentSessionBypass: false,
   }
 }
 
@@ -537,6 +542,7 @@ function buildInteractiveTaskArgs(
     '--output-format', 'json',
     '--max-turns', '50',
   ]
+  rejectUnsafePermissionMode(args, profile.allowAgentSessionBypass === true)
   if (!hasExplicitPermissionMode(args)) {
     args.push('--permission-mode', resolveDefaultPermissionMode())
   }
@@ -544,6 +550,42 @@ function buildInteractiveTaskArgs(
     args.push('--continue', continueSessionId)
   }
   return args
+}
+
+function rejectUnsafePermissionMode(args: string[], allowAgentSessionBypass: boolean): void {
+  if (allowAgentSessionBypass) return
+
+  const unsafeMode = findUnsafePermissionMode(args)
+  if (!unsafeMode) return
+
+  throw new Error(
+    `workerProfiles.*.allowAgentSessionBypass must be true before agent-session may use ${unsafeMode}`,
+  )
+}
+
+function findUnsafePermissionMode(args: string[]): string | null {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
+    if (!arg) continue
+    if (arg === '--dangerously-skip-permissions' || arg === '--allow-dangerously-skip-permissions') {
+      return arg
+    }
+    if (arg === '--permission-mode') {
+      const mode = args[i + 1]
+      if (mode === 'bypassPermissions' || mode === 'acceptEdits') {
+        return mode
+      }
+      continue
+    }
+    const inlinePrefix = '--permission-mode='
+    if (arg.startsWith(inlinePrefix)) {
+      const mode = arg.slice(inlinePrefix.length)
+      if (mode === 'bypassPermissions' || mode === 'acceptEdits') {
+        return mode
+      }
+    }
+  }
+  return null
 }
 
 function hasExplicitPermissionMode(args: string[]): boolean {
@@ -555,15 +597,8 @@ function hasExplicitPermissionMode(args: string[]): boolean {
   return false
 }
 
-function resolveDefaultPermissionMode(): 'acceptEdits' | 'bypassPermissions' {
-  try {
-    if (typeof process.getuid === 'function' && process.getuid() === 0) {
-      return 'acceptEdits'
-    }
-  } catch {
-    // Ignore and keep non-root default.
-  }
-  return 'bypassPermissions'
+function resolveDefaultPermissionMode(): 'plan' {
+  return 'plan'
 }
 
 function emitCodexEvent(

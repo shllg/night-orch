@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { request as httpRequest, type OutgoingHttpHeaders, type Server } from 'node:http'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { once } from 'node:events'
@@ -16,6 +16,7 @@ import { makeTestConfig } from '../helpers/factories.js'
 
 const MUTATION_INTENT_HEADER = 'x-night-orch-intent'
 const WEB_AUTH_TOKEN_HEADER = 'x-night-orch-web-token'
+const originalRuntimeDir = process.env['XDG_RUNTIME_DIR']
 
 describe('startWebServer', () => {
   let tmpDir: string
@@ -29,7 +30,9 @@ describe('startWebServer', () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'night-orch-web-test-'))
     frontendDir = join(tmpDir, 'frontend')
     mkdirSync(frontendDir, { recursive: true })
+    mkdirSync(join(tmpDir, 'runtime'), { recursive: true })
     writeFileSync(join(frontendDir, 'index.html'), '<!doctype html><html><body>ok</body></html>')
+    process.env['XDG_RUNTIME_DIR'] = join(tmpDir, 'runtime')
 
     db = initDatabase(join(tmpDir, 'test.db'))
     deps = {
@@ -49,6 +52,11 @@ describe('startWebServer', () => {
     }
     db.close()
     rmSync(tmpDir, { recursive: true, force: true })
+    if (originalRuntimeDir === undefined) {
+      delete process.env['XDG_RUNTIME_DIR']
+    } else {
+      process.env['XDG_RUNTIME_DIR'] = originalRuntimeDir
+    }
   })
 
   async function startTestServer(
@@ -1299,18 +1307,26 @@ describe('startWebServer', () => {
     expect(setCookie).not.toBeNull()
     expect(setCookie).toContain('norch_session=')
     expect(setCookie).toContain('HttpOnly')
-    expect(setCookie).toContain('SameSite=Lax')
+    expect(setCookie).toContain('norch_csrf=')
+    expect(setCookie).toContain('SameSite=Strict')
 
-    // Extract the cookie value so we can present it on the mutation request.
-    const cookieValue = setCookie!.split(';')[0]!
+    // Extract the cookie values so we can present them on the mutation request.
+    const cookies = setCookie!.split(/,\s*(?=[^;,]+=)/).map((cookie) => cookie.split(';')[0]!)
+    const sessionCookie = cookies.find((cookie) => cookie.startsWith('norch_session='))
+    const csrfCookie = cookies.find((cookie) => cookie.startsWith('norch_csrf='))
+    expect(sessionCookie).toBeDefined()
+    expect(csrfCookie).toBeDefined()
+    const csrfToken = csrfCookie!.split('=')[1]!
 
-    // Mutation with ONLY the cookie (no web-token header) succeeds.
+    // Mutation with the cookie session succeeds when the double-submit
+    // CSRF cookie and header match.
     const poll = await fetch(`${baseUrl}/api/operations/poll`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         [MUTATION_INTENT_HEADER]: 'mutate',
-        Cookie: cookieValue,
+        'x-csrf-token': csrfToken,
+        Cookie: `${sessionCookie}; ${csrfCookie}`,
       },
       body: '{}',
     })
@@ -1735,11 +1751,14 @@ describe('startWebServer', () => {
 async function getMutationToken(baseUrl: string): Promise<string> {
   const session = await fetch(`${baseUrl}/api/session`)
   expect(session.status).toBe(200)
-  const payload = await session.json() as { mutationToken?: unknown }
-  if (typeof payload.mutationToken !== 'string' || payload.mutationToken.length === 0) {
-    throw new Error('Missing mutation token in /api/session response')
+  const payload = await session.json() as {
+    loopbackTokenHint?: { path?: unknown } | null
   }
-  return payload.mutationToken
+  const tokenPath = payload.loopbackTokenHint?.path
+  if (typeof tokenPath !== 'string' || tokenPath.length === 0) {
+    throw new Error('Missing loopback token sidecar hint in /api/session response')
+  }
+  return readFileSync(tokenPath, 'utf-8').trim()
 }
 
 async function sendRawHttpRequest(

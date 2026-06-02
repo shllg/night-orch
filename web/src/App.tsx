@@ -45,6 +45,9 @@ import {
 const MUTATION_INTENT_HEADER = 'x-night-orch-intent'
 const MUTATION_INTENT_VALUE = 'mutate'
 const WEB_AUTH_TOKEN_HEADER = 'x-night-orch-web-token'
+const CSRF_HEADER_NAME = 'x-csrf-token'
+const CSRF_COOKIE_NAMES = ['__Host-night-orch-csrf', 'norch_csrf']
+const LOOPBACK_TOKEN_STORAGE_KEY = 'night-orch.loopbackToken'
 const FRONTEND_BUILD_VERSION = import.meta.env.VITE_BUILD_VERSION ?? 'unknown'
 
 const AUTO_POLL_COOLDOWN_MS = 60_000
@@ -78,6 +81,25 @@ function formatRuntimeSettingDraft(value: RuntimeSettingValue): string {
   return String(value)
 }
 
+function readCookieValue(name: string): string | null {
+  const cookies = document.cookie.split(';')
+  for (const cookie of cookies) {
+    const [rawName, ...rawValue] = cookie.trim().split('=')
+    if (rawName !== name) continue
+    const value = rawValue.join('=')
+    return value.length > 0 ? decodeURIComponent(value) : null
+  }
+  return null
+}
+
+function readCsrfTokenFromCookie(): string | null {
+  for (const name of CSRF_COOKIE_NAMES) {
+    const value = readCookieValue(name)
+    if (value) return value
+  }
+  return null
+}
+
 export function App({
   activePage,
   issueDetailRunId = null,
@@ -105,6 +127,7 @@ export function App({
   const [activeOperation, setActiveOperation] = useState<string | null>(null)
   const [isHeaderRefreshing, setIsHeaderRefreshing] = useState(false)
   const [webMutationToken, setWebMutationToken] = useState<string | null>(null)
+  const [csrfToken, setCsrfToken] = useState<string | null>(null)
   const [authReady, setAuthReady] = useState(false)
   const [operationsEnabled, setOperationsEnabled] = useState(true)
   // Phase 2a — cookie auth state
@@ -114,6 +137,7 @@ export function App({
   const [loginTokenDraft, setLoginTokenDraft] = useState('')
   const [loginError, setLoginError] = useState<string | null>(null)
   const [loginBusy, setLoginBusy] = useState(false)
+  const [loopbackTokenHint, setLoopbackTokenHint] = useState<SessionResponse['loopbackTokenHint']>(null)
   const [settingsDrafts, setSettingsDrafts] = useState<Record<string, string>>({})
   const [dailyOverrideDraft, setDailyOverrideDraft] = useState('')
   const [costOverrideDraft, setCostOverrideDraft] = useState<{ repo: string; issueNumber: string; amount: string }>({
@@ -331,12 +355,25 @@ export function App({
       }
       const payload = await response.json() as SessionResponse
       setOperationsEnabled(payload.operationsEnabled ?? true)
-      const externalAuth = payload.requiresExternalAuth ?? (payload.mutationToken === null)
+      setLoopbackTokenHint(payload.loopbackTokenHint ?? null)
+      const externalAuth = payload.requiresExternalAuth ?? true
       setOperatorAuthMode(externalAuth)
+      setCsrfToken(readCsrfTokenFromCookie())
 
-      if (!externalAuth && payload.mutationToken) {
-        // Loopback mode: server handed us the token directly, no login needed.
-        setWebMutationToken(payload.mutationToken)
+      if (!externalAuth && payload.loopbackTokenHint) {
+        const storedToken = window.localStorage.getItem(LOOPBACK_TOKEN_STORAGE_KEY)
+        if (storedToken) {
+          setWebMutationToken(storedToken)
+          setSessionAuthenticated(true)
+          return
+        }
+        setWebMutationToken(null)
+        setSessionAuthenticated(false)
+        setLoginDialogOpen(true)
+        return
+      }
+
+      if (!externalAuth) {
         setSessionAuthenticated(true)
         return
       }
@@ -379,6 +416,12 @@ export function App({
         body: JSON.stringify({ token: loginTokenDraft.trim() }),
       })
       if (response.status === 204) {
+        const token = loginTokenDraft.trim()
+        if (!operatorAuthMode) {
+          window.localStorage.setItem(LOOPBACK_TOKEN_STORAGE_KEY, token)
+          setWebMutationToken(token)
+        }
+        setCsrfToken(readCsrfTokenFromCookie())
         setSessionAuthenticated(true)
         setLoginDialogOpen(false)
         setLoginTokenDraft('')
@@ -386,7 +429,9 @@ export function App({
         return
       }
       if (response.status === 401) {
-        setLoginError('Invalid token. Check NIGHT_ORCH_WEB_AUTH_TOKEN on the server.')
+        setLoginError(operatorAuthMode
+          ? 'Invalid token. Check NIGHT_ORCH_WEB_AUTH_TOKEN on the server.'
+          : 'Invalid token. Check the loopback token file or daemon stdout.')
         return
       }
       setLoginError(`Login failed (${response.status}).`)
@@ -395,7 +440,7 @@ export function App({
     } finally {
       setLoginBusy(false)
     }
-  }, [loginTokenDraft])
+  }, [loginTokenDraft, operatorAuthMode])
 
   const logoutSession = useCallback(async () => {
     try {
@@ -409,6 +454,9 @@ export function App({
     } catch {
       // Best-effort — even if the server errors we still clear local state.
     }
+    window.localStorage.removeItem(LOOPBACK_TOKEN_STORAGE_KEY)
+    setWebMutationToken(null)
+    setCsrfToken(null)
     setSessionAuthenticated(false)
     setLoginDialogOpen(true)
   }, [])
@@ -764,6 +812,8 @@ export function App({
       }
       if (webMutationToken) {
         headers[WEB_AUTH_TOKEN_HEADER] = webMutationToken
+      } else if (csrfToken) {
+        headers[CSRF_HEADER_NAME] = csrfToken
       }
 
       const response = await fetch(endpoint, {
@@ -810,6 +860,7 @@ export function App({
     operationsEnabled,
     operatorAuthMode,
     runsView,
+    csrfToken,
     sessionAuthenticated,
     webMutationToken,
   ])
@@ -1161,8 +1212,9 @@ export function App({
               Sign in
             </h2>
             <p className="mt-1 text-xs text-slate-400">
-              Enter the <code className="font-mono">NIGHT_ORCH_WEB_AUTH_TOKEN</code> configured on the server.
-              The browser will keep you signed in via an HttpOnly cookie for 7 days.
+              {loopbackTokenHint
+                ? `Paste the loopback token from ${loopbackTokenHint.path ?? 'the daemon stdout'}.`
+                : 'Enter the NIGHT_ORCH_WEB_AUTH_TOKEN configured on the server.'}
             </p>
             <input
               type="password"

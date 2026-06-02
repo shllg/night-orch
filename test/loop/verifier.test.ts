@@ -15,8 +15,10 @@ vi.mock('../../src/utils/logger.js', () => ({
 }))
 
 import { execa } from 'execa'
+import { logger } from '../../src/utils/logger.js'
 
 const mockExeca = vi.mocked(execa)
+const mockLoggerWarn = vi.mocked(logger.warn)
 
 describe('runVerifyCommands', () => {
   beforeEach(() => {
@@ -85,6 +87,18 @@ describe('runVerifyCommands', () => {
 
     expect(results[0]!.passed).toBe(true)
     expect(results[0]!.stderr).toBe('some warning')
+  })
+
+  it('scrubs token-shaped stderr before logging failed verify commands', async () => {
+    const token = 'ghp_abcdefghijklmnopqrstuvwxyz1234567890'
+    mockExeca.mockResolvedValue({ exitCode: 1, stdout: '', stderr: `GITHUB_TOKEN=${token}` } as never)
+
+    const results = await runVerifyCommands('/tmp/wt', ['cmd'])
+
+    expect(results[0]!.stderr).toContain(token)
+    const warnContext = mockLoggerWarn.mock.calls[0]?.[0] as { stderrTail?: string } | undefined
+    expect(warnContext?.stderrTail).toContain('[REDACTED]')
+    expect(warnContext?.stderrTail).not.toContain(token)
   })
 
   it('splits command into binary and args', async () => {

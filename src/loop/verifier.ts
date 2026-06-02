@@ -2,6 +2,7 @@ import { execa } from 'execa'
 import type { VerifyResult } from './types.js'
 import { logger } from '../utils/logger.js'
 import { parseCommandSpec, type CommandSpec } from '../utils/command.js'
+import { sanitizeErrorMessage } from '../utils/sanitize-error.js'
 
 const VERIFY_TIMEOUT_MS = 60_000
 type VerifyCommandSpec = CommandSpec | { command: CommandSpec; timeoutSeconds: number }
@@ -38,7 +39,12 @@ export async function runVerifyCommands(
       if (passed) {
         logger.info({ command: commandLabel, durationMs }, 'Verify command passed')
       } else {
-        logger.warn({ command: commandLabel, exitCode: result.exitCode, durationMs, stderrTail: result.stderr.slice(-500) }, 'Verify command failed')
+        logger.warn({
+          command: commandLabel,
+          exitCode: result.exitCode,
+          durationMs,
+          stderrTail: sanitizeErrorMessage(result.stderr.slice(-500)),
+        }, 'Verify command failed')
       }
 
       results.push({
@@ -52,7 +58,11 @@ export async function runVerifyCommands(
     } catch (err) {
       const durationMs = Date.now() - start
       const stderr = String(err)
-      logger.warn({ command: commandLabel, durationMs, stderrTail: stderr.slice(-500) }, 'Verify command crashed')
+      logger.warn({
+        command: commandLabel,
+        durationMs,
+        stderrTail: sanitizeErrorMessage(stderr.slice(-500)),
+      }, 'Verify command crashed')
 
       results.push({
         command: commandLabel,

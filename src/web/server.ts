@@ -1,8 +1,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
-import { extname, resolve, dirname, sep } from 'node:path'
+import { extname, resolve, dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocket, WebSocketServer } from 'ws'
 import type { MCPDependencies } from '../mcp/server.js'
@@ -18,6 +18,7 @@ import {
 } from './snapshots.js'
 import {
   extractSessionCookie,
+  requireCsrfToken,
   verifySessionCookie,
 } from './auth.js'
 import type { RouteContext } from './routes/context.js'
@@ -67,6 +68,8 @@ export interface WebSecurityContext {
    * to success without checking cookies or headers. Intended for
    * deployments behind a trusted reverse proxy that handles auth. */
   authRequired: boolean
+  trustedProxy: boolean
+  loopbackTokenPath: string | null
 }
 
 export type WebSocketCommand =
@@ -83,6 +86,7 @@ const DEFAULT_SNAPSHOT_INTERVAL_MS = 3000
 const MUTATION_INTENT_HEADER = 'x-night-orch-intent'
 const MUTATION_INTENT_VALUE = 'mutate'
 const WEB_AUTH_TOKEN_HEADER = 'x-night-orch-web-token'
+let loopbackTokenPrinted = false
 const CONTENT_TYPES: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
   '.html': 'text/html; charset=utf-8',
@@ -592,6 +596,9 @@ export function validateMutationRequest(
     security.sessionSecret,
   )
   if (cookieSession !== null) {
+    if (!requireCsrfToken(req)) {
+      return { statusCode: 403, error: 'Invalid CSRF token' }
+    }
     return null
   }
 
@@ -651,15 +658,45 @@ function createWebSecurityContext(deps: MCPDependencies, options: WebServerOptio
     || bindHostName === '::1'
     || bindHostName === 'localhost'
     || bindHostName === ''
-  const operatorAuthMode = !isLoopback && !!operatorToken
+  const authRequired = options.requireAuth !== false
+  const operatorAuthMode = authRequired && !isLoopback && !!operatorToken
+  const generatedLoopbackToken = randomBytes(24).toString('base64url')
+  const webMutationToken = operatorAuthMode ? operatorToken : generatedLoopbackToken
+  const loopbackTokenPath = authRequired && !operatorAuthMode
+    ? writeLoopbackTokenSidecar(generatedLoopbackToken)
+    : null
+
+  if (authRequired && !operatorAuthMode && !loopbackTokenPrinted) {
+    process.stdout.write(
+      `\n[night-orch] Loopback web token (also at ${loopbackTokenPath ?? 'sidecar file'}):\n  ${generatedLoopbackToken}\n\n`,
+    )
+    loopbackTokenPrinted = true
+  }
 
   return {
     allowedHostnames: resolveAllowedHostnames(options.host, options.allowedHosts ?? []),
-    webMutationToken: operatorAuthMode ? operatorToken : randomBytes(24).toString('base64url'),
+    webMutationToken,
     mcpMutationAuthToken: resolveMcpMutationAuthToken(deps),
     operatorAuthMode,
     sessionSecret: randomBytes(32),
-    authRequired: options.requireAuth !== false,
+    authRequired,
+    trustedProxy: deps.config.web?.trustedProxy === true,
+    loopbackTokenPath,
+  }
+}
+
+function writeLoopbackTokenSidecar(token: string): string | null {
+  const runtimeDir = process.env['XDG_RUNTIME_DIR'] ?? '/tmp'
+  try {
+    mkdirSync(runtimeDir, { recursive: true, mode: 0o700 })
+    const tokenPath = join(runtimeDir, 'night-orch-web.token')
+    writeFileSync(tokenPath, token, { mode: 0o600 })
+    chmodSync(tokenPath, 0o600)
+    logger.info({ path: tokenPath }, 'Loopback web token written to sidecar file (mode 0600)')
+    return tokenPath
+  } catch (err) {
+    logger.warn({ err }, 'Failed to write loopback token sidecar file')
+    return null
   }
 }
 
@@ -755,7 +792,7 @@ function resolveMcpMutationAuthToken(deps: MCPDependencies): string | undefined 
 function resolveAgentSessionWorkspacePath(deps: MCPDependencies): string {
   const configuredRoot = deps.config.storage.worktreeRoot
   if (configuredRoot.trim().length === 0) {
-    return process.cwd()
+    throw new Error('storage.worktreeRoot must be configured before using web agent sessions')
   }
   return resolve(configuredRoot)
 }

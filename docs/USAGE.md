@@ -78,6 +78,11 @@ The web UI at `127.0.0.1:3200` is loopback-only by default. There
 are three deployment shapes for remote access, in increasing order
 of operator auth involvement:
 
+On loopback, the daemon writes a one-time web token to
+`$XDG_RUNTIME_DIR/night-orch-web.token` with mode `0600` and prints it
+once on startup. Paste that token into the browser sign-in dialog; the
+session response intentionally does not expose the token in JSON.
+
 **Option 1 — Trust the reverse proxy (simplest; Caddy, Tailscale serve, nginx)**
 
 If you're already running a trusted proxy in front of night-orch
@@ -119,12 +124,12 @@ night-orch web --host 0.0.0.0 --port 3200 \
 ```
 
 On first visit the browser shows a sign-in dialog; paste the token
-and the server replies with an `HttpOnly SameSite=Lax` session
-cookie that lasts 1 year. **The signing secret is regenerated on
+and the server replies with an `HttpOnly SameSite=Strict` session
+cookie that lasts 8 hours. **The signing secret is regenerated on
 every restart**, so a stolen cookie stops working as soon as the
-daemon recycles — the 1-year Max-Age exists so mobile users on the
-same daemon uptime aren't re-prompted every week, not as an
-infinite grant.
+daemon recycles. Mutating browser requests also use a double-submit
+CSRF cookie/header pair; non-browser scripts can avoid cookie+CSRF
+handling by sending the operator token as `x-night-orch-web-token`.
 
 ### Web Push notifications (overnight alerts to your phone)
 

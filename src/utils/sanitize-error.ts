@@ -41,6 +41,8 @@ const URL_QUERY_TOKEN = /([?&](?:access_?token|refresh_?token|api_?key|apikey|to
 const BARE_TOKEN_SHAPES: RegExp[] = [
   /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/g,
   /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
+  // Anthropic API keys
+  /\bsk-ant-[A-Za-z0-9_-]{10,}\b/g,
   // Slack tokens
   /\bxox[aboprs]-[A-Za-z0-9-]{10,}\b/g,
   // AWS access keys

@@ -123,6 +123,7 @@ Update surfaces:
 | `metrics` | object | no | object with defaults | Prometheus exporter config. |
 | `observability` | object | no | object with defaults | Live agent event streaming/persistence settings. |
 | `mcp` | object | no | object with defaults | MCP server config for run/mcp commands. |
+| `web` | object | no | object with defaults | Web UI security and proxy config. |
 | `commentCommands` | object | no | object with defaults | Issue comment command processing config. |
 | `repos` | array | yes | none | At least one repo is required. |
 | `workflows` | record | no | `{}` | Named workflow definitions for custom pipelines. |
@@ -524,6 +525,7 @@ workerProfiles:
 | `runtimeWrapper` | string or `null` | no | `null` | Wrapper command prepended before `command` (for sandbox wrappers, etc.). |
 | `env` | record string->string | no | `{}` | Extra env vars for worker process; blacklist still applies. |
 | `sandbox` | object | no | `{ type: "host" }` | Worker execution sandbox. Use `host` for current host execution, `docker` or `podman` for container isolation. |
+| `allowAgentSessionBypass` | boolean | no | `false` | Allow the web agent-session endpoint to run this profile with unsafe Claude permission modes such as `bypassPermissions` or `acceptEdits`. Keep this `false` unless the profile is intentionally exposed to trusted operators only. |
 
 Worker `PATH` is normalized at runtime: if missing, `~/.local/bin`, `~/.local/share/pnpm`,
 `~/.local/share/mise/shims`, `/usr/local/bin`, `/usr/bin`, and `/bin` are appended.
@@ -669,6 +671,18 @@ Client-side `.mcp.json`:
 ```
 
 Non-loopback binding **without** `authTokenEnv` is rejected at startup — exposing mutation tools to an unauthenticated listener is never a supported configuration.
+
+## `web`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `trustedProxy` | boolean | `false` | When `true`, the web auth routes trust `X-Forwarded-Proto: https` from your reverse proxy and emit `Secure` `__Host-` cookies. Enable only when night-orch is reachable only through a proxy you control. |
+
+### Web Auth Notes
+
+Loopback web auth writes the generated mutation token to `$XDG_RUNTIME_DIR/night-orch-web.token` with mode `0600` and also prints it once at startup. `/api/session` returns only a hint to that sidecar path; it does not return the token in the response body. Paste that token into the browser login dialog, or set `NIGHT_ORCH_WEB_AUTH_TOKEN` and bind with operator auth for remote access.
+
+Operator auth sessions use an `HttpOnly` `SameSite=Strict` session cookie with an 8-hour max age. Cookie-authenticated mutation requests must include a matching double-submit CSRF header (`x-csrf-token`) copied from the readable `norch_csrf` cookie, or `__Host-night-orch-csrf` when secure proxy cookies are enabled. Browser clients do this automatically; scripts can avoid cookie+CSRF handling by sending the configured bearer token with `x-night-orch-web-token`.
 
 ## `commentCommands`
 

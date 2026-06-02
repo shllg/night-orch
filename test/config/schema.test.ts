@@ -106,6 +106,7 @@ describe('ConfigSchema', () => {
       expect(result.data.security.maxDailyCostUsd).toBe(50)
       expect(result.data.cost.model).toBe('pay-per-use')
       expect(result.data.metrics.host).toBe('0.0.0.0')
+      expect(result.data.web.trustedProxy).toBe(false)
       expect(result.data.autoResolveConflicts.enabled).toBe(true)
       expect(result.data.autoResolveConflicts.maxAttempts).toBe(2)
       expect(result.data.autoResolveConflicts.maxFiles).toBe(5)
@@ -339,6 +340,7 @@ describe('ConfigSchema', () => {
         mounts: [],
         env: {},
       })
+      expect(result.data.workerProfiles['claude-default']?.allowAgentSessionBypass).toBe(false)
     }
   })
 

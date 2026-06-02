@@ -4,8 +4,10 @@ import type { RouteHandler } from './context.js'
 import { writeJson, readJsonBody } from '../server.js'
 import {
   SESSION_COOKIE_NAME,
-  buildClearSessionCookie,
+  buildClearAuthCookies,
+  buildCsrfCookie,
   buildSessionCookie,
+  createCsrfToken,
   extractSessionCookie,
   verifySessionCookie,
 } from '../auth.js'
@@ -61,7 +63,12 @@ export const handleAuthRoutes: RouteHandler = async (
       return true
     }
 
-    res.setHeader('Set-Cookie', buildSessionCookie(ctx.security.sessionSecret))
+    const secureCookie = isSecureCookieRequest(req, ctx.security.trustedProxy)
+    const csrfToken = createCsrfToken()
+    res.setHeader('Set-Cookie', [
+      buildSessionCookie(ctx.security.sessionSecret, { secure: secureCookie }),
+      buildCsrfCookie(csrfToken, { secure: secureCookie }),
+    ])
     writeJson(res, 204, null)
     return true
   }
@@ -69,7 +76,7 @@ export const handleAuthRoutes: RouteHandler = async (
   if (method === 'POST' && pathname === '/api/auth/logout') {
     if (!enforceBootstrapGuards(req, res)) return true
 
-    res.setHeader('Set-Cookie', buildClearSessionCookie())
+    res.setHeader('Set-Cookie', buildClearAuthCookies())
     writeJson(res, 204, null)
     return true
   }
@@ -98,6 +105,15 @@ function getSingleHeaderValue(value: string | string[] | undefined): string | nu
     return trimmed.length > 0 ? trimmed : null
   }
   return null
+}
+
+function isSecureCookieRequest(req: IncomingMessage, trustedProxy: boolean): boolean {
+  if (trustedProxy) {
+    const forwardedProto = getSingleHeaderValue(req.headers['x-forwarded-proto'])
+    if (forwardedProto?.toLowerCase() === 'https') return true
+  }
+
+  return (req.socket as { encrypted?: boolean }).encrypted === true
 }
 
 /**
