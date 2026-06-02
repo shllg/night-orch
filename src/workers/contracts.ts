@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { CoderOutput, PlannerOutput, ReviewerOutput } from './types.js'
+import type { CoderOutput, PlannerOutput, ReviewerOutput, VerifyResult } from './types.js'
 
 export const PlannerOutputContractSchema: z.ZodType<PlannerOutput> = z.object({
   objective: z.string(),
@@ -37,3 +37,17 @@ export const ReviewerOutputContractSchema: z.ZodType<ReviewerOutput> = z.object(
     noBlockingFindings: z.boolean(),
   }),
 })
+
+export const VerifyResultContractSchema: z.ZodType<VerifyResult> = z.object({
+  command: z.string(),
+  exitCode: z.number(),
+  stdout: z.string(),
+  stderr: z.string(),
+  durationMs: z.number(),
+  passed: z.boolean(),
+  required: z.boolean().optional(),
+  stageId: z.string().nullable().optional(),
+  onFailure: z.enum(['block', 'iterate', 'warn']).optional(),
+})
+
+export const VerifyResultsContractSchema: z.ZodType<VerifyResult[]> = z.array(VerifyResultContractSchema)

@@ -395,6 +395,28 @@ describe('Checkpoint', () => {
       ])
     })
 
+    it('ignores review phase artifacts whose persisted JSON no longer matches reviewer contracts', () => {
+      checkpoint.phaseCompleted('run-test-1', 'review', {
+        reviewerKey: 'review',
+        reviewResults: {
+          review: {
+            verdict: 'APPROVED',
+            summary: 'missing findings and definition of done',
+          },
+        },
+        reviewResult: {
+          verdict: 'CHANGES_REQUIRED',
+          summary: 'missing findings and definition of done',
+        },
+      })
+
+      const resumed = checkpoint.resumeFromCheckpoint('run-test-1', makeBaseCtx())
+
+      expect(resumed).not.toBeNull()
+      expect(resumed!.reviewResults).toEqual({})
+      expect(resumed!.reviewFindings).toEqual([])
+    })
+
     it('preserves base context fields not in DB', () => {
       checkpoint.phaseCompleted('run-test-1', 'plan', { plan: { objective: 'Fix' } })
 

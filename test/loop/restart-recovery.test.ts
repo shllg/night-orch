@@ -141,6 +141,23 @@ describe('Checkpoint.resumeFromCheckpoint — restart recovery from handoffs', (
     expect(metrics.incRecoveryFromHandoff).not.toHaveBeenCalled()
     expect(readRecoveryEvents(db, runId).length).toBe(0)
   })
+
+  it('ignores handoffs whose persisted JSON no longer matches worker contracts', () => {
+    seedInvalidHandoffs(db, runId)
+    db.prepare('UPDATE runs SET phase_data = NULL WHERE id = ?').run(runId)
+
+    const checkpoint = new Checkpoint(db, undefined, metrics)
+    const resumed = checkpoint.resumeFromCheckpoint(runId, makeBaseCtx(runId))
+
+    expect(resumed).not.toBeNull()
+    expect(resumed!.plan).toBeNull()
+    expect(resumed!.codeResult).toBeNull()
+    expect(resumed!.verifyResults).toEqual([])
+    expect(resumed!.reviewResults).toEqual({})
+    expect(resumed!.reviewFindings).toEqual([])
+    expect(metrics.incRecoveryFromHandoff).not.toHaveBeenCalled()
+    expect(readRecoveryEvents(db, runId).length).toBe(0)
+  })
 })
 
 function seedHandoffs(db: Database.Database, runId: string): void {
@@ -194,6 +211,56 @@ function seedHandoffs(db: Database.Database, runId: string): void {
     summary: review.summary,
     contentMd: review.contentMd,
     contentJson: review.contentJson,
+  })
+}
+
+function seedInvalidHandoffs(db: Database.Database, runId: string): void {
+  recordHandoff(db, {
+    runId,
+    attemptId: runId,
+    stepId: 'plan',
+    fromRole: 'planner',
+    toRole: 'coder',
+    kind: 'plan',
+    summary: 'Plan',
+    contentMd: '## Plan',
+    contentJson: { objective: 'missing required fields' },
+  })
+
+  recordHandoff(db, {
+    runId,
+    attemptId: runId,
+    stepId: 'code',
+    fromRole: 'coder',
+    toRole: 'reviewer',
+    kind: 'code-summary',
+    summary: 'Code',
+    contentMd: '## Code',
+    contentJson: { summary: 'missing required fields' },
+  })
+
+  recordHandoff(db, {
+    runId,
+    attemptId: runId,
+    stepId: 'verify',
+    fromRole: null,
+    toRole: 'reviewer',
+    kind: 'verify-summary',
+    summary: 'Verify',
+    contentMd: '## Verify',
+    contentJson: [{ command: 'pnpm test', passed: true }],
+  })
+
+  recordHandoff(db, {
+    runId,
+    attemptId: runId,
+    stepId: 'review',
+    fromRole: 'reviewer',
+    toRole: 'coder',
+    kind: 'review-findings',
+    summary: 'Review',
+    contentMd: '## Review',
+    contentJson: { verdict: 'APPROVED', summary: 'missing required fields' },
   })
 }
 

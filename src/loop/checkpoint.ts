@@ -17,6 +17,13 @@ import {
 import { recordPhase, updateContext } from './context.js'
 import { LEGACY_BLOCK_REASON_VALUES } from './state.js'
 import { mergeReviewFindings, sourceReviewFindings } from './review-findings.js'
+import {
+  CoderOutputContractSchema,
+  PlannerOutputContractSchema,
+  ReviewerOutputContractSchema,
+  VerifyResultsContractSchema,
+} from '../workers/contracts.js'
+import type { z } from 'zod'
 
 export interface CheckpointArtifactEvent {
   runId: string
@@ -377,8 +384,9 @@ export class Checkpoint {
     const verifyEmptyDiffRetries = typeof verifyArtifacts?.emptyDiffRetries === 'number'
       ? verifyArtifacts.emptyDiffRetries
       : baseCtx.emptyDiffRetries
-    const reviewState = hydrateReviewState(phaseData, baseCtx)
+    const reviewState = hydrateReviewState(runId, phaseData, baseCtx)
     const handoffRecovery = recoverFromHandoffs(
+      runId,
       listHandoffs(this.db, runId),
       {
         plan: (planArtifacts?.plan as PlannerOutput) ?? baseCtx.plan,
@@ -535,6 +543,7 @@ export class Checkpoint {
 }
 
 function hydrateReviewState(
+  runId: string,
   phaseData: Record<string, unknown>,
   baseCtx: RunContext,
 ): {
@@ -550,8 +559,13 @@ function hydrateReviewState(
     if (isRecord(artifactResults)) {
       for (const [key, value] of Object.entries(artifactResults)) {
         if (!isRecord(value)) continue
-        const review = value as unknown as ReviewerOutput
-        reviewResults[key] = review
+        const review = parsePersistedContract(ReviewerOutputContractSchema, value, {
+          runId,
+          kind: 'reviewResults',
+          phase,
+          stepId: key,
+        })
+        if (review) reviewResults[key] = review
       }
     }
 
@@ -560,8 +574,13 @@ function hydrateReviewState(
       const reviewerKey = typeof rawArtifacts['reviewerKey'] === 'string'
         ? rawArtifacts['reviewerKey']
         : phase
-      const review = legacyReview as unknown as ReviewerOutput
-      reviewResults[reviewerKey] = review
+      const review = parsePersistedContract(ReviewerOutputContractSchema, legacyReview, {
+        runId,
+        kind: 'reviewResult',
+        phase,
+        stepId: reviewerKey,
+      })
+      if (review) reviewResults[reviewerKey] = review
     }
   }
 
@@ -595,6 +614,7 @@ interface HandoffRecoveryResult extends HandoffRecoveryState {
 }
 
 function recoverFromHandoffs(
+  runId: string,
   handoffs: AgentHandoff[],
   state: HandoffRecoveryState,
 ): HandoffRecoveryResult {
@@ -608,24 +628,39 @@ function recoverFromHandoffs(
   if (!plan) {
     const handoff = latestHandoff(handoffs, 'plan')
     if (isRecord(handoff?.contentJson)) {
-      plan = handoff.contentJson as unknown as PlannerOutput
-      recoveredKinds.push('plan')
+      plan = parsePersistedContract(PlannerOutputContractSchema, handoff.contentJson, {
+        runId,
+        kind: handoff.kind,
+        stepId: handoff.stepId,
+      })
+      if (plan) recoveredKinds.push('plan')
     }
   }
 
   if (!codeResult) {
     const handoff = latestHandoff(handoffs, 'code-summary')
     if (isRecord(handoff?.contentJson)) {
-      codeResult = handoff.contentJson as unknown as CoderOutput
-      recoveredKinds.push('code-summary')
+      codeResult = parsePersistedContract(CoderOutputContractSchema, handoff.contentJson, {
+        runId,
+        kind: handoff.kind,
+        stepId: handoff.stepId,
+      })
+      if (codeResult) recoveredKinds.push('code-summary')
     }
   }
 
   if (verifyResults.length === 0) {
     const handoff = latestHandoff(handoffs, 'verify-summary')
     if (Array.isArray(handoff?.contentJson)) {
-      verifyResults = handoff.contentJson as VerifyResult[]
-      recoveredKinds.push('verify-summary')
+      const parsedVerifyResults = parsePersistedContract(VerifyResultsContractSchema, handoff.contentJson, {
+        runId,
+        kind: handoff.kind,
+        stepId: handoff.stepId,
+      })
+      if (parsedVerifyResults) {
+        verifyResults = parsedVerifyResults
+        recoveredKinds.push('verify-summary')
+      }
     }
   }
 
@@ -634,8 +669,12 @@ function recoverFromHandoffs(
     for (const handoff of handoffs) {
       if (handoff.kind !== 'review-findings') continue
       if (!isRecord(handoff.contentJson)) continue
-      const review = handoff.contentJson as unknown as ReviewerOutput
-      recoveredReviews[handoff.stepId] = review
+      const review = parsePersistedContract(ReviewerOutputContractSchema, handoff.contentJson, {
+        runId,
+        kind: handoff.kind,
+        stepId: handoff.stepId,
+      })
+      if (review) recoveredReviews[handoff.stepId] = review
     }
     if (Object.keys(recoveredReviews).length > 0) {
       const hydratedFindings = Object.entries(recoveredReviews).flatMap(([sourceStepId, result]) =>
@@ -662,6 +701,32 @@ function latestHandoff(handoffs: AgentHandoff[], kind: AgentHandoff['kind']): Ag
     const handoff = handoffs[index]
     if (handoff?.kind === kind) return handoff
   }
+  return null
+}
+
+function parsePersistedContract<T>(
+  schema: z.ZodType<T>,
+  value: unknown,
+  context: {
+    runId: string
+    kind: string
+    phase?: string
+    stepId?: string
+  },
+): T | null {
+  const result = schema.safeParse(value)
+  if (result.success) return value as T
+
+  logger.warn(
+    {
+      ...context,
+      validationErrors: result.error.issues.map((issue) => ({
+        path: issue.path.join('.'),
+        message: issue.message,
+      })),
+    },
+    'Ignoring invalid persisted checkpoint artifact',
+  )
   return null
 }
 
