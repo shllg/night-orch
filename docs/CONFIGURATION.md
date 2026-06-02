@@ -61,7 +61,7 @@ Runtime settings registry scope:
 
 Registered keys are visible via `night-orch settings list` (or Web/TUI Settings/MCP `night-orch-list-settings`). Current key groups:
 
-- `github`: `tokenEnv`, `apiBaseUrl`, `pollIntervalSeconds`, `appMentions`
+- `github`: `tokenEnv`, `apiBaseUrl`, `pollIntervalSeconds`, `pollConcurrency`, `appMentions`
 - `storage`: `dbPath` (read-only), `worktreeRoot`, `logsRoot`, `autoCleanup.enabled`, `autoCleanup.intervalMinutes`, `retention.worktreeAgeDays`, `retention.detailDays`, `retention.archiveDays`
 - `notifications`: `channels`, `events.onRunStarted`, `events.onBlocked`, `events.onPrReady`, `events.onPrUpdated`, `events.onError`, `events.onRetryExhausted`
 - `loop`: `maxReviewIterations`, `maxTotalAgentPasses`, `maxAttemptChainLength`, `maxRunTokens`, `maxIssueTokens`, `maxDailyTokens`, `maxRunWallClockMinutes`, `stopOnPlannerFailure`, `requireVerificationPass`, `reviewApprovalKeyword`, `reviewNeedsChangesKeyword`, `blockOnAmbiguousReview`, `maxAutoRetries`, `maxEmptyDiffRetries`, `maxConsecutiveBlocks`, `decompose`, `maxSubtasks`, `maxConcurrentSubtasks`
@@ -135,6 +135,7 @@ Update surfaces:
 | `tokenEnv` | string | yes | none | Env var name holding GitHub token. Literal token prefixes (`ghp_`, `ghs_`, `github_pat_`) are rejected. |
 | `apiBaseUrl` | URL string | no | `https://api.github.com` | Default base URL for GitHub repos. |
 | `pollIntervalSeconds` | positive number | no | `300` | Poll interval used by `run` loop. |
+| `pollConcurrency` | positive integer | no | `4` | Number of repos polled in parallel per cycle. Valid range: `1`-`32`. |
 | `appMentions` | record | no | `{}` | Mention templates keyed by mention alias (`claude`, `codex`, etc.). |
 
 ### `github.appMentions.<key>`
@@ -674,7 +675,7 @@ Non-loopback binding **without** `authTokenEnv` is rejected at startup — expos
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `enabled` | boolean | `true` | Enable processing of `/orch` commands in issue comments. |
-| `requireCollaborator` | boolean | `true` | Only repo collaborators can use comment commands. Set to `false` only for private repos where all commenters are trusted. |
+| `requireCollaborator` | boolean | `true` | Only repo collaborators can use comment commands. When `commentCommands` is omitted, the runtime still treats this as `true`. Set to `false` only for private repos where all commenters are trusted; explicit opt-out logs a warning each cycle. |
 
 Supported commands (posted as issue comments):
 - `/orch retry` — start a fresh retry from the latest base branch

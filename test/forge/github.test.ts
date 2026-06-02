@@ -95,49 +95,75 @@ const mockPullsList = vi.fn()
 const mockPullsGet = vi.fn()
 const mockRateLimitGet = vi.fn()
 const mockReposGetCollaboratorPermissionLevel = vi.fn()
+const mockOctokitConstructedOptions: unknown[] = []
 
 vi.mock('@octokit/rest', () => {
+  class MockOctokit {
+    static plugin(..._plugins: unknown[]) {
+      return MockOctokit
+    }
+
+    paginate = mockPaginate
+    rest = {
+      issues: {
+        listForRepo: mockIssuesListForRepo,
+        get: mockIssuesGet,
+        addLabels: mockIssuesAddLabels,
+        removeLabel: mockIssuesRemoveLabel,
+        createComment: mockIssuesCreateComment,
+      },
+      users: {
+        getAuthenticated: mockUsersGetAuthenticated,
+      },
+      pulls: {
+        create: mockPullsCreate,
+        update: mockPullsUpdate,
+        list: mockPullsList,
+        get: mockPullsGet,
+      },
+      repos: {
+        getCollaboratorPermissionLevel: mockReposGetCollaboratorPermissionLevel,
+      },
+      rateLimit: {
+        get: mockRateLimitGet,
+      },
+    }
+
+    constructor(options?: unknown) {
+      mockOctokitConstructedOptions.push(options)
+    }
+  }
+
   return {
-    Octokit: class MockOctokit {
-      paginate = mockPaginate
-      rest = {
-        issues: {
-          listForRepo: mockIssuesListForRepo,
-          get: mockIssuesGet,
-          addLabels: mockIssuesAddLabels,
-          removeLabel: mockIssuesRemoveLabel,
-          createComment: mockIssuesCreateComment,
-        },
-        users: {
-          getAuthenticated: mockUsersGetAuthenticated,
-        },
-        pulls: {
-          create: mockPullsCreate,
-          update: mockPullsUpdate,
-          list: mockPullsList,
-          get: mockPullsGet,
-        },
-        repos: {
-          getCollaboratorPermissionLevel: mockReposGetCollaboratorPermissionLevel,
-        },
-        rateLimit: {
-          get: mockRateLimitGet,
-        },
-      }
-    },
+    Octokit: MockOctokit,
   }
 })
+
+vi.mock('@octokit/plugin-throttling', () => ({ throttling: {} }))
+vi.mock('@octokit/plugin-retry', () => ({ retry: {} }))
 
 describe('GitHubForgeAdapter', () => {
   let adapter: GitHubForgeAdapter
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mockOctokitConstructedOptions.length = 0
     // Default rate limit to be healthy
     mockRateLimitGet.mockResolvedValue({
       data: { resources: { core: { remaining: 5000, limit: 5000, reset: Date.now() / 1000 + 3600 } } },
     })
     adapter = new GitHubForgeAdapter('fake-token')
+  })
+
+  it('passes retry and throttle config to Octokit', () => {
+    const options = mockOctokitConstructedOptions.at(-1) as {
+      throttle?: { onRateLimit?: unknown; onSecondaryRateLimit?: unknown }
+      retry?: { doNotRetry?: number[] }
+    }
+
+    expect(options.throttle?.onRateLimit).toEqual(expect.any(Function))
+    expect(options.throttle?.onSecondaryRateLimit).toEqual(expect.any(Function))
+    expect(options.retry?.doNotRetry).toEqual([400, 401, 403, 404, 422])
   })
 
   describe('getIssue', () => {

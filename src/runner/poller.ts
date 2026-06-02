@@ -21,6 +21,7 @@ import { runPreflightDriftCheck } from '../loop/preflight.js'
 import { processRepoReactions } from '../poller/reaction-processor.js'
 import { FileLoopEngine } from '../fileloop/engine.js'
 import { createOrchestrationCache, type OrchestrationCache } from './orchestration-cache.js'
+import { mapWithConcurrency } from '../utils/concurrency.js'
 
 /**
  * R6 wiring-only poller.
@@ -102,26 +103,26 @@ export async function pollOnce(
       : config.repos
     const usedPortsInPass: number[] = []
 
-    const repoResults = await Promise.all(
-      reposToProcess.map((repoConfig): Promise<PollResult> =>
-        pollRepo({
-          config,
-          db,
-          repoConfig,
-          runManager,
-          leaseManager,
-          issueManager,
-          worktreeManager,
-          fileLoopEngine,
-          costTracker,
-          observability,
-          metrics,
-          dryRun,
-          targetIssue,
-          usedPortsInPass,
-          cache: orchestrationCache,
-        }),
-      ),
+    const repoResults = await mapWithConcurrency(
+      reposToProcess,
+      config.github.pollConcurrency,
+      (repoConfig): Promise<PollResult> => pollRepo({
+        config,
+        db,
+        repoConfig,
+        runManager,
+        leaseManager,
+        issueManager,
+        worktreeManager,
+        fileLoopEngine,
+        costTracker,
+        observability,
+        metrics,
+        dryRun,
+        targetIssue,
+        usedPortsInPass,
+        cache: orchestrationCache,
+      }),
     )
 
     for (const repoResult of repoResults) {

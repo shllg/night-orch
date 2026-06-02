@@ -87,7 +87,7 @@ export async function fanoutRebaseAfterMerge(deps: FanoutDeps): Promise<FanoutRe
   const queueRebase = deps.queueRebase ?? defaultQueueRebase
   const autoRebase = repoConfig.autoRebaseOnMerge
 
-  if (!autoRebase.enabled) {
+  if (!autoRebase?.enabled) {
     return { queued: 0, skipped: 0, failures: 0, alreadyFannedOut: false, skippedDisabled: true }
   }
 

@@ -103,6 +103,8 @@ YAML config validated by Zod schemas (`schema.ts`). The loader (`loader.ts`) rea
 ### Forge (`src/forge/`)
 Abstraction layer over GitHub and Forgejo APIs. `types.ts` defines the `ForgeAdapter` interface; `github.ts` and `forgejo.ts` implement it. `factory.ts` selects the right adapter based on repo config. Tokens are read at adapter creation and never stored in config or context.
 
+- The GitHub adapter uses Octokit's throttle and retry plugins to absorb transient 429/5xx responses. Primary rate-limit retries are capped at two attempts; secondary rate limits are retried and logged.
+
 > **Watch out:** All forge API calls must go through `ForgeAdapter`. Direct Octokit usage outside `forge/github.ts` is forbidden — it bypasses auth handling and breaks the Forgejo abstraction.
 
 ### Discovery (`src/discovery/`)

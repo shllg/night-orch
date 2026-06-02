@@ -606,7 +606,7 @@ Night-orch distinguishes its own comments from yours via an HTML marker (`<!-- n
 ```yaml
 commentCommands:
   enabled: true              # default: true
-  requireCollaborator: false  # default: false — if true, only collaborators can use commands
+  requireCollaborator: true   # default: true; explicit false logs a warning each cycle
 ```
 
 ---

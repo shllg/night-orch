@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
 import { describe, expect, it, vi } from 'vitest'
+import type { Config, RepoConfig } from '../../src/config/schema.js'
 import { initDatabase } from '../../src/state/db.js'
 import { RebaseFanoutManager } from '../../src/state/rebase-fanouts.js'
 import { RunManager, type RunStatus } from '../../src/state/runs.js'
@@ -66,6 +67,58 @@ describe('fanoutRebaseAfterMerge', () => {
     })
 
     expect(result.skippedDisabled).toBe(true)
+    expect(queueRebase).not.toHaveBeenCalled()
+    expect(getPR).not.toHaveBeenCalled()
+  })
+
+  it('returns skippedDisabled when repoConfig.autoRebaseOnMerge is undefined', async () => {
+    const db = initDatabase(':memory:')
+    const queueRebase = vi.fn()
+    const getPR = vi.fn()
+    const forge = makeForge({ getPR })
+    const repoConfig = {
+      repo: 'org/repo',
+      forge: 'github',
+      localPath: '/tmp/repo',
+      baseBranch: 'main',
+      branchPrefix: 'orch',
+      labels: {
+        ready: ['no:ready'],
+        running: 'no:running',
+        blocked: ['no:blocked'],
+        reviewReady: 'no:review-ready',
+        error: 'no:error',
+        retry: 'no:retry',
+      },
+      defaults: {
+        planner: 'claude',
+        coder: 'claude',
+        reviewer: 'claude',
+        prMentions: [],
+      },
+      verify: [],
+      selectors: { includeLabelsAny: [], excludeLabelsAny: [] },
+      agents: {},
+    } as unknown as RepoConfig
+
+    const result = await fanoutRebaseAfterMerge({
+      db,
+      repoConfig,
+      forge,
+      config: { repos: [repoConfig] } as unknown as Config,
+      sourcePrNumber: 42,
+      baseBranch: 'main',
+      botUser: 'bot',
+      queueRebase,
+    })
+
+    expect(result).toEqual({
+      queued: 0,
+      skipped: 0,
+      failures: 0,
+      alreadyFannedOut: false,
+      skippedDisabled: true,
+    })
     expect(queueRebase).not.toHaveBeenCalled()
     expect(getPR).not.toHaveBeenCalled()
   })

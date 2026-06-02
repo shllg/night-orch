@@ -1,4 +1,6 @@
 import { Octokit } from '@octokit/rest'
+import { retry } from '@octokit/plugin-retry'
+import { throttling } from '@octokit/plugin-throttling'
 import type { RepoConfig } from '../config/schema.js'
 import type {
   ForgeAdapter, ForgeIssue, ForgePR, PRParams, ForgeAuthInfo,
@@ -8,6 +10,8 @@ import type {
 import { getDiscoveryIncludeLabels } from '../labels/config.js'
 import { logger } from '../utils/logger.js'
 
+const ResilientOctokit = Octokit.plugin(throttling, retry)
+
 function splitRepo(repo: string): { owner: string; repo: string } {
   const [owner, name] = repo.split('/')
   if (!owner || !name) throw new Error(`Invalid repo format: ${repo} (expected owner/name)`)
@@ -15,12 +19,29 @@ function splitRepo(repo: string): { owner: string; repo: string } {
 }
 
 export class GitHubForgeAdapter implements ForgeAdapter {
-  private octokit: Octokit
+  private octokit: InstanceType<typeof ResilientOctokit>
 
   constructor(token: string, baseUrl?: string) {
-    this.octokit = new Octokit({
+    this.octokit = new ResilientOctokit({
       auth: token,
       baseUrl: baseUrl ?? 'https://api.github.com',
+      throttle: {
+        onRateLimit: (retryAfter, options, _octokit, retryCount) => {
+          logger.warn(
+            { retryAfter, method: options.method, url: options.url, retryCount },
+            'GitHub rate limit hit',
+          )
+          return retryCount < 2
+        },
+        onSecondaryRateLimit: (retryAfter, options) => {
+          logger.warn(
+            { retryAfter, method: options.method, url: options.url },
+            'GitHub secondary rate limit hit',
+          )
+          return true
+        },
+      },
+      retry: { doNotRetry: [400, 401, 403, 404, 422] },
     })
   }
 

@@ -667,6 +667,7 @@ export const ConfigSchema = z.object({
     ),
     apiBaseUrl: z.string().url().default('https://api.github.com'),
     pollIntervalSeconds: z.number().positive().default(300),
+    pollConcurrency: z.number().int().positive().max(32).default(4),
     appMentions: z.record(AppMentionSchema).default({}),
   }),
 

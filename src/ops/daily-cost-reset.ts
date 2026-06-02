@@ -4,6 +4,7 @@ import type { ForgeAdapter } from '../forge/types.js'
 import { CostTracker } from '../loop/cost.js'
 import { scanCostBlockedRuns } from './cost-resume.js'
 import { logger } from '../utils/logger.js'
+import { utcDayKey } from '../utils/time.js'
 
 export interface DailyCostResetResult {
   date: string
@@ -26,7 +27,7 @@ export async function resetDailyCostsAndResume(
   config: Config,
   forge: ForgeAdapter,
 ): Promise<DailyCostResetResult> {
-  const date = new Date().toISOString().split('T')[0] ?? ''
+  const date = utcDayKey()
   const costTracker = new CostTracker(db)
 
   // Reset daily cost counters

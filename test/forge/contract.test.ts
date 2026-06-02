@@ -149,38 +149,47 @@ const mockPullsMerge = vi.fn()
 const mockRateLimitGet = vi.fn()
 
 vi.mock('@octokit/rest', () => {
+  class MockOctokit {
+    static plugin(..._plugins: unknown[]) {
+      return MockOctokit
+    }
+
+    paginate = mockPaginate
+    rest = {
+      issues: {
+        listForRepo: mockIssuesListForRepo,
+        get: mockIssuesGet,
+        addLabels: mockIssuesAddLabels,
+        removeLabel: mockIssuesRemoveLabel,
+        createComment: mockIssuesCreateComment,
+        listComments: mockIssuesListComments,
+        updateComment: mockIssuesUpdateComment,
+      },
+      users: {
+        getAuthenticated: mockUsersGetAuthenticated,
+      },
+      pulls: {
+        create: mockPullsCreate,
+        update: mockPullsUpdate,
+        list: mockPullsList,
+        get: mockPullsGet,
+        listReviews: mockPullsListReviews,
+        listReviewComments: mockPullsListReviewComments,
+        merge: mockPullsMerge,
+      },
+      rateLimit: {
+        get: mockRateLimitGet,
+      },
+    }
+  }
+
   return {
-    Octokit: class MockOctokit {
-      paginate = mockPaginate
-      rest = {
-        issues: {
-          listForRepo: mockIssuesListForRepo,
-          get: mockIssuesGet,
-          addLabels: mockIssuesAddLabels,
-          removeLabel: mockIssuesRemoveLabel,
-          createComment: mockIssuesCreateComment,
-          listComments: mockIssuesListComments,
-          updateComment: mockIssuesUpdateComment,
-        },
-        users: {
-          getAuthenticated: mockUsersGetAuthenticated,
-        },
-        pulls: {
-          create: mockPullsCreate,
-          update: mockPullsUpdate,
-          list: mockPullsList,
-          get: mockPullsGet,
-          listReviews: mockPullsListReviews,
-          listReviewComments: mockPullsListReviewComments,
-          merge: mockPullsMerge,
-        },
-        rateLimit: {
-          get: mockRateLimitGet,
-        },
-      }
-    },
+    Octokit: MockOctokit,
   }
 })
+
+vi.mock('@octokit/plugin-throttling', () => ({ throttling: {} }))
+vi.mock('@octokit/plugin-retry', () => ({ retry: {} }))
 
 /**
  * Shared contract test suite that any ForgeAdapter implementation must satisfy.

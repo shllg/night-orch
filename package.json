@@ -50,6 +50,8 @@
   "dependencies": {
     "@ai-hero/sandcastle": "^0.5.12",
     "@modelcontextprotocol/sdk": "^1.27.1",
+    "@octokit/plugin-retry": "^8.1.0",
+    "@octokit/plugin-throttling": "^11.0.3",
     "@octokit/rest": "^22.0.1",
     "acpx": "^0.4.0",
     "better-sqlite3": "^12.8.0",
@@ -64,7 +66,7 @@
     "raw-body": "^3.0.2",
     "react": "^19.2.4",
     "web-push": "^3.6.7",
-    "ws": "^8.18.3",
+    "ws": "^8.21.0",
     "yaml": "^2.8.3",
     "zod": "^3.25.0"
   },
@@ -99,7 +101,7 @@
   },
   "overrides": {
     "@hono/node-server": "^1.19.13",
-    "hono": "^4.12.12",
+    "hono": "^4.12.18",
     "yaml": "^2.8.3",
     "path-to-regexp": "^8.4.0",
     "picomatch": "^4.0.4"
@@ -107,12 +109,17 @@
   "pnpm": {
     "overrides": {
       "@hono/node-server": "^1.19.13",
-      "hono": "^4.12.12",
+      "hono": "^4.12.18",
       "yaml": "^2.8.3",
       "path-to-regexp": "^8.4.0",
       "picomatch": "^4.0.4",
+      "ws@<8.20.1": "^8.20.1",
+      "fast-uri@<3.1.2": "^3.1.2",
+      "qs@<6.15.2": "^6.15.2",
+      "postcss@<8.5.10": "^8.5.10",
+      "ip-address@<=10.1.0": "^10.1.1",
       "minimatch@3>brace-expansion": "^1.1.13",
-      "minimatch@10>brace-expansion": "^5.0.5",
+      "minimatch@10>brace-expansion": "^5.0.6",
       "vitepress>vite": "^7.3.2",
       "esbuild": "^0.25.0"
     },

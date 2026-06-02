@@ -91,9 +91,10 @@ describe('ConfigSchema', () => {
       ],
     }
     const result = ConfigSchema.safeParse(minimal)
-    expect(result.success).toBe(true)
+      expect(result.success).toBe(true)
     if (result.success) {
       expect(result.data.github.pollIntervalSeconds).toBe(300)
+      expect(result.data.github.pollConcurrency).toBe(4)
       expect(result.data.loop.maxReviewIterations).toBe(4)
       expect(result.data.loop.maxAttemptChainLength).toBe(3)
       expect(result.data.loop.maxRunTokens).toBe(0)

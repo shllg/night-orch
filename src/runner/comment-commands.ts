@@ -86,9 +86,9 @@ export async function processCommentCommands(params: ProcessCommentCommandsParam
     cache,
   } = params
 
-  const commandSettings = config.commentCommands ?? { enabled: true, requireCollaborator: false }
+  const commandSettings = config.commentCommands ?? { enabled: true, requireCollaborator: true }
   if (!commandSettings.enabled) return
-  if (!commandSettings.requireCollaborator) {
+  if (config.commentCommands && commandSettings.requireCollaborator === false) {
     logger.warn(
       { repo: repoConfig.repo },
       'commentCommands.requireCollaborator=false — /orch commands accept any commenter. Enable on public repos.',

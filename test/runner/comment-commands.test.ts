@@ -1,7 +1,13 @@
 import { describe, it, expect, vi } from 'vitest'
-import { collectCommentSources } from '../../src/runner/comment-commands.js'
+import { collectCommentSources, processCommentCommands } from '../../src/runner/comment-commands.js'
 import { parseOrchCommands } from '../../src/discovery/commands.js'
+import type { Config } from '../../src/config/schema.js'
 import type { ForgeAdapter, ForgeComment, ForgePRReview, ForgePRReviewComment } from '../../src/forge/types.js'
+import { LeaseManager } from '../../src/state/leases.js'
+import { initDatabase } from '../../src/state/db.js'
+import { RunManager } from '../../src/state/runs.js'
+import { createOrchestrationCache } from '../../src/runner/orchestration-cache.js'
+import { makeTestConfig, makeTestRepoConfig } from '../helpers/factories.js'
 
 function makeForge(overrides: Partial<ForgeAdapter> = {}): ForgeAdapter {
   return {
@@ -107,5 +113,54 @@ describe('collectCommentSources', () => {
 
     expect(out).toHaveLength(1)
     expect(out[0]!.id).toBe(1)
+  })
+})
+
+describe('processCommentCommands', () => {
+  it('enforces collaborator check when commentCommands is undefined', async () => {
+    const db = initDatabase(':memory:')
+    const runManager = new RunManager(db)
+    const leaseManager = new LeaseManager(db)
+    const repoConfig = makeTestRepoConfig({ repo: 'org/repo' })
+    const run = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 7,
+      issueNodeId: 'node-7',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.updateLifecycle(run.id, { status: 'review_ready' })
+
+    const isCollaborator = vi.fn().mockResolvedValue(false)
+    const forge = makeForge({
+      listIssueComments: vi.fn().mockResolvedValue([
+        {
+          id: 1,
+          user: 'random-attacker',
+          body: '/orch rebase',
+          createdAt: '2026-06-02T09:00:00Z',
+          updatedAt: '2026-06-02T09:00:00Z',
+        },
+      ]),
+      isCollaborator,
+    })
+    const config = {
+      ...makeTestConfig({ repos: [repoConfig] }),
+      commentCommands: undefined,
+    } as unknown as Config
+
+    await processCommentCommands({
+      config,
+      db,
+      forge,
+      runManager,
+      leaseManager,
+      repoConfig,
+      botUser: 'orch-bot',
+      cache: createOrchestrationCache(),
+    })
+
+    expect(isCollaborator).toHaveBeenCalledWith('org/repo', 'random-attacker')
   })
 })
