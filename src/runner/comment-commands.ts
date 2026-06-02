@@ -13,6 +13,7 @@ import {
   isCommandProcessed,
   markCommandProcessed,
   parseOrchCommands,
+  stripCodeBlocks,
   type OrchCommand,
 } from '../discovery/commands.js'
 import { resolveIssueRepo } from '../utils/issue-repo.js'
@@ -29,6 +30,33 @@ export interface ProcessCommentCommandsParams {
   repoConfig: Config['repos'][0]
   botUser: string
   cache: OrchestrationCache
+}
+
+export interface MentionMatch {
+  commentId: number
+  user: string
+  body: string
+  alias: string
+}
+
+export function parseMentions(comments: ForgeComment[], aliases: readonly string[]): MentionMatch[] {
+  const normalizedAliases = [...new Set(aliases.map((alias) => alias.trim()).filter((alias) => alias.length > 0))]
+  if (normalizedAliases.length === 0) return []
+
+  const results: MentionMatch[] = []
+  for (const comment of comments) {
+    if (isBotAuthored(comment.body)) continue
+    const cleaned = stripCodeBlocks(comment.body)
+    const alias = normalizedAliases.find((candidate) => cleaned.includes(candidate))
+    if (!alias) continue
+    results.push({
+      commentId: comment.id,
+      user: comment.user,
+      body: comment.body,
+      alias,
+    })
+  }
+  return results
 }
 
 function getHttpStatus(err: unknown): number | null {

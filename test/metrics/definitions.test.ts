@@ -74,6 +74,8 @@ describe('Metric definitions', () => {
       'night_orch_rebase_auto_resolve_failed_total',
       'night_orch_rebase_fanouts_total',
       'night_orch_rebase_fanout_siblings_queued_total',
+      'night_orch_mention_feedback_total',
+      'night_orch_review_bot_comments_total',
     ]
 
     for (const name of required) {

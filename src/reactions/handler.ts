@@ -1,4 +1,4 @@
-import type { Reaction } from './types.js'
+import type { MentionFeedbackReaction, Reaction } from './types.js'
 import type { ForgeAdapter } from '../forge/types.js'
 import type { RunManager } from '../state/runs.js'
 import type Database from 'better-sqlite3'
@@ -10,6 +10,7 @@ import { logger } from '../utils/logger.js'
 import { createFollowupAttempt, AttemptTerminatedError, AttemptNotFoundError } from '../state/attempts.js'
 import { recordUserAction } from '../state/run-log-events.js'
 import { clearResumeDecisionArtifacts } from '../loop/checkpoint.js'
+import { markerTag, upsertBotComment } from '../forge/bot-comment.js'
 
 export interface ReactionHandlerDeps {
   db: Database.Database
@@ -17,6 +18,7 @@ export interface ReactionHandlerDeps {
   runManager: RunManager
   repoConfig: Pick<RepoConfig, 'labels' | 'kanban'>
   maxAttemptChainLength?: number
+  botUser?: string
 }
 
 /**
@@ -127,8 +129,44 @@ export async function handleReaction(
     )
   }
 
+  if (isMentionFeedbackReaction(reaction) && deps.botUser) {
+    await acknowledgeMentionFeedback(forge, issueRepo, reaction, deps.botUser)
+  }
+
   logger.info(
     { repo: reaction.repo, issueNumber: reaction.issueNumber, type: reaction.type },
     'Reaction handled — issue queued for follow-up',
   )
+}
+
+function isMentionFeedbackReaction(reaction: Reaction): reaction is MentionFeedbackReaction {
+  return (
+    reaction.type === 'mention_feedback'
+    && typeof (reaction as Partial<MentionFeedbackReaction>).author === 'string'
+    && typeof (reaction as Partial<MentionFeedbackReaction>).commentId === 'number'
+  )
+}
+
+async function acknowledgeMentionFeedback(
+  forge: ForgeAdapter,
+  issueRepo: string,
+  reaction: MentionFeedbackReaction,
+  botUser: string,
+): Promise<void> {
+  const marker = markerTag(`mention-ack-${reaction.commentId}`)
+  try {
+    await upsertBotComment(
+      forge,
+      issueRepo,
+      reaction.issueNumber,
+      marker,
+      `**night-orch**: Queued continue pass for feedback from @${reaction.author}.`,
+      botUser,
+    )
+  } catch (err) {
+    logger.warn(
+      { repo: issueRepo, issueNumber: reaction.issueNumber, commentId: reaction.commentId, err },
+      'Failed to acknowledge mention feedback',
+    )
+  }
 }

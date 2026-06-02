@@ -133,6 +133,35 @@ describe('handleReaction', () => {
     expect(term.terminated_at).toBeNull()
   })
 
+  it('acknowledges mention feedback with an idempotent marker comment', async () => {
+    seedReviewReadyRun()
+    const forge = makeForge({
+      listIssueComments: vi.fn().mockResolvedValue([]),
+      commentOnIssue: vi.fn().mockResolvedValue(undefined),
+    })
+
+    await handleReaction({
+      type: 'mention_feedback',
+      repo: 'foo/bar',
+      prNumber: 42,
+      issueNumber: 7,
+      summary: 'Mention feedback from alice',
+      context: '[Review by @alice]:\nPlease add tests',
+      detectedAt: '2026-04-13T00:00:00.000Z',
+      author: 'alice',
+      body: '@night-orch Please add tests',
+      locationKind: 'issue_comment',
+      commentId: 123,
+      commentUrl: null,
+    }, { db, forge, runManager: runs, repoConfig, botUser: 'night-orch' })
+
+    expect(forge.commentOnIssue).toHaveBeenCalledWith(
+      'foo/bar',
+      7,
+      expect.stringContaining('<!-- night-orch:mention-ack-123 -->'),
+    )
+  })
+
   it('ignores reactions when the run is not in review_ready state', async () => {
     const row = runs.create({
       repo: 'foo/bar',

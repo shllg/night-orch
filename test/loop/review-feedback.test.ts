@@ -29,6 +29,45 @@ describe('fetchPRReviewFeedback', () => {
     expect(result.comments[0]!.user).toBe('human')
   })
 
+  it('keeps allowlisted review bot reviews and comments', async () => {
+    const reviews: ForgePRReview[] = [
+      { id: 1, user: 'coderabbitai[bot]', state: 'commented', body: 'Consider extracting this branch', submittedAt: '' },
+    ]
+    const comments: ForgePRReviewComment[] = [
+      { id: 10, user: 'coderabbitai[bot]', body: 'Add a null guard', path: 'src/main.ts', line: 42, createdAt: '' },
+    ]
+
+    const forge = makeMockForge(reviews, comments)
+    const result = await fetchPRReviewFeedback(forge, 'org/repo', 10, 'bot', {
+      reviewBotAllowlist: ['coderabbitai[bot]'],
+    })
+
+    expect(result.reviews).toHaveLength(1)
+    expect(result.comments).toHaveLength(1)
+    expect(result.summary).toContain('coderabbitai[bot]')
+    expect(result.summary).toContain('Add a null guard')
+  })
+
+  it('drops non-allowlisted review bot reviews and comments', async () => {
+    const reviews: ForgePRReview[] = [
+      { id: 1, user: 'somebot[bot]', state: 'commented', body: 'Automated review', submittedAt: '' },
+      { id: 2, user: 'human', state: 'commented', body: 'Human review', submittedAt: '' },
+    ]
+    const comments: ForgePRReviewComment[] = [
+      { id: 10, user: 'somebot[bot]', body: 'Automated comment', path: 'src/main.ts', line: 42, createdAt: '' },
+      { id: 11, user: 'human', body: 'Human comment', path: 'src/main.ts', line: 43, createdAt: '' },
+    ]
+
+    const forge = makeMockForge(reviews, comments)
+    const result = await fetchPRReviewFeedback(forge, 'org/repo', 10, 'bot', {
+      reviewBotAllowlist: ['coderabbitai[bot]'],
+    })
+
+    expect(result.reviews.map((r) => r.user)).toEqual(['human'])
+    expect(result.comments.map((c) => c.user)).toEqual(['human'])
+    expect(result.summary).not.toContain('Automated')
+  })
+
   it('generates summary with review and comment details', async () => {
     const reviews: ForgePRReview[] = [
       { id: 1, user: 'reviewer', state: 'changes_requested', body: 'Please fix the naming convention', submittedAt: '' },

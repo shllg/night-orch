@@ -1,6 +1,12 @@
 import type { PRCheckStatus, ForgePRReview, ForgePRReviewComment } from '../forge/types.js'
 
-export type ReactionType = 'ci_failure' | 'human_review' | 'review_comment' | 'merge_conflict' | 'external_review'
+export type ReactionType =
+  | 'ci_failure'
+  | 'human_review'
+  | 'review_comment'
+  | 'merge_conflict'
+  | 'external_review'
+  | 'mention_feedback'
 
 export interface Reaction {
   type: ReactionType
@@ -30,6 +36,15 @@ export interface ReviewCommentReaction extends Reaction {
   comments: ForgePRReviewComment[]
 }
 
+export interface MentionFeedbackReaction extends Reaction {
+  type: 'mention_feedback'
+  author: string
+  body: string
+  locationKind: 'issue_comment' | 'review' | 'review_comment'
+  commentId: number
+  commentUrl: string | null
+}
+
 export interface ReactionScanResult {
   reactions: Reaction[]
   /** Opaque state to persist for deduplication across scans. */
@@ -43,6 +58,7 @@ export interface ReactionScanResult {
 export interface ReactionCursor {
   lastReviewId: number
   lastCommentId: number
+  lastIssueCommentId: number
   lastCheckConclusion: string | null
   /**
    * Last observed mergeable state of the PR. `null` means never scanned.

@@ -23,6 +23,7 @@ const COMMENT_COMMAND_RE = /^\s*\/(?:orch|night-orch)\b/im
 const EMPTY_CURSOR: ReactionCursor = {
   lastReviewId: 0,
   lastCommentId: 0,
+  lastIssueCommentId: 0,
   lastCheckConclusion: null,
   lastMergeableState: null,
 }
@@ -504,6 +505,8 @@ function summarizeReactionTypes(types: ReactionType[]): string[] {
         return 'inline review comments'
       case 'external_review':
         return 'external review findings'
+      case 'mention_feedback':
+        return 'mention feedback'
     }
   })
 }

@@ -14,10 +14,12 @@ export interface ScanAndHandleReactionsParams {
   repoConfig: Config['repos'][0]
   maxAttemptChainLength: number
   cache: OrchestrationCache
+  config: Config
+  botUser: string
 }
 
 export async function scanAndHandleReactions(params: ScanAndHandleReactionsParams): Promise<void> {
-  const { db, forge, runManager, repoConfig, maxAttemptChainLength, cache } = params
+  const { db, forge, runManager, repoConfig, maxAttemptChainLength, cache, config, botUser } = params
 
   const rows = runManager
     .getActive()
@@ -39,13 +41,20 @@ export async function scanAndHandleReactions(params: ScanAndHandleReactionsParam
       row.pr_number,
       row.issue_number,
       cursor,
+      {
+        acceptMentions: config.commentCommands.acceptMentions,
+        requireCollaborator: config.commentCommands.requireCollaborator,
+        mentionAliases: config.commentCommands.mentionAliases,
+        botUser,
+        reviewBotAllowlist: config.commentCommands.reviewBotAllowlist,
+      },
     )
 
     cache.reactionCursors.set(cursorKey, result.cursor)
 
     for (const reaction of result.reactions) {
       try {
-        await handleReaction(reaction, { db, forge, runManager, repoConfig, maxAttemptChainLength })
+        await handleReaction(reaction, { db, forge, runManager, repoConfig, maxAttemptChainLength, botUser })
       } catch (err) {
         logger.warn(
           { repo: row.repo, issueNumber: row.issue_number, reactionType: reaction.type, err },

@@ -758,6 +758,9 @@ export const ConfigSchema = z.object({
     /** Default true: only repo collaborators may run /orch commands. Set
      *  to false only for private repos where all commenters are trusted. */
     requireCollaborator: z.boolean().default(true),
+    acceptMentions: z.boolean().default(true),
+    mentionAliases: z.array(z.string().min(1)).default([]),
+    reviewBotAllowlist: z.array(z.string().min(1)).default([]),
   }).default({}),
 
   repos: z.array(RepoConfigSchema).min(1, 'At least one repository must be configured'),

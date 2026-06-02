@@ -22,7 +22,7 @@ const COMMAND_PATTERN = /^\s*\/(?:orch|night-orch)\s+(\S+)(?:\s+(.*))?$/im
  * start, per CommonMark) code blocks to prevent stray /orch commands in
  * pasted terminal output or code samples from being executed.
  */
-function stripCodeBlocks(text: string): string {
+export function stripCodeBlocks(text: string): string {
   // Fenced blocks first (greedy within delimiters).
   let result = text.replace(/```[\s\S]*?```/g, '')
   // Indented code blocks: lines starting with ≥4 spaces or a tab.

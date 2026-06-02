@@ -230,6 +230,20 @@ export function createMetricsRegistry() {
     registers: [registry],
   })
 
+  const mentionFeedbackTotal = new Counter({
+    name: 'night_orch_mention_feedback_total',
+    help: 'Mention feedback reactions by comment location',
+    labelNames: ['location'] as const,
+    registers: [registry],
+  })
+
+  const reviewBotCommentsTotal = new Counter({
+    name: 'night_orch_review_bot_comments_total',
+    help: 'Allowlisted review bot comments routed into feedback by author',
+    labelNames: ['author'] as const,
+    registers: [registry],
+  })
+
   return {
     registry,
     runsTotal,
@@ -261,6 +275,8 @@ export function createMetricsRegistry() {
     rebaseAutoResolveFailedTotal,
     rebaseFanoutTotal,
     rebaseFanoutSiblingsTotal,
+    mentionFeedbackTotal,
+    reviewBotCommentsTotal,
   }
 }
 

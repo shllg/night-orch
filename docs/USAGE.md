@@ -600,6 +600,8 @@ After a PR is created, night-orch monitors it for events and can automatically r
 - **CI failure** on the PR — detected via GitHub check status
 - **Human review with changes requested** — reviewer posts changes_requested
 - **Inline review comments** — new code comments from humans
+- **Mention feedback** — a collaborator writes `@night-orch` or a configured alias with free-form feedback
+- **Allowlisted review bots** — configured bots such as CodeRabbit or Copilot post review comments
 - **Merge conflicts** — PR is no longer mergeable against base
 
 ### How it works
@@ -612,7 +614,9 @@ Each poll cycle scans `review_ready` PRs for new events. When a reaction is dete
 
 Merge-conflict reactions are treated differently from ordinary review follow-ups. Instead of dropping straight into a generic continue pass, night-orch now queues a dedicated branch refresh attempt that respects the repo's `updateStrategy` (`merge` or `rebase`). If that refresh conflicts, the run blocks with a durable conflict snapshot so the later `/orch continue` pass sees the actual files, SHAs, and excerpts that caused the conflict.
 
-This happens automatically — no configuration needed beyond the standard setup. Reactions are identified by the content of the comment/review, not by its author, so feedback you post under the same GitHub identity that runs night-orch is still picked up. See [Single-user deployment](./single-user.md) for the details.
+This happens automatically for CI, human reviews, and merge conflicts. Free-form mentions are enabled by default and can be configured under `commentCommands.acceptMentions` and `commentCommands.mentionAliases`; mentions inside code blocks are ignored. Review bot feedback is accepted only for exact logins in `commentCommands.reviewBotAllowlist`, for example `coderabbitai[bot]`.
+
+Reactions are identified by the content of the comment/review, not only by its author, so feedback you post under the same GitHub identity that runs night-orch is still picked up. See [Single-user deployment](./single-user.md) for the details.
 
 ---
 

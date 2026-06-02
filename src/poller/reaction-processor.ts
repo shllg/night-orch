@@ -49,6 +49,8 @@ export async function processRepoReactions(
       repoConfig,
       maxAttemptChainLength: config.loop.maxAttemptChainLength,
       cache,
+      config,
+      botUser,
     }),
     processMergeQueue(db, forge, repoConfig, { config, botUser }),
     scanCostBlockedRuns(db, config, forge, repoConfig, botUser),

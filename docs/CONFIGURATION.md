@@ -72,7 +72,7 @@ Registered keys are visible via `night-orch settings list` (or Web/TUI Settings/
 - `metrics`: `enabled`, `port`, `host`
 - `observability`: `agentStreaming`, `eventRetention`, `sessionLogs`, `sessionLogRetention`
 - `mcp`: `enabled`, `transport`, `authTokenEnv`, `httpPort`, `httpHost`
-- `commentCommands`: `enabled`, `requireCollaborator`
+- `commentCommands`: `enabled`, `requireCollaborator`, `acceptMentions`, `mentionAliases`, `reviewBotAllowlist`
 - `workflows`
 
 Keys **not** in the runtime registry — edit YAML and restart the daemon: `ai.*`, `fileLoop.*`, `cost.allowEstimatedDuration`, all `repos[]` settings, `github.tokenEnv` environment values (the registry exposes the env var *name*, not the token itself). Use `night-orch daily-cost-override` / `night-orch cost-override` for budget headroom rather than mutating `security.maxDailyCostUsd` at runtime.
@@ -690,6 +690,9 @@ Operator auth sessions use an `HttpOnly` `SameSite=Strict` session cookie with a
 | --- | --- | --- | --- |
 | `enabled` | boolean | `true` | Enable processing of `/orch` commands in issue comments. |
 | `requireCollaborator` | boolean | `true` | Only repo collaborators can use comment commands. When `commentCommands` is omitted, the runtime still treats this as `true`. Set to `false` only for private repos where all commenters are trusted; explicit opt-out logs a warning each cycle. |
+| `acceptMentions` | boolean | `true` | Treat free-form mentions such as `@night-orch please rework error handling` as continue feedback while the PR is `review_ready`. |
+| `mentionAliases` | string[] | `[]` | Additional aliases that trigger mention feedback, for example `["@night-orch", "@orch"]`. The configured bot username is also accepted as an alias. |
+| `reviewBotAllowlist` | string[] | `[]` | Exact `[bot]` logins whose review comments should be accepted as review feedback, for example `["coderabbitai[bot]", "copilot[bot]"]`. Non-allowlisted bot review comments are ignored. |
 
 Supported commands (posted as issue comments):
 - `/orch retry` — start a fresh retry from the latest base branch
@@ -698,6 +701,8 @@ Supported commands (posted as issue comments):
 - `/orch continue` — resume the existing branch with fresh context for blocked/review-ready/errored runs
 
 When a PR becomes non-mergeable while it is in `review_ready`, night-orch does not treat that as a generic continue. It queues a dedicated branch refresh attempt that uses the repo's `updateStrategy`, and if that refresh conflicts the blocked run stores a durable conflict snapshot for the next `/orch continue` pass.
+
+Free-form mentions use the same collaborator gate as `/orch` commands for human authors when `requireCollaborator` is true. Allowlisted review bots are checked before that gate because forge collaborator APIs usually do not treat app bots as ordinary collaborators. Mentions inside fenced or indented code blocks are ignored, and acknowledgement comments use per-comment markers so retries do not post duplicate replies.
 
 ## `workflows`
 

@@ -107,6 +107,9 @@ describe('ConfigSchema', () => {
       expect(result.data.cost.model).toBe('pay-per-use')
       expect(result.data.metrics.host).toBe('0.0.0.0')
       expect(result.data.web.trustedProxy).toBe(false)
+      expect(result.data.commentCommands.acceptMentions).toBe(true)
+      expect(result.data.commentCommands.mentionAliases).toEqual([])
+      expect(result.data.commentCommands.reviewBotAllowlist).toEqual([])
       expect(result.data.autoResolveConflicts.enabled).toBe(true)
       expect(result.data.autoResolveConflicts.maxAttempts).toBe(2)
       expect(result.data.autoResolveConflicts.maxFiles).toBe(5)
@@ -122,6 +125,25 @@ describe('ConfigSchema', () => {
       expect(result.data.repos[0]?.defaults.reviewer).toBe('codex')
       expect(result.data.workerProfiles).toEqual({})
       expect(result.data.notifications.events.onPrUpdated).toBe(true)
+    }
+  })
+
+  it('accepts mention and review bot comment command settings', () => {
+    const raw = loadExampleConfig()
+    raw.commentCommands = {
+      enabled: true,
+      requireCollaborator: true,
+      acceptMentions: true,
+      mentionAliases: ['@night-orch', '@orch'],
+      reviewBotAllowlist: ['coderabbitai[bot]', 'copilot[bot]'],
+    }
+
+    const result = ConfigSchema.safeParse(raw)
+
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.commentCommands.mentionAliases).toEqual(['@night-orch', '@orch'])
+      expect(result.data.commentCommands.reviewBotAllowlist).toEqual(['coderabbitai[bot]', 'copilot[bot]'])
     }
   })
 

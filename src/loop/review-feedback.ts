@@ -6,6 +6,10 @@ export interface PRReviewFeedback {
   summary: string
 }
 
+export interface FetchPRReviewFeedbackOptions {
+  reviewBotAllowlist?: readonly string[]
+}
+
 const MAX_SUMMARY_LENGTH = 8000
 
 /**
@@ -59,19 +63,26 @@ export async function fetchPRReviewFeedback(
   repo: string,
   prNumber: number,
   botUser: string,
+  options: FetchPRReviewFeedbackOptions = {},
 ): Promise<PRReviewFeedback> {
   const [allReviews, allComments] = await Promise.all([
     forge.listPRReviews(repo, prNumber),
     forge.listPRReviewComments(repo, prNumber),
   ])
 
-  // Filter out bot's own reviews and comments
-  const reviews = allReviews.filter((r) => r.user !== botUser)
-  const comments = allComments.filter((c) => c.user !== botUser)
+  const reviewBotAllowlist = new Set(options.reviewBotAllowlist ?? [])
+  const reviews = allReviews.filter((r) => shouldKeepFeedbackAuthor(r.user, botUser, reviewBotAllowlist))
+  const comments = allComments.filter((c) => shouldKeepFeedbackAuthor(c.user, botUser, reviewBotAllowlist))
 
   return {
     reviews,
     comments,
     summary: compileSummary(reviews, comments),
   }
+}
+
+function shouldKeepFeedbackAuthor(user: string, botUser: string, reviewBotAllowlist: Set<string>): boolean {
+  if (user === botUser) return false
+  if (/\[bot\]$/i.test(user)) return reviewBotAllowlist.has(user)
+  return true
 }
