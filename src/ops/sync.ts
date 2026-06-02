@@ -343,10 +343,12 @@ export class SyncEngine {
     if (!repoConfig) return
 
     let baseBranch = repoConfig.baseBranch
+    let sourceMergeSha: string | null = null
     if (forge.getPR) {
       try {
         const pr = await forge.getPR(run.repo, run.pr_number)
         baseBranch = pr.baseBranch
+        sourceMergeSha = pr.mergeCommitSha ?? null
       } catch (err) {
         logger.debug({ repo: run.repo, prNumber: run.pr_number, err }, 'Failed to read merged PR base branch for fan-out')
       }
@@ -359,6 +361,7 @@ export class SyncEngine {
       config: this.config,
       sourcePrNumber: run.pr_number,
       baseBranch,
+      sourceMergeSha,
       botUser: await this.resolveBotUser(run.repo, forge),
     })
   }

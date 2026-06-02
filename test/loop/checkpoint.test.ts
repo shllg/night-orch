@@ -354,6 +354,34 @@ describe('Checkpoint', () => {
       const data = JSON.parse(row.phase_data)
       expect(data.plan?.plan?.objective).toBe('Fix')
     })
+
+    it('merges decision outcomes while inside a DB transaction', () => {
+      const originalGetPhaseData = checkpoint.getPhaseData.bind(checkpoint)
+      let readInsideTransaction = false
+      checkpoint.getPhaseData = (runId: string) => {
+        readInsideTransaction = db.inTransaction
+        return originalGetPhaseData(runId)
+      }
+
+      checkpoint.recordDecisionOutcome('run-test-1', 'decide', { action: 'publish' })
+
+      expect(readInsideTransaction).toBe(true)
+    })
+  })
+
+  describe('run state persistence', () => {
+    it('merges session and step output state while inside a DB transaction', () => {
+      const originalGetPhaseData = checkpoint.getPhaseData.bind(checkpoint)
+      let readInsideTransaction = false
+      checkpoint.getPhaseData = (runId: string) => {
+        readInsideTransaction = db.inTransaction
+        return originalGetPhaseData(runId)
+      }
+
+      checkpoint.persistRunState('run-test-1', { planner: 'sess-1' }, { analysis: { score: 1 } })
+
+      expect(readInsideTransaction).toBe(true)
+    })
   })
 
   describe('getCompletedPhases', () => {

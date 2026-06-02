@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { Config } from '../../../src/config/schema.js'
 import {
   moveLogSelection,
   moveProjectSelection,
@@ -9,6 +10,7 @@ import {
   resolveLogWindowSize,
   resolveSelectedLogIndex,
   resolveTabHotkey,
+  resolveTuiRebaseMaxAttemptChainLength,
 } from '../../../src/cli/tui/app.js'
 
 describe('tui app input helpers', () => {
@@ -54,6 +56,14 @@ describe('tui app input helpers', () => {
   it('uses a minimum log window size for short terminals', () => {
     expect(resolveLogWindowSize(12)).toBe(4)
     expect(resolveLogWindowSize(40)).toBe(23)
+  })
+
+  it('uses the configured attempt-chain cap for TUI rebase actions', () => {
+    const config = {
+      loop: { maxAttemptChainLength: 7 },
+    } as unknown as Config
+
+    expect(resolveTuiRebaseMaxAttemptChainLength(config)).toBe(7)
   })
 
   it('keeps selected log id stable when capped buffer drops from head', () => {

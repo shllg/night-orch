@@ -163,4 +163,65 @@ describe('processCommentCommands', () => {
 
     expect(isCollaborator).toHaveBeenCalledWith('org/repo', 'random-attacker')
   })
+
+  it('records the commenter as the actor for rebase commands', async () => {
+    const db = initDatabase(':memory:')
+    const runManager = new RunManager(db)
+    const leaseManager = new LeaseManager(db)
+    const repoConfig = makeTestRepoConfig({ repo: 'org/repo' })
+    const run = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 7,
+      issueNodeId: 'node-7',
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.updateWorktree(run.id, { branchName: 'orch/org-repo/7' })
+    runManager.updatePullRequest(run.id, { prNumber: 166 })
+    runManager.updateLifecycle(run.id, { status: 'review_ready' })
+
+    const forge = makeForge({
+      listIssueComments: vi.fn().mockResolvedValue([
+        {
+          id: 2,
+          user: 'alice',
+          body: '/orch rebase',
+          createdAt: '2026-06-02T09:00:00Z',
+          updatedAt: '2026-06-02T09:00:00Z',
+        },
+      ]),
+      getIssue: vi.fn().mockResolvedValue({ labels: [] }),
+      addLabels: vi.fn().mockResolvedValue(undefined),
+      removeLabels: vi.fn().mockResolvedValue(undefined),
+      commentOnIssue: vi.fn().mockResolvedValue(undefined),
+    })
+    const config = makeTestConfig({ repos: [repoConfig] })
+
+    await processCommentCommands({
+      config,
+      db,
+      forge,
+      runManager,
+      leaseManager,
+      repoConfig,
+      botUser: 'orch-bot',
+      cache: createOrchestrationCache(),
+    })
+
+    const queuedRun = runManager.getByRepoAndIssue('org/repo', 7)
+    expect(queuedRun?.id).not.toBe(run.id)
+    const eventRow = db.prepare(
+      `SELECT role, data
+       FROM run_log_events
+       WHERE run_id = ? AND event_type = 'user_action'
+       ORDER BY id DESC LIMIT 1`,
+    ).get(queuedRun!.id) as { role: string | null; data: string | null } | undefined
+
+    expect(eventRow?.role).toBe('comment:alice')
+    expect(JSON.parse(eventRow!.data!)).toMatchObject({
+      kind: 'rebase',
+      actor: 'comment:alice',
+    })
+  })
 })

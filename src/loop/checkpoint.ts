@@ -259,13 +259,16 @@ export class Checkpoint {
    * produced a terminal decision in the crashed attempt.
    */
   recordDecisionOutcome(runId: string, phase: LoopPhase, outcome: PersistedDecisionOutcome): void {
-    const existing = this.getPhaseData(runId)
-    const prev = (existing[DECISION_OUTCOMES_KEY] as Record<string, PersistedDecisionOutcome> | undefined) ?? {}
-    const merged = {
-      ...existing,
-      [DECISION_OUTCOMES_KEY]: { ...prev, [phase]: outcome },
-    }
-    this.runManager.updatePhaseData(runId, JSON.stringify(merged))
+    const tx = this.db.transaction(() => {
+      const existing = this.getPhaseData(runId)
+      const prev = (existing[DECISION_OUTCOMES_KEY] as Record<string, PersistedDecisionOutcome> | undefined) ?? {}
+      const merged = {
+        ...existing,
+        [DECISION_OUTCOMES_KEY]: { ...prev, [phase]: outcome },
+      }
+      this.runManager.updatePhaseData(runId, JSON.stringify(merged))
+    })
+    tx()
   }
 
   /**
@@ -278,13 +281,16 @@ export class Checkpoint {
     sessionIds: Readonly<Record<string, string>>,
     stepOutputs: Readonly<Record<string, unknown>>,
   ): void {
-    const existing = this.getPhaseData(runId)
-    const merged = {
-      ...existing,
-      [SESSION_IDS_KEY]: { ...sessionIds },
-      [STEP_OUTPUTS_KEY]: { ...stepOutputs },
-    }
-    this.runManager.updatePhaseData(runId, JSON.stringify(merged))
+    const tx = this.db.transaction(() => {
+      const existing = this.getPhaseData(runId)
+      const merged = {
+        ...existing,
+        [SESSION_IDS_KEY]: { ...sessionIds },
+        [STEP_OUTPUTS_KEY]: { ...stepOutputs },
+      }
+      this.runManager.updatePhaseData(runId, JSON.stringify(merged))
+    })
+    tx()
   }
 
   getLastCompleted(runId: string): { phase: LoopPhase; artifacts: Record<string, unknown> } | null {

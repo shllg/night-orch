@@ -124,7 +124,7 @@ async function handleActiveBatch(
       }
 
       batchManager.update(batch.id, { status: 'passed' })
-      await transitionMergedRuns(db, forge, repoConfig, mergedPrNumbers, options)
+      await transitionMergedRuns(db, forge, repoConfig, mergedPrNumbers, batch.stagingSha, options)
     } else if (ciStatus.overall === 'failure') {
       logger.warn({ repo: repoConfig.repo, batchId: batch.id }, 'Merge batch CI failed — bisecting')
       batchManager.update(batch.id, { status: 'failed' })
@@ -208,6 +208,7 @@ async function transitionMergedRuns(
   forge: ForgeAdapter,
   repoConfig: RepoConfig,
   mergedPrNumbers: number[],
+  sourceMergeSha: string | null,
   options: {
     config?: Config
     botUser?: string
@@ -246,6 +247,7 @@ async function transitionMergedRuns(
           config: options.config,
           sourcePrNumber: row.pr_number,
           baseBranch: repoConfig.baseBranch,
+          sourceMergeSha,
           botUser: options.botUser ?? '',
         })
       }

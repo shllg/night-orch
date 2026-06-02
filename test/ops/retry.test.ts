@@ -307,6 +307,22 @@ describe('RetryEngine', () => {
     expect(row.status).toBe('error')
   })
 
+  it('rejects retry while the run PR is in an active merge-queue batch', async () => {
+    const forge = makeMockForge()
+    const runId = insertRun(db, { status: 'review_ready' })
+    db.prepare('UPDATE runs SET pr_number = ? WHERE id = ?').run(99, runId)
+    db.prepare(
+      `INSERT INTO merge_batches
+         (id, repo, base_branch, base_sha, status, pr_numbers, approved_shas, retry_count)
+       VALUES ('batch-active', 'org/repo', 'main', 'abc123', 'testing', '[99]', '["sha-99"]', 0)`,
+    ).run()
+
+    const engine = new RetryEngine(db, makeConfig(), () => forge)
+
+    await expect(engine.retry('org/repo', 1)).rejects.toThrow('active merge-queue batch')
+    expect(fetchHead(db, 'org/repo', 1).id).toBe(runId)
+  })
+
   it('completed run → reject', async () => {
     const forge = makeMockForge()
     insertRun(db, { status: 'completed' })

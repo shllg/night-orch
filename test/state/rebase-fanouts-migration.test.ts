@@ -44,4 +44,34 @@ describe('migration 030 rebase_fanouts', () => {
 
     db.close()
   })
+
+  it('creates durable sibling outcome storage and fan-out summary columns', () => {
+    const db = initDatabase(':memory:')
+    const fanoutCols = db.prepare("PRAGMA table_info('rebase_fanouts')").all() as Array<{
+      name: string
+      type: string
+      notnull: number
+      dflt_value: string | null
+    }>
+    const siblingCols = db.prepare("PRAGMA table_info('rebase_fanout_siblings')").all() as Array<{
+      name: string
+      type: string
+      pk: number
+    }>
+    const fanoutByName = Object.fromEntries(fanoutCols.map((c) => [c.name, c]))
+    const siblingByName = Object.fromEntries(siblingCols.map((c) => [c.name, c]))
+
+    expect(fanoutByName.failures_count).toMatchObject({
+      type: 'INTEGER',
+      notnull: 1,
+      dflt_value: '0',
+    })
+    expect(fanoutByName.source_merge_sha).toMatchObject({ type: 'TEXT' })
+    expect(siblingByName.repo).toMatchObject({ type: 'TEXT', pk: 1 })
+    expect(siblingByName.source_pr_number).toMatchObject({ type: 'INTEGER', pk: 2 })
+    expect(siblingByName.sibling_pr_number).toMatchObject({ type: 'INTEGER', pk: 3 })
+    expect(siblingByName.status).toMatchObject({ type: 'TEXT' })
+
+    db.close()
+  })
 })

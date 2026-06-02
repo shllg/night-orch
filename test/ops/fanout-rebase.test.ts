@@ -4,7 +4,7 @@ import type { Config, RepoConfig } from '../../src/config/schema.js'
 import { initDatabase } from '../../src/state/db.js'
 import { RebaseFanoutManager } from '../../src/state/rebase-fanouts.js'
 import { RunManager, type RunStatus } from '../../src/state/runs.js'
-import { fanoutRebaseAfterMerge, selectFanoutCandidates } from '../../src/ops/fanout-rebase.js'
+import { fanoutRebaseAfterMerge, selectFanoutCandidates, warnIncompleteRebaseFanouts } from '../../src/ops/fanout-rebase.js'
 import { makeTestConfig, makeTestRepoConfig } from '../helpers/factories.js'
 import type { ForgeAdapter } from '../../src/forge/types.js'
 
@@ -204,11 +204,17 @@ describe('fanoutRebaseAfterMerge', () => {
     expect(fanouts.has('org/repo', 99)).toBe(true)
   })
 
-  it('does not record fan-out when queueing fails so the next cycle can retry', async () => {
+  it('records every sibling outcome and marks partial fan-out failures', async () => {
     const db = initDatabase(':memory:')
     seedSibling(db, 1, 101)
+    seedSibling(db, 2, 102)
+    seedSibling(db, 3, 103)
     const fanouts = new RebaseFanoutManager(db)
-    const queueRebase = vi.fn().mockRejectedValue(new Error('forge unavailable'))
+    const queueRebase = vi.fn(async ({ issueNumber }: { issueNumber: number }) => {
+      if (issueNumber === 1) return { queued: true, reason: 'ok' }
+      if (issueNumber === 2) return { queued: false, reason: 'Run is already queued' }
+      throw new Error('forge unavailable')
+    })
     const forge = makeForge({ getPR: vi.fn().mockResolvedValue({ state: 'open', baseBranch: 'main' }) })
 
     const result = await fanoutRebaseAfterMerge({
@@ -221,10 +227,28 @@ describe('fanoutRebaseAfterMerge', () => {
       botUser: 'bot',
       queueRebase,
       fanouts,
+      sourceMergeSha: 'merge-sha-99',
     })
 
-    expect(result.failures).toBe(1)
-    expect(fanouts.has('org/repo', 99)).toBe(false)
+    expect(result).toMatchObject({ queued: 1, skipped: 1, failures: 1 })
+    expect(fanouts.get('org/repo', 99)).toMatchObject({
+      siblings_queued: 1,
+      failures_count: 1,
+      source_merge_sha: 'merge-sha-99',
+    })
+    expect(fanouts.listSiblings('org/repo', 99)).toEqual([
+      expect.objectContaining({ sibling_pr_number: 101, status: 'queued', reason: null }),
+      expect.objectContaining({
+        sibling_pr_number: 102,
+        status: 'skipped',
+        reason: 'Run is already queued',
+      }),
+      expect.objectContaining({
+        sibling_pr_number: 103,
+        status: 'failed',
+        message: 'forge unavailable',
+      }),
+    ])
   })
 
   it('uses maxChainLength override or twice the global attempt cap', async () => {
@@ -282,6 +306,33 @@ describe('fanoutRebaseAfterMerge', () => {
     })
 
     expect(queueRebase).toHaveBeenCalledWith(expect.objectContaining({ strategyOverride: 'merge' }))
+  })
+})
+
+describe('warnIncompleteRebaseFanouts', () => {
+  it('logs a bounded startup warning for fan-outs with failed siblings', () => {
+    const db = initDatabase(':memory:')
+    const fanouts = new RebaseFanoutManager(db)
+    fanouts.mark('org/repo', 99, 1, { failuresCount: 1, sourceMergeSha: 'merge-sha' })
+    const log = { warn: vi.fn() }
+
+    const count = warnIncompleteRebaseFanouts(db, log)
+
+    expect(count).toBe(1)
+    expect(log.warn).toHaveBeenCalledWith(
+      {
+        count: 1,
+        samples: [
+          {
+            repo: 'org/repo',
+            sourcePrNumber: 99,
+            failuresCount: 1,
+            sourceMergeSha: 'merge-sha',
+          },
+        ],
+      },
+      'Incomplete rebase fan-outs detected',
+    )
   })
 })
 

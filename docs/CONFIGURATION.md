@@ -227,7 +227,7 @@ Discriminated by `type`:
 | --- | --- | --- | --- |
 | `maxReviewIterations` | positive number | `4` | Base max loop iterations before stop. |
 | `maxTotalAgentPasses` | positive number | `10` | Base max total worker passes. |
-| `maxAttemptChainLength` | int 1-20 | `3` | Hard cap on follow-up attempts per issue chain (`retry`/`continue`/`rebase`/`refresh`). |
+| `maxAttemptChainLength` | int 1-20 | `3` | Hard cap on follow-up attempts per issue chain (`retry`/`continue`/`rebase`/`refresh`). Manual rebase entry points (CLI, TUI, web, MCP, and comment commands) all use this cap. |
 | `maxRunTokens` | int >= 0 | `0` | Non-cost runaway guard. Blocks when a single attempt reaches this total token count. |
 | `maxIssueTokens` | int >= 0 | `0` | Non-cost runaway guard. Blocks when cumulative tokens across attempts for the same issue reach this count. |
 | `maxDailyTokens` | int >= 0 | `0` | Non-cost runaway guard. Blocks when UTC-day cumulative tokens across all runs reach this count. |
@@ -1172,7 +1172,7 @@ When enabled, a merged tracked PR queues rebase attempts for open tracked siblin
 | `strategy` | `rebase` \| `merge` | `rebase` | How sibling worktrees pick up the merged base. Forwarded to the queued rebase attempt's `updateStrategy`. |
 | `maxChainLength` | int >= 1 | `loop.maxAttemptChainLength * 2` | Optional cap for fan-out rebase attempt chains. Exhausted chains are skipped with a PR comment. |
 
-Fan-out is idempotent per `(repo, source PR)` through the `rebase_fanouts` table. Retention pruning removes old fan-out markers with the normal archive cutoff.
+Fan-out is idempotent per `(repo, source PR)` through the `rebase_fanouts` table. Each sibling outcome is recorded separately, and the source marker is written even when some siblings fail to queue so partial failures do not replay the entire fan-out. Retention pruning removes old fan-out markers with the normal archive cutoff.
 
 ## Forge-Specific Notes
 

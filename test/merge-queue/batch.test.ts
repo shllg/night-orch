@@ -197,6 +197,40 @@ describe('MergeBatchManager', () => {
     })
   })
 
+  describe('findActiveBatchContainingPr', () => {
+    it('returns a non-terminal batch containing the PR in the requested repo', () => {
+      const active = manager.create({
+        repo: 'org/repo',
+        baseBranch: 'main',
+        baseSha: 'abc123',
+        prNumbers: [10, 20],
+        approvedShas: [],
+      })
+      manager.update(active.id, { status: 'building' })
+
+      const terminal = manager.create({
+        repo: 'org/repo',
+        baseBranch: 'main',
+        baseSha: 'def456',
+        prNumbers: [30],
+        approvedShas: [],
+      })
+      manager.update(terminal.id, { status: 'passed' })
+
+      manager.create({
+        repo: 'org/other',
+        baseBranch: 'main',
+        baseSha: 'abc123',
+        prNumbers: [20],
+        approvedShas: [],
+      })
+
+      expect(manager.findActiveBatchContainingPr('org/repo', 20)?.id).toBe(active.id)
+      expect(manager.findActiveBatchContainingPr('org/repo', 30)).toBeNull()
+      expect(manager.findActiveBatchContainingPr('org/missing', 20)).toBeNull()
+    })
+  })
+
   describe('getByRepoAndStatus', () => {
     it('returns only batches matching repo and status', () => {
       const b1 = manager.create({

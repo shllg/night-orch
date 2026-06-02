@@ -430,6 +430,7 @@ export class GitHubForgeAdapter implements ForgeAdapter {
       state: string
       merged: boolean
       mergeable?: boolean | null
+      merge_commit_sha?: string | null
       head: { ref: string; sha?: string }
       base: { ref: string }
       html_url: string
@@ -445,6 +446,7 @@ export class GitHubForgeAdapter implements ForgeAdapter {
       mergeable: typeof d.mergeable === 'boolean' ? d.mergeable : null,
       headBranch: d.head.ref,
       headSha: d.head.sha ?? '',
+      mergeCommitSha: typeof d.merge_commit_sha === 'string' ? d.merge_commit_sha : null,
       baseBranch: d.base.ref,
       url: d.html_url,
     }

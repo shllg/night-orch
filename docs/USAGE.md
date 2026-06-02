@@ -491,11 +491,15 @@ Each poll cycle:
 
 With `retryFlakyOnce: true` (default), a failed batch is retried once before bisecting. This avoids unnecessary bisection due to flaky tests.
 
+Manual retry is blocked while the PR is still part of an active merge-queue batch. Wait for the batch to pass/fail or remove the PR from the active batch before starting a fresh retry.
+
 ### Automatic rebase fan-out
 
 Set `repos[].autoRebaseOnMerge.enabled: true` to queue rebase attempts for open sibling PRs after a tracked PR merges into the same base branch. The daemon detects merges during sync and merge-queue finalization, filters siblings by repo/base/open state, and records a `rebase_fanouts` marker so the same source PR is not fanned out twice.
 
 Use `maxFanout` to cap how many siblings are queued from one merge. Use `maxChainLength` to cap follow-up attempts for these automatic rebase chains; when the cap is exhausted, night-orch skips that sibling and leaves a PR comment for manual review.
+
+Fan-out records each sibling outcome (`queued`, `skipped`, or `failed`) and always records the source marker after the fan-out attempt, including partial failures. That prevents one failed sibling from replaying the whole fan-out on the next sync. Startup recovery logs a warning when prior fan-outs have failed sibling rows that need operator attention.
 
 ### Labels
 
@@ -700,6 +704,8 @@ Queue an explicit git rebase of the PR branch onto the latest base branch, then 
 Options: `--strategy merge|rebase` (override the action strategy for this manual rebase request). `merge` merges the latest base branch into the work branch; `rebase` replays commits and is still the default behavior for explicit rebase runs. Successful queueing also signals any running daemon that uses the same database to wake for the next cycle immediately.
 
 Also available as a comment command: `/orch rebase` (with `--check` by default).
+
+Explicit rebase requests from CLI, TUI, web, MCP, and comment commands all use `loop.maxAttemptChainLength`. Comment-triggered rebases are recorded in issue history as `comment:<user>` user actions.
 
 ### `night-orch continue <repo> <issue>`
 

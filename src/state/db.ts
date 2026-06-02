@@ -32,6 +32,7 @@ import { up as migration027 } from './migrations/027-push-subscriptions.js'
 import { up as migration028 } from './migrations/028-file-loop.js'
 import { up as migration029 } from './migrations/029-cost-theoretical.js'
 import { up as migration030 } from './migrations/030-rebase-fanouts.js'
+import { up as migration031 } from './migrations/031-rebase-fanout-siblings.js'
 
 const MIGRATIONS = [
   { version: 1, name: '001-initial', up: migration001 },
@@ -64,6 +65,7 @@ const MIGRATIONS = [
   { version: 28, name: '028-file-loop', up: migration028 },
   { version: 29, name: '029-cost-theoretical', up: migration029 },
   { version: 30, name: '030-rebase-fanouts', up: migration030 },
+  { version: 31, name: '031-rebase-fanout-siblings', up: migration031 },
 ]
 
 export function initDatabase(dbPath: string): Database.Database {

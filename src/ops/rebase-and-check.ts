@@ -24,6 +24,7 @@ const STATUS_MARKER = markerTag('status')
 export type RebaseTrigger =
   | { kind: 'manual' }
   | { kind: 'cli' }
+  | { kind: 'comment'; user: string }
   | { kind: 'mcp' }
   | { kind: 'tui' }
   | { kind: 'fanout'; sourcePr: number }
@@ -131,7 +132,7 @@ export async function queueRebase(
     recordUserAction(db, {
       runId: queuedRun.id,
       kind: 'rebase',
-      actor: trigger.kind,
+      actor: actorForRebaseTrigger(trigger),
       details: buildRebaseActionDetails(trigger, strategyOverride),
     })
   }
@@ -169,6 +170,10 @@ function buildRebaseActionDetails(
     ...(trigger.kind === 'fanout' ? { triggeredBy: trigger } : {}),
   }
   return Object.keys(details).length > 0 ? details : null
+}
+
+function actorForRebaseTrigger(trigger: RebaseTrigger): string {
+  return trigger.kind === 'comment' ? `comment:${trigger.user}` : trigger.kind
 }
 
 /**

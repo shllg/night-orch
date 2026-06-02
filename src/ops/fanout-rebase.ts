@@ -65,6 +65,7 @@ export interface FanoutDeps {
   sourcePrNumber: number
   baseBranch: string
   botUser: string
+  sourceMergeSha?: string | null
   queueRebase?: QueueRebaseFn
   fanouts?: RebaseFanoutManager
   metrics?: {
@@ -81,6 +82,37 @@ export interface FanoutResult {
   skippedDisabled: boolean
 }
 
+interface StartupWarningLogger {
+  warn(data: unknown, message: string): void
+}
+
+export function warnIncompleteRebaseFanouts(
+  db: Database.Database,
+  log: StartupWarningLogger = logger,
+): number {
+  try {
+    const incomplete = new RebaseFanoutManager(db).findIncomplete()
+    if (incomplete.length === 0) return 0
+
+    log.warn(
+      {
+        count: incomplete.length,
+        samples: incomplete.slice(0, 5).map((fanout) => ({
+          repo: fanout.repo,
+          sourcePrNumber: fanout.source_pr_number,
+          failuresCount: fanout.failures_count,
+          sourceMergeSha: fanout.source_merge_sha,
+        })),
+      },
+      'Incomplete rebase fan-outs detected',
+    )
+    return incomplete.length
+  } catch (err) {
+    log.warn({ err }, 'Failed to inspect incomplete rebase fan-outs')
+    return 0
+  }
+}
+
 export async function fanoutRebaseAfterMerge(deps: FanoutDeps): Promise<FanoutResult> {
   const { db, repoConfig, forge, config, sourcePrNumber, baseBranch, botUser } = deps
   const fanouts = deps.fanouts ?? new RebaseFanoutManager(db)
@@ -91,101 +123,129 @@ export async function fanoutRebaseAfterMerge(deps: FanoutDeps): Promise<FanoutRe
     return { queued: 0, skipped: 0, failures: 0, alreadyFannedOut: false, skippedDisabled: true }
   }
 
-  if (fanouts.has(repoConfig.repo, sourcePrNumber)) {
-    return { queued: 0, skipped: 0, failures: 0, alreadyFannedOut: true, skippedDisabled: false }
-  }
+  return fanouts.runOnce(repoConfig.repo, sourcePrNumber, async () => {
+    if (fanouts.has(repoConfig.repo, sourcePrNumber)) {
+      return { queued: 0, skipped: 0, failures: 0, alreadyFannedOut: true, skippedDisabled: false }
+    }
 
-  const runManager = new RunManager(db)
-  const localCandidates = selectFanoutCandidates(
-    runManager.listLiveTopLevelByRepo(repoConfig.repo).map((run) => ({
-      id: run.id,
-      repo: run.repo,
-      issueNumber: run.issueNumber,
-      prNumber: run.prNumber,
-      status: run.status,
-      operationIntent: run.operationIntent,
-      hasOpenRebaseAttempt: hasOpenRebaseAttempt(db, run.repo, run.issueNumber),
-    })),
-    { sourcePrNumber },
-    { maxFanout: autoRebase.maxFanout },
-  )
-
-  if (!forge.getPR) {
-    logger.warn(
-      { repo: repoConfig.repo, sourcePrNumber },
-      'Skipping fan-out rebase because forge adapter cannot fetch PR details',
+    const runManager = new RunManager(db)
+    const localCandidates = selectFanoutCandidates(
+      runManager.listLiveTopLevelByRepo(repoConfig.repo).map((run) => ({
+        id: run.id,
+        repo: run.repo,
+        issueNumber: run.issueNumber,
+        prNumber: run.prNumber,
+        status: run.status,
+        operationIntent: run.operationIntent,
+        hasOpenRebaseAttempt: hasOpenRebaseAttempt(db, run.repo, run.issueNumber),
+      })),
+      { sourcePrNumber },
+      { maxFanout: autoRebase.maxFanout },
     )
-    return {
-      queued: 0,
-      skipped: localCandidates.length,
-      failures: 0,
-      alreadyFannedOut: false,
-      skippedDisabled: false,
-    }
-  }
 
-  const enriched: FanoutCandidate[] = []
-  for (const candidate of localCandidates) {
-    try {
-      const pr = await forge.getPR(repoConfig.repo, candidate.prNumber)
-      if (pr.state === 'open' && pr.baseBranch === baseBranch) {
-        enriched.push(candidate)
-      }
-    } catch (err) {
+    if (!forge.getPR) {
       logger.warn(
-        { repo: repoConfig.repo, prNumber: candidate.prNumber, err },
-        'Failed to enrich fan-out candidate PR',
+        { repo: repoConfig.repo, sourcePrNumber },
+        'Skipping fan-out rebase because forge adapter cannot fetch PR details',
       )
+      return {
+        queued: 0,
+        skipped: localCandidates.length,
+        failures: 0,
+        alreadyFannedOut: false,
+        skippedDisabled: false,
+      }
     }
-  }
 
-  let queued = 0
-  let skipped = 0
-  let failures = 0
-  const maxAttemptChainLength = autoRebase.maxChainLength
-    ?? config.loop.maxAttemptChainLength * 2
-
-  for (const candidate of enriched) {
-    try {
-      const result = await queueRebase({
-        db,
-        forge,
-        repoConfig,
-        issueNumber: candidate.issueNumber,
-        botUser,
-        maxAttemptChainLength,
-        trigger: { kind: 'fanout', sourcePr: sourcePrNumber },
-        strategyOverride: autoRebase.strategy,
-      })
-
-      if (result.queued) {
-        queued += 1
-      } else if (BENIGN_SKIP_REASONS.has(result.reason)) {
-        skipped += 1
-      } else {
-        failures += 1
+    const enriched: FanoutCandidate[] = []
+    for (const candidate of localCandidates) {
+      try {
+        const pr = await forge.getPR(repoConfig.repo, candidate.prNumber)
+        if (pr.state === 'open' && pr.baseBranch === baseBranch) {
+          enriched.push(candidate)
+        }
+      } catch (err) {
         logger.warn(
-          { repo: repoConfig.repo, issueNumber: candidate.issueNumber, reason: result.reason },
-          'Fan-out rebase queue returned non-benign skip',
+          { repo: repoConfig.repo, prNumber: candidate.prNumber, err },
+          'Failed to enrich fan-out candidate PR',
         )
       }
-    } catch (err) {
-      failures += 1
-      logger.warn(
-        { repo: repoConfig.repo, sourcePrNumber, issueNumber: candidate.issueNumber, err },
-        'Fan-out rebase queue failed',
-      )
     }
-  }
 
-  if (failures === 0) {
-    fanouts.mark(repoConfig.repo, sourcePrNumber, queued)
-  }
+    let queued = 0
+    let skipped = 0
+    let failures = 0
+    const maxAttemptChainLength = autoRebase.maxChainLength
+      ?? config.loop.maxAttemptChainLength * 2
 
-  deps.metrics?.incRebaseFanout?.(repoConfig.repo, baseBranch)
-  for (let i = 0; i < queued; i += 1) {
-    deps.metrics?.incRebaseFanoutSibling?.(repoConfig.repo)
-  }
+    for (const candidate of enriched) {
+      try {
+        const result = await queueRebase({
+          db,
+          forge,
+          repoConfig,
+          issueNumber: candidate.issueNumber,
+          botUser,
+          maxAttemptChainLength,
+          trigger: { kind: 'fanout', sourcePr: sourcePrNumber },
+          strategyOverride: autoRebase.strategy,
+        })
 
-  return { queued, skipped, failures, alreadyFannedOut: false, skippedDisabled: false }
+        if (result.queued) {
+          queued += 1
+          fanouts.recordSibling(repoConfig.repo, sourcePrNumber, candidate.prNumber, {
+            status: 'queued',
+          })
+        } else if (BENIGN_SKIP_REASONS.has(result.reason)) {
+          skipped += 1
+          fanouts.recordSibling(repoConfig.repo, sourcePrNumber, candidate.prNumber, {
+            status: 'skipped',
+            reason: result.reason,
+          })
+        } else {
+          failures += 1
+          fanouts.recordSibling(repoConfig.repo, sourcePrNumber, candidate.prNumber, {
+            status: 'failed',
+            reason: result.reason,
+          })
+          logger.warn(
+            { repo: repoConfig.repo, issueNumber: candidate.issueNumber, reason: result.reason },
+            'Fan-out rebase queue returned non-benign skip',
+          )
+        }
+      } catch (err) {
+        failures += 1
+        fanouts.recordSibling(repoConfig.repo, sourcePrNumber, candidate.prNumber, {
+          status: 'failed',
+          message: errorMessage(err),
+        })
+        logger.warn(
+          { repo: repoConfig.repo, sourcePrNumber, issueNumber: candidate.issueNumber, err },
+          'Fan-out rebase queue failed',
+        )
+      }
+    }
+
+    fanouts.mark(repoConfig.repo, sourcePrNumber, queued, {
+      failuresCount: failures,
+      sourceMergeSha: deps.sourceMergeSha ?? null,
+    })
+
+    deps.metrics?.incRebaseFanout?.(repoConfig.repo, baseBranch)
+    for (let i = 0; i < queued; i += 1) {
+      deps.metrics?.incRebaseFanoutSibling?.(repoConfig.repo)
+    }
+
+    return { queued, skipped, failures, alreadyFannedOut: false, skippedDisabled: false }
+  })
+}
+
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) {
+    return err.message
+  }
+  if (typeof err === 'string') {
+    return err
+  }
+  return 'Unknown error'
 }

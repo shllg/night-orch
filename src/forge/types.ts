@@ -55,6 +55,7 @@ export interface ForgePR {
   mergeable?: boolean | null
   headBranch: string
   headSha: string
+  mergeCommitSha?: string | null
   baseBranch: string
   url: string
   diff?: string

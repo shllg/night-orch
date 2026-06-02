@@ -53,6 +53,22 @@ export class MergeBatchManager {
     return row ? mapRow(row) : null
   }
 
+  findActiveBatchContainingPr(repo: string, prNumber: number): MergeBatchRecord | null {
+    const placeholders = TERMINAL_STATUSES.map(() => '?').join(', ')
+    const row = this.db
+      .prepare(
+        `SELECT b.*
+         FROM merge_batches b, json_each(b.pr_numbers) p
+         WHERE b.repo = ?
+           AND CAST(p.value AS INTEGER) = ?
+           AND b.status NOT IN (${placeholders})
+         ORDER BY b.created_at ASC
+         LIMIT 1`,
+      )
+      .get(repo, prNumber, ...TERMINAL_STATUSES) as RawBatchRow | undefined
+    return row ? mapRow(row) : null
+  }
+
   getByRepoAndStatus(repo: string, status: MergeBatchStatus): MergeBatchRecord[] {
     const rows = this.db
       .prepare('SELECT * FROM merge_batches WHERE repo = ? AND status = ? ORDER BY created_at ASC')

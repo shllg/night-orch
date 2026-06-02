@@ -3,6 +3,7 @@ import type { Config } from '../config/schema.js'
 import type { ForgeAdapter } from '../forge/types.js'
 import type { UpdateStrategy } from '../git/worktree.js'
 import { createForgeAdapter } from '../forge/factory.js'
+import { MergeBatchManager } from '../merge-queue/batch.js'
 import { buildLabelConfig } from '../labels/config.js'
 import { transitionLabels } from '../labels/manager.js'
 import { LeaseManager } from '../state/leases.js'
@@ -62,6 +63,13 @@ export class RetryEngine {
 
     if (!RETRYABLE_STATUSES.includes(run.status)) {
       throw new Error(`Run ${run.id} is in status "${run.status}" — can only retry ${RETRYABLE_STATUSES.join(', ')} runs`)
+    }
+
+    if (run.prNumber !== null) {
+      const activeBatch = new MergeBatchManager(this.db).findActiveBatchContainingPr(repo, run.prNumber)
+      if (activeBatch) {
+        throw new Error(`Run ${run.id} PR #${run.prNumber} is in active merge-queue batch ${activeBatch.id} — cannot retry`)
+      }
     }
 
     logger.info({ runId: run.id, repo, issue: issueNumber, status: run.status, opts }, 'Retrying run')

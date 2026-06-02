@@ -148,6 +148,7 @@ describe('SyncEngine', () => {
         body: '',
         headBranch: 'orch/1-fix',
         headSha: 'sha-10',
+        mergeCommitSha: 'merge-sha-10',
         baseBranch: 'develop',
         url: '',
       }),
@@ -171,6 +172,7 @@ describe('SyncEngine', () => {
       config,
       sourcePrNumber: 10,
       baseBranch: 'develop',
+      sourceMergeSha: 'merge-sha-10',
       botUser: '',
     }))
   })

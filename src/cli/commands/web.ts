@@ -10,6 +10,7 @@ import { createMetricsService, type MetricsService } from '../../metrics/service
 import { createForgeAdapter } from '../../forge/factory.js'
 import type { ForgeAdapter } from '../../forge/types.js'
 import { startMCPHttpServer } from '../../mcp/http.js'
+import { warnIncompleteRebaseFanouts } from '../../ops/fanout-rebase.js'
 import { startWebServer } from '../../web/server.js'
 import { logger } from '../../utils/logger.js'
 import { resolveConfigWithRuntimeSettings } from '../../settings/runtime.js'
@@ -104,6 +105,7 @@ export async function webCommand(
     } catch (err) {
       logger.warn({ err }, 'Startup sync failed — continuing')
     }
+    warnIncompleteRebaseFanouts(db)
   }
 
   const forgeAdapters = new Map<string, ForgeAdapter>()

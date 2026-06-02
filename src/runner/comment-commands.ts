@@ -294,6 +294,7 @@ async function executeCommentCommand(params: ExecuteCommentCommandParams): Promi
         repoConfig,
         issueNumber,
         botUser,
+        trigger: { kind: 'comment', user },
         maxAttemptChainLength: config.loop.maxAttemptChainLength,
       })
       return result.queued ? { ok: true } : { ok: false, reason: result.reason }

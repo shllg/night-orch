@@ -2,6 +2,7 @@ import { loadConfig, resolveConfigPath, ConfigError } from '../../config/loader.
 import { initDatabase } from '../../state/db.js'
 import { pollOnce } from '../../runner/poller.js'
 import { SyncEngine } from '../../ops/sync.js'
+import { warnIncompleteRebaseFanouts } from '../../ops/fanout-rebase.js'
 import { logger } from '../../utils/logger.js'
 import { resolveConfigWithRuntimeSettings } from '../../settings/runtime.js'
 import { createNdjsonWriter, ndjsonError } from '../ndjson.js'
@@ -59,6 +60,7 @@ export async function runOnceCommand(globalOpts?: GlobalOpts): Promise<void> {
     } catch (err) {
       logger.warn({ err }, 'Startup sync failed — continuing')
     }
+    warnIncompleteRebaseFanouts(db)
 
     emitNdjson('poll_start', { dryRun })
     const result = await pollOnce(runtimeConfig, db, dryRun)

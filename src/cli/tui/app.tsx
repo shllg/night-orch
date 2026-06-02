@@ -15,6 +15,7 @@ import { createForgeAdapter } from '../../forge/factory.js'
 import type { UpdateStrategy } from '../../git/worktree.js'
 import type Database from 'better-sqlite3'
 import { loadTuiStats } from '../../state/stats.js'
+import { RebaseFanoutManager } from '../../state/rebase-fanouts.js'
 import { ActionsBar } from './actions-bar.js'
 import { buildIssueList, loadRuns, loadAgentEvents, loadMergeBatches, type IssueListRow } from './data.js'
 import { Header } from './header.js'
@@ -151,6 +152,10 @@ export function reconcileLogSelectionSnapshot(
 
 export function resolveLogWindowSize(termRows: number): number {
   return Math.max(MIN_LOG_WINDOW_SIZE, termRows - LOG_WINDOW_RESERVED_ROWS)
+}
+
+export function resolveTuiRebaseMaxAttemptChainLength(config: Config): number {
+  return config.loop.maxAttemptChainLength
 }
 
 export type CleanupConfirmationEvent = 'pressD' | 'pressOther' | 'timeout'
@@ -376,6 +381,10 @@ export function App({
           'info',
           `startup recovery: ${syncResult.reconciledRuns.length} reconciled, ${syncResult.expiredLeases} expired lease(s)`,
         )
+        const incompleteFanouts = new RebaseFanoutManager(db).findIncomplete()
+        if (incompleteFanouts.length > 0) {
+          appendLog('warn', `startup recovery: ${incompleteFanouts.length} incomplete rebase fan-out(s) with failed sibling(s)`)
+        }
       } catch (err) {
         appendLog('warn', `startup recovery: sync failed: ${(err as Error).message}`)
       }
@@ -801,6 +810,7 @@ export function App({
         botUser,
         strategyOverride: manualStrategy ?? undefined,
         trigger: { kind: 'tui' },
+        maxAttemptChainLength: resolveTuiRebaseMaxAttemptChainLength(currentRuntimeConfig),
       })
       if (!dryRun && result.queued && enableBackgroundPoller) {
         await runPollCycle('manual', target)

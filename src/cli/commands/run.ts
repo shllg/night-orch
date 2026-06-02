@@ -9,6 +9,7 @@ import { PollCycleController, resolveExternalPollTriggerPath } from '../../polle
 import { createMetricsService, type MetricsService } from '../../metrics/service.js'
 import { createForgeAdapter } from '../../forge/factory.js'
 import { startMCPHttpServer } from '../../mcp/http.js'
+import { warnIncompleteRebaseFanouts } from '../../ops/fanout-rebase.js'
 import type { Server } from 'node:http'
 import type { ForgeAdapter } from '../../forge/types.js'
 import { logger } from '../../utils/logger.js'
@@ -83,6 +84,7 @@ export async function runCommand(globalOpts?: GlobalOpts): Promise<void> {
   } catch (err) {
     logger.warn({ err }, 'Startup sync failed — continuing')
   }
+  warnIncompleteRebaseFanouts(db)
 
   // Start embedded MCP HTTP/SSE server
   let mcpServer: Server | undefined

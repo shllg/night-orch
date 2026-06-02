@@ -193,6 +193,7 @@ describe('processMergeQueue', () => {
       config,
       sourcePrNumber: 100,
       baseBranch: 'main',
+      sourceMergeSha: 'ssha',
       botUser: 'bot',
     }))
   })
