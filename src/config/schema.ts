@@ -611,6 +611,11 @@ const ObservabilitySchema = z.object({
   eventRetention: z.number().int().min(100).max(10_000).default(1000),
   sessionLogs: z.boolean().default(true),
   sessionLogRetention: z.number().int().positive().default(7),
+  // Self-improvement (item 3): when true, every worker prompt is hashed
+  // and recorded in `prompt_compilations` for retrospective mining. Set
+  // false in tests or low-disk environments. Workers run inside the
+  // retro meta-agent skip recording via skipPromptLogging regardless.
+  recordPromptCompilations: z.boolean().default(true),
 })
 
 // --- AI (Phase 3 direct-LLM) schema ---

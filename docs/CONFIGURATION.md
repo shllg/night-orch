@@ -70,7 +70,7 @@ Registered keys are visible via `night-orch settings list` (or Web/TUI Settings/
 - `workerProfiles`
 - `verificationProfiles`
 - `metrics`: `enabled`, `port`, `host`
-- `observability`: `agentStreaming`, `eventRetention`, `sessionLogs`, `sessionLogRetention`
+- `observability`: `agentStreaming`, `eventRetention`, `sessionLogs`, `sessionLogRetention`, `recordPromptCompilations`
 - `mcp`: `enabled`, `transport`, `authTokenEnv`, `httpPort`, `httpHost`
 - `commentCommands`: `enabled`, `requireCollaborator`, `acceptMentions`, `mentionAliases`, `reviewBotAllowlist`
 - `workflows`
@@ -633,6 +633,7 @@ Notes:
 | `eventRetention` | int (100-10000) | `1000` | In-memory max agent events retained per run. |
 | `sessionLogs` | boolean | `true` | Write per-phase JSONL session logs to `storage.logsRoot/<runId>/`. |
 | `sessionLogRetention` | positive int | `7` | Retention target in days for session logs (consumed by cleanup policy). |
+| `recordPromptCompilations` | boolean | `true` | Self-improvement (item 3): when true, every worker prompt is SHA-hashed and recorded in `prompt_compilations` for retrospective mining by `night-orch retro`. Set false for low-disk environments or to opt out of prompt persistence. The retro meta-agent skips its own writes via `skipPromptLogging` regardless of this flag. See [ADR 0002](adr/0002-self-improvement-retrospective.md). |
 
 ## `mcp`
 

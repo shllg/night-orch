@@ -36,6 +36,8 @@ import { mcpCommand } from './commands/mcp.js'
 import { labelsInitCommand } from './commands/labels-init.js'
 import { statusCommand } from './commands/status.js'
 import { handoffsCommand } from './commands/handoffs.js'
+import { timelineCommand } from './commands/timeline.js'
+import { retroCommand } from './commands/retro.js'
 import { deleteEntryCommand } from './commands/delete-entry.js'
 import { runInit } from './commands/init.js'
 import { runWatch } from './commands/watch.js'
@@ -209,6 +211,27 @@ program
   .argument('<run-id>', 'Run ID')
   .description('Show persisted agent handoffs for a run')
   .action((runId, _opts, cmd) => handoffsCommand(runId, cmd.parent?.opts()))
+
+program
+  .command('timeline')
+  .argument('<run-id>', 'Run ID')
+  .option('--source <source>', 'Filter by source (comma-separated: system,agent,user)')
+  .option('--kind <kind>', 'Filter by kind (comma-separated: phase,handoff,event,cost,prompt)')
+  .option('--since <iso>', 'Earliest timestamp to include, ISO 8601')
+  .option('--limit <n>', 'Maximum entries to return')
+  .description('Show chronological timeline merging phases, handoffs, events, and costs')
+  .action((runId, opts, cmd) => timelineCommand(runId, opts, cmd.parent?.opts()))
+
+program
+  .command('retro')
+  .option('--since <iso>', 'Earliest classifier to include, ISO 8601 (default: 7 days ago)')
+  .option('--classifier <name>', 'Restrict to a single classifier label')
+  .option('--dry-run', 'Cluster + report without writing suggestions')
+  .option('--view <id>', 'Print a single suggestion by id')
+  .option('--apply <id>', 'Write the suggestion to .night-orch/retro/ and mark applied')
+  .option('--limit <n>', 'Recent-suggestions tail length (default 5)')
+  .description('Mine recent failure classifiers and emit prompt-improvement suggestions')
+  .action((opts, cmd) => retroCommand(opts, cmd.parent?.opts()))
 
 program
   .command('labels-init')

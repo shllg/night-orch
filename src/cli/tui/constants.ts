@@ -8,6 +8,7 @@ export const TABS: Array<{ id: TabId; hotkey: string; label: string }> = [
   { id: 'logs', hotkey: '4', label: 'Logs' },
   { id: 'settings', hotkey: '5', label: 'Settings' },
   { id: 'fileloop', hotkey: '6', label: 'File-Loop' },
+  { id: 'timeline', hotkey: '7', label: 'Timeline' },
 ]
 
 export type TuiColor = 'white' | 'gray' | 'yellow' | 'cyan' | 'magenta' | 'green' | 'red'

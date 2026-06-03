@@ -8,6 +8,7 @@ import { describeRunEvent, formatTimestamp, formatTokenCount, truncate } from '.
 import { STATUS_BADGE_TONE } from '../lib/run-tone.js'
 import { type RunEvent, type RunSummary } from '../types/dashboard.js'
 import { ActionButton } from './ActionButton.js'
+import { RunTimeline } from './RunTimeline.js'
 
 type UpdateStrategy = 'merge' | 'rebase'
 
@@ -217,7 +218,9 @@ export function IssueDetailPage({
                 No events yet for this issue.
               </AlertWeb>
             ) : (
-              <section className="min-w-0 rounded-box border border-base-300/70 bg-base-100/70 px-3 py-3">
+              <>
+              <RunTimeline runId={runId} refreshKey={runEvents.length} />
+              <section className="min-w-0 rounded-box border border-base-300/70 bg-base-100/70 px-3 py-3 mt-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-sm font-semibold text-base-content">Event Stream</h3>
                   <p className="text-xs text-base-content/65">
@@ -263,6 +266,7 @@ export function IssueDetailPage({
                   ))}
                 </div>
               </section>
+              </>
             )}
           </div>
         )}

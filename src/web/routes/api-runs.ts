@@ -102,6 +102,28 @@ export const handleRunRoutes: RouteHandler = async (_req, res, method, pathname,
       return true
     }
 
+    const runTimelineMatch = pathname.match(/^\/api\/runs\/([^/]+)\/timeline$/)
+    if (runTimelineMatch) {
+      const runId = decodeURIComponent(runTimelineMatch[1] ?? '')
+      const limit = toBoundedInt(searchParams.get('limit'), 500, 1, 2000)
+      const sinceMs = searchParams.get('sinceMs')
+        ? Number.parseInt(searchParams.get('sinceMs') ?? '', 10)
+        : undefined
+      const sourcesRaw = searchParams.get('sources')
+      const kindsRaw = searchParams.get('kinds')
+      const sources = sourcesRaw
+        ? sourcesRaw.split(',').filter(Boolean)
+        : undefined
+      const kinds = kindsRaw ? kindsRaw.split(',').filter(Boolean) : undefined
+      const result = await handleToolCall(
+        'night-orch-timeline',
+        { runId, limit, sinceMs, sources, kinds },
+        runtimeDeps,
+      )
+      writeJson(res, 200, result)
+      return true
+    }
+
     const runEventsMatch = pathname.match(/^\/api\/runs\/([^/]+)\/events$/)
     if (runEventsMatch) {
       const runId = decodeURIComponent(runEventsMatch[1] ?? '')

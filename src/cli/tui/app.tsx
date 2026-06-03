@@ -20,6 +20,7 @@ import { ActionsBar } from './actions-bar.js'
 import { buildIssueList, loadRuns, loadAgentEvents, loadHandoffs, loadMergeBatches, type IssueListRow } from './data.js'
 import { Header } from './header.js'
 import { LogsView } from './logs-view.js'
+import { TimelineView } from './timeline-view.js'
 import { ProjectsView } from './projects-view.js'
 import { RunsView } from './runs-view.js'
 import { SettingsView } from './settings-view.js'
@@ -81,6 +82,7 @@ export function resolveTabHotkey(input: string): TabId | null {
   if (input === '4') return 'logs'
   if (input === '5') return 'settings'
   if (input === '6') return 'fileloop'
+  if (input === '7') return 'timeline'
   return null
 }
 
@@ -1440,6 +1442,15 @@ export function App({
           rows={fileLoopRows}
           selectedIndex={selectedProjectIndex}
         />
+      )}
+      {activeTab === 'timeline' && (
+        <Box flexGrow={1} minHeight={0}>
+          <TimelineView
+            db={db}
+            runId={selectedRun?.id ?? null}
+            tick={tick}
+          />
+        </Box>
       )}
 
       <ActionsBar

@@ -6,6 +6,12 @@ import { handleRetry, handleSync, handleCleanup, handlePoll, handleRebase, handl
 import { handleCostOverride, handleCostReset, handleDailyCostOverride, handleDailyCostReset, handleLabelsInit, handleDeleteEntry, handleUpdate } from './admin.js'
 import { handleFileLoop } from './file-loop.js'
 import { handleHandoffs } from './handoffs.js'
+import { handleTimeline } from './timeline.js'
+import {
+  handleRetroRun,
+  handleRetroListSuggestions,
+  handleRetroViewSuggestion,
+} from './retro.js'
 import { z } from 'zod'
 
 interface ToolDefinition {
@@ -13,7 +19,13 @@ interface ToolDefinition {
   description: string
   inputSchema: {
     type: 'object'
-    properties: Record<string, { type: string; description: string; default?: unknown; enum?: string[] }>
+    properties: Record<string, {
+      type: string
+      description: string
+      default?: unknown
+      enum?: string[]
+      items?: { type: string; enum?: string[] }
+    }>
     required?: string[]
   }
 }
@@ -53,6 +65,24 @@ const RunDetailArgsSchema = z.object({
 }).passthrough()
 const HandoffsArgsSchema = z.object({
   runId: z.string(),
+}).passthrough()
+const TimelineArgsSchema = z.object({
+  runId: z.string(),
+  sources: z.array(z.enum(['system', 'agent', 'user'])).optional(),
+  kinds: z.array(z.enum(['phase', 'handoff', 'event', 'cost', 'prompt'])).optional(),
+  sinceMs: z.number().optional(),
+  limit: z.number().optional(),
+}).passthrough()
+const RetroRunArgsSchema = z.object({
+  sinceMs: z.number().optional(),
+  classifier: z.string().optional(),
+  dryRun: z.boolean().optional(),
+}).passthrough()
+const RetroListSuggestionsArgsSchema = z.object({
+  limit: z.number().optional(),
+}).passthrough()
+const RetroViewSuggestionArgsSchema = z.object({
+  id: z.number(),
 }).passthrough()
 const ListRunsArgsSchema = z.object({
   repo: z.string().optional(),
@@ -219,6 +249,62 @@ export function registerTools(): ToolDefinition[] {
         type: 'object',
         properties: {
           runId: { type: 'string', description: 'Run ID (e.g., run-abc123)' },
+        },
+        required: ['runId'],
+      },
+    },
+    {
+      name: 'night-orch-retro-run',
+      description: 'Cluster recent failure classifiers and emit prompt-improvement suggestions. Use dryRun=true to inspect without writing.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          sinceMs: { type: 'number', description: 'Earliest classifier ts (epoch ms). Default: 7d ago' },
+          classifier: { type: 'string', description: 'Restrict to one classifier label' },
+          dryRun: { type: 'string', description: 'Set to true to skip suggestion writes' },
+        },
+      },
+    },
+    {
+      name: 'night-orch-retro-list-suggestions',
+      description: 'List recent retro suggestions newest-first.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          limit: { type: 'number', description: 'Max suggestions (default 20)', default: 20 },
+        },
+      },
+    },
+    {
+      name: 'night-orch-retro-view-suggestion',
+      description: 'Fetch the full markdown body of a single retro suggestion.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'number', description: 'Suggestion id' },
+        },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'night-orch-timeline',
+      description: 'Chronological timeline merging phases, handoffs, events, and cost entries for a run.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          runId: { type: 'string', description: 'Run ID (e.g., run-abc123)' },
+          sources: {
+            type: 'array',
+            items: { type: 'string', enum: ['system', 'agent', 'user'] },
+            description: 'Filter by source(s)',
+          },
+          kinds: {
+            type: 'array',
+            items: { type: 'string', enum: ['phase', 'handoff', 'event', 'cost', 'prompt'] },
+            description: 'Filter by entry kind(s)',
+          },
+          sinceMs: { type: 'number', description: 'Earliest entry to include, epoch ms' },
+          limit: { type: 'number', description: 'Max entries (default: 500, max: 2000)', default: 500 },
         },
         required: ['runId'],
       },
@@ -519,6 +605,14 @@ export async function handleToolCall(
       return handleRunDetail(parseToolArgs(name, RunDetailArgsSchema, args), runtimeDeps)
     case 'night-orch-handoffs':
       return handleHandoffs(parseToolArgs(name, HandoffsArgsSchema, args), runtimeDeps)
+    case 'night-orch-timeline':
+      return handleTimeline(parseToolArgs(name, TimelineArgsSchema, args), runtimeDeps)
+    case 'night-orch-retro-run':
+      return handleRetroRun(parseToolArgs(name, RetroRunArgsSchema, args), runtimeDeps)
+    case 'night-orch-retro-list-suggestions':
+      return handleRetroListSuggestions(parseToolArgs(name, RetroListSuggestionsArgsSchema, args), runtimeDeps)
+    case 'night-orch-retro-view-suggestion':
+      return handleRetroViewSuggestion(parseToolArgs(name, RetroViewSuggestionArgsSchema, args), runtimeDeps)
     case 'night-orch-list-runs':
       return handleListRuns(parseToolArgs(name, ListRunsArgsSchema, args), runtimeDeps)
     case 'night-orch-list-inbox':

@@ -35,6 +35,7 @@ import { up as migration030 } from './migrations/030-rebase-fanouts.js'
 import { up as migration031 } from './migrations/031-rebase-fanout-siblings.js'
 import { up as migration032 } from './migrations/032-agent-handoffs.js'
 import { up as migration033 } from './migrations/033-drop-handoff-attempt-id.js'
+import { up as migration034 } from './migrations/034-retro-tables.js'
 
 const MIGRATIONS = [
   { version: 1, name: '001-initial', up: migration001 },
@@ -70,6 +71,7 @@ const MIGRATIONS = [
   { version: 31, name: '031-rebase-fanout-siblings', up: migration031 },
   { version: 32, name: '032-agent-handoffs', up: migration032 },
   { version: 33, name: '033-drop-handoff-attempt-id', up: migration033 },
+  { version: 34, name: '034-retro-tables', up: migration034 },
 ]
 
 export function initDatabase(dbPath: string): Database.Database {

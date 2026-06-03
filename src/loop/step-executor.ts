@@ -35,6 +35,8 @@ import { createHash } from 'node:crypto'
 import { getRemediation } from '../workers/auth-check.js'
 import { logger } from '../utils/logger.js'
 import { buildPlanningPrdPath, isPlanningIssue } from '../planning/mode.js'
+import { recordPromptCompilation } from '../state/prompt-compilations.js'
+import type Database from 'better-sqlite3'
 import { coerceConflictSnapshot } from '../ops/conflict-types.js'
 import { sanitizeErrorMessage } from '../utils/sanitize-error.js'
 import { mergeReviewFindings, sourceReviewFindings } from './review-findings.js'
@@ -46,6 +48,14 @@ export interface StepDependencies {
   envOverrides?: Record<string, string>
   metrics?: MetricsService
   onAgentEvent?: (event: AgentEvent) => void
+  /**
+   * Optional SQLite handle for observability writes. When present and
+   * `config.observability.recordPromptCompilations` is true, the worker
+   * step records every compiled prompt into `prompt_compilations` for
+   * retrospective mining (item 3). Optional so tests that don't exercise
+   * the loop engine can omit it.
+   */
+  db?: Database.Database
 }
 
 export interface StepResult {
@@ -101,6 +111,8 @@ export async function executeWorkerStep(
     template,
     promptCtx,
   )
+
+  recordPromptCompilationIfEnabled(deps, ctx, step, systemPrompt, userPrompt)
 
   const env = buildWorkerEnv(profile, deps.envOverrides)
   const continueSessionId = resolveContinueSession(ctx, step, profile.type)
@@ -604,6 +616,30 @@ function buildReviewerCtxPatch(
       [key]: review,
     },
     reviewFindings: nextFindings,
+  }
+}
+
+function recordPromptCompilationIfEnabled(
+  deps: StepDependencies,
+  ctx: RunContext,
+  step: WorkerStep,
+  systemPrompt: string,
+  userPrompt: string,
+): void {
+  if (!deps.db) return
+  if (!deps.config.observability?.recordPromptCompilations) return
+  try {
+    recordPromptCompilation(deps.db, {
+      runId: ctx.runId,
+      stepId: step.id,
+      phase: step.id,
+      templatePath: step.prompt ?? null,
+      systemPrompt,
+      userPrompt,
+    })
+  } catch (err) {
+    // Best-effort observability — never block the loop on a write failure.
+    logger.debug({ runId: ctx.runId, stepId: step.id, err }, 'Failed to record prompt compilation')
   }
 }
 

@@ -385,6 +385,17 @@ Post-publish reviewer steps run after PR creation. Use them for external review 
 
 For `steps` workflows, keep post-publish workers after the `decide` step. They are dispatched by finalization after the PR exists, so `decide.onIterate` must point to a pre-decision step like `code`.
 
+### Full-pipeline example
+
+The repository ships an end-to-end example workflow at [`examples/configs/full-pipeline.yaml`](https://github.com/shllg/night-orch/blob/master/examples/configs/full-pipeline.yaml) with four prompt templates under `examples/prompts/full-pipeline/`. It demonstrates:
+
+1. **Planner** that reads related issues via the GitHub MCP tools and derives goals when the issue body lacks them.
+2. **Coder** that invokes the local Claude Code `/tdd` skill via prompt instruction (Claude-only — Codex workers can't call local skills).
+3. Two pre-publish reviewers (peer-review + CodeRabbit-style), each under a distinct `reviewerKey`.
+4. A post-publish reviewer that runs after PR creation; `onChangesRequired: continue` queues a follow-up if the external review surfaces blocking findings.
+
+The integration test at `test/loop/full-pipeline.test.ts` exercises the full pipeline against mocked workers — including the iterate path where one reviewer returns `CHANGES_REQUIRED` and the loop jumps back to `code`.
+
 ### DAG workflows
 
 You can also define a workflow as an explicit DAG:
@@ -726,6 +737,36 @@ Live-updating terminal dashboard. Refreshes every 2 seconds. Shows active runs, 
 ### `night-orch handoffs <run-id>`
 
 Print the persisted structured handoffs for one run in chronological order. Handoffs include planner plans, coder summaries, verify summaries, reviewer findings, and post-publish external-review findings. Use this when a run resumed after a crash or when you need the exact cross-agent context without reading raw logs.
+
+### `night-orch timeline <run-id>`
+
+Print a chronological merge of every persisted artifact for one run: phase transitions, agent handoffs, run log events, cost ledger entries, and (when self-improvement is enabled) prompt compilation pointers. Each entry is sorted by `(timestamp, kindWeight, id)` so cross-table ordering stays stable even when timestamps collide.
+
+```
+night-orch timeline <run-id> [--source system,agent,user]
+                             [--kind phase,handoff,event,cost,prompt]
+                             [--since <iso>]
+                             [--limit <n>]
+```
+
+The same merged stream is available in the web UI on each run-detail page (filter chips for source + kind) and as the MCP tool `night-orch-timeline`. The TUI exposes it on tab `7`; the active selection determines which run is rendered.
+
+### `night-orch retro`
+
+Mine recent failure classifiers (cost overruns, verify regressions, vague plans, etc.) and emit prompt-improvement suggestions. The classifier hook runs after every phase and writes structured tags into `retro_classifiers`; `retro` clusters those tags by classifier + repo and produces one `retro_suggestions` row per affected prompt template.
+
+```
+night-orch retro [--since <iso>]      # default: 7 days ago
+                 [--classifier <name>]
+                 [--dry-run]
+                 [--view <id>]        # print a single suggestion
+                 [--apply <id>]       # write suggestion to .night-orch/retro/<id>.md
+                 [--limit <n>]        # recent-suggestions tail (default 5)
+```
+
+**Apply is a manual operation.** `--apply` writes the suggestion markdown to `.night-orch/retro/` and stamps `applied_at` on the row. Night-orch never auto-rewrites a template file. After review, the operator manually edits the target template and commits — see [ADR 0002](adr/0002-self-improvement-retrospective.md) for the rationale.
+
+MCP exposes the equivalent flow as `night-orch-retro-run`, `night-orch-retro-list-suggestions`, and `night-orch-retro-view-suggestion`. There is intentionally no MCP apply tool and no TUI tab — retro is post-mortem analysis, not an operational dashboard.
 
 ### `night-orch settings`
 

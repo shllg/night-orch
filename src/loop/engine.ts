@@ -42,6 +42,9 @@ import type { AgentEvent } from '../events/types.js'
 import type { ReactionEnvelope } from '../reactions/types.js'
 import { mergeReviewFindings } from './review-findings.js'
 import { buildStepHandoff } from './handoff.js'
+import { classifyPhaseFailure } from './classifier.js'
+import { recordClassifier } from '../state/retro.js'
+import type { LoopDecision } from './types.js'
 import { withPublishedPrContext } from './post-publish.js'
 
 /** External services injected into the loop engine. Tests can substitute mocks for all of these. */
@@ -140,6 +143,7 @@ export async function executeLoop(
     envOverrides: deps.envOverrides,
     metrics: deps.metrics,
     onAgentEvent: deps.onAgentEvent,
+    db: deps.db,
   }
 
   const checkpointPhaseData = checkpoint.getPhaseData(initialCtx.runId)
@@ -284,6 +288,8 @@ export async function executeLoop(
       }
     }
     ctx = recordPhase(ctx, step.id, stepSuccess ? 'success' : 'failure', {}, stepStartedAt)
+
+    runClassifierIfEnabled(db, ctx, result.decision ?? null, deps.config)
 
     // Handle decide step routing
     if (step.type === 'decide' && result.decision) {
@@ -432,6 +438,7 @@ export async function executePostPublishSteps(
     envOverrides: input.envOverrides,
     metrics: input.metrics,
     onAgentEvent: input.onAgentEvent,
+    db,
   }
   const steps = getPostPublishSteps(input.workflow)
   const resumedCtx = checkpoint.resumeFromCheckpoint(input.ctx.runId, input.ctx)
@@ -731,4 +738,32 @@ async function executeGuardedWorkerStep(
   }
 
   return { action: 'continue', ctx }
+}
+
+function runClassifierIfEnabled(
+  db: Database.Database,
+  ctx: RunContext,
+  decision: LoopDecision | null,
+  config: Config,
+): void {
+  if (!config.observability?.recordPromptCompilations) {
+    // The classifier shares the same observability gate as prompt
+    // compilations — same disable knob to avoid two flags for one concept.
+  }
+  const lastPhase = ctx.phaseHistory[ctx.phaseHistory.length - 1]
+  if (!lastPhase) return
+  try {
+    const result = classifyPhaseFailure(ctx, lastPhase, decision ?? undefined)
+    if (!result) return
+    recordClassifier(db, {
+      runId: ctx.runId,
+      phase: lastPhase.phase,
+      stepId: lastPhase.phase,
+      classifier: result.classifier,
+      severity: result.severity,
+      evidence: result.evidence,
+    })
+  } catch (err) {
+    logger.debug({ runId: ctx.runId, err }, 'Failed to record classifier')
+  }
 }

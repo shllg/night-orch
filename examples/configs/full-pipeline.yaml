@@ -1,0 +1,70 @@
+# Full-pipeline workflow example
+#
+# Models a multi-agent pipeline that runs to a PR and then keeps responding
+# to external review feedback after publication:
+#
+#   plan -> code -> verify -> review -> cr-review -> decide -> (publish) -> post-cr
+#                                                    ^_______/
+#                                              (iterate on CHANGES_REQUIRED)
+#
+# After the PR is published, `post-cr` runs as a post-publish reviewer and
+# can queue another follow-up run if external review (CodeRabbit) requests
+# changes — `onChangesRequired: continue` flips the run back into `queued`
+# so the next poll cycle picks it up and re-enters the loop at `code`.
+#
+# Merge this snippet into your config.yaml (see examples/config.example.yaml
+# for the rest of the schema). The four prompt templates referenced below
+# live in `examples/prompts/full-pipeline/`.
+
+workflows:
+  full-pipeline:
+    # Per-phase agent selection. Planning + coding use Claude so the worker
+    # can invoke local Claude Code skills (/tdd, /review) via prompt
+    # instruction. The peer reviewer uses Codex for a different perspective.
+    roles:
+      planner: claude
+      coder: claude
+      reviewer: codex
+    steps:
+      - { type: worker, id: plan, role: planner,
+          prompt: examples/prompts/full-pipeline/planner-deep.md }
+
+      - { type: worker, id: code, role: coder, continueFrom: plan,
+          prompt: examples/prompts/full-pipeline/coder-tdd.md }
+
+      - { type: verify, id: verify }
+
+      # Peer review — uses /review skill via Claude.
+      - { type: worker, id: review, role: reviewer,
+          reviewerKey: peer-review,
+          prompt: examples/prompts/full-pipeline/reviewer.md }
+
+      # Second reviewer — runs the local CodeRabbit-equivalent skill before
+      # publishing. Namespaced under a distinct reviewerKey so its verdict
+      # accumulates independently from the peer review.
+      - { type: worker, id: cr-review, role: reviewer,
+          reviewerKey: code-review,
+          prompt: examples/prompts/full-pipeline/cr-skill.md }
+
+      - { type: decide, id: decide, onIterate: code }
+
+      # Post-publish: runs AFTER PR creation. If the external review returns
+      # CHANGES_REQUIRED, `onChangesRequired: continue` queues a follow-up
+      # attempt that re-enters the loop at `code` with the findings as
+      # context.
+      - type: worker
+        id: post-cr
+        role: reviewer
+        runWhen: post-publish
+        onChangesRequired: continue
+        commentOnIssue: true
+        commentPrefix: "[night-orch][post-cr]"
+        prompt: examples/prompts/full-pipeline/cr-skill.md
+
+# Wire the workflow to a repo:
+#
+# repos:
+#   - repo: myorg/myrepo
+#     forge: github
+#     workflow: full-pipeline
+#     # ...rest of the repo config from examples/config.example.yaml

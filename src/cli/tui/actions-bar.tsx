@@ -28,27 +28,30 @@ function joinHintGroups(...groups: Array<string | null>): string {
 
 function navigationHints(activeTab: TabId, runsFocused: boolean, projectsFocused: boolean): string {
   if (activeTab === 'runs' && runsFocused) {
-    return '[1-6]tabs [h/l]tabs [j/k]scroll run'
+    return '[1-7]tabs [h/l]tabs [j/k]scroll run'
   }
   if (activeTab === 'projects' && projectsFocused) {
-    return '[1-6]tabs [h/l]tabs'
+    return '[1-7]tabs [h/l]tabs'
   }
   if (activeTab === 'runs') {
-    return '[1-6]tabs [h/l]tabs [j/k]select issue [o/enter]open'
+    return '[1-7]tabs [h/l]tabs [j/k]select issue [o/enter]open'
   }
   if (activeTab === 'projects') {
-    return '[1-6]tabs [h/l]tabs [j/k]select project [o/enter]open'
+    return '[1-7]tabs [h/l]tabs [j/k]select project [o/enter]open'
   }
   if (activeTab === 'fileloop') {
-    return '[1-6]tabs [h/l]tabs [j/k]select repo'
+    return '[1-7]tabs [h/l]tabs [j/k]select repo'
   }
   if (activeTab === 'logs') {
-    return '[1-6]tabs [h/l]tabs [j/k]select log [J/K]scroll raw'
+    return '[1-7]tabs [h/l]tabs [j/k]select log [J/K]scroll raw'
   }
   if (activeTab === 'settings') {
-    return '[1-6]tabs [h/l]tabs [j/k]select setting'
+    return '[1-7]tabs [h/l]tabs [j/k]select setting'
   }
-  return '[1-6]tabs [h/l]tabs'
+  if (activeTab === 'timeline') {
+    return '[1-7]tabs [h/l]tabs (select an issue in tab 1 to populate)'
+  }
+  return '[1-7]tabs [h/l]tabs'
 }
 
 function globalHints(options: {
