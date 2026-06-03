@@ -773,6 +773,8 @@ When a workflow has multiple reviewer steps, Night-Orch stores each reviewer res
 
 Post-publish reviewer steps run only after the branch has been pushed and a PR exists. They are intended for external review tools such as CodeRabbit or Snyk invoked from a reviewer prompt. A non-approved result is stored as an `external-review-findings` handoff, posted to the issue when enabled, and by default queues a continue pass with the findings as `external_review` feedback.
 
+In `steps` workflows, declare post-publish workers after the `decide` step. They are owned by PR finalization, so `decide.onIterate` must target a pre-decision step such as `code`, never a `runWhen: post-publish` step.
+
 ### Step Types
 
 | Type | Fields | Description |

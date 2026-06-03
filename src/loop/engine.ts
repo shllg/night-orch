@@ -91,6 +91,28 @@ export interface PostPublishReviewEffect {
   result: Exclude<PostPublishStepResult, 'error'>
 }
 
+function assertMainLoopWorkflowBoundary(steps: readonly WorkflowStep[]): void {
+  const decideIndex = steps.findIndex((step) => step.type === 'decide')
+  if (decideIndex === -1) {
+    throw new Error('Workflow must include a decide step for executeLoop')
+  }
+
+  const postPublishIds = new Set<string>()
+  for (const [index, step] of steps.entries()) {
+    if (step.type !== 'worker' || runWhenForStep(step) !== 'post-publish') continue
+    postPublishIds.add(step.id)
+    if (index < decideIndex) {
+      throw new Error(`post-publish step "${step.id}" must be declared after decide`)
+    }
+  }
+
+  for (const step of steps) {
+    if (step.type === 'decide' && postPublishIds.has(step.onIterate)) {
+      throw new Error(`decide step "${step.id}" cannot iterate to post-publish step "${step.onIterate}"`)
+    }
+  }
+}
+
 /**
  * Execute the configurable workflow loop.
  * Walks through workflow steps in order, delegating execution to the step executor.
@@ -101,6 +123,8 @@ export async function executeLoop(
   deps: LoopDependencies,
 ): Promise<RunContext> {
   const { db, config, metrics } = deps
+  const steps = deps.workflow.steps
+  assertMainLoopWorkflowBoundary(steps)
   const artifactWriter = config.storage.logsRoot.trim().length > 0
     ? new FileRunArtifactWriter(config.storage.logsRoot)
     : undefined
@@ -118,7 +142,6 @@ export async function executeLoop(
     onAgentEvent: deps.onAgentEvent,
   }
 
-  const steps = deps.workflow.steps
   const checkpointPhaseData = checkpoint.getPhaseData(initialCtx.runId)
   const persistedDecisions = extractDecisionOutcomes(checkpointPhaseData)
 
@@ -141,8 +164,7 @@ export async function executeLoop(
     const step = steps[stepIndex]!
 
     if (step.type === 'worker' && runWhenForStep(step) === 'post-publish') {
-      stepIndex++
-      continue
+      throw new Error(`Invariant violation: executeLoop reached post-publish step "${step.id}"`)
     }
 
     // Skip step if skipWhen matches triage level. Emit paired

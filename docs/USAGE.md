@@ -383,6 +383,8 @@ Multiple reviewer steps are aggregated. Findings from each reviewer are grouped 
 
 Post-publish reviewer steps run after PR creation. Use them for external review tools that need an open PR number. Non-approved findings are posted to the issue by default and queued as `external_review` feedback for a continue pass; set `onChangesRequired: comment-only` to avoid automatically continuing.
 
+For `steps` workflows, keep post-publish workers after the `decide` step. They are dispatched by finalization after the PR exists, so `decide.onIterate` must point to a pre-decision step like `code`.
+
 ### DAG workflows
 
 You can also define a workflow as an explicit DAG:

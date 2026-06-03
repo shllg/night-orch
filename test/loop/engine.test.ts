@@ -337,6 +337,70 @@ describe('executeLoop', () => {
     ])
   })
 
+  it('rejects post-publish worker steps that are reachable before decide', async () => {
+    const config = makeConfig()
+    config.loop.requireVerificationPass = false
+    const workflow: LoopDependencies['workflow'] = {
+      steps: [
+        { type: 'worker', id: 'code', role: 'coder' },
+        { type: 'worker', id: 'cr', role: 'reviewer', runWhen: 'post-publish' },
+        { type: 'decide', id: 'decide', onIterate: 'code', requireReview: false },
+      ],
+    }
+
+    await expect(executeLoop(makeCtx(), {
+      db,
+      config,
+      adapters: {
+        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: makeMockAdapter([makeReviewerResult('APPROVED')]),
+      },
+      workflow,
+    })).rejects.toThrow('post-publish step "cr" must be declared after decide')
+  })
+
+  it('rejects decide steps that iterate to post-publish worker steps', async () => {
+    const config = makeConfig()
+    config.loop.requireVerificationPass = false
+    const workflow: LoopDependencies['workflow'] = {
+      steps: [
+        { type: 'worker', id: 'code', role: 'coder' },
+        { type: 'worker', id: 'review', role: 'reviewer' },
+        { type: 'decide', id: 'decide', onIterate: 'cr' },
+        { type: 'worker', id: 'cr', role: 'reviewer', runWhen: 'post-publish' },
+      ],
+    }
+
+    await expect(executeLoop(makeCtx(), {
+      db,
+      config,
+      adapters: {
+        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: makeMockAdapter([makeReviewerResult('CHANGES_REQUIRED')]),
+      },
+      workflow,
+    })).rejects.toThrow('decide step "decide" cannot iterate to post-publish step "cr"')
+  })
+
+  it('rejects workflows without a decide step before loop execution', async () => {
+    const workflow: LoopDependencies['workflow'] = {
+      steps: [
+        { type: 'worker', id: 'code', role: 'coder' },
+        { type: 'worker', id: 'cr', role: 'reviewer', runWhen: 'post-publish' },
+      ],
+    }
+
+    await expect(executeLoop(makeCtx(), {
+      db,
+      config: makeConfig(),
+      adapters: {
+        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: makeMockAdapter([makeReviewerResult('APPROVED')]),
+      },
+      workflow,
+    })).rejects.toThrow('Workflow must include a decide step for executeLoop')
+  })
+
   it('executes post-publish worker steps through the checkpointed engine worker path', async () => {
     const config = makeConfig()
     config.loop.requireVerificationPass = false
