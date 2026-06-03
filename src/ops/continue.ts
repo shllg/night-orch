@@ -7,6 +7,7 @@ import type { ReactionCursor, ReactionEnvelope, ReactionType } from '../reaction
 import { clearResumeDecisionArtifacts } from '../loop/checkpoint.js'
 import { RunManager } from '../state/runs.js'
 import { LeaseManager } from '../state/leases.js'
+import { parseControlPayload } from '../state/run-payloads.js'
 import { createFollowupAttempt } from '../state/attempts.js'
 import { recordUserAction } from '../state/run-log-events.js'
 import { transitionLabels } from '../labels/manager.js'
@@ -36,18 +37,19 @@ interface ContinueConflictExcerpt {
   preview: string
 }
 
-const ContinueControlPayloadSchema = z.object({
-  conflictSummary: z.unknown().optional().transform((value) => typeof value === 'string' ? value : undefined),
-  conflictFiles: z.unknown().optional().transform((value) => toStringArray(value)),
-  conflictExcerpts: z.unknown().optional().transform((value) => toConflictExcerpts(value)),
+const ContinueControlPayloadRecordSchema = z.object({
+  conflictSummary: z.unknown().optional(),
+  conflictFiles: z.unknown().optional(),
+  conflictExcerpts: z.unknown().optional(),
   conflictSnapshot: z.unknown().optional(),
 }).passthrough()
 
-type ContinueControlPayload = z.infer<typeof ContinueControlPayloadSchema>
-
-const EMPTY_CONTINUE_CONTROL_PAYLOAD: ContinueControlPayload = {
-  conflictFiles: [],
-  conflictExcerpts: [],
+interface ContinueControlPayload {
+  conflictSummary?: string
+  conflictFiles: string[]
+  conflictExcerpts: ContinueConflictExcerpt[]
+  conflictSnapshot?: unknown
+  warnings: string[]
 }
 
 export interface QueueContinueOptions {
@@ -88,6 +90,7 @@ export async function queueContinue(
   }
 
   const applyStrategyDuringResume = run.manualState === 'awaiting_rebase_resolution' && options.strategyOverride !== undefined
+  const controlPayloadState = inspectStoredControlPayload(db, run.id, run.controlPayload)
   const followup = await buildFollowupContext({
     forge,
     issueRepo,
@@ -97,7 +100,8 @@ export async function queueContinue(
     previousError: run.lastError,
     botUser,
     manualState: run.manualState,
-    controlPayload: run.controlPayload,
+    controlPayload: controlPayloadState.payload,
+    controlPayloadWarnings: controlPayloadState.warnings,
   })
 
   const existingPhaseData = clearResumeDecisionArtifacts(run.phaseData)
@@ -234,6 +238,33 @@ function isCheckpointArtifact(value: unknown): boolean {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function inspectStoredControlPayload(
+  db: Database.Database,
+  runId: string,
+  payload: Record<string, unknown> | null,
+): { payload: Record<string, unknown> | null; warnings: string[] } {
+  if (payload !== null) {
+    return { payload, warnings: [] }
+  }
+
+  const row = db.prepare('SELECT control_payload AS raw FROM runs WHERE id = ?').get(runId) as
+    | { raw: string | null }
+    | undefined
+  if (!row?.raw) {
+    return { payload: null, warnings: [] }
+  }
+
+  const parsed = parseControlPayload(row.raw)
+  if (parsed.ok) {
+    return { payload: parsed.data, warnings: [] }
+  }
+
+  return {
+    payload: null,
+    warnings: [`control_payload: ${parsed.reason} (${parsed.detail})`],
+  }
+}
+
 interface BuildFollowupContextParams {
   forge: ForgeAdapter
   issueRepo: string
@@ -244,6 +275,7 @@ interface BuildFollowupContextParams {
   botUser: string
   manualState: 'none' | 'awaiting_rebase_resolution'
   controlPayload: Record<string, unknown> | null
+  controlPayloadWarnings?: string[]
 }
 
 interface FollowupContextPayload {
@@ -264,8 +296,9 @@ async function buildFollowupContext(params: BuildFollowupContextParams): Promise
     botUser,
     manualState,
     controlPayload,
+    controlPayloadWarnings = [],
   } = params
-  const parsedControlPayload = parseContinueControlPayload(controlPayload)
+  const parsedControlPayload = parseContinueControlPayload(controlPayload, controlPayloadWarnings)
 
   const sections: string[] = []
   const summaryParts: string[] = []
@@ -279,6 +312,10 @@ async function buildFollowupContext(params: BuildFollowupContextParams): Promise
     const snapshot = coerceConflictSnapshot(parsedControlPayload.conflictSnapshot)
     sections.push(rebaseContext)
     summaryParts.push(snapshot?.source === 'branch_refresh' ? 'branch refresh conflict resolution' : 'rebase conflict resolution')
+  }
+
+  if (parsedControlPayload.warnings.length > 0) {
+    summaryParts.push('malformed control payload')
   }
 
   const reactions = await collectReactions({
@@ -363,37 +400,109 @@ function formatRebaseResolutionContext(controlPayload: ContinueControlPayload): 
     }
   }
 
+  if (controlPayload.warnings.length > 0) {
+    lines.push('', '## Malformed Continue Control Payload')
+    lines.push('', 'Some saved conflict metadata could not be used. The continue pass may need to inspect the branch state directly.')
+    for (const warning of controlPayload.warnings) {
+      lines.push(`- ${warning}`)
+    }
+  }
+
   return lines.join('\n')
 }
 
 function parseContinueControlPayload(
   value: Record<string, unknown> | null,
+  inheritedWarnings: string[] = [],
 ): ContinueControlPayload {
   if (!value) {
-    return EMPTY_CONTINUE_CONTROL_PAYLOAD
+    return {
+      conflictFiles: [],
+      conflictExcerpts: [],
+      warnings: inheritedWarnings,
+    }
   }
-  const parsed = ContinueControlPayloadSchema.safeParse(value)
+  const parsed = ContinueControlPayloadRecordSchema.safeParse(value)
   if (!parsed.success) {
-    return EMPTY_CONTINUE_CONTROL_PAYLOAD
+    return {
+      conflictFiles: [],
+      conflictExcerpts: [],
+      warnings: [...inheritedWarnings, 'controlPayload: expected a plain object'],
+    }
   }
-  return parsed.data
+  return {
+    conflictSummary: parseOptionalStringField(parsed.data, 'conflictSummary'),
+    conflictFiles: parseConflictFiles(parsed.data),
+    conflictExcerpts: parseConflictExcerpts(parsed.data),
+    conflictSnapshot: parsed.data.conflictSnapshot,
+    warnings: [
+      ...inheritedWarnings,
+      ...validateConflictFiles(parsed.data),
+      ...validateConflictExcerpts(parsed.data),
+    ],
+  }
 }
 
-function toStringArray(value: unknown): string[] {
+function parseOptionalStringField(
+  payload: z.infer<typeof ContinueControlPayloadRecordSchema>,
+  key: 'conflictSummary',
+): string | undefined {
+  const value = payload[key]
+  return typeof value === 'string' ? value : undefined
+}
+
+function parseConflictFiles(payload: z.infer<typeof ContinueControlPayloadRecordSchema>): string[] {
+  const value = payload.conflictFiles
+  if (value === undefined) return []
   if (!Array.isArray(value)) return []
   return value.filter((entry): entry is string => typeof entry === 'string')
 }
 
-function toConflictExcerpts(value: unknown): ContinueConflictExcerpt[] {
+function parseConflictExcerpts(payload: z.infer<typeof ContinueControlPayloadRecordSchema>): ContinueConflictExcerpt[] {
+  const value = payload.conflictExcerpts
+  if (value === undefined) return []
   if (!Array.isArray(value)) return []
   const excerpts: ContinueConflictExcerpt[] = []
   for (const entry of value) {
-    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue
-    const path = typeof entry['path'] === 'string' ? entry['path'] : '(unknown)'
-    const preview = typeof entry['preview'] === 'string' ? entry['preview'] : ''
+    if (!isConflictExcerpt(entry)) continue
+    const path = entry.path
+    const preview = entry.preview
     excerpts.push({ path, preview })
   }
   return excerpts
+}
+
+function validateConflictFiles(payload: z.infer<typeof ContinueControlPayloadRecordSchema>): string[] {
+  const value = payload.conflictFiles
+  if (value === undefined) return []
+  if (!Array.isArray(value)) {
+    return ['conflictFiles: expected an array of strings']
+  }
+  return value.every((entry) => typeof entry === 'string')
+    ? []
+    : ['conflictFiles: expected an array of strings']
+}
+
+function validateConflictExcerpts(payload: z.infer<typeof ContinueControlPayloadRecordSchema>): string[] {
+  const value = payload.conflictExcerpts
+  if (value === undefined) return []
+  if (!Array.isArray(value)) {
+    return ['conflictExcerpts: expected an array of entries with string path and preview']
+  }
+  return value.every(isConflictExcerpt)
+    ? []
+    : ['conflictExcerpts: expected entries with string path and preview']
+}
+
+function isConflictExcerpt(value: unknown): value is ContinueConflictExcerpt {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false
+  }
+  const record = value as Record<string, unknown>
+  return (
+    typeof record['path'] === 'string'
+    && typeof record['preview'] === 'string'
+  )
 }
 
 interface CollectReactionsParams {

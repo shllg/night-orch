@@ -383,4 +383,73 @@ describe('queueContinue', () => {
       strategy: 'merge',
     })
   })
+
+  it('surfaces malformed rebase conflict payload fields in the continue context', async () => {
+    const runManager = new RunManager(db)
+    const run = runManager.create(makeRunInput({
+      issueNumber: 66,
+      issueNodeId: 'node-66',
+    }))
+    runManager.update(run.id, {
+      status: 'blocked',
+      manualState: 'awaiting_rebase_resolution',
+      endedAt: '2026-02-01T12:00:00Z',
+      controlPayload: {
+        issueRepo: 'org/repo',
+        conflictSummary: 'Refresh against origin/main conflicted',
+        conflictFiles: ['src/app.ts'],
+        conflictExcerpts: [
+          { path: 42, preview: '<<<<<<< ours' },
+          'not an excerpt',
+        ],
+      },
+    })
+
+    const forge = makeForge({
+      listIssueComments: vi.fn().mockResolvedValue([]),
+    })
+    const result = await queueContinue(db, forge, makeTestRepoConfig(), 66, '')
+
+    expect(result.queued).toBe(true)
+    expect(result.reason).toContain('malformed control payload')
+    const updated = runManager.getByRepoAndIssue('org/repo', 66)
+    expect(updated?.phaseData?.reactionSummary).toContain('malformed control payload')
+    expect(updated?.phaseData?.reactionContext).toContain('## Malformed Continue Control Payload')
+    expect(updated?.phaseData?.reactionContext).toContain('conflictExcerpts')
+    expect(updated?.phaseData?.reactionContext).toContain('expected entries with string path and preview')
+  })
+
+  it('surfaces stored control payload corruption when conflict files fail validation', async () => {
+    const runManager = new RunManager(db)
+    const run = runManager.create(makeRunInput({
+      issueNumber: 67,
+      issueNodeId: 'node-67',
+    }))
+    runManager.update(run.id, {
+      status: 'blocked',
+      manualState: 'awaiting_rebase_resolution',
+      endedAt: '2026-02-01T12:00:00Z',
+      phaseData: {
+        issueRepo: 'org/repo',
+      },
+    })
+    db.prepare('UPDATE runs SET control_payload = ? WHERE id = ?')
+      .run(JSON.stringify({
+        issueRepo: 'org/repo',
+        conflictSummary: 'Refresh against origin/main conflicted',
+        conflictFiles: [42],
+        conflictExcerpts: [],
+      }), run.id)
+
+    const forge = makeForge({
+      listIssueComments: vi.fn().mockResolvedValue([]),
+    })
+    const result = await queueContinue(db, forge, makeTestRepoConfig(), 67, '')
+
+    expect(result.queued).toBe(true)
+    expect(result.reason).toContain('malformed control payload')
+    const updated = runManager.getByRepoAndIssue('org/repo', 67)
+    expect(updated?.phaseData?.reactionContext).toContain('## Malformed Continue Control Payload')
+    expect(updated?.phaseData?.reactionContext).toContain('control_payload: schema_error')
+  })
 })
