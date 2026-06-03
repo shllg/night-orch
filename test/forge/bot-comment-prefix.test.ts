@@ -1,40 +1,64 @@
 import { describe, it, expect, vi } from 'vitest'
 import { markerTag, upsertBotComment } from '../../src/forge/bot-comment.js'
-import { formatExternalReviewComment } from '../../src/loop/post-publish.js'
+import { handlePostPublishReview } from '../../src/loop/post-publish.js'
 import type { WorkerStep } from '../../src/loop/workflow.js'
 import type { ReviewerOutput } from '../../src/workers/types.js'
 import type { ForgeAdapter, ForgeComment } from '../../src/forge/types.js'
+import type { RunContext } from '../../src/loop/types.js'
+import { makeTestConfig } from '../helpers/factories.js'
 
 /**
  * Phase 4 acceptance: external review comments posted on the issue must use
  * the configured `commentPrefix` (falling back to `[night-orch]`) AND must be
  * deduped per-attempt via the `<!-- night-orch:${stepId}-${runId} -->`
- * marker. The post-publish.test.ts integration touches both, but a dedicated
- * unit gives a single regression surface that survives refactors to the
- * orchestrator.
+ * marker. Drive the post-publish review handler so the assertion observes the
+ * comment body sent to the forge.
  */
 describe('external review comment — prefix and marker contract', () => {
-  describe('formatExternalReviewComment', () => {
-    it('uses the configured commentPrefix on the verdict line', () => {
-      const body = formatExternalReviewComment(stepWith({ commentPrefix: '[night-orch][cr]' }), reviewFixture())
-      expect(body.split('\n')[0]).toBe('[night-orch][cr] External review: CHANGES_REQUIRED')
+  describe('post-publish external review issue comment', () => {
+    it('posts the configured commentPrefix on the verdict line', async () => {
+      const forge = makeForge([])
+
+      await handlePostPublishReview({
+        ctx: makeCtx(),
+        step: stepWith({ commentPrefix: '[night-orch][cr]' }),
+        review: reviewFixture(),
+        forge,
+        issueRepo: 'org/repo',
+        issueNumber: 7,
+        prNumber: 42,
+        botUser: 'orch-bot',
+      })
+
+      const body = commentBodyFrom(forge.commentOnIssue)
+      expect(body.split('\n')).toEqual([
+        '<!-- night-orch:cr-attempt-1 -->',
+        '[night-orch][cr] External review: CHANGES_REQUIRED',
+        '',
+        'Missing null-check before dereferencing user',
+        '',
+        'Findings:',
+        '- [major] Guard against null user',
+        '  Suggested fix: Add an early-return when user is null',
+      ])
     })
 
-    it('defaults the prefix to [night-orch] when not configured', () => {
-      const body = formatExternalReviewComment(stepWith({}), reviewFixture())
-      expect(body.split('\n')[0]).toBe('[night-orch] External review: CHANGES_REQUIRED')
-    })
+    it('defaults the posted verdict line prefix to [night-orch] when not configured', async () => {
+      const forge = makeForge([])
 
-    it('renders findings with severity and optional suggested fix', () => {
-      const body = formatExternalReviewComment(stepWith({}), reviewFixture())
-      expect(body).toContain('- [major] Guard against null user')
-      expect(body).toContain('  Suggested fix: Add an early-return when user is null')
-    })
+      await handlePostPublishReview({
+        ctx: makeCtx(),
+        step: stepWith({}),
+        review: reviewFixture(),
+        forge,
+        issueRepo: 'org/repo',
+        issueNumber: 7,
+        prNumber: 42,
+        botUser: 'orch-bot',
+      })
 
-    it('omits the findings section when there are none', () => {
-      const review: ReviewerOutput = { ...reviewFixture(), findings: [] }
-      const body = formatExternalReviewComment(stepWith({}), review)
-      expect(body).not.toContain('Findings:')
+      const body = commentBodyFrom(forge.commentOnIssue)
+      expect(body.split('\n')[1]).toBe('[night-orch] External review: CHANGES_REQUIRED')
     })
   })
 
@@ -99,8 +123,6 @@ function reviewFixture(): ReviewerOutput {
     findings: [
       {
         severity: 'major',
-        category: 'correctness',
-        location: 'src/auth.ts:42',
         message: 'Guard against null user',
         suggestedFix: 'Add an early-return when user is null',
       },
@@ -113,10 +135,54 @@ function reviewFixture(): ReviewerOutput {
   }
 }
 
+function makeCtx(): RunContext {
+  const config = makeTestConfig()
+  return {
+    runId: 'attempt-1',
+    repo: 'org/repo',
+    issueRepo: 'org/repo',
+    issueNumber: 7,
+    issue: { number: 7, nodeId: 'issue-node', title: 'Issue', body: '', labels: [], assignees: [], state: 'open', createdAt: '', updatedAt: '', url: '' },
+    repoConfig: config.repos[0]!,
+    roles: { planner: 'codex', coder: 'codex', reviewer: 'codex' },
+    triageResult: { level: 'standard', reason: 'test' },
+    adjustedLimits: { maxReviewIterations: 4, maxTotalAgentPasses: 10, workerTimeoutSeconds: 1800 },
+    branchName: 'orch/7-fix',
+    worktreePath: '/tmp/wt',
+    plan: null,
+    codeResult: null,
+    diff: 'diff',
+    verifyResults: [],
+    reviewResults: {},
+    reviewFindings: [],
+    iteration: 1,
+    totalAgentPasses: 0,
+    estimatedCostUsd: 0,
+    currentPhase: 'completed',
+    terminalStatus: 'publish',
+    phaseHistory: [],
+    dryRun: false,
+    runMode: 'fresh',
+    blockReason: null,
+    prReviewFeedback: null,
+    diffError: null,
+    emptyDiffRetries: 0,
+    sessionIds: {},
+    stepOutputs: {},
+    iterationSnapshots: [],
+  }
+}
+
 function makeForge(existing: ForgeComment[]): ForgeAdapter {
   return {
     listIssueComments: vi.fn().mockResolvedValue(existing),
     updateComment: vi.fn().mockResolvedValue(undefined),
     commentOnIssue: vi.fn().mockResolvedValue(undefined),
   } as unknown as ForgeAdapter
+}
+
+function commentBodyFrom(commentOnIssue: ForgeAdapter['commentOnIssue']): string {
+  const body = vi.mocked(commentOnIssue).mock.calls[0]?.[2]
+  expect(body).toBeTypeOf('string')
+  return body!
 }

@@ -136,14 +136,7 @@ async function upsertExternalReviewComment(input: {
   await input.forge.commentOnIssue(input.issueRepo, input.issueNumber, `${marker}\n${body}`)
 }
 
-/**
- * Render the body of the issue-level comment posted for an external review
- * step. Exposed so the comment-prefix contract can be verified without
- * spinning up the full post-publish orchestrator. The `commentPrefix` field
- * defaults to `[night-orch]`; tests should not rely on the default falling
- * through silently — set it explicitly when asserting on prefix-aware output.
- */
-export function formatExternalReviewComment(step: WorkerStep, review: ReviewerOutput): string {
+function formatExternalReviewComment(step: WorkerStep, review: ReviewerOutput): string {
   const prefix = step.commentPrefix ?? '[night-orch]'
   const lines = [
     `${prefix} External review: ${review.verdict}`,
