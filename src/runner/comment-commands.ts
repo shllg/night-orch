@@ -41,6 +41,7 @@ export interface MentionMatch {
 
 export function parseMentions(comments: ForgeComment[], aliases: readonly string[]): MentionMatch[] {
   const normalizedAliases = [...new Set(aliases.map((alias) => alias.trim()).filter((alias) => alias.length > 0))]
+    .sort((a, b) => b.length - a.length)
   if (normalizedAliases.length === 0) return []
 
   const results: MentionMatch[] = []

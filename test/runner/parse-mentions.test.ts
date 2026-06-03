@@ -46,4 +46,12 @@ describe('parseMentions', () => {
 
     expect(result.map((item) => item.commentId)).toEqual([2])
   })
+
+  it('records the longest matching alias when a comment contains overlapping aliases', () => {
+    const result = parseMentions([
+      comment(1, '@orch and @night-orch should use the stable bot alias'),
+    ], ['@orch', '@night-orch'])
+
+    expect(result[0]?.alias).toBe('@night-orch')
+  })
 })
