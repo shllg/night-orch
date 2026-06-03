@@ -551,8 +551,12 @@ function hydrateReviewState(
   reviewFindings: RunContext['reviewFindings']
 } {
   const reviewResults: Record<string, ReviewerOutput> = { ...baseCtx.reviewResults }
+  const completedPhases = extractCompletedPhases(phaseData)
+  const phaseEntries = completedPhases.length > 0
+    ? completedPhases.map((phase) => [phase, phaseData[phase]] as const)
+    : Object.entries(phaseData)
 
-  for (const [phase, rawArtifacts] of Object.entries(phaseData)) {
+  for (const [phase, rawArtifacts] of phaseEntries) {
     if (!isRecord(rawArtifacts)) continue
 
     const artifactResults = rawArtifacts['reviewResults']

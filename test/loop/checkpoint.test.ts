@@ -392,6 +392,41 @@ describe('Checkpoint', () => {
       ])
     })
 
+    it('hydrates duplicate reviewer slots in completed phase order', () => {
+      const firstReview = {
+        verdict: 'CHANGES_REQUIRED' as const,
+        summary: 'First review requested changes',
+        findings: [{ severity: 'major' as const, message: 'Add parser validation', suggestedFix: 'Guard input' }],
+        definitionOfDoneCheck: { issueAddressed: false, testsPassing: true, noBlockingFindings: false },
+      }
+      const laterReview = {
+        verdict: 'APPROVED' as const,
+        summary: 'Later review approved the fix',
+        findings: [],
+        definitionOfDoneCheck: { issueAddressed: true, testsPassing: true, noBlockingFindings: true },
+      }
+      db.prepare('UPDATE runs SET current_phase = ?, phase_data = ? WHERE id = ?').run(
+        'cr',
+        JSON.stringify({
+          cr: {
+            reviewerKey: 'review',
+            reviewResults: { review: laterReview },
+          },
+          review: {
+            reviewerKey: 'review',
+            reviewResults: { review: firstReview },
+          },
+          __completedPhases: ['review', 'cr'],
+        }),
+        'run-test-1',
+      )
+
+      const resumed = checkpoint.resumeFromCheckpoint('run-test-1', makeBaseCtx())
+
+      expect(resumed?.reviewResults.review).toEqual(laterReview)
+      expect(resumed?.reviewFindings).toEqual([])
+    })
+
     it('ignores review phase artifacts whose persisted JSON no longer matches reviewer contracts', () => {
       checkpoint.phaseCompleted('run-test-1', 'review', {
         reviewerKey: 'review',
