@@ -1,6 +1,6 @@
 import type { ForgeAdapter, PRCheckStatus, ForgePRReview, ForgePRReviewComment } from '../forge/types.js'
 import type { MentionFeedbackReaction, ReactionCursor, ReactionEnvelope, ReactionScanResult } from './types.js'
-import { isBotAuthored } from '../forge/bot-comment.js'
+import { isBotAuthored, isBotLogin } from '../forge/bot-comment.js'
 import { parseMentions } from '../runner/comment-commands.js'
 import { logger } from '../utils/logger.js'
 import { nowUtcIso } from '../utils/time.js'
@@ -225,10 +225,6 @@ function isAcceptableReviewAuthor(user: string, body: string, reviewBotAllowlist
   if (isBotAuthored(body)) return false
   if (isBotLogin(user)) return reviewBotAllowlist.has(user)
   return true
-}
-
-function isBotLogin(user: string): boolean {
-  return /\[bot\]$/i.test(user)
 }
 
 function formatCIContext(status: PRCheckStatus): string {

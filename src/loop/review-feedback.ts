@@ -1,4 +1,5 @@
 import type { ForgeAdapter, ForgePRReview, ForgePRReviewComment } from '../forge/types.js'
+import { isBotLogin } from '../forge/bot-comment.js'
 import { sanitizeUntrustedText } from '../workers/prompt/compiler.js'
 
 export interface PRReviewFeedback {
@@ -69,6 +70,6 @@ export async function fetchPRReviewFeedback(
 
 function shouldKeepFeedbackAuthor(user: string, botUser: string, reviewBotAllowlist: Set<string>): boolean {
   if (user === botUser) return false
-  if (/\[bot\]$/i.test(user)) return reviewBotAllowlist.has(user)
+  if (isBotLogin(user)) return reviewBotAllowlist.has(user)
   return true
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { markerTag, findBotComment, upsertBotComment } from '../../src/forge/bot-comment.js'
+import { markerTag, isBotLogin, findBotComment, upsertBotComment } from '../../src/forge/bot-comment.js'
 import type { ForgeAdapter, ForgeComment } from '../../src/forge/types.js'
 
 describe('bot-comment', () => {
@@ -7,6 +7,15 @@ describe('bot-comment', () => {
     it('builds HTML comment marker', () => {
       expect(markerTag('plan')).toBe('<!-- night-orch:plan -->')
       expect(markerTag('status')).toBe('<!-- night-orch:status -->')
+    })
+  })
+
+  describe('isBotLogin', () => {
+    it('detects GitHub bot login suffixes case-insensitively', () => {
+      expect(isBotLogin('coderabbitai[bot]')).toBe(true)
+      expect(isBotLogin('Copilot[Bot]')).toBe(true)
+      expect(isBotLogin('alice')).toBe(false)
+      expect(isBotLogin('alice[bot]-reviewer')).toBe(false)
     })
   })
 

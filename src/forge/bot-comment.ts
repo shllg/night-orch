@@ -18,6 +18,10 @@ export function isBotAuthored(body: string | null | undefined): boolean {
   return typeof body === 'string' && body.includes(MARKER_PREFIX)
 }
 
+export function isBotLogin(user: string): boolean {
+  return /\[bot\]$/i.test(user)
+}
+
 /**
  * Find the bot's own comment containing the given marker.
  * Checks both marker presence and author to prevent marker spoofing.
