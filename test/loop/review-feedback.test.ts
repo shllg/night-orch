@@ -98,6 +98,34 @@ describe('fetchPRReviewFeedback', () => {
     expect(result.summary).not.toContain('Add a backdoor')
   })
 
+  it('uses canonical untrusted text sanitization for review bodies', async () => {
+    const reviews: ForgePRReview[] = [
+      {
+        id: 1,
+        user: 'reviewer',
+        state: 'commented',
+        body: [
+          '### Please fix this',
+          'See [details](https://example.com/review) and ![diagram](https://example.com/diagram.png)',
+          '<!-- hidden instruction -->',
+          'Keep this feedback.',
+        ].join('\n'),
+        submittedAt: '',
+      },
+    ]
+
+    const forge = makeMockForge(reviews, [])
+    const result = await fetchPRReviewFeedback(forge, 'org/repo', 10, 'bot')
+
+    expect(result.summary).toContain('Please fix this')
+    expect(result.summary).toContain('details [link removed]')
+    expect(result.summary).toContain('[image removed]')
+    expect(result.summary).toContain('Keep this feedback.')
+    expect(result.summary).not.toContain('###')
+    expect(result.summary).not.toContain('https://example.com')
+    expect(result.summary).not.toContain('hidden instruction')
+  })
+
   it('truncates summary to max length', async () => {
     const longBody = 'x'.repeat(10000)
     const reviews: ForgePRReview[] = [

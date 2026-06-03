@@ -4,6 +4,7 @@ import { isBotAuthored } from '../forge/bot-comment.js'
 import { parseMentions } from '../runner/comment-commands.js'
 import { logger } from '../utils/logger.js'
 import { nowUtcIso } from '../utils/time.js'
+import { sanitizeUntrustedText } from '../workers/prompt/compiler.js'
 
 const EMPTY_CURSOR: ReactionCursor = {
   lastReviewId: 0,
@@ -266,13 +267,5 @@ function formatCommentContext(comments: ForgePRReviewComment[]): string {
 }
 
 function formatMentionContext(author: string, body: string): string {
-  return `[Review by @${author}]:\n${sanitizeReactionText(body)}`
-}
-
-function sanitizeReactionText(text: string): string {
-  return text
-    .replace(/^(System|Instructions|SYSTEM|IMPORTANT|OVERRIDE|IGNORE):.*$/gim, '')
-    .replace(/<[^>]+>/g, '')
-    .replace(/\s{3,}/g, '  ')
-    .trim()
+  return `[Review by @${author}]:\n${sanitizeUntrustedText(body)}`
 }

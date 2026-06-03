@@ -195,6 +195,7 @@ function sanitizeFollowupContext(value: string): string {
 
 export function sanitizeUntrustedText(value: string): string {
   return value
+    .replace(/^\s*(?:System|Instructions|Important|Override|Ignore):.*$/gim, '')
     .replace(/<[^>]*>/g, '')
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, '[image removed]')

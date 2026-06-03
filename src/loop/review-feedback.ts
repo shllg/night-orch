@@ -1,4 +1,5 @@
 import type { ForgeAdapter, ForgePRReview, ForgePRReviewComment } from '../forge/types.js'
+import { sanitizeUntrustedText } from '../workers/prompt/compiler.js'
 
 export interface PRReviewFeedback {
   reviews: ForgePRReview[]
@@ -13,21 +14,6 @@ export interface FetchPRReviewFeedbackOptions {
 const MAX_SUMMARY_LENGTH = 8000
 
 /**
- * Sanitize untrusted text from PR review comments.
- * Strips potential prompt injection patterns and truncates.
- */
-function sanitizeReviewText(text: string): string {
-  return text
-    // Strip lines that look like system prompt instructions
-    .replace(/^(System|Instructions|SYSTEM|IMPORTANT|OVERRIDE|IGNORE):.*/gim, '')
-    // Strip HTML tags
-    .replace(/<[^>]+>/g, '')
-    // Collapse excessive whitespace
-    .replace(/\s{3,}/g, '  ')
-    .trim()
-}
-
-/**
  * Compile a human-readable summary of PR review feedback for prompt inclusion.
  */
 function compileSummary(
@@ -38,7 +24,7 @@ function compileSummary(
 
   for (const review of reviews) {
     if (review.body.trim()) {
-      parts.push(`[Review by ${review.user} (${review.state})]:\n${sanitizeReviewText(review.body)}`)
+      parts.push(`[Review by ${review.user} (${review.state})]:\n${sanitizeUntrustedText(review.body)}`)
     }
   }
 
@@ -46,7 +32,7 @@ function compileSummary(
     const location = comment.path
       ? `${comment.path}${comment.line ? `:${comment.line}` : ''}`
       : 'general'
-    parts.push(`[Comment by ${comment.user} on ${location}]:\n${sanitizeReviewText(comment.body)}`)
+    parts.push(`[Comment by ${comment.user} on ${location}]:\n${sanitizeUntrustedText(comment.body)}`)
   }
 
   const full = parts.join('\n\n')
