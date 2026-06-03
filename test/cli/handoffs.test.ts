@@ -45,7 +45,6 @@ describe('handoffsCommand', () => {
       {
         id: 1,
         runId: 'run-1',
-        attemptId: 'run-1',
         stepId: 'plan',
         fromRole: 'planner',
         toRole: 'coder',
@@ -59,7 +58,6 @@ describe('handoffsCommand', () => {
       {
         id: 2,
         runId: 'run-1',
-        attemptId: 'run-1',
         stepId: 'review',
         fromRole: 'reviewer',
         toRole: 'system',

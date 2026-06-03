@@ -13,7 +13,6 @@ export async function handleHandoffs(args: { runId: string }, deps: MCPDependenc
   const handoffs = rows.slice(0, MAX_HANDOFFS).map((handoff) => ({
     id: handoff.id,
     runId: handoff.runId,
-    attemptId: handoff.attemptId,
     stepId: handoff.stepId,
     fromRole: handoff.fromRole,
     toRole: handoff.toRole,

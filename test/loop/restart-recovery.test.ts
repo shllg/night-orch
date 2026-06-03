@@ -164,7 +164,6 @@ function seedHandoffs(db: Database.Database, runId: string): void {
   const plan = renderPlanHandoff(planFixture())
   recordHandoff(db, {
     runId,
-    attemptId: runId,
     stepId: 'plan',
     fromRole: 'planner',
     toRole: 'coder',
@@ -177,7 +176,6 @@ function seedHandoffs(db: Database.Database, runId: string): void {
   const code = renderCodeHandoff(codeFixture())
   recordHandoff(db, {
     runId,
-    attemptId: runId,
     stepId: 'code',
     fromRole: 'coder',
     toRole: 'reviewer',
@@ -190,7 +188,6 @@ function seedHandoffs(db: Database.Database, runId: string): void {
   const verify = renderVerifyHandoff(verifyFixture())
   recordHandoff(db, {
     runId,
-    attemptId: runId,
     stepId: 'verify',
     fromRole: null,
     toRole: 'reviewer',
@@ -203,7 +200,6 @@ function seedHandoffs(db: Database.Database, runId: string): void {
   const review = renderReviewHandoff(reviewFixture(), 'review')
   recordHandoff(db, {
     runId,
-    attemptId: runId,
     stepId: 'review',
     fromRole: 'reviewer',
     toRole: 'coder',
@@ -217,7 +213,6 @@ function seedHandoffs(db: Database.Database, runId: string): void {
 function seedInvalidHandoffs(db: Database.Database, runId: string): void {
   recordHandoff(db, {
     runId,
-    attemptId: runId,
     stepId: 'plan',
     fromRole: 'planner',
     toRole: 'coder',
@@ -229,7 +224,6 @@ function seedInvalidHandoffs(db: Database.Database, runId: string): void {
 
   recordHandoff(db, {
     runId,
-    attemptId: runId,
     stepId: 'code',
     fromRole: 'coder',
     toRole: 'reviewer',
@@ -241,7 +235,6 @@ function seedInvalidHandoffs(db: Database.Database, runId: string): void {
 
   recordHandoff(db, {
     runId,
-    attemptId: runId,
     stepId: 'verify',
     fromRole: null,
     toRole: 'reviewer',
@@ -253,7 +246,6 @@ function seedInvalidHandoffs(db: Database.Database, runId: string): void {
 
   recordHandoff(db, {
     runId,
-    attemptId: runId,
     stepId: 'review',
     fromRole: 'reviewer',
     toRole: 'coder',

@@ -10,7 +10,6 @@ export type HandoffKind =
 
 export interface RecordHandoffInput {
   runId: string
-  attemptId: string
   stepId: string
   fromRole: string | null
   toRole: string | null
@@ -24,7 +23,6 @@ export interface RecordHandoffInput {
 export interface AgentHandoff {
   readonly id: number
   readonly runId: string
-  readonly attemptId: string
   readonly stepId: string
   readonly fromRole: string | null
   readonly toRole: string | null
@@ -39,7 +37,6 @@ export interface AgentHandoff {
 interface HandoffRow {
   id: number
   run_id: string
-  attempt_id: string
   step_id: string
   from_role: string | null
   to_role: string | null
@@ -56,7 +53,6 @@ export function recordHandoff(db: Database.Database, input: RecordHandoffInput):
   const result = db.prepare(`
     INSERT INTO agent_handoffs (
       run_id,
-      attempt_id,
       step_id,
       from_role,
       to_role,
@@ -67,10 +63,9 @@ export function recordHandoff(db: Database.Database, input: RecordHandoffInput):
       token_usage,
       created_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     input.runId,
-    input.attemptId,
     input.stepId,
     input.fromRole,
     input.toRole,
@@ -85,7 +80,6 @@ export function recordHandoff(db: Database.Database, input: RecordHandoffInput):
   return {
     id: Number(result.lastInsertRowid),
     runId: input.runId,
-    attemptId: input.attemptId,
     stepId: input.stepId,
     fromRole: input.fromRole,
     toRole: input.toRole,
@@ -100,7 +94,7 @@ export function recordHandoff(db: Database.Database, input: RecordHandoffInput):
 
 export function listHandoffs(db: Database.Database, runId: string): AgentHandoff[] {
   const rows = db.prepare(`
-    SELECT id, run_id, attempt_id, step_id, from_role, to_role, kind,
+    SELECT id, run_id, step_id, from_role, to_role, kind,
            summary, content_md, content_json, token_usage, created_at
     FROM agent_handoffs
     WHERE run_id = ?
@@ -116,7 +110,7 @@ export function getLatestHandoffByKind(
   kind: HandoffKind,
 ): AgentHandoff | null {
   const row = db.prepare(`
-    SELECT id, run_id, attempt_id, step_id, from_role, to_role, kind,
+    SELECT id, run_id, step_id, from_role, to_role, kind,
            summary, content_md, content_json, token_usage, created_at
     FROM agent_handoffs
     WHERE run_id = ? AND kind = ?
@@ -131,7 +125,6 @@ function mapHandoffRow(row: HandoffRow): AgentHandoff {
   return {
     id: row.id,
     runId: row.run_id,
-    attemptId: row.attempt_id,
     stepId: row.step_id,
     fromRole: row.from_role,
     toRole: row.to_role,

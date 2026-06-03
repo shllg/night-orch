@@ -24,10 +24,17 @@ describe('agent handoff repository', () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
+  it('does not persist a separate attempt id for handoffs', () => {
+    const columns = db
+      .prepare('PRAGMA table_info(agent_handoffs)')
+      .all() as Array<{ name: string }>
+
+    expect(columns.map((column) => column.name)).not.toContain('attempt_id')
+  })
+
   it('records and lists handoffs ordered by insertion with parsed JSON fields', () => {
     const plan = recordHandoff(db, {
       runId: 'run-test-1',
-      attemptId: 'run-test-1',
       stepId: 'plan',
       fromRole: 'planner',
       toRole: 'coder',
@@ -40,7 +47,6 @@ describe('agent handoff repository', () => {
 
     recordHandoff(db, {
       runId: 'run-test-1',
-      attemptId: 'run-test-1',
       stepId: 'review',
       fromRole: 'reviewer',
       toRole: 'system',
@@ -57,7 +63,6 @@ describe('agent handoff repository', () => {
     expect(rows.map((row) => row.stepId)).toEqual(['plan', 'review'])
     expect(rows[0]).toMatchObject({
       runId: 'run-test-1',
-      attemptId: 'run-test-1',
       stepId: 'plan',
       fromRole: 'planner',
       toRole: 'coder',

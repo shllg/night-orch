@@ -27,7 +27,6 @@ export function buildStepHandoff(input: BuildStepHandoffInput): RecordHandoffInp
       const rendered = renderPlanHandoff(ctx.plan)
       return withTokenUsage({
         runId: ctx.runId,
-        attemptId: ctx.runId,
         stepId: step.id,
         fromRole: 'planner',
         toRole: nextHandoffRole(steps, stepIndex),
@@ -43,7 +42,6 @@ export function buildStepHandoff(input: BuildStepHandoffInput): RecordHandoffInp
       const rendered = renderCodeHandoff(ctx.codeResult)
       return withTokenUsage({
         runId: ctx.runId,
-        attemptId: ctx.runId,
         stepId: step.id,
         fromRole: 'coder',
         toRole: nextHandoffRole(steps, stepIndex),
@@ -62,7 +60,6 @@ export function buildStepHandoff(input: BuildStepHandoffInput): RecordHandoffInp
         const rendered = renderExternalReviewHandoff(review, step.id)
         return withTokenUsage({
           runId: ctx.runId,
-          attemptId: ctx.runId,
           stepId: step.id,
           fromRole: 'reviewer',
           toRole: shouldQueuePostPublishContinue(step, review) ? 'coder' : 'system',
@@ -75,7 +72,6 @@ export function buildStepHandoff(input: BuildStepHandoffInput): RecordHandoffInp
       const rendered = renderReviewHandoff(review, step.id)
       return withTokenUsage({
         runId: ctx.runId,
-        attemptId: ctx.runId,
         stepId: step.id,
         fromRole: 'reviewer',
         toRole: review.verdict === 'CHANGES_REQUIRED' ? 'coder' : nextHandoffRole(steps, stepIndex),
@@ -94,7 +90,6 @@ export function buildStepHandoff(input: BuildStepHandoffInput): RecordHandoffInp
     const rendered = renderVerifyHandoff(ctx.verifyResults)
     return {
       runId: ctx.runId,
-      attemptId: ctx.runId,
       stepId: step.id,
       fromRole: 'system',
       toRole: nextHandoffRole(steps, stepIndex),

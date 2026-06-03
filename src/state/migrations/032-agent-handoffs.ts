@@ -5,7 +5,6 @@ export function up(db: Database.Database): void {
     CREATE TABLE IF NOT EXISTS agent_handoffs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-      attempt_id TEXT NOT NULL,
       step_id TEXT NOT NULL,
       from_role TEXT,
       to_role TEXT,
@@ -19,9 +18,6 @@ export function up(db: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_handoffs_run
     ON agent_handoffs(run_id, id);
-
-    CREATE INDEX IF NOT EXISTS idx_handoffs_attempt
-    ON agent_handoffs(attempt_id, id);
 
     CREATE INDEX IF NOT EXISTS idx_handoffs_kind
     ON agent_handoffs(run_id, kind);

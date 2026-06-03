@@ -252,7 +252,6 @@ function makeHandoffRow(partial: Partial<HandoffRow>): HandoffRow {
   return {
     id: partial.id ?? 1,
     runId: partial.runId ?? 'run-focus',
-    attemptId: partial.attemptId ?? 'run-focus',
     stepId: partial.stepId ?? 'plan',
     fromRole: partial.fromRole ?? 'planner',
     toRole: partial.toRole ?? 'coder',

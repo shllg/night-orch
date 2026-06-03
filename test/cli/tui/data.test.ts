@@ -27,7 +27,6 @@ describe('loadRuns', () => {
     ).run()
     recordHandoff(db, {
       runId: 'run-handoff-1',
-      attemptId: 'run-handoff-1',
       stepId: 'plan',
       fromRole: 'planner',
       toRole: 'coder',
@@ -38,7 +37,6 @@ describe('loadRuns', () => {
     })
     recordHandoff(db, {
       runId: 'run-handoff-1',
-      attemptId: 'run-handoff-1',
       stepId: 'code',
       fromRole: 'coder',
       toRole: 'system',

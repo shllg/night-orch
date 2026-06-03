@@ -191,7 +191,6 @@ describe('MCP Tools', () => {
     })
     recordHandoff(db, {
       runId: run.id,
-      attemptId: run.id,
       stepId: 'plan',
       fromRole: 'planner',
       toRole: 'coder',
@@ -202,7 +201,6 @@ describe('MCP Tools', () => {
     })
     recordHandoff(db, {
       runId: run.id,
-      attemptId: run.id,
       stepId: 'review',
       fromRole: 'reviewer',
       toRole: 'system',

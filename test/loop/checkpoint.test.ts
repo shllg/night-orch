@@ -165,7 +165,6 @@ describe('Checkpoint', () => {
     it('records a handoff in the same completion operation', () => {
       checkpoint.phaseCompleted('run-test-1', 'plan', { plan: { objective: 'Fix login' } }, 1, {
         runId: 'run-test-1',
-        attemptId: 'run-test-1',
         stepId: 'plan',
         fromRole: 'planner',
         toRole: 'coder',
@@ -264,7 +263,6 @@ describe('Checkpoint', () => {
       }
       recordHandoff(db, {
         runId: 'run-test-1',
-        attemptId: 'run-test-1',
         stepId: 'plan',
         fromRole: 'planner',
         toRole: 'coder',
@@ -275,7 +273,6 @@ describe('Checkpoint', () => {
       })
       recordHandoff(db, {
         runId: 'run-test-1',
-        attemptId: 'run-test-1',
         stepId: 'review',
         fromRole: 'reviewer',
         toRole: 'coder',
