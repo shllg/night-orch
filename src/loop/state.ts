@@ -105,6 +105,12 @@ export type BlockedReason =
       adapter: string
       step: string
     }
+  | {
+      type: 'environmentFault'
+      adapter: string
+      step: string
+      detail: string
+    }
 
 /**
  * Total set of blocked-reason type tags. Keep in lockstep with
@@ -124,6 +130,7 @@ export const BLOCKED_REASON_TYPES = [
   'emptyDiff',
   'workerTimeout',
   'tokenCaptureFailed',
+  'environmentFault',
 ] as const satisfies readonly BlockedReason['type'][]
 
 export type BlockedReasonType = (typeof BLOCKED_REASON_TYPES)[number]
@@ -221,6 +228,8 @@ export function isBlockedReasonRecoverable(reason: BlockedReason): boolean {
       return false
     case 'tokenCaptureFailed':
       return false
+    case 'environmentFault':
+      return false
     default:
       return assertNever(reason, 'isBlockedReasonRecoverable')
   }
@@ -255,6 +264,8 @@ export function describeBlockedReason(reason: BlockedReason): string {
       return `${reason.adapter} timed out during ${reason.step} after ${reason.timeoutMs}ms`
     case 'tokenCaptureFailed':
       return `${reason.adapter} produced output without parseable token usage (${reason.step})`
+    case 'environmentFault':
+      return `${reason.adapter} hit an environment fault during ${reason.step}: ${reason.detail}`
     default:
       return assertNever(reason, 'describeBlockedReason')
   }
@@ -284,6 +295,8 @@ export function blockReasonSummary(reason: BlockedReason, ctx: RunContext): stri
       return `${reason.adapter} timed out during ${reason.step} after ${reason.timeoutMs}ms. Use /orch retry to start fresh, or increase the worker timeout in Settings.`
     case 'tokenCaptureFailed':
       return `${reason.adapter} produced output without parseable token usage during ${reason.step}. This is a worker bug — capture the raw output and file an issue.`
+    case 'environmentFault':
+      return `${reason.adapter} could not modify the workspace during ${reason.step} (${reason.detail}). The worker ran in a read-only or otherwise broken environment — fix the sandbox/worker config, then use /orch retry.`
     default:
       return assertNever(reason, 'blockReasonSummary')
   }
@@ -423,6 +436,8 @@ export function blockedReasonToLegacy(
       return 'auth_failure'
     case 'tokenCaptureFailed':
       return 'auth_failure'
+    case 'environmentFault':
+      return 'verify_config'
     default:
       return assertNever(reason, 'blockedReasonToLegacy')
   }

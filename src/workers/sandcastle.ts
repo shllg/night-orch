@@ -359,16 +359,20 @@ function buildCodexAgent(
     ...base,
     buildPrintCommand(options) {
       const command = base.buildPrintCommand(options)
-      const modeHardenedCommand = hardenCodexCommandForRole(command.command, role)
-      if (!continueSessionId) {
-        return {
-          ...command,
-          command: modeHardenedCommand,
-        }
-      }
+      const isResume = Boolean(continueSessionId)
+      // On resume, the sandbox policy MUST be expressed as `-c sandbox_mode=…`
+      // because `codex exec resume` has no `--sandbox` flag — a `--sandbox`
+      // appended after the `resume` subcommand is silently ignored and the
+      // resumed session inherits the session creator's policy (read-only for
+      // a planner-created session), which blocks every coder write.
+      const hardenedCommand = hardenCodexCommandForRole(command.command, role, isResume)
+      const finalCommand = isResume
+        ? injectCodexResumeSubcommand(hardenedCommand, continueSessionId as string)
+        : hardenedCommand
+      assertCoderSandboxWritable(finalCommand, role)
       return {
         ...command,
-        command: injectCodexResumeSubcommand(modeHardenedCommand, continueSessionId),
+        command: finalCommand,
       }
     },
     parseStreamLine(line: string) {
@@ -385,9 +389,23 @@ function buildCodexAgent(
   }
 }
 
+/**
+ * Apply the per-role Codex sandbox policy (`workspace-write` for the coder,
+ * `read-only` otherwise), stripping any conflicting policy the base command
+ * already carried.
+ *
+ * When `forResume` is true the policy is injected as `-c sandbox_mode="…"`
+ * instead of `--sandbox …`. This matters because the resume subcommand
+ * (added afterwards by {@link injectCodexResumeSubcommand}) has no
+ * `--sandbox`/`-s` flag — codex silently ignores a `--sandbox` placed after
+ * `resume`, so the resumed session would keep the policy of whoever created
+ * it (read-only for a planner-created session). `codex exec resume` does
+ * accept `-c <key=value>`, so the config form survives the rewrite.
+ */
 function hardenCodexCommandForRole(
   command: string,
   role: WorkerTaskInput['role'],
+  forResume: boolean,
 ): string {
   if (!/^(?:\S+\s+)*codex\s+exec\b/.test(command)) return command
 
@@ -396,14 +414,50 @@ function hardenCodexCommandForRole(
     .replace(/\s--dangerously-bypass-approvals-and-sandbox\b/g, '')
     .replace(/\s--sandbox\s+(?:read-only|workspace-write|danger-full-access)\b/g, '')
     .replace(/\s-s\s+(?:read-only|workspace-write|danger-full-access)\b/g, '')
+    .replace(/\s(?:-c|--config)\s+sandbox_mode=(?:"[^"]*"|'[^']*'|\S+)/g, '')
 
-  return withoutBypass.replace(/\bcodex\s+exec\b/, `codex exec --sandbox ${sandboxMode}`)
+  const injection = forResume
+    ? `codex exec -c sandbox_mode="${sandboxMode}"`
+    : `codex exec --sandbox ${sandboxMode}`
+  return withoutBypass.replace(/\bcodex\s+exec\b/, injection)
 }
 
 function injectCodexResumeSubcommand(command: string, sessionId: string): string {
   if (!/^(?:\S+\s+)*codex\s+exec\b/.test(command)) return command
   const escapedSession = shellEscape(sessionId)
   return command.replace(/\bcodex\s+exec\b/, `codex exec resume ${escapedSession}`)
+}
+
+/**
+ * Tripwire guard: a coder Codex command must run with an *effective*
+ * workspace-write policy, otherwise every `apply_patch` is rejected and the
+ * run burns its full token budget producing an empty diff (issue #341).
+ *
+ * Throws when the role is coder but workspace-write is absent or expressed in
+ * a form codex won't honor — specifically a bare `--sandbox` sitting after a
+ * `resume` subcommand. With {@link hardenCodexCommandForRole} correct this
+ * never fires; it exists to fail fast (before spending tokens) if that logic
+ * regresses.
+ */
+function assertCoderSandboxWritable(command: string, role: WorkerTaskInput['role']): void {
+  if (role !== 'coder') return
+  if (!/^(?:\S+\s+)*codex\s+exec\b/.test(command)) return
+
+  const hasResume = /\bcodex\s+exec\s+resume\b/.test(command)
+  const hasFlagForm = /(?:--sandbox|\s-s)\s+workspace-write\b/.test(command)
+  const hasConfigForm = /sandbox_mode=(?:"workspace-write"|'workspace-write'|workspace-write\b)/.test(command)
+  // A --sandbox/-s after `resume` is accepted on the CLI grammar but silently
+  // ineffective — treat it as "not writable" so we fail loud instead of quiet.
+  const flagAfterResume = hasResume && /\bresume\b[\s\S]*?(?:--sandbox|\s-s)\s+workspace-write\b/.test(command)
+  const effective = hasResume ? hasConfigForm : (hasFlagForm || hasConfigForm)
+
+  if (!effective || flagAfterResume) {
+    throw new Error(
+      `codex coder command would not run workspace-write (resume=${hasResume}); ` +
+        'refusing to run read-only and waste the token budget. Command: ' +
+        command,
+    )
+  }
 }
 
 function shellEscape(value: string): string {

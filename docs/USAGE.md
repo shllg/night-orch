@@ -574,7 +574,7 @@ Night-orch supports multiple AI agent backends. Each role (planner, coder, revie
 | `codex` | Codex CLI | Default coder/reviewer in the standard role split. Uses `--output-last-message`, session continuity via `--resume` |
 | `acp` | Any ACP agent | Via [acpx](https://github.com/openclaw/acpx) — supports Gemini, Claude, Codex, and 17+ agents |
 
-Role hardening for Codex runs is automatic: coder steps run with `--sandbox workspace-write`, while planner/reviewer steps run with `--sandbox read-only`.
+Role hardening for Codex runs is automatic: coder steps run with `--sandbox workspace-write`, while planner/reviewer steps run with `--sandbox read-only`. When a step resumes a prior phase's Codex session (e.g. a coder resuming the planner's session), the policy is applied as `-c sandbox_mode="…"` instead — `codex exec resume` has no `--sandbox` flag, so a `--sandbox` placed after `resume` is silently ignored and the resumed session would otherwise inherit the session creator's read-only policy. If a coder step would end up without an effective workspace-write policy, the run fails fast with a clear error rather than burning its token budget producing an empty diff.
 
 ### Configuring agents
 

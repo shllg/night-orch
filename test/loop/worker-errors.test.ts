@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { workerErrorToBlockedReason } from '../../src/loop/worker-errors.js'
 import {
   WorkerAuthError,
+  WorkerEnvironmentError,
   WorkerParseError,
   WorkerRateLimitError,
   WorkerTimeoutError,
@@ -36,6 +37,10 @@ describe('workerErrorToBlockedReason', () => {
       type: 'ambiguousReview',
       excerpt: 'claude rate-limited during coder: quota exhausted',
     })
+
+    expect(
+      workerErrorToBlockedReason(new WorkerEnvironmentError('codex', 'coder', 'read-only sandbox')),
+    ).toEqual({ type: 'environmentFault', adapter: 'codex', step: 'coder', detail: 'read-only sandbox' })
   })
 
   it('rejects transient worker failures so poller retry can handle them', () => {

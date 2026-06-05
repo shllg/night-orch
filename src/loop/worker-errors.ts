@@ -1,5 +1,6 @@
 import {
   WorkerAuthError,
+  WorkerEnvironmentError,
   WorkerParseError,
   WorkerRateLimitError,
   WorkerTimeoutError,
@@ -29,6 +30,9 @@ export function workerErrorToBlockedReason(err: WorkerError): BlockedReason {
   }
   if (err instanceof WorkerTokenCaptureError) {
     return { type: 'tokenCaptureFailed', adapter: err.adapter, step: err.step }
+  }
+  if (err instanceof WorkerEnvironmentError) {
+    return { type: 'environmentFault', adapter: err.adapter, step: err.step, detail: err.detail }
   }
   if (err instanceof WorkerParseError) {
     return { type: 'ambiguousReview', excerpt: err.message }

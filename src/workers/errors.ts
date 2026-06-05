@@ -136,6 +136,30 @@ export class WorkerRateLimitError extends WorkerError {
 }
 
 /**
+ * Thrown when a worker completed but its output shows the execution
+ * environment rejected all writes — e.g. a Codex coder running in a
+ * read-only sandbox where every `apply_patch` is refused. Distinct from
+ * `WorkerTransientError` because retrying an unwritable environment is
+ * guaranteed to fail the same way; the engine converts this to a typed
+ * `environmentFault` blocked state instead of burning the empty-diff retry
+ * budget (issue #341).
+ *
+ * `detail` is a short, non-sensitive excerpt of the rejection signature —
+ * never the full worker output, to avoid leaking prompt contents into logs.
+ */
+export class WorkerEnvironmentError extends WorkerError {
+  readonly code = 'WORKER_ENVIRONMENT_FAULT' as const
+
+  constructor(
+    adapter: string,
+    step: string,
+    public readonly detail: string,
+  ) {
+    super(adapter, step, `${adapter} worker environment fault during ${step}: ${detail}`)
+  }
+}
+
+/**
  * Thrown when the worker failure looks genuinely transient — network
  * blip, dropped connection, flaky CLI startup. This is the **only**
  * `WorkerError` subclass that the engine re-throws so the poller's

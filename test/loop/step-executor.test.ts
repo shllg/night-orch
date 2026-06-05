@@ -8,6 +8,7 @@ import {
   buildPromptContext,
   getWorkerProfile,
   resolveContinueSession,
+  detectReadOnlySandboxRejection,
   type StepDependencies,
 } from '../../src/loop/step-executor.js'
 import type { RunContext } from '../../src/loop/types.js'
@@ -260,6 +261,33 @@ describe('executeWorkerStep', () => {
     expect(result.ctx.sessionIds['coder']).toBe('sess-coder-1')
     expect(result.ctx.sessionIds['code::claude']).toBe('sess-coder-1')
     expect(result.ctx.sessionIds['coder::claude']).toBe('sess-coder-1')
+  })
+
+  it('flags a coder read-only-sandbox rejection as an environment fault instead of throwing (issue #341)', async () => {
+    const step: WorkerStep = { type: 'worker', id: 'code', role: 'coder', continueFrom: 'plan' }
+    const rejectedResult: WorkerTaskResult = {
+      ...makeCoderResult(),
+      rawOutput: 'ERROR codex_core::tools::router: error=patch rejected: writing is blocked by read-only sandbox; rejected by user approval settings',
+      parsed: {
+        summary: 'I could not modify the workspace; approval policy is `never`.',
+        changedFiles: [],
+        remainingUncertainty: null,
+        blockers: null,
+      },
+    }
+    const result = await executeWorkerStep(makeCtx(), step, makeDeps({ coder: makeMockAdapter(rejectedResult) }))
+
+    // Carried out via StepResult so the engine can record cost, then block.
+    expect(result.environmentFault).toBe('patch rejected: read-only sandbox')
+    // Cost signals still present so the wasted spend is recorded, not free.
+    expect(result.tokenUsage).toBeDefined()
+    expect(result.pricingIdentity?.role).toBe('coder')
+  })
+
+  it('does not flag a normal coder run as an environment fault', async () => {
+    const step: WorkerStep = { type: 'worker', id: 'code', role: 'coder', continueFrom: 'plan' }
+    const result = await executeWorkerStep(makeCtx(), step, makeDeps({ coder: makeMockAdapter(makeCoderResult()) }))
+    expect(result.environmentFault).toBeUndefined()
   })
 
   it('does not pass continueSessionId across different role agents', async () => {
@@ -869,5 +897,28 @@ describe('resolveContinueSession', () => {
       sessionIds: { planner: 'sess-planner-1', coder: 'sess-coder-prev' },
     })
     expect(resolveContinueSession(ctx, step, 'claude')).toBe('sess-planner-1')
+  })
+})
+
+describe('detectReadOnlySandboxRejection', () => {
+  it.each([
+    'ERROR codex_core::tools::router: error=patch rejected: writing is blocked by read-only sandbox',
+    'patch rejected: read-only sandbox in effect',
+    'apply_patch failed: blocked by read-only sandbox',
+    'rejected by user approval settings',
+  ])('detects rejection signature in %s', (raw) => {
+    expect(detectReadOnlySandboxRejection(raw)).not.toBeNull()
+  })
+
+  it('returns null for output with no rejection signature', () => {
+    expect(detectReadOnlySandboxRejection('Applied patch to src/a.ts successfully')).toBeNull()
+    expect(detectReadOnlySandboxRejection('')).toBeNull()
+  })
+
+  it('returns a bounded, non-sensitive label rather than the raw output', () => {
+    const raw = 'secret-prompt-content ... writing is blocked by read-only sandbox'
+    const label = detectReadOnlySandboxRejection(raw)
+    expect(label).toBe('patch rejected: read-only sandbox')
+    expect(label).not.toContain('secret-prompt-content')
   })
 })

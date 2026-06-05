@@ -69,6 +69,14 @@ export interface StepResult {
   }
   /** For decide steps: the decision action. */
   decision?: LoopDecision
+  /**
+   * Set when a coder worker completed but its output shows the workspace was
+   * read-only (every write rejected). The engine records this step's cost as
+   * normal, then blocks the run with an `environmentFault` reason instead of
+   * burning the empty-diff retry budget on an unwritable environment. Value
+   * is a short, non-sensitive rejection label.
+   */
+  environmentFault?: string
 }
 
 /**
@@ -186,6 +194,42 @@ export async function executeWorkerStep(
       `worker exited with code ${result.exitCode}`,
     )
   }
+  // Detect an unwritable environment before the parse-error/token-capture
+  // throws below, so a coder that hit a read-only sandbox is reported as an
+  // environment fault (the real cause) rather than masked as a parse error.
+  // The fault is carried out via StepResult — the engine records this step's
+  // cost first, then blocks with `environmentFault` instead of spending the
+  // empty-diff retry budget on an environment that will never become
+  // writable mid-run (issue #341).
+  const environmentFault = step.role === 'coder'
+    ? detectReadOnlySandboxRejection(result.rawOutput)
+    : null
+  if (environmentFault) {
+    const tokens = result.tokenUsage
+    logger.error(
+      {
+        role: step.role,
+        adapterType,
+        rejection: environmentFault,
+        promptTokens: tokens?.promptTokens ?? 0,
+        completionTokens: tokens?.completionTokens ?? 0,
+      },
+      `${step.role} worker could not write to the workspace (read-only sandbox) — blocking instead of retrying`,
+    )
+    const faultedCtx = updateContext(ctx, buildWorkerCtxPatch(ctx, step, result, profile.type))
+    return {
+      ctx: faultedCtx,
+      tokenUsage: result.tokenUsage,
+      pricingIdentity: {
+        role: step.role,
+        workerType: profile.type,
+        pricingModel: profile.pricingModel ?? null,
+        fallbackMinuteUsd: profile.minuteUsd ?? null,
+      },
+      environmentFault,
+    }
+  }
+
   if (result.parseError) {
     logger.warn(
       { role: step.role, parseError: result.parseError, rawLength: result.rawOutput.length, rawHead: result.rawOutput.slice(0, 500), rawTail: result.rawOutput.slice(-500) },
@@ -527,6 +571,28 @@ const STEP_ID_TO_DEFAULT_ROLE: Record<string, string> = {
  * Build the RunContext patch for a completed worker step, mapping parsed
  * output to the correct context field based on the step's role.
  */
+/**
+ * Read-only-sandbox rejection signatures emitted by Codex when a coder tries
+ * to write in a read-only workspace. Matched only against *coder* output, so
+ * a planner legitimately noting "read-only" never trips this. Returns a short
+ * canonical label (never the raw output) for the blocked-state detail, or
+ * `null` when no rejection is present.
+ */
+const READ_ONLY_SANDBOX_SIGNATURES: ReadonlyArray<{ pattern: RegExp; label: string }> = [
+  { pattern: /writing is blocked by read-only sandbox/i, label: 'patch rejected: read-only sandbox' },
+  { pattern: /patch rejected:[^\n]*read-only/i, label: 'patch rejected: read-only sandbox' },
+  { pattern: /blocked by read-only sandbox/i, label: 'write blocked by read-only sandbox' },
+  { pattern: /rejected by user approval settings/i, label: 'write rejected by approval settings' },
+]
+
+export function detectReadOnlySandboxRejection(rawOutput: string): string | null {
+  if (!rawOutput) return null
+  for (const { pattern, label } of READ_ONLY_SANDBOX_SIGNATURES) {
+    if (pattern.test(rawOutput)) return label
+  }
+  return null
+}
+
 function buildWorkerCtxPatch(
   ctx: RunContext,
   step: WorkerStep,

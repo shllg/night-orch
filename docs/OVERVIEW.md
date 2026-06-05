@@ -219,7 +219,7 @@ A **pure function** with no side effects. This is critical for testability and c
 decide(ctx: RunContext) → LoopDecision
 ```
 
-Every decision wraps a `RunState` (`src/loop/state.ts`) discriminated union — `running`, `publishing`, `published`, `blocked { reason }`, or `error`. The `blocked.reason` sub-union (`costLimit`, `iterationLimit`, `agentPassLimit`, `reviewerBlocked`, `ambiguousReview`, `verifyConfig`, `mergeConflict`, `authFailure`, `emptyDiff`, `workerTimeout`, `tokenCaptureFailed`) gives compile-time exhaustiveness via `assertNever` at every consumer (status comments, label transitions, finalizer, web snapshot).
+Every decision wraps a `RunState` (`src/loop/state.ts`) discriminated union — `running`, `publishing`, `published`, `blocked { reason }`, or `error`. The `blocked.reason` sub-union (`costLimit`, `iterationLimit`, `agentPassLimit`, `reviewerBlocked`, `ambiguousReview`, `verifyConfig`, `mergeConflict`, `authFailure`, `emptyDiff`, `workerTimeout`, `tokenCaptureFailed`, `environmentFault`) gives compile-time exhaustiveness via `assertNever` at every consumer (status comments, label transitions, finalizer, web snapshot). `environmentFault` blocks a run when a worker completed but its environment rejected all writes (e.g. a coder in a read-only sandbox) — retrying is hopeless, so the run blocks immediately instead of exhausting the empty-diff retry budget.
 
 Rules (in priority order):
 1. Cost over budget → `blocked { costLimit }`

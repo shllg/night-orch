@@ -279,5 +279,7 @@ function stubBlockedReason(type: BlockedReasonType): BlockedReason {
       return { type: 'workerTimeout', adapter: 'claude', step: 'coder', timeoutMs: 0 }
     case 'tokenCaptureFailed':
       return { type: 'tokenCaptureFailed', adapter: 'claude', step: 'coder' }
+    case 'environmentFault':
+      return { type: 'environmentFault', adapter: 'codex', step: 'coder', detail: 'read-only sandbox' }
   }
 }

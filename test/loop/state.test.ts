@@ -75,6 +75,7 @@ describe('RunState discriminated union', () => {
         { type: 'emptyDiff', retries: 2 },
         { type: 'workerTimeout', adapter: 'claude', step: 'coder', timeoutMs: 60000 },
         { type: 'tokenCaptureFailed', adapter: 'codex', step: 'planner' },
+        { type: 'environmentFault', adapter: 'codex', step: 'coder', detail: 'read-only sandbox' },
       ]
       const types = new Set(samples.map((s) => s.type))
       for (const t of BLOCKED_REASON_TYPES) {
@@ -131,6 +132,10 @@ describe('RunState discriminated union', () => {
         reason: { type: 'tokenCaptureFailed', adapter: 'claude', step: 'reviewer' },
         matches: /claude produced output without parseable token usage \(reviewer\)/,
       },
+      {
+        reason: { type: 'environmentFault', adapter: 'codex', step: 'coder', detail: 'read-only sandbox' },
+        matches: /codex hit an environment fault during coder: read-only sandbox/,
+      },
     ]
 
     it.each(cases)('describes %s', ({ reason, matches }) => {
@@ -156,6 +161,7 @@ describe('RunState discriminated union', () => {
       { reason: { type: 'emptyDiff', retries: 2 }, matches: /no file changes/ },
       { reason: { type: 'workerTimeout', adapter: 'claude', step: 'coder', timeoutMs: 30000 }, matches: /timed out during coder/ },
       { reason: { type: 'tokenCaptureFailed', adapter: 'claude', step: 'reviewer' }, matches: /without parseable token usage/ },
+      { reason: { type: 'environmentFault', adapter: 'codex', step: 'coder', detail: 'read-only sandbox' }, matches: /could not modify the workspace/ },
     ]
 
     it.each(cases)('summarizes %s', ({ reason, matches }) => {
@@ -183,6 +189,7 @@ describe('RunState discriminated union', () => {
       'mergeConflict',
       'authFailure',
       'tokenCaptureFailed',
+      'environmentFault',
     ]
 
     it('marks recoverable reasons correctly', () => {
@@ -345,6 +352,8 @@ describe('RunState discriminated union', () => {
           return 'workerTimeout'
         case 'tokenCaptureFailed':
           return 'tokenCaptureFailed'
+        case 'environmentFault':
+          return 'environmentFault'
         default:
           return assertNever(reason, 'blockedReasonTypeLabel')
       }
@@ -390,6 +399,8 @@ function stubReason(type: BlockedReasonType): BlockedReason {
       return { type: 'workerTimeout', adapter: 'claude', step: 'coder', timeoutMs: 0 }
     case 'tokenCaptureFailed':
       return { type: 'tokenCaptureFailed', adapter: 'claude', step: 'coder' }
+    case 'environmentFault':
+      return { type: 'environmentFault', adapter: 'codex', step: 'coder', detail: 'read-only sandbox' }
   }
 }
 

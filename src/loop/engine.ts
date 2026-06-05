@@ -625,6 +625,38 @@ async function executeGuardedWorkerStep(
     metrics,
   )
   ctx = costResult.ctx
+
+  // A coder that ran in an unwritable environment (read-only sandbox, every
+  // patch rejected) can never succeed on retry. Cost for this attempt has
+  // just been recorded above, so the spend is visible; now block with a
+  // typed `environmentFault` reason instead of churning the empty-diff retry
+  // budget on a doomed environment (issue #341).
+  if (result.environmentFault) {
+    const adapter = result.pricingIdentity?.workerType ?? 'worker'
+    const reason = {
+      type: 'environmentFault' as const,
+      adapter,
+      step: step.id,
+      detail: result.environmentFault,
+    }
+    const blockedState = blocked(reason)
+    logger.error(
+      { runId: ctx.runId, phase: step.id, adapter, detail: result.environmentFault },
+      `${step.id} environment fault → blocking attempt`,
+    )
+    return {
+      action: 'return',
+      ctx: blockExit(
+        ctx,
+        checkpoint,
+        step.id,
+        blockedReasonToLegacy(reason),
+        blockedState.message,
+        stepStartedAt,
+      ),
+    }
+  }
+
   if (costResult.budget?.overBudget) {
     const blockMessage = `${describeBudgetBlock(costResult.budget)}. ${costLimitRecoveryHint(costResult.budget.limit)}`
     logger.warn(
