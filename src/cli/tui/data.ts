@@ -13,6 +13,7 @@ export interface IssueListRow {
   current_phase: string | null
   iteration_count: number | null
   estimated_cost_usd: number | null
+  theoretical_cost_usd: number | null
   prompt_tokens: number | null
   completion_tokens: number | null
   cache_read_tokens: number | null
@@ -62,6 +63,7 @@ export function buildIssueList(runs: RunListRow[]): IssueListRow[] {
         current_phase: run.current_phase,
         iteration_count: run.iteration_count,
         estimated_cost_usd: run.estimated_cost_usd,
+        theoretical_cost_usd: run.theoretical_cost_usd,
         prompt_tokens: run.prompt_tokens,
         completion_tokens: run.completion_tokens,
         cache_read_tokens: run.cache_read_tokens,
@@ -92,6 +94,7 @@ export function buildIssueList(runs: RunListRow[]): IssueListRow[] {
       existing.current_phase = run.current_phase
       existing.iteration_count = run.iteration_count
       existing.estimated_cost_usd = run.estimated_cost_usd
+      existing.theoretical_cost_usd = run.theoretical_cost_usd
       existing.prompt_tokens = run.prompt_tokens
       existing.completion_tokens = run.completion_tokens
       existing.cache_read_tokens = run.cache_read_tokens

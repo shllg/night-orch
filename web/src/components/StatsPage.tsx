@@ -226,8 +226,8 @@ export function StatsPage({ snapshot, socketConnected }: StatsPageProps): ReactE
                     valueClassName={toTextClass(tokensPerSuccessTone)}
                   />
                   <SignalRow label="Tokens Per Iteration (7d)" value={formatTokenCount(stats.efficiency.avgTokensPerIteration7d)} />
-                  <SignalRow label="Est. Cost Today" value={`$${formatMoney(stats.cost.todayCostUsd)}`} valueClassName={toTextClass(todayCostTone)} />
-                  <SignalRow label="Est. Cost (7d)" value={`$${formatMoney(stats.cost.cost7d)}`} />
+                  <SignalRow label="Cost Today (real / metered)" value={`$${formatMoney(stats.cost.todayCostUsd)} / $${formatMoney(stats.cost.todayTheoreticalCostUsd)}`} valueClassName={toTextClass(todayCostTone)} />
+                  <SignalRow label="Cost 7d (real / metered)" value={`$${formatMoney(stats.cost.cost7d)} / $${formatMoney(stats.cost.theoretical7d)}`} />
                   <SignalRow label="Usage Trend (7d)" value={usageTrend} />
                 </div>
                 <div className="mt-3 space-y-1">
@@ -246,12 +246,12 @@ export function StatsPage({ snapshot, socketConnected }: StatsPageProps): ReactE
                 <div className="mt-2 space-y-2 text-sm">
                   <SignalRow label="Cost Model" value="pay-per-use" />
                   <SignalRow
-                    label="Today"
-                    value={`$${formatMoney(stats.cost.todayCostUsd)} (${stats.cost.todayRunCount} runs)`}
+                    label="Today (real / metered)"
+                    value={`$${formatMoney(stats.cost.todayCostUsd)} / $${formatMoney(stats.cost.todayTheoreticalCostUsd)} (${stats.cost.todayRunCount} runs)`}
                     valueClassName={toTextClass(todayCostTone)}
                   />
-                  <SignalRow label="Cost (7d)" value={`$${formatMoney(stats.cost.cost7d)}`} />
-                  <SignalRow label="Cost (30d)" value={`$${formatMoney(stats.cost.cost30d)}`} />
+                  <SignalRow label="Cost 7d (real / metered)" value={`$${formatMoney(stats.cost.cost7d)} / $${formatMoney(stats.cost.theoretical7d)}`} />
+                  <SignalRow label="Cost 30d (real / metered)" value={`$${formatMoney(stats.cost.cost30d)} / $${formatMoney(stats.cost.theoretical30d)}`} />
                   <SignalRow label="Average Daily Cost (7d)" value={`$${formatMoney(stats.cost.avgDailyCost7d)}`} />
                   <SignalRow label="Total Cost (7d)" value={`$${formatMoney(stats.efficiency.totalCostUsd7d)}`} />
                   <SignalRow

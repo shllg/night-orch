@@ -103,7 +103,8 @@ export function StatsView({ stats, autoRefresh, pollIntervalMs, lastRefreshAt }:
                 tokens/success <Text color={tokensPerSuccessColor}>{formatTokenCount(stats.efficiency.avgTokensPerSuccess7d)}</Text>
               </Text>
               <Text>tokens/iter {formatTokenCount(stats.efficiency.avgTokensPerIteration7d)}</Text>
-              <Text dimColor>estimated cost today ${stats.cost.todayCostUsd.toFixed(2)}  7d ${stats.cost.cost7d.toFixed(2)}</Text>
+              <Text dimColor>cost today ${stats.cost.todayCostUsd.toFixed(2)} real / ${stats.cost.todayTheoreticalCostUsd.toFixed(2)} metered</Text>
+              <Text dimColor>7d ${stats.cost.cost7d.toFixed(2)} real / ${stats.cost.theoretical7d.toFixed(2)} metered</Text>
               <Text>trend {buildSparkline(usageSeries)}</Text>
               {stats.usage.dailyHistory.slice(0, 4).map((row) => (
                 <Text key={row.date} dimColor>
@@ -119,9 +120,9 @@ export function StatsView({ stats, autoRefresh, pollIntervalMs, lastRefreshAt }:
             <>
               <Text>model pay-per-use</Text>
               <Text>
-                today <Text color={todayCostColor}>${stats.cost.todayCostUsd.toFixed(2)}</Text> ({stats.cost.todayRunCount} runs)
+                today <Text color={todayCostColor}>${stats.cost.todayCostUsd.toFixed(2)}</Text> real / ${stats.cost.todayTheoreticalCostUsd.toFixed(2)} metered ({stats.cost.todayRunCount} runs)
               </Text>
-              <Text>7d ${stats.cost.cost7d.toFixed(2)}  30d ${stats.cost.cost30d.toFixed(2)}</Text>
+              <Text>7d ${stats.cost.cost7d.toFixed(2)} / ${stats.cost.theoretical7d.toFixed(2)}  30d ${stats.cost.cost30d.toFixed(2)} / ${stats.cost.theoretical30d.toFixed(2)} (real/metered)</Text>
               <Text>avg/day 7d ${stats.cost.avgDailyCost7d.toFixed(2)}</Text>
               <Text>
                 cost/run 7d <Text color={costPerRunColor}>${stats.efficiency.avgCostPerRun7d.toFixed(2)}</Text>

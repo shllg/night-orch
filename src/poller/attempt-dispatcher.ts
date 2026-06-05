@@ -436,6 +436,7 @@ export async function dispatchAttempt(
       iteration: startingIteration,
       totalAgentPasses: 0,
       estimatedCostUsd: 0,
+      theoreticalCostUsd: 0,
       currentPhase: workflow.steps[0]?.id ?? 'plan',
       terminalStatus: 'running',
       phaseHistory: [],

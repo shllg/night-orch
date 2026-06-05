@@ -24,6 +24,7 @@ interface ActiveRunRow {
   current_phase: string | null
   iteration_count: number | null
   estimated_cost_usd: number | null
+  theoretical_cost_usd: number | null
 }
 
 const STATUS_ICONS: Record<string, { icon: string; color: TuiColor }> = {
@@ -36,7 +37,7 @@ const STATUS_ICONS: Record<string, { icon: string; color: TuiColor }> = {
 
 export function ActiveRuns({ db, tick: _tick }: ActiveRunsProps): React.ReactElement {
   const rows = db
-    .prepare("SELECT id, repo, issue_number, status, pr_number, current_phase, iteration_count, estimated_cost_usd FROM runs WHERE status IN ('queued', 'running', 'review_ready', 'blocked', 'error') ORDER BY created_at DESC LIMIT 10")
+    .prepare("SELECT id, repo, issue_number, status, pr_number, current_phase, iteration_count, estimated_cost_usd, theoretical_cost_usd FROM runs WHERE status IN ('queued', 'running', 'review_ready', 'blocked', 'error') ORDER BY created_at DESC LIMIT 10")
     .all() as ActiveRunRow[]
 
   if (rows.length === 0) {
@@ -67,6 +68,7 @@ export function ActiveRuns({ db, tick: _tick }: ActiveRunsProps): React.ReactEle
             <Text color={colorForIterationCount(row.iteration_count)}>iter {row.iteration_count ?? 0}</Text>
             {'  '}
             <Text color={colorForCostUsd(row.estimated_cost_usd)}>${(row.estimated_cost_usd ?? 0).toFixed(2)}</Text>
+            <Text dimColor>/${(row.theoretical_cost_usd ?? row.estimated_cost_usd ?? 0).toFixed(2)}</Text>
             {'  '}
             <Text color={colorForPrNumber(row.pr_number)}>{row.pr_number !== null ? `PR #${row.pr_number}` : 'no PR'}</Text>
           </Text>

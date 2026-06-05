@@ -29,6 +29,7 @@ export interface RunSummary {
   phase: string | null
   iterations: number
   costUsd: number
+  theoreticalCostUsd: number
   promptTokens: number
   completionTokens: number
   cacheReadTokens: number
@@ -66,6 +67,7 @@ export interface AgentRoleAggregate {
 export interface DailyCostAggregate {
   date: string
   totalCostUsd: number
+  totalTheoreticalCostUsd: number
   runCount: number
 }
 
@@ -115,9 +117,12 @@ export interface TuiStatsSnapshot {
   cost: {
     model: 'pay-per-use' | 'subscription'
     todayCostUsd: number
+    todayTheoreticalCostUsd: number
     todayRunCount: number
     cost7d: number
+    theoretical7d: number
     cost30d: number
+    theoretical30d: number
     avgDailyCost7d: number
     dailyHistory: DailyCostAggregate[]
   }
@@ -182,6 +187,7 @@ export interface DashboardSnapshot {
   status: {
     activeRuns: number
     dailyCostUsd: number
+    dailyTheoreticalCostUsd: number
   }
   runs: RunListResult
   cost: {

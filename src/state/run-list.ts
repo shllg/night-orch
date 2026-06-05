@@ -10,6 +10,7 @@ export interface RunListRow {
   current_phase: string | null
   iteration_count: number | null
   estimated_cost_usd: number | null
+  theoretical_cost_usd: number | null
   prompt_tokens: number | null
   completion_tokens: number | null
   cache_read_tokens: number | null
@@ -125,6 +126,7 @@ export function loadRuns(
            r.current_phase,
            r.iteration_count,
            r.estimated_cost_usd,
+           r.theoretical_cost_usd,
            r.prompt_tokens,
            r.completion_tokens,
            r.cache_read_tokens,
@@ -183,6 +185,7 @@ export function loadRuns(
            i.current_phase,
            i.iteration_count,
            i.estimated_cost_usd,
+           i.estimated_cost_usd AS theoretical_cost_usd,
            0 AS prompt_tokens,
            0 AS completion_tokens,
            0 AS cache_read_tokens,
@@ -234,6 +237,7 @@ export function loadRuns(
          current_phase,
          iteration_count,
          estimated_cost_usd,
+         theoretical_cost_usd,
          prompt_tokens,
          completion_tokens,
          cache_read_tokens,

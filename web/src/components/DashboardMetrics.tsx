@@ -13,6 +13,7 @@ export function DashboardMetrics({ snapshot }: DashboardMetricsProps): ReactElem
   const dailyOverride = snapshot?.cost.dailyBudgetOverrideUsd ?? null
   const effectiveBudget = snapshot?.cost.effectiveDailyBudgetUsd ?? snapshot?.cost.dailyBudgetUsd ?? 0
   const dailyCost = snapshot?.status.dailyCostUsd ?? 0
+  const dailyTheoretical = snapshot?.status.dailyTheoreticalCostUsd ?? dailyCost
   const budgetHeadroom = effectiveBudget - dailyCost
   const budgetLabel = dailyOverride !== null
     ? `Budget $${formatMoney(effectiveBudget)} (override)`
@@ -26,8 +27,8 @@ export function DashboardMetrics({ snapshot }: DashboardMetricsProps): ReactElem
         accent="emerald"
         compactOnMobile
         subValue={usageFirst
-          ? `Est. $${formatMoney(dailyCost)} today`
-          : budgetLabel}
+          ? `$${formatMoney(dailyCost)} real / $${formatMoney(dailyTheoretical)} metered`
+          : `${budgetLabel} · metered $${formatMoney(dailyTheoretical)}`}
       />
       <MetricCard
         label="Budget Headroom"

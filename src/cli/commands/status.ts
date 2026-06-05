@@ -43,6 +43,7 @@ export async function statusCommand(globalOpts?: GlobalOpts): Promise<void> {
     .prepare(
       `SELECT
          total_cost_usd,
+         total_theoretical_cost_usd,
          run_count,
          total_prompt_tokens,
          total_completion_tokens,
@@ -57,6 +58,7 @@ export async function statusCommand(globalOpts?: GlobalOpts): Promise<void> {
       `SELECT
          step_id,
          SUM(cost_usd) AS total_cost_usd,
+         SUM(theoretical_cost_usd) AS total_theoretical_cost_usd,
          SUM(prompt_tokens + completion_tokens + cache_read_tokens) AS total_tokens
        FROM run_cost_entries
        WHERE date(created_at) = date('now')
@@ -91,6 +93,7 @@ export async function statusCommand(globalOpts?: GlobalOpts): Promise<void> {
 
   // Daily cost
   const cost = dailyUsage?.total_cost_usd ?? 0
+  const theoreticalCost = dailyUsage?.total_theoretical_cost_usd ?? cost
   const promptTokens = dailyUsage?.total_prompt_tokens ?? 0
   const completionTokens = dailyUsage?.total_completion_tokens ?? 0
   const cacheReadTokens = dailyUsage?.total_cache_read_tokens ?? 0
@@ -100,9 +103,9 @@ export async function statusCommand(globalOpts?: GlobalOpts): Promise<void> {
   const subscriptionLike = config.cost.model === 'subscription' || config.cost.model === 'subscription-metered'
   if (subscriptionLike) {
     console.log(`\n  Daily usage:  ${formatTokenCount(totalTokens)} tokens (${dailyUsage?.run_count ?? 0} runs)`)
-    console.log(`  Est. cost:    $${cost.toFixed(2)} / $${budget.toFixed(2)} (${costPct}%)`)
+    console.log(`  Cost:         $${cost.toFixed(2)} real / $${theoreticalCost.toFixed(2)} metered  (budget $${budget.toFixed(2)}, ${costPct}%)`)
   } else {
-    console.log(`\n  Daily cost:   $${cost.toFixed(2)} / $${budget.toFixed(2)} (${costPct}%)`)
+    console.log(`\n  Daily cost:   $${cost.toFixed(2)} real / $${theoreticalCost.toFixed(2)} metered  (budget $${budget.toFixed(2)}, ${costPct}%)`)
     console.log(`  Token usage:  ${formatTokenCount(totalTokens)} tokens`)
   }
   if (cacheReadTokens > 0) {
@@ -110,10 +113,12 @@ export async function statusCommand(globalOpts?: GlobalOpts): Promise<void> {
   }
 
   if (dailyPhaseCosts.length > 0) {
-    console.log('\n  Phase cost breakdown (today):')
+    console.log('\n  Phase cost breakdown (today):  (real / metered)')
     for (const row of dailyPhaseCosts) {
+      const real = `$${(row.total_cost_usd ?? 0).toFixed(2)}`
+      const metered = `$${(row.total_theoretical_cost_usd ?? row.total_cost_usd ?? 0).toFixed(2)}`
       console.log(
-        `    ${row.step_id.padEnd(12)} $${(row.total_cost_usd ?? 0).toFixed(2).padStart(7)}  ${formatTokenCount(row.total_tokens ?? 0)} tokens`,
+        `    ${row.step_id.padEnd(12)} ${`${real} / ${metered}`.padStart(18)}  ${formatTokenCount(row.total_tokens ?? 0)} tokens`,
       )
     }
   }
@@ -121,8 +126,8 @@ export async function statusCommand(globalOpts?: GlobalOpts): Promise<void> {
   // Recent runs
   console.log('\n  Recent runs:')
   console.log('  %-14s %-24s %6s %-10s %-8s %7s  %s'.replace(/%/g, ' '))
-  console.log(`  ${'ID'.padEnd(14)} ${'Repo#Issue'.padEnd(24)} ${'Status'.padEnd(10)} ${'Phase'.padEnd(8)} ${'Iter'.padStart(4)} ${'Cost'.padStart(7)}  ${'Duration/Error'}`)
-  console.log(`  ${'─'.repeat(14)} ${'─'.repeat(24)} ${'─'.repeat(10)} ${'─'.repeat(8)} ${'─'.repeat(4)} ${'─'.repeat(7)}  ${'─'.repeat(30)}`)
+  console.log(`  ${'ID'.padEnd(14)} ${'Repo#Issue'.padEnd(24)} ${'Status'.padEnd(10)} ${'Phase'.padEnd(8)} ${'Iter'.padStart(4)} ${'Cost'.padStart(7)} ${'Metered'.padStart(8)}  ${'Duration/Error'}`)
+  console.log(`  ${'─'.repeat(14)} ${'─'.repeat(24)} ${'─'.repeat(10)} ${'─'.repeat(8)} ${'─'.repeat(4)} ${'─'.repeat(7)} ${'─'.repeat(8)}  ${'─'.repeat(30)}`)
 
   for (const row of recent) {
     const id = row.id.replace('run-', '')
@@ -131,6 +136,7 @@ export async function statusCommand(globalOpts?: GlobalOpts): Promise<void> {
     const phase = row.current_phase ?? '-'
     const iter = String(row.iteration_count ?? 0)
     const cost = `$${(row.estimated_cost_usd ?? 0).toFixed(2)}`
+    const metered = `$${(row.theoretical_cost_usd ?? row.estimated_cost_usd ?? 0).toFixed(2)}`
     const detail = row.last_error
       ? row.last_error.slice(0, 40)
       : row.started_at && row.ended_at
@@ -139,7 +145,7 @@ export async function statusCommand(globalOpts?: GlobalOpts): Promise<void> {
           ? timeSince(row.started_at)
           : '-'
 
-    console.log(`  ${statusIcon(status)} ${id.padEnd(12)} ${repoIssue.padEnd(24)} ${status.padEnd(10)} ${phase.padEnd(8)} ${iter.padStart(4)} ${cost.padStart(7)}  ${detail}`)
+    console.log(`  ${statusIcon(status)} ${id.padEnd(12)} ${repoIssue.padEnd(24)} ${status.padEnd(10)} ${phase.padEnd(8)} ${iter.padStart(4)} ${cost.padStart(7)} ${metered.padStart(8)}  ${detail}`)
   }
 
   // Configured repos
@@ -202,6 +208,7 @@ interface RawRow {
   current_phase: string | null
   iteration_count: number | null
   estimated_cost_usd: number | null
+  theoretical_cost_usd: number | null
   started_at: string | null
   ended_at: string | null
   last_error: string | null
@@ -216,6 +223,7 @@ interface LeaseRow {
 
 interface DailyUsageRow {
   total_cost_usd: number | null
+  total_theoretical_cost_usd: number | null
   run_count: number | null
   total_prompt_tokens: number | null
   total_completion_tokens: number | null
@@ -225,6 +233,7 @@ interface DailyUsageRow {
 interface PhaseCostRow {
   step_id: string
   total_cost_usd: number | null
+  total_theoretical_cost_usd: number | null
   total_tokens: number | null
 }
 

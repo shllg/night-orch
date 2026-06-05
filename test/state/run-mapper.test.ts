@@ -35,6 +35,7 @@ function makeRunListRow(overrides: Partial<RunListRow> = {}): RunListRow {
     current_phase: 'code',
     iteration_count: 2,
     estimated_cost_usd: 1.25,
+    theoretical_cost_usd: 3.75,
     prompt_tokens: 100,
     completion_tokens: 50,
     cache_read_tokens: 25,
@@ -68,6 +69,17 @@ describe('mapActiveRunRow', () => {
     expect(item.runId).toBe('issue:org/repo#42')
     expect(item.hasRun).toBe(false)
     expect(item.startedAt).toBeNull()
+  })
+
+  it('surfaces real and theoretical cost separately', () => {
+    const item = mapActiveRunRow(makeRunListRow(), undefined)
+    expect(item.costUsd).toBe(1.25)
+    expect(item.theoreticalCostUsd).toBe(3.75)
+  })
+
+  it('falls back to estimated cost when theoretical is missing', () => {
+    const item = mapActiveRunRow(makeRunListRow({ theoretical_cost_usd: null }), undefined)
+    expect(item.theoreticalCostUsd).toBe(1.25)
   })
 })
 

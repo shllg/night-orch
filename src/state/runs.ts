@@ -42,6 +42,7 @@ export interface RunRecord {
   branchSlug: string | null
   worktreePath: string | null
   estimatedCostUsd: number
+  theoreticalCostUsd: number
   promptTokens: number
   completionTokens: number
   cacheReadTokens: number
@@ -86,6 +87,7 @@ export interface RunPhaseFields {
 
 export interface RunCostFields {
   estimatedCostUsd?: number
+  theoreticalCostUsd?: number
   promptTokens?: number
   completionTokens?: number
   cacheReadTokens?: number
@@ -140,6 +142,7 @@ const RUN_COLUMN_MAP = {
   branchSlug: 'branch_slug',
   worktreePath: 'worktree_path',
   estimatedCostUsd: 'estimated_cost_usd',
+  theoreticalCostUsd: 'theoretical_cost_usd',
   promptTokens: 'prompt_tokens',
   completionTokens: 'completion_tokens',
   cacheReadTokens: 'cache_read_tokens',
@@ -609,6 +612,7 @@ export class RunManager {
       branchSlug: row.branch_slug,
       worktreePath: row.worktree_path,
       estimatedCostUsd: row.estimated_cost_usd ?? 0,
+      theoreticalCostUsd: row.theoretical_cost_usd ?? row.estimated_cost_usd ?? 0,
       promptTokens: row.prompt_tokens ?? 0,
       completionTokens: row.completion_tokens ?? 0,
       cacheReadTokens: row.cache_read_tokens ?? 0,
@@ -696,6 +700,7 @@ interface RawRunRow {
   branch_slug: string | null
   worktree_path: string | null
   estimated_cost_usd: number | null
+  theoretical_cost_usd: number | null
   prompt_tokens: number | null
   completion_tokens: number | null
   cache_read_tokens: number | null

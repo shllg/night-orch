@@ -79,6 +79,7 @@ async function readStatusResource(deps: MCPDependencies): Promise<unknown> {
     activeRuns: active.length,
     statusCounts: Object.fromEntries(statusCounts.map((r) => [r.status, r.count])),
     dailyCostUsd: costTracker.getDailyCost(),
+    dailyTheoreticalCostUsd: costTracker.getDailyTheoreticalCost(),
     dailyPromptTokens: dailyTokens.promptTokens,
     dailyCompletionTokens: dailyTokens.completionTokens,
     dailyTotalTokens: dailyTokens.totalTokens,

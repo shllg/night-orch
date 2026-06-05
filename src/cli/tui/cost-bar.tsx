@@ -12,10 +12,11 @@ interface CostBarProps {
 export function CostBar({ db, tick: _tick, maxDailyCost = 50 }: CostBarProps): React.ReactElement {
   const today = utcDayKey()
   const row = db
-    .prepare('SELECT total_cost_usd FROM daily_costs WHERE date = ?')
-    .get(today) as { total_cost_usd: number } | undefined
+    .prepare('SELECT total_cost_usd, total_theoretical_cost_usd FROM daily_costs WHERE date = ?')
+    .get(today) as { total_cost_usd: number; total_theoretical_cost_usd: number } | undefined
 
   const cost = row?.total_cost_usd ?? 0
+  const theoretical = row?.total_theoretical_cost_usd ?? cost
   const pct = Math.min(100, (cost / maxDailyCost) * 100)
   const barWidth = 30
   const filled = Math.round((pct / 100) * barWidth)
@@ -30,6 +31,10 @@ export function CostBar({ db, tick: _tick, maxDailyCost = 50 }: CostBarProps): R
         <Text color={color}>{bar}</Text>
         {' '}
         <Text>${cost.toFixed(2)} / ${maxDailyCost} ({pct.toFixed(1)}%)</Text>
+      </Text>
+      <Text>
+        {'  '}
+        <Text dimColor>real ${cost.toFixed(2)} / metered ${theoretical.toFixed(2)}</Text>
       </Text>
     </Box>
   )

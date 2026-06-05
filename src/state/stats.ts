@@ -31,6 +31,7 @@ export interface AgentRoleAggregate {
 export interface DailyCostAggregate {
   date: string
   totalCostUsd: number
+  totalTheoreticalCostUsd: number
   runCount: number
 }
 
@@ -103,9 +104,12 @@ export interface TuiStatsSnapshot {
   readonly cost: {
     model: CostModel
     todayCostUsd: number
+    todayTheoreticalCostUsd: number
     todayRunCount: number
     cost7d: number
+    theoretical7d: number
     cost30d: number
+    theoretical30d: number
     avgDailyCost7d: number
     dailyHistory: DailyCostAggregate[]
     phaseBreakdown7d?: StepCostAggregate[]
@@ -276,12 +280,15 @@ export function loadTuiStats(
     .prepare(
       `SELECT
          SUM(CASE WHEN date = date('now') THEN total_cost_usd ELSE 0 END) AS today_cost_usd,
+         SUM(CASE WHEN date = date('now') THEN total_theoretical_cost_usd ELSE 0 END) AS today_theoretical_cost_usd,
          SUM(CASE WHEN date = date('now') THEN run_count ELSE 0 END) AS today_run_count,
          SUM(CASE WHEN date = date('now') THEN total_prompt_tokens ELSE 0 END) AS today_prompt_tokens,
          SUM(CASE WHEN date = date('now') THEN total_completion_tokens ELSE 0 END) AS today_completion_tokens,
          SUM(CASE WHEN date = date('now') THEN total_cache_read_tokens ELSE 0 END) AS today_cache_read_tokens,
          SUM(CASE WHEN date >= date('now', '-6 days') THEN total_cost_usd ELSE 0 END) AS cost_7d,
+         SUM(CASE WHEN date >= date('now', '-6 days') THEN total_theoretical_cost_usd ELSE 0 END) AS theoretical_7d,
          SUM(CASE WHEN date >= date('now', '-29 days') THEN total_cost_usd ELSE 0 END) AS cost_30d,
+         SUM(CASE WHEN date >= date('now', '-29 days') THEN total_theoretical_cost_usd ELSE 0 END) AS theoretical_30d,
          AVG(CASE WHEN date >= date('now', '-6 days') THEN total_cost_usd ELSE NULL END) AS avg_daily_cost_7d,
          SUM(CASE WHEN date >= date('now', '-6 days') THEN total_prompt_tokens + total_completion_tokens + total_cache_read_tokens ELSE 0 END) AS tokens_7d,
          SUM(CASE WHEN date >= date('now', '-29 days') THEN total_prompt_tokens + total_completion_tokens + total_cache_read_tokens ELSE 0 END) AS tokens_30d,
@@ -292,7 +299,7 @@ export function loadTuiStats(
 
   const dailyHistory = db
     .prepare(
-      `SELECT date, total_cost_usd, run_count, total_prompt_tokens, total_completion_tokens, total_cache_read_tokens
+      `SELECT date, total_cost_usd, total_theoretical_cost_usd, run_count, total_prompt_tokens, total_completion_tokens, total_cache_read_tokens
        FROM daily_costs
        WHERE date >= date('now', '-6 days')
        ORDER BY date DESC`,
@@ -541,13 +548,17 @@ export function loadTuiStats(
     cost: {
       model: costModel,
       todayCostUsd: toNumber(costRow?.today_cost_usd),
+      todayTheoreticalCostUsd: toNumber(costRow?.today_theoretical_cost_usd),
       todayRunCount: toNumber(costRow?.today_run_count),
       cost7d: toNumber(costRow?.cost_7d),
+      theoretical7d: toNumber(costRow?.theoretical_7d),
       cost30d: toNumber(costRow?.cost_30d),
+      theoretical30d: toNumber(costRow?.theoretical_30d),
       avgDailyCost7d: toNumber(costRow?.avg_daily_cost_7d),
       dailyHistory: dailyHistory.map((row) => ({
         date: row.date,
         totalCostUsd: toNumber(row.total_cost_usd),
+        totalTheoreticalCostUsd: toNumber(row.total_theoretical_cost_usd),
         runCount: toNumber(row.run_count),
       })),
       phaseBreakdown7d: phaseCostBreakdown.map((row) => {
@@ -815,12 +826,15 @@ interface EfficiencyRow {
 
 interface CostRow {
   today_cost_usd: number | null
+  today_theoretical_cost_usd: number | null
   today_run_count: number | null
   today_prompt_tokens: number | null
   today_completion_tokens: number | null
   today_cache_read_tokens: number | null
   cost_7d: number | null
+  theoretical_7d: number | null
   cost_30d: number | null
+  theoretical_30d: number | null
   avg_daily_cost_7d: number | null
   tokens_7d: number | null
   tokens_30d: number | null
@@ -839,6 +853,7 @@ interface AgentRow {
 interface DailyCostRow {
   date: string
   total_cost_usd: number | null
+  total_theoretical_cost_usd: number | null
   run_count: number | null
   total_prompt_tokens: number | null
   total_completion_tokens: number | null

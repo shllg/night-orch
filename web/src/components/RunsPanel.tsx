@@ -137,7 +137,7 @@ export function RunsPanel({
                           iter {run.iterations}
                         </BadgeWeb>
                         <BadgeWeb size="xs" className={badgeToneForCostUsd(run.costUsd)}>
-                          ${formatMoney(run.costUsd)}
+                          ${formatMoney(run.costUsd)} real / ${formatMoney(run.theoreticalCostUsd)} metered
                         </BadgeWeb>
                         <BadgeWeb size="xs" className={badgeToneForPrNumber(run.prNumber)}>
                           {run.prNumber !== null ? `PR #${run.prNumber}` : 'no PR'}

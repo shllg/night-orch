@@ -239,6 +239,7 @@ export function seedDemoData(db: Database.Database): { runCount: number; eventCo
       currentPhase: spec.phase,
       iterationCount: spec.iterations,
       estimatedCostUsd: spec.costUsd,
+      theoreticalCostUsd: spec.costUsd,
       promptTokens: spec.promptTokens,
       completionTokens: spec.completionTokens,
       prNumber: spec.prNumber,

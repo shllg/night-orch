@@ -72,14 +72,17 @@ const FULL_SNAPSHOT: DashboardSnapshot = {
     cost: {
       model: 'pay-per-use',
       todayCostUsd: 8.1,
+      todayTheoreticalCostUsd: 8.1,
       todayRunCount: 3,
       cost7d: 36.2,
+      theoretical7d: 36.2,
       cost30d: 160.4,
+      theoretical30d: 160.4,
       avgDailyCost7d: 5.1,
       dailyHistory: [
-        { date: '2026-04-01', totalCostUsd: 8.1, runCount: 3 },
-        { date: '2026-03-31', totalCostUsd: 4.1, runCount: 2 },
-        { date: '2026-03-30', totalCostUsd: 1.4, runCount: 1 },
+        { date: '2026-04-01', totalCostUsd: 8.1, totalTheoreticalCostUsd: 8.1, runCount: 3 },
+        { date: '2026-03-31', totalCostUsd: 4.1, totalTheoreticalCostUsd: 4.1, runCount: 2 },
+        { date: '2026-03-30', totalCostUsd: 1.4, totalTheoreticalCostUsd: 1.4, runCount: 1 },
       ],
     },
     usage: {

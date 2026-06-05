@@ -298,9 +298,12 @@ function makeStats(): TuiStatsSnapshot {
     cost: {
       model: 'pay-per-use',
       todayCostUsd: 0,
+      todayTheoreticalCostUsd: 0,
       todayRunCount: 0,
       cost7d: 0,
+      theoretical7d: 0,
       cost30d: 0,
+      theoretical30d: 0,
       avgDailyCost7d: 0,
       dailyHistory: [],
     },

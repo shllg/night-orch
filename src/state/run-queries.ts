@@ -18,6 +18,7 @@ export type HistoryRunRow = Pick<
   | 'current_phase'
   | 'iteration_count'
   | 'estimated_cost_usd'
+  | 'theoretical_cost_usd'
   | 'prompt_tokens'
   | 'completion_tokens'
   | 'cache_read_tokens'
@@ -31,6 +32,7 @@ export type RecentCompletedRow = Pick<RunListRow, 'id' | 'repo' | 'issue_number'
 export interface DailyCostRow {
   date: string
   total_cost_usd: number
+  total_theoretical_cost_usd: number
   run_count: number
   total_prompt_tokens: number
   total_completion_tokens: number
@@ -101,6 +103,7 @@ export function queryRunHistoryPage(
          r.current_phase,
          r.iteration_count,
          r.estimated_cost_usd,
+         r.theoretical_cost_usd,
          r.prompt_tokens,
          r.completion_tokens,
          r.cache_read_tokens,
@@ -159,6 +162,7 @@ export function loadDailyCostRows(db: Database.Database, days: number): DailyCos
       `SELECT
          date,
          total_cost_usd,
+         total_theoretical_cost_usd,
          run_count,
          total_prompt_tokens,
          total_completion_tokens,

@@ -15,6 +15,15 @@ describe('formatStatusComment', () => {
     expect(result).toContain('**Cost:** $5.1234')
   })
 
+  it('renders real and metered cost when theoreticalCost is provided', () => {
+    const result = formatStatusComment({
+      phase: 'code',
+      cost: 0,
+      theoreticalCost: 4.2,
+    })
+    expect(result).toContain('**Cost:** $0.0000 real / $4.2000 metered')
+  })
+
   it('renders error status', () => {
     const result = formatStatusComment({
       error: 'Worker timeout',

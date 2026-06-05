@@ -23,6 +23,7 @@ export interface RunSummaryRow {
   phase: string | null
   iterations: number
   costUsd: number
+  theoreticalCostUsd: number
   promptTokens: number
   completionTokens: number
   cacheReadTokens: number
@@ -41,6 +42,7 @@ export interface InboxItemRow {
   phase: string | null
   iterations: number
   costUsd: number
+  theoreticalCostUsd: number
   prNumber: number | null
   prTitle: string | null
   blockReason: string | null
@@ -65,6 +67,7 @@ export function mapHistoryRunRow(row: HistoryRunRow): RunSummaryRow {
     phase: row.current_phase,
     iterations: row.iteration_count ?? 0,
     costUsd: row.estimated_cost_usd ?? 0,
+    theoreticalCostUsd: row.theoretical_cost_usd ?? row.estimated_cost_usd ?? 0,
     promptTokens: row.prompt_tokens ?? 0,
     completionTokens: row.completion_tokens ?? 0,
     cacheReadTokens: row.cache_read_tokens ?? 0,
@@ -92,6 +95,7 @@ export function mapActiveRunRow(
     phase: row.current_phase,
     iterations: row.iteration_count ?? 0,
     costUsd: row.estimated_cost_usd ?? 0,
+    theoreticalCostUsd: row.theoretical_cost_usd ?? row.estimated_cost_usd ?? 0,
     promptTokens: row.prompt_tokens ?? 0,
     completionTokens: row.completion_tokens ?? 0,
     cacheReadTokens: row.cache_read_tokens ?? 0,
@@ -116,6 +120,7 @@ export function mapInboxIssueRow(
     phase: row.current_phase,
     iterations: row.iteration_count ?? 0,
     costUsd: row.estimated_cost_usd ?? 0,
+    theoreticalCostUsd: row.estimated_cost_usd ?? 0,
     prNumber: row.pr_number,
     prTitle: row.pr_title,
     blockReason: row.block_reason,

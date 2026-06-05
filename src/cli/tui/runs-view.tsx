@@ -113,7 +113,7 @@ export function RunsView({
           <Text color={colorForIterationCount(issue.iteration_count)}>{issue.iteration_count ?? 0}</Text>
           {'  '}
           <Text color="gray">cost </Text>
-          <Text color={colorForCostUsd(issue.estimated_cost_usd)}>${(issue.estimated_cost_usd ?? 0).toFixed(2)}</Text>
+          <Text color={colorForCostUsd(issue.estimated_cost_usd)}>${(issue.estimated_cost_usd ?? 0).toFixed(2)}</Text><Text dimColor>/${(issue.theoretical_cost_usd ?? issue.estimated_cost_usd ?? 0).toFixed(2)}</Text>
           {'  '}
           <Text color={colorForPrNumber(issue.pr_number)}>{issue.pr_number !== null ? `PR #${issue.pr_number}` : 'no PR'}</Text>
           {'  '}
@@ -167,7 +167,7 @@ export function RunsView({
                 <Text color={colorForIterationCount(selectedIssue.iteration_count)}>{selectedIssue.iteration_count ?? 0}</Text>
                 {'  '}
                 <Text color="gray">cost </Text>
-                <Text color={colorForCostUsd(selectedIssue.estimated_cost_usd)}>${(selectedIssue.estimated_cost_usd ?? 0).toFixed(2)}</Text>
+                <Text color={colorForCostUsd(selectedIssue.estimated_cost_usd)}>${(selectedIssue.estimated_cost_usd ?? 0).toFixed(2)}</Text><Text dimColor>/${(selectedIssue.theoretical_cost_usd ?? selectedIssue.estimated_cost_usd ?? 0).toFixed(2)}</Text>
               </Text>
               {selectedIssue.pr_number !== null && (
                 <Text dimColor>
@@ -186,7 +186,7 @@ export function RunsView({
                     {' '}
                     <Text color={colorForIterationCount(run.iteration_count)}>i{run.iteration_count ?? 0}</Text>
                     {' '}
-                    <Text color={colorForCostUsd(run.estimated_cost_usd)}>${(run.estimated_cost_usd ?? 0).toFixed(2)}</Text>
+                    <Text color={colorForCostUsd(run.estimated_cost_usd)}>${(run.estimated_cost_usd ?? 0).toFixed(2)}</Text><Text dimColor>/${(run.theoretical_cost_usd ?? run.estimated_cost_usd ?? 0).toFixed(2)}</Text>
                     {' '}
                     <Text color="gray">{formatTime(run.updated_at)}</Text>
                     {' '}
@@ -296,7 +296,7 @@ function FocusedIssueView({
                 <Text color={colorForIterationCount(selectedIssue.iteration_count)}>{selectedIssue.iteration_count ?? 0}</Text>
                 {'  '}
                 <Text color="gray">cost </Text>
-                <Text color={colorForCostUsd(selectedIssue.estimated_cost_usd)}>${(selectedIssue.estimated_cost_usd ?? 0).toFixed(2)}</Text>
+                <Text color={colorForCostUsd(selectedIssue.estimated_cost_usd)}>${(selectedIssue.estimated_cost_usd ?? 0).toFixed(2)}</Text><Text dimColor>/${(selectedIssue.theoretical_cost_usd ?? selectedIssue.estimated_cost_usd ?? 0).toFixed(2)}</Text>
               </Text>
               <Text dimColor>updated {formatTime(selectedIssue.updated_at)}</Text>
               {selectedIssue.last_error && <Text color="red">error: {truncate(selectedIssue.last_error, 500)}</Text>}
@@ -310,7 +310,7 @@ function FocusedIssueView({
                     {' '}
                     <Text color={colorForIterationCount(run.iteration_count)}>i{run.iteration_count ?? 0}</Text>
                     {' '}
-                    <Text color={colorForCostUsd(run.estimated_cost_usd)}>${(run.estimated_cost_usd ?? 0).toFixed(2)}</Text>
+                    <Text color={colorForCostUsd(run.estimated_cost_usd)}>${(run.estimated_cost_usd ?? 0).toFixed(2)}</Text><Text dimColor>/${(run.theoretical_cost_usd ?? run.estimated_cost_usd ?? 0).toFixed(2)}</Text>
                     {' '}
                     <Text color={colorForPrNumber(run.pr_number)}>{run.pr_number !== null ? `PR #${run.pr_number}` : 'no PR'}</Text>
                     {' '}
@@ -338,7 +338,7 @@ function FocusedIssueView({
                   {'  '}
                   <Text color={colorForIterationCount(selectedRun.iteration_count)}>i{selectedRun.iteration_count ?? 0}</Text>
                   {'  '}
-                  <Text color={colorForCostUsd(selectedRun.estimated_cost_usd)}>${(selectedRun.estimated_cost_usd ?? 0).toFixed(2)}</Text>
+                  <Text color={colorForCostUsd(selectedRun.estimated_cost_usd)}>${(selectedRun.estimated_cost_usd ?? 0).toFixed(2)}</Text><Text dimColor>/${(selectedRun.theoretical_cost_usd ?? selectedRun.estimated_cost_usd ?? 0).toFixed(2)}</Text>
                 </Text>
               )}
               {selectedRunEvents.length === 0 && <Text color="gray">No agent events</Text>}

@@ -69,6 +69,14 @@ export interface RunContext {
   readonly iteration: number
   readonly totalAgentPasses: number
   readonly estimatedCostUsd: number
+  /**
+   * Cumulative metered-equivalent ("theoretical") cost: what the run WOULD
+   * cost on pay-per-use list pricing, accumulated regardless of cost model.
+   * Equals `estimatedCostUsd` under pay-per-use; under subscription the real
+   * charge is $0 but this still reflects the token spend so failures don't
+   * look free (see `pricing.ts` layer-2 cost).
+   */
+  readonly theoreticalCostUsd: number
 
   readonly currentPhase: LoopPhase
   readonly terminalStatus: TerminalStatus

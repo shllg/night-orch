@@ -90,6 +90,7 @@ export async function handleStatus(args: { repo?: string }, deps: MCPDependencie
       endedAt: r.ended_at,
     })),
     dailyCostUsd: costTracker.getDailyCost(),
+    dailyTheoreticalCostUsd: costTracker.getDailyTheoreticalCost(),
     dailyPromptTokens: dailyTokens.promptTokens,
     dailyCompletionTokens: dailyTokens.completionTokens,
     dailyCacheReadTokens: dailyTokens.cacheReadTokens,
@@ -234,6 +235,7 @@ export async function handleCostReport(args: { days?: number }, deps: MCPDepende
   const rows = loadDailyCostRows(deps.db, days)
 
   const totalCost = rows.reduce((sum, r) => sum + r.total_cost_usd, 0)
+  const totalTheoreticalCost = rows.reduce((sum, r) => sum + r.total_theoretical_cost_usd, 0)
   const totalRuns = rows.reduce((sum, r) => sum + r.run_count, 0)
   const totalPromptTokens = rows.reduce((sum, r) => sum + r.total_prompt_tokens, 0)
   const totalCompletionTokens = rows.reduce((sum, r) => sum + r.total_completion_tokens, 0)
@@ -243,6 +245,7 @@ export async function handleCostReport(args: { days?: number }, deps: MCPDepende
     model: costModel,
     period: `Last ${days} days`,
     totalCostUsd: Math.round(totalCost * 100) / 100,
+    totalTheoreticalCostUsd: Math.round(totalTheoreticalCost * 100) / 100,
     totalRuns,
     totalPromptTokens,
     totalCompletionTokens,
@@ -257,6 +260,7 @@ export async function handleCostReport(args: { days?: number }, deps: MCPDepende
     daily: rows.map((row) => ({
       date: row.date,
       totalCostUsd: row.total_cost_usd,
+      totalTheoreticalCostUsd: row.total_theoretical_cost_usd,
       runCount: row.run_count,
       promptTokens: row.total_prompt_tokens,
       completionTokens: row.total_completion_tokens,

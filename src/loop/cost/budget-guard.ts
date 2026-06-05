@@ -199,13 +199,12 @@ export function applyEstimatedWorkerCost(
     const agent = pricingIdentity?.workerType ?? 'unknown'
     try { metrics?.addEstimatedCost(ctx.repo, agent, estimatedCost) } catch { /* best-effort */ }
   }
-  if (estimatedCost <= 0) {
-    return { ctx, budget }
-  }
-
+  // Accumulate theoretical cost even when the real charge is $0 (subscription
+  // models) so the run's metered-equivalent spend stays visible in the UI.
   return {
     ctx: updateContext(ctx, {
       estimatedCostUsd: Number((ctx.estimatedCostUsd + estimatedCost).toFixed(6)),
+      theoreticalCostUsd: Number((ctx.theoreticalCostUsd + theoreticalCost).toFixed(6)),
     }),
     budget,
   }

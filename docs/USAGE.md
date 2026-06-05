@@ -931,9 +931,19 @@ cost:
 - **Token-based** (preferred) — when the agent adapter reports token counts, cost is calculated from per-model input/output/cache-read token rates
 - **Time-based** (fallback) — when token counts aren't available, cost is estimated from each model's `minuteUsd`
 
+#### Real vs. theoretical (metered) cost
+
+Every cost figure is tracked as two numbers:
+
+- **Real** — what is actually charged. Under `pay-per-use` this is the token cost; under `subscription`/`subscription-metered` it is `$0` while inside the included quota.
+- **Theoretical (metered)** — what the same token spend *would* cost on pay-per-use list pricing, always `> 0` when tokens were spent.
+
+Both are shown side by side across every surface (CLI `status`, TUI cost bar / stats / run lists, MCP `night-orch-status` + `night-orch-cost-report`, the web dashboard, and PR status comments) so a subscription run that produced nothing never *looks* free. Under `pay-per-use` the two figures are equal.
+
 View costs/usage:
-- `night-orch status` — shows daily cost summary (including cache-read tokens and phase cost breakdown)
-- `night-orch watch` — live cost/usage summaries
+- `night-orch status` — daily cost (real / metered), per-phase breakdown, and a per-run `Cost` + `Metered` column
+- `night-orch watch` — live cost/usage summaries with real and metered figures
+- MCP `night-orch-cost-report` — `totalCostUsd` + `totalTheoreticalCostUsd` and per-day `totalCostUsd` / `totalTheoreticalCostUsd`
 - Prometheus metric: `night_orch_estimated_cost_dollars`
 
 ---

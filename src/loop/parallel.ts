@@ -135,6 +135,7 @@ export async function executeParallelSubtasks(
             iteration: 1,
             totalAgentPasses: 0,
             estimatedCostUsd: 0,
+            theoreticalCostUsd: 0,
             currentPhase: 'plan',
             terminalStatus: 'running',
             phaseHistory: [],

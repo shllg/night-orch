@@ -105,7 +105,7 @@ export function IssueDetailPage({
                 </BadgeWeb>
                 <BadgeWeb size="sm">phase {truncate(run.phase?.trim() || '-', 28)}</BadgeWeb>
                 <BadgeWeb size="sm">iter {run.iterations}</BadgeWeb>
-                <BadgeWeb size="sm">${run.costUsd.toFixed(2)}</BadgeWeb>
+                <BadgeWeb size="sm">${run.costUsd.toFixed(2)} real / ${run.theoreticalCostUsd.toFixed(2)} metered</BadgeWeb>
                 <span
                   title={`prompt ${run.promptTokens.toLocaleString()} · completion ${run.completionTokens.toLocaleString()} · cache-read ${run.cacheReadTokens.toLocaleString()}`}
                 >

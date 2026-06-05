@@ -5,6 +5,8 @@ export interface StatusCommentSections {
   error?: string
   nextStep?: string
   cost?: number
+  /** Metered-equivalent cost; rendered alongside `cost` when provided. */
+  theoreticalCost?: number
   iteration?: number
   maxIterations?: number
   prUrl?: string
@@ -37,7 +39,12 @@ export function formatStatusComment(sections: StatusCommentSections): string {
   }
 
   if (sections.cost !== undefined) {
-    parts.push(`**Cost:** $${sections.cost.toFixed(4)}`)
+    const cost = `$${sections.cost.toFixed(4)}`
+    parts.push(
+      sections.theoreticalCost !== undefined
+        ? `**Cost:** ${cost} real / $${sections.theoreticalCost.toFixed(4)} metered`
+        : `**Cost:** ${cost}`,
+    )
   }
 
   if (sections.retryCount !== undefined && sections.maxRetries !== undefined) {

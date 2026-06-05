@@ -153,6 +153,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
               iteration: blockedCtx.iteration,
               maxIterations: blockedCtx.adjustedLimits.maxReviewIterations,
               cost: blockedCtx.estimatedCostUsd,
+              theoreticalCost: blockedCtx.theoreticalCostUsd,
             }),
             warnMessage: 'Failed to post post-publish block reason comment',
           })
@@ -343,6 +344,7 @@ export async function finalizeRunOutcome(params: FinalizeRunOutcomeParams): Prom
         iteration: finalCtx.iteration,
         maxIterations: finalCtx.adjustedLimits.maxReviewIterations,
         cost: finalCtx.estimatedCostUsd,
+        theoreticalCost: finalCtx.theoreticalCostUsd,
       })
       if (botUser) {
         await upsertBotComment(forge, issueRepo, issueNumber, STATUS_MARKER, statusBody, botUser)

@@ -44,11 +44,14 @@ describe('StatsView', () => {
       cost: {
         model: 'pay-per-use',
         todayCostUsd: 3.5,
+        todayTheoreticalCostUsd: 3.5,
         todayRunCount: 2,
         cost7d: 12.2,
+        theoretical7d: 12.2,
         cost30d: 44.2,
+        theoretical30d: 44.2,
         avgDailyCost7d: 2.5,
-        dailyHistory: [{ date: '2026-04-01', totalCostUsd: 3.5, runCount: 2 }],
+        dailyHistory: [{ date: '2026-04-01', totalCostUsd: 3.5, totalTheoreticalCostUsd: 3.5, runCount: 2 }],
       },
       usage: {
         todayPromptTokens: 1200,

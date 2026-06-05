@@ -318,6 +318,16 @@ These controls are interpreted by `cost.model`:
   `cost.subscriptionMetered.enforcePerRunLimit` and/or
   `cost.subscriptionMetered.enforceDailyLimit` are enabled
 
+Regardless of model, night-orch records both a **real** cost (the actual
+charge — `$0` inside a subscription quota) and a **theoretical (metered)**
+cost (the same token spend priced at pay-per-use list rates). All cost
+surfaces — CLI `status`, the TUI, MCP `night-orch-status` /
+`night-orch-cost-report`, the web dashboard, and PR status comments — show
+both side by side so subscription runs that spend tokens without a dollar
+charge are never mistaken for free. The two figures are equal under
+`pay-per-use`. See [Cost estimation](USAGE.md#cost-estimation) in the usage
+guide.
+
 When a run is blocked by a cost limit, there are three escape hatches — pick
 whichever matches the scope of the situation:
 

@@ -854,7 +854,7 @@ describe('startWebServer', () => {
       'successRate7d', 'avgDurationMinutes7d', 'avgIterations7d',
     ])
     expectNumericStats(payload.stats.reliability, ['failureCount7d', 'failureRate7d'])
-    expectNumericStats(payload.stats.cost, ['todayCostUsd', 'todayRunCount', 'cost7d', 'cost30d', 'avgDailyCost7d'])
+    expectNumericStats(payload.stats.cost, ['todayCostUsd', 'todayTheoreticalCostUsd', 'todayRunCount', 'cost7d', 'theoretical7d', 'cost30d', 'theoretical30d', 'avgDailyCost7d'])
     expectNumericStats(payload.stats.efficiency, [
       'totalCostUsd7d', 'avgCostPerRun7d', 'avgCostPerSuccess7d',
       'avgCostPerIteration7d', 'completedPerDollar7d',

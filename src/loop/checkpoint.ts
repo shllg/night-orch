@@ -359,12 +359,13 @@ export class Checkpoint {
     baseCtx: RunContext,
   ): RunContext | null {
     const row = this.db
-      .prepare('SELECT current_phase, phase_data, iteration_count, estimated_cost_usd FROM runs WHERE id = ?')
+      .prepare('SELECT current_phase, phase_data, iteration_count, estimated_cost_usd, theoretical_cost_usd FROM runs WHERE id = ?')
       .get(runId) as {
         current_phase: string | null
         phase_data: string | null
         iteration_count: number | null
         estimated_cost_usd: number | null
+        theoretical_cost_usd: number | null
       } | undefined
 
     if (!row?.current_phase) return null
@@ -412,6 +413,7 @@ export class Checkpoint {
       terminalStatus: 'running',
       iteration: row.iteration_count ?? baseCtx.iteration,
       estimatedCostUsd: row.estimated_cost_usd ?? baseCtx.estimatedCostUsd,
+      theoreticalCostUsd: row.theoretical_cost_usd ?? row.estimated_cost_usd ?? baseCtx.theoreticalCostUsd,
       plan: handoffRecovery.plan,
       codeResult: handoffRecovery.codeResult,
       verifyResults: handoffRecovery.verifyResults,

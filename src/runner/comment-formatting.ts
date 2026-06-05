@@ -62,8 +62,18 @@ export function formatBlockComment(reason: string, ctx: RunContext): string {
       }
     }
   }
-  parts.push(`\n*Iteration ${ctx.iteration}, cost: $${ctx.estimatedCostUsd.toFixed(4)}*`)
+  parts.push(`\n*Iteration ${ctx.iteration}, cost: ${formatRealVsTheoretical(ctx.estimatedCostUsd, ctx.theoreticalCostUsd)}*`)
   return parts.join('\n')
+}
+
+/**
+ * Render real vs theoretical (metered-equivalent) cost, always side by side.
+ * Under pay-per-use the two are equal; under subscription the real charge is
+ * $0 while the metered value shows the token spend so the work never looks
+ * free.
+ */
+export function formatRealVsTheoretical(realUsd: number, theoreticalUsd: number): string {
+  return `$${realUsd.toFixed(4)} real / $${theoreticalUsd.toFixed(4)} metered`
 }
 
 function getReviewFindings(
