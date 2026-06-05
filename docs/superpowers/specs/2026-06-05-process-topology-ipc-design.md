@@ -72,17 +72,16 @@ Day-1 packages (must exist after migration):
 
 ```
 packages/
-  types/      @night-orch/types      pure types + zod schemas for IPC + domain models
-  domain/     @night-orch/domain     pure logic — decide, parsers, label mutation, prompt compile
-  backend/    @night-orch/backend    engine, DB, forge, workers, HTTP api, MCP, config hot-reload
-  web/        @night-orch/web        SPA build + static server + reverse-proxy
-  runner/     @night-orch/runner     supervisor (replaces src/supervisor/)
-  cli/        night-orch             thin entry: parses argv, dispatches to runner/tui/one-shot cmds
-                                     (tui lives here as src/tui/, no separate pkg yet)
+  shared/     @night-orch/shared    types + zod schemas + pure logic (decide, parsers, label mutation, prompt compile) + shared constants
+  backend/    @night-orch/backend   engine, DB, forge, workers, HTTP api, MCP, config hot-reload
+  web/        @night-orch/web       SPA build + static server + reverse-proxy
+  runner/     @night-orch/runner    supervisor (replaces src/supervisor/)
+  cli/        night-orch            thin entry: parses argv, dispatches to runner/tui/one-shot cmds
+                                    (tui lives here as src/tui/, no separate pkg yet)
 ```
 
-- `types` and `domain` are leaves; everyone may depend on them. Neither depends on anything internal.
-- `backend`, `web`, `runner` depend on `types` (+ `domain` where pure logic is needed).
+- `shared` is the only leaf; everyone may depend on it. It depends on `node:*` + `zod` only — no internal deps.
+- `backend`, `web`, `runner` depend on `shared`.
 - `cli` is the published bin; internal packages are `"private": true` initially.
 - TS project references for incremental builds.
 - pnpm workspace with `packages/*` glob.
@@ -92,17 +91,19 @@ Deferred package extractions (folder inside an existing package today, separate 
 - `tui` — currently lives in `src/cli/tui/`; lift to `packages/tui/` when its API surface stops churning.
 - `api` — kept inside `backend` package (api is a thin HTTP gateway over engine; extracting it gains no isolation but adds a publish artifact).
 
-### D5. Shared types (`@night-orch/types`)
+### D5. Shared package (`@night-orch/shared`)
 
 Contents:
 
 - **Domain models**: `Run`, `RunPhase`, `Issue`, `WorkItem`, `Lease`, `CostBucket`, `Checkpoint`, `Project`, `Repository`.
 - **IPC envelopes**: `ApiRequest<T>`, `ApiResponse<T>`, `ApiError`, `SseEvent<T>` discriminated union.
 - **Health**: `HealthStatus`, `ProcessName`, `UpdatePhase`, `MaintenanceState`.
-- **Config**: re-export of zod schemas + inferred types from `@night-orch/domain/config`.
+- **Config**: zod schemas + inferred types for app config and project config.
 - **Runner control messages**: `RunnerCommand` (drain, stop, set-maintenance, reload-config), `RunnerEvent` (child-up, child-down, child-health).
+- **Pure logic**: `decide`, `computeLabelMutation`, worker output parsers, prompt compilers. Anything I/O-free.
+- **Shared constants**: SSE event names, error codes, default ports.
 
-Zero runtime code beyond zod schemas. Pure type package.
+Purity enforced by ESLint rule (`no-restricted-imports`): `shared` cannot import `better-sqlite3`, `@octokit/*`, `execa`, `chokidar`, `pino`, `node:fs`, `node:net`, `node:http`, or any other internal package. Only `node:url` / `node:path` style pure utilities + `zod` allowed.
 
 ### D6. Auth
 
@@ -144,7 +145,7 @@ Runner polls every 5s with a 5s timeout. Three consecutive failures → restart.
 
 ### D9. Backend HTTP api surface
 
-The backend public HTTP exposes (full schema lives in `@night-orch/types`):
+The backend public HTTP exposes (full schema lives in `@night-orch/shared`):
 
 - `GET /api/runs` — list runs (paginated, filterable).
 - `GET /api/runs/:id` — run detail incl. checkpoints + cost.
@@ -159,7 +160,7 @@ The backend public HTTP exposes (full schema lives in `@night-orch/types`):
 - `GET /health` — see D8.
 - `/mcp/*` — MCP HTTP transport (existing).
 
-This is approximately the current `src/web/routes/*` surface, formalized in `@night-orch/types`.
+This is approximately the current `src/web/routes/*` surface, formalized in `@night-orch/shared`.
 
 ## Architecture overview
 
@@ -198,7 +199,7 @@ This is approximately the current `src/web/routes/*` surface, formalized in `@ni
 1. Client sends `GET /api/runs` with bearer token.
 2. (Web only) web reverse-proxies to backend.
 3. Backend middleware: auth → zod validate query → route handler.
-4. Route handler queries SQLite, returns `ApiResponse<Run[]>` (shape from `@night-orch/types`).
+4. Route handler queries SQLite, returns `ApiResponse<Run[]>` (shape from `@night-orch/shared`).
 5. Client renders.
 
 **Event flow (engine emits run phase complete)**:
@@ -228,14 +229,14 @@ This is approximately the current `src/web/routes/*` surface, formalized in `@ni
 
 Each step independently shippable:
 
-1. **Workspace skeleton**: add pnpm workspace, create `packages/types/` and `packages/domain/` (empty stubs). Move pure-fn modules (decide, parsers, label mutation, prompt compile) into `domain`. Re-export from old paths via barrel files for source-compatibility. No behavior change.
+1. **Workspace skeleton**: add pnpm workspace, create `packages/shared/` (empty stub). Move pure-fn modules (decide, parsers, label mutation, prompt compile) + existing domain types + zod config schemas into `shared`. Add the purity ESLint rule (D5). Re-export from old paths via barrel files for source-compatibility. No behavior change.
 2. **Extract `packages/backend`**: move `src/loop/`, `src/state/`, `src/forge/`, `src/workers/`, `src/poller/`, `src/runner/`, `src/discovery/`, `src/mentions/`, `src/reactions/`, `src/publishing/`, `src/labels/`, `src/notify/`, `src/metrics/`, `src/ops/`, `src/git/`, `src/environment/`, `src/mcp/`, `src/web/` (routes, auth, server) into `packages/backend/src/`. Update imports. Still single process.
 3. **Extract `packages/runner`**: move `src/supervisor/` to `packages/runner/`. No new behavior yet — same children as today (run + web).
 4. **Extract `packages/web`**: move `web/` workspace into `packages/web/`. SPA build unchanged.
 5. **Split process boundaries**:
    - 5a. Web becomes a reverse-proxy + static server (instead of an in-process route handler). It binds its own public port (the port browsers connect to today) and proxies `/api/*` + `/api/events` to backend's loopback port. Backend binds a separate loopback-only port for api + MCP.
    - 5b. Runner forks backend + web as separate processes (replaces today's `run` + `web` fork pattern with a cleaner shape). Web's proxy target URL is supplied by runner via fork-IPC config message at child startup.
-6. **Define `@night-orch/types`** as authoritative IPC + domain types. Migrate routes + handlers + SSE serializers to consume schemas from types package.
+6. **Formalize `@night-orch/shared` as the contract source**: migrate routes + handlers + SSE serializers to consume schemas from `shared`. Delete any duplicate type defs in backend/web/runner/cli.
 7. **Tui extraction prep**: extract `src/cli/tui/` to a tidy folder inside `packages/cli/src/tui/` (still inside cli pkg). Rewire to call backend HTTP api instead of in-process imports.
 8. **Health endpoint formalization**: every child exposes `/health` per D8. Runner uses `/health` plus fork-IPC heartbeats.
 
@@ -244,8 +245,7 @@ Maintenance flag, staged update FSM, and config hot-reload land in subsequent sp
 ## Testing strategy
 
 **Per package:**
-- `types`: schema validation tests (zod parses, rejects bad input).
-- `domain`: existing exhaustive unit tests on `decide`, `computeLabelMutation`, parsers, prompt compile.
+- `shared`: schema validation tests (zod parses, rejects bad input) + existing exhaustive unit tests on `decide`, `computeLabelMutation`, parsers, prompt compile.
 - `backend`: integration tests with `:memory:` SQLite + fake forge adapter + fake worker. Hit HTTP routes, assert DB state and SSE events.
 - `web`: reverse-proxy smoke test (proxy forwards auth header + body verbatim, preserves SSE framing).
 - `runner`: spawn fake child scripts that implement `/health` and fork-IPC, assert restart on crash, backoff timing, update FSM transitions, maintenance flag propagation.
@@ -256,7 +256,7 @@ Maintenance flag, staged update FSM, and config hot-reload land in subsequent sp
 - Kill web, assert tui still works.
 
 **Contract tests:**
-- All `ApiRequest`/`ApiResponse`/`SseEvent` schemas in `@night-orch/types` get round-trip tests.
+- All `ApiRequest`/`ApiResponse`/`SseEvent` schemas in `@night-orch/shared` get round-trip tests.
 - Web reverse-proxy + backend api: assert envelope shapes match on both sides.
 
 ## Open follow-up specs
@@ -271,7 +271,7 @@ Maintenance flag, staged update FSM, and config hot-reload land in subsequent sp
 
 - **Reverse-proxy latency in web**: adds one hop. Mitigation: same-host loopback (sub-ms), HTTP/1.1 keep-alive between web and backend.
 - **Fork IPC reliability**: structured messages over `process.send` are well-trodden but can be missed if backend is mid-GC. Mitigation: every fork IPC command is idempotent and acknowledged via response message with timeout.
-- **Type drift between packages**: shared `@night-orch/types` mitigates, but only if everyone imports from there. Mitigation: lint rule forbidding cross-package imports that bypass `types`.
+- **Type drift between packages**: `@night-orch/shared` mitigates, but only if everyone imports from there. Mitigation: lint rule forbidding cross-package imports that bypass `shared` for any cross-process payload type.
 - **Bigger blast radius for backend**: backend now holds engine + api + MCP. A leak in MCP can OOM the engine. Accepted trade — alternative (separate api process) was rejected because the api layer was not the unstable layer in night-orch. Re-evaluate if production data shows otherwise.
 
 ## Success criteria
@@ -279,5 +279,6 @@ Maintenance flag, staged update FSM, and config hot-reload land in subsequent sp
 - Web process can be killed and respawned without interrupting any active run.
 - Backend can be killed mid-run; on restart, the engine resumes the run from the last checkpoint, with the same outcome as if the crash had not occurred.
 - TUI can be launched from a separate shell session and shows live state via SSE within 1 second of an event.
-- `@night-orch/types` is the single source of truth for all cross-process payload shapes; no duplicate type definitions exist in `backend`, `web`, `runner`, or `cli`.
-- `runner` package is ≤ 800 LOC and depends only on `types` (no domain logic).
+- `@night-orch/shared` is the single source of truth for all cross-process payload shapes; no duplicate type definitions exist in `backend`, `web`, `runner`, or `cli`.
+- `runner` package is ≤ 800 LOC and depends only on `shared` (no engine/DB code).
+- `shared` has zero internal package deps and the purity ESLint rule passes.
