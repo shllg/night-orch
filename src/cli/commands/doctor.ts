@@ -239,9 +239,10 @@ export async function doctorCommand(globalOpts?: GlobalOpts): Promise<void> {
     }
   }
 
-  // 11. Direct-LLM provider probe — sends a 1-token completion to
+  // 11. Direct-LLM provider probe — sends a tiny completion to
   //     catch bad API keys and wrong model slugs at startup instead
   //     of on the first triage/reviewer call in production.
+  //     maxTokens floored at 16: Azure gpt-5.x rejects values below that.
   const aiInternal = config.ai.internal
   const aiFeatureEnabled =
     aiInternal.enable.triage
@@ -269,7 +270,7 @@ export async function doctorCommand(globalOpts?: GlobalOpts): Promise<void> {
         await client.complete({
           system: 'Reply with a single character.',
           user: 'ping',
-          maxTokens: 1,
+          maxTokens: 16,
           temperature: 0,
           timeoutMs: 10_000,
         })
