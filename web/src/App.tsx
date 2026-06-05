@@ -810,9 +810,16 @@ export function App({
         'Content-Type': 'application/json',
         [MUTATION_INTENT_HEADER]: MUTATION_INTENT_VALUE,
       }
+      // Attach BOTH credentials when available. The server validates
+      // the session cookie before the header token (server.ts), so a
+      // login that set a session cookie makes the cookie path win — and
+      // that path requires a matching x-csrf-token header. Sending only
+      // the web token (loopback mode) left the cookie path without a
+      // CSRF header → 403. The unused credential is ignored server-side.
       if (webMutationToken) {
         headers[WEB_AUTH_TOKEN_HEADER] = webMutationToken
-      } else if (csrfToken) {
+      }
+      if (csrfToken) {
         headers[CSRF_HEADER_NAME] = csrfToken
       }
 
