@@ -396,7 +396,7 @@ describe('createWorkerAdapter (factory)', () => {
         image: 'night-orch-agent:latest',
         containerUid: 1000,
         containerGid: 1000,
-        mounts: [{ hostPath: '~/.codex', sandboxPath: '/home/agent/.codex', readonly: true }],
+        mounts: [{ hostPath: process.cwd(), sandboxPath: '/home/agent/.codex', readonly: true }],
         env: {
           SAFE_VALUE: 'ok',
           GITHUB_TOKEN: 'skip-me',
