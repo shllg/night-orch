@@ -6,6 +6,7 @@ import { extname, resolve, dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocket, WebSocketServer } from 'ws'
 import type { MCPDependencies } from '../mcp/server.js'
+import { WebSecretStore } from '../state/web-secrets.js'
 import {
   InteractiveAgentSessionManager,
 } from './agent-session.js'
@@ -61,8 +62,8 @@ export interface WebSecurityContext {
   webMutationToken: string
   mcpMutationAuthToken?: string
   operatorAuthMode: boolean
-  /** Secret used to sign session cookies. Generated at startup and
-   * kept in memory — restarts invalidate existing sessions. */
+  /** Secret used to sign session cookies. Persisted in the DB
+   * (`web_secrets`) so sessions survive `night-orch web` restarts. */
   sessionSecret: Buffer
   /** Phase 2a: when false, `validateMutationRequest` short-circuits
    * to success without checking cookies or headers. Intended for
@@ -660,17 +661,31 @@ function createWebSecurityContext(deps: MCPDependencies, options: WebServerOptio
     || bindHostName === ''
   const authRequired = options.requireAuth !== false
   const operatorAuthMode = authRequired && !isLoopback && !!operatorToken
-  const generatedLoopbackToken = randomBytes(24).toString('base64url')
-  const webMutationToken = operatorAuthMode ? operatorToken : generatedLoopbackToken
-  const loopbackTokenPath = authRequired && !operatorAuthMode
-    ? writeLoopbackTokenSidecar(generatedLoopbackToken)
-    : null
+  const secretStore = new WebSecretStore(deps.db)
 
-  if (authRequired && !operatorAuthMode && !loopbackTokenPrinted) {
-    process.stdout.write(
-      `\n[night-orch] Loopback web token (also at ${loopbackTokenPath ?? 'sidecar file'}):\n  ${generatedLoopbackToken}\n\n`,
-    )
-    loopbackTokenPrinted = true
+  let webMutationToken: string
+  let loopbackTokenPath: string | null = null
+
+  if (operatorAuthMode && operatorToken) {
+    webMutationToken = operatorToken
+  } else if (authRequired) {
+    // Loopback auth: persist the token so the saved value keeps working
+    // across restarts; the sidecar is rewritten each start for discovery
+    // (XDG_RUNTIME_DIR is volatile, the DB is the durable source).
+    const loopbackToken = secretStore.getOrCreateLoopbackToken()
+    webMutationToken = loopbackToken
+    loopbackTokenPath = writeLoopbackTokenSidecar(loopbackToken)
+
+    if (!loopbackTokenPrinted) {
+      process.stdout.write(
+        `\n[night-orch] Loopback web token (also at ${loopbackTokenPath ?? 'sidecar file'}):\n  ${loopbackToken}\n\n`,
+      )
+      loopbackTokenPrinted = true
+    }
+  } else {
+    // Auth disabled (--skip-auth): the mutation guard is bypassed, so this
+    // token is never checked — keep it ephemeral, do not persist.
+    webMutationToken = randomBytes(24).toString('base64url')
   }
 
   return {
@@ -678,7 +693,7 @@ function createWebSecurityContext(deps: MCPDependencies, options: WebServerOptio
     webMutationToken,
     mcpMutationAuthToken: resolveMcpMutationAuthToken(deps),
     operatorAuthMode,
-    sessionSecret: randomBytes(32),
+    sessionSecret: secretStore.getOrCreateSessionSecret(),
     authRequired,
     trustedProxy: deps.config.web?.trustedProxy === true,
     loopbackTokenPath,

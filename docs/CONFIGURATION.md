@@ -706,6 +706,8 @@ Non-loopback binding **without** `authTokenEnv` is rejected at startup — expos
 
 Loopback web auth writes the generated mutation token to `$XDG_RUNTIME_DIR/night-orch-web.token` with mode `0600` and also prints it once at startup. `/api/session` returns only a hint to that sidecar path; it does not return the token in the response body. Paste that token into the browser login dialog, or set `NIGHT_ORCH_WEB_AUTH_TOKEN` and bind with operator auth for remote access.
 
+Both the loopback mutation token and the session-cookie signing secret are persisted in the database (`web_secrets` table) and stay stable across `night-orch web` restarts — existing browser sessions and the saved loopback token keep working after a restart, so operators behind a reverse proxy are not locked out. `$XDG_RUNTIME_DIR` is volatile, so the sidecar file is rewritten from the stored token on each start. The operator-token path (`NIGHT_ORCH_WEB_AUTH_TOKEN`) is unaffected. To rotate either secret, delete the corresponding row (`loopback_token` or `session_secret`) from `web_secrets` and restart.
+
 Operator auth sessions use an `HttpOnly` `SameSite=Strict` session cookie with an 8-hour max age. Cookie-authenticated mutation requests must include a matching double-submit CSRF header (`x-csrf-token`) copied from the readable `norch_csrf` cookie, or `__Host-night-orch-csrf` when secure proxy cookies are enabled. Browser clients do this automatically; scripts can avoid cookie+CSRF handling by sending the configured bearer token with `x-night-orch-web-token`.
 
 ## `commentCommands`
