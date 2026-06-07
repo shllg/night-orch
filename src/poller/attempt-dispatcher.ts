@@ -22,6 +22,7 @@ import { adjustLimitsForTriage } from '../discovery/triage.js'
 import { getOrPinSlug, buildWorktreePath } from '../git/slug.js'
 import {
   prepareEnvironment,
+  releaseEnvironmentPorts,
   runBeforeRunHooks,
   teardownEnvironment,
 } from '../environment/manager.js'
@@ -636,6 +637,8 @@ export async function dispatchAttempt(
         logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: envErr }, 'Failed to tear down environment')
       }
     }
+    // Release allocated host ports so a later run in the same poll pass reuses them.
+    if (envSetup) releaseEnvironmentPorts(usedPortsInPass, envSetup.tokens)
     leaseManager.release(issueRepo, discoveredIssue.issue.number)
   }
 }

@@ -77,7 +77,7 @@ export interface ProjectRepoSummary {
     prMentions: string[]
   }
   environment?: {
-    ports?: { min: number; max: number }
+    ports?: Record<string, { min: number; max: number }>
     beforeRun: RunHookSummary[]
     afterRun: RunHookSummary[]
   }
@@ -201,10 +201,18 @@ export function sanitizeProjectRepo(repo: RepoConfig): ProjectRepoSummary {
 
 function sanitizeEnvironment(environment: NonNullable<RepoConfig['environment']>): NonNullable<ProjectRepoSummary['environment']> {
   return {
-    ...(environment.ports ? { ports: { ...environment.ports } } : {}),
+    ...(environment.ports ? { ports: copyPortPools(environment.ports) } : {}),
     beforeRun: environment.beforeRun.map(copyRunHook),
     afterRun: environment.afterRun.map(copyRunHook),
   }
+}
+
+function copyPortPools(
+  ports: NonNullable<NonNullable<RepoConfig['environment']>['ports']>,
+): Record<string, { min: number; max: number }> {
+  const out: Record<string, { min: number; max: number }> = {}
+  for (const [name, range] of Object.entries(ports)) out[name] = { ...range }
+  return out
 }
 
 function copyRunHook(hook: NonNullable<RepoConfig['environment']>['beforeRun'][number]): RunHookSummary {

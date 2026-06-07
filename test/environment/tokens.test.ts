@@ -4,6 +4,8 @@ import {
   substituteCommandTokens,
   substituteEnvTokens,
   defaultProjectName,
+  findUnresolvedPortToken,
+  unresolvedPortMessage,
   type RunTokens,
 } from '../../src/environment/tokens.js'
 
@@ -28,6 +30,50 @@ describe('substituteTokens', () => {
   it('leaves {port} untouched when no port is allocated (visible misconfig)', () => {
     const noPort: RunTokens = { issue: 1, run: 'r', project: 'p' }
     expect(substituteTokens('x:{port}', noPort)).toBe('x:{port}')
+  })
+
+  it('replaces named-pool {port:NAME} tokens and {port} as the first pool', () => {
+    const named: RunTokens = {
+      issue: 1, run: 'r', port: 5460,
+      ports: { postgres: 5460, redis: 6460 }, project: 'p',
+    }
+    expect(substituteTokens('pg:{port:postgres} redis:{port:redis} def:{port}', named))
+      .toBe('pg:5460 redis:6460 def:5460')
+  })
+
+  it('leaves an unknown {port:NAME} untouched (visible misconfig)', () => {
+    const named: RunTokens = { issue: 1, run: 'r', port: 5460, ports: { postgres: 5460 }, project: 'p' }
+    expect(substituteTokens('x:{port:rustfs}', named)).toBe('x:{port:rustfs}')
+  })
+})
+
+describe('findUnresolvedPortToken', () => {
+  it('returns null when all port tokens are resolved', () => {
+    expect(findUnresolvedPortToken(['pg://localhost:5460', 'plain'])).toBeNull()
+  })
+
+  it('detects a bare {port} token', () => {
+    expect(findUnresolvedPortToken(['x:{port}'])).toBe('{port}')
+  })
+
+  it('detects a named {port:NAME} token', () => {
+    expect(findUnresolvedPortToken(['plain', 'x:{port:rustfs}'])).toBe('{port:rustfs}')
+  })
+})
+
+describe('unresolvedPortMessage', () => {
+  it('lists configured pools when some exist', () => {
+    const msg = unresolvedPortMessage('{port:rustfs}', {
+      issue: 1, run: 'r', port: 5460, ports: { postgres: 5460, redis: 6460 }, project: 'p',
+    }, 'Verify command')
+    expect(msg).toContain('{port:rustfs}')
+    expect(msg).toContain('postgres, redis')
+    expect(msg).toContain('Verify command')
+  })
+
+  it('says none configured when no pools exist', () => {
+    const msg = unresolvedPortMessage('{port}', { issue: 1, run: 'r', project: 'p' }, 'Run hook')
+    expect(msg).toContain('No `environment.ports` pool is configured')
   })
 })
 

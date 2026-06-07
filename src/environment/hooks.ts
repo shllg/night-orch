@@ -3,7 +3,12 @@ import { logger } from '../utils/logger.js'
 import { parseCommandSpec, type CommandSpec } from '../utils/command.js'
 import { buildBootstrapEnv } from '../workers/env.js'
 import { sanitizeErrorMessage } from '../utils/sanitize-error.js'
-import { substituteCommandTokens, type RunTokens } from './tokens.js'
+import {
+  findUnresolvedPortToken,
+  substituteCommandTokens,
+  unresolvedPortMessage,
+  type RunTokens,
+} from './tokens.js'
 
 export interface RunHookFailureHint {
   contains: string
@@ -26,8 +31,10 @@ const HOOK_TIMEOUT_MS = 300_000 // 5 min
  * logs failures at `warn`, and never throws — teardown must not mask the run's
  * real outcome.
  *
- * Tokens (`{issue}`/`{run}`/`{port}`/`{project}`) are substituted into each
- * command. Env is the bootstrap-class whitelist (includes `DOCKER_*` /
+ * Tokens (`{issue}`/`{run}`/`{project}` plus `{port}`/`{port:NAME}`) are
+ * substituted into each command; an unresolved port token fails loudly
+ * (fail-fast) or is skipped with a warning (attempt-all). Env is the
+ * bootstrap-class whitelist (includes `DOCKER_*` /
  * `COMPOSE_*`); the daemon's secrets are never inherited.
  */
 export async function runRunHooks(
@@ -44,8 +51,9 @@ export async function runRunHooks(
     const resolved = substituteCommandTokens(command, tokens)
     const label = Array.isArray(resolved) ? resolved.join(' ') : resolved
     const segments = Array.isArray(resolved) ? resolved : [resolved]
-    if (segments.some((s) => s.includes('{port}'))) {
-      const msg = `Run hook references the {port} token but no port was allocated — set \`environment.ports: { min, max }\`: ${label}`
+    const unresolved = findUnresolvedPortToken(segments)
+    if (unresolved) {
+      const msg = `${unresolvedPortMessage(unresolved, tokens, 'Run hook')}: ${label}`
       if (mode === 'fail-fast') throw new Error(msg)
       logger.warn({ command: label }, msg)
       continue

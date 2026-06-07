@@ -6,29 +6,60 @@ import type { CommandSpec } from '../utils/command.js'
  *
  * `run` is the per-run discriminator — use it (not `issue`) in resource names
  * like test-DB names so two concurrent runs of the same issue never collide.
- * `port` is present only when a host port was allocated.
+ * `port` is the first/default pool's host port (the bare `{port}` token),
+ * present only when at least one pool is configured. `ports` maps each named
+ * pool to its allocated host port (the `{port:NAME}` tokens).
  */
 export interface RunTokens {
   issue: number
   run: string
   port?: number
+  ports?: Record<string, number>
   project: string
 }
 
-/** Expand `{issue}`/`{run}`/`{port}`/`{project}` in a single string. */
-export function substituteTokens(input: string, tokens: RunTokens): string {
-  const map: Record<string, string> = {
-    '{issue}': String(tokens.issue),
-    '{run}': tokens.run,
-    '{project}': tokens.project,
-  }
-  if (tokens.port !== undefined) map['{port}'] = String(tokens.port)
+/** Matches an unresolved `{port}` or `{port:NAME}` token. */
+const PORT_TOKEN_RE = /\{port(?::([a-zA-Z0-9_-]+))?\}/
 
+/** Expand `{issue}`/`{run}`/`{project}`/`{port}`/`{port:NAME}` in a string. */
+export function substituteTokens(input: string, tokens: RunTokens): string {
   let out = input
-  for (const [token, value] of Object.entries(map)) {
-    out = out.replaceAll(token, value)
+  out = out.replaceAll('{issue}', String(tokens.issue))
+  out = out.replaceAll('{run}', tokens.run)
+  out = out.replaceAll('{project}', tokens.project)
+  if (tokens.port !== undefined) out = out.replaceAll('{port}', String(tokens.port))
+  if (tokens.ports) {
+    for (const [name, value] of Object.entries(tokens.ports)) {
+      out = out.replaceAll(`{port:${name}}`, String(value))
+    }
   }
   return out
+}
+
+/**
+ * Return the first unresolved port token across the given segments, or `null`
+ * if every port token was substituted. Used to fail loudly when a command
+ * references `{port}` with no pool configured, or `{port:NAME}` naming an
+ * unknown pool.
+ */
+export function findUnresolvedPortToken(segments: readonly string[]): string | null {
+  for (const segment of segments) {
+    const match = segment.match(PORT_TOKEN_RE)
+    if (match) return match[0]
+  }
+  return null
+}
+
+/**
+ * Build the "fix your config" message for an unresolved port token, listing the
+ * pools that ARE configured so the operator can spot a typo or missing pool.
+ */
+export function unresolvedPortMessage(token: string, tokens: RunTokens | undefined, context: string): string {
+  const pools = tokens?.ports ? Object.keys(tokens.ports) : []
+  const configured = pools.length > 0
+    ? `Configured pools: ${pools.join(', ')}.`
+    : 'No `environment.ports` pool is configured.'
+  return `${context} references the ${token} token but it could not be resolved. ${configured} Add it under \`environment.ports\`.`
 }
 
 /** Expand tokens across every segment of a string- or array-form command. */

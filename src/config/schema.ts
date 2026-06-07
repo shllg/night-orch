@@ -183,14 +183,33 @@ const RunHookCommandSchema = z.union([
  * Per-run environment lifecycle. There is one isolation model: a per-run
  * worktree plus hooks. `beforeRun` runs once before the loop (fail-fast);
  * `afterRun` runs once after the loop in a `finally` (attempt-all, always).
- * `ports` is the pool the `{port}` token allocates from. Per-command service
- * lifecycle lives on each `verify` command's `before`/`after`/`env`.
+ * `ports` are the host-port pools the `{port}`/`{port:NAME}` tokens allocate
+ * from. Per-command service lifecycle lives on each `verify` command's
+ * `before`/`after`/`env`.
  */
+const PortRangeSchema = z.object({
+  min: z.number().int().positive(),
+  max: z.number().int().positive(),
+}).strict()
+
+/**
+ * `environment.ports` accepts either form, normalized to an ordered record of
+ * named pools `{ name: { min, max } }`:
+ *
+ * - Legacy single range `{ min, max }` → `{ default: { min, max } }`. The bare
+ *   `{port}` token allocates from the first pool, so legacy configs keep working.
+ * - Named pools `{ postgres: { min, max }, redis: { min, max } }` → as-is. Each
+ *   pool yields a `{port:NAME}` token; `{port}` aliases the first pool.
+ *
+ * Pool order follows config key order — the first key is the `{port}` default.
+ */
+const PortsConfigSchema = z.union([
+  PortRangeSchema.transform((range) => ({ default: range })),
+  z.record(z.string().min(1), PortRangeSchema),
+])
+
 const EnvironmentConfigSchema = z.object({
-  ports: z.object({
-    min: z.number().int().positive(),
-    max: z.number().int().positive(),
-  }).strict().optional(),
+  ports: PortsConfigSchema.optional(),
   beforeRun: z.array(RunHookCommandSchema).default([]),
   afterRun: z.array(RunHookCommandSchema).default([]),
 }).strict()

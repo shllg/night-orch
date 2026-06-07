@@ -104,7 +104,9 @@ function formatRunHook(hook: NonNullable<ProjectRepoSummary['environment']>['bef
 
 export function formatPorts(repo: ProjectRepoSummary): string {
   const ports = repo.environment?.ports
-  return ports ? `${ports.min}-${ports.max}` : '(none)'
+  const entries = ports ? Object.entries(ports) : []
+  if (entries.length === 0) return '(none)'
+  return entries.map(([name, range]) => `${name} ${range.min}-${range.max}`).join(', ')
 }
 
 export function formatBeforeRun(repo: ProjectRepoSummary): string {

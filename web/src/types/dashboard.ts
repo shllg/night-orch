@@ -418,7 +418,7 @@ export interface ProjectRepoSummary {
     prMentions: string[]
   }
   environment?: {
-    ports?: { min: number; max: number }
+    ports?: Record<string, { min: number; max: number }>
     beforeRun: Array<
       | CommandSpec
       | {

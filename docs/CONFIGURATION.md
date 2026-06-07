@@ -1109,11 +1109,27 @@ There is **one** isolation model: each run gets its own worktree plus lifecycle 
 
 | Key | Type | Required | Default | Notes |
 | --- | --- | --- | --- | --- |
-| `ports` | `{ min, max }` | no | none | Host-port pool the `{port}` token allocates from (one unique port per run). Required only if a hook/command references `{port}`. |
+| `ports` | `{ min, max }` **or** `{ NAME: { min, max }, … }` | no | none | Host-port pool(s) the `{port}`/`{port:NAME}` tokens allocate from (one unique port per pool per run). The single-range form is shorthand for one pool; the named form isolates a multi-service stack (e.g. `postgres`/`redis`/`rustfs`). The bare `{port}` token always resolves to the **first** pool. Required only if a hook/command references a port token. |
 | `beforeRun` | run-hook[] | no | `[]` | Commands run once **before** the loop (fail-fast). Inherit the run's env. |
 | `afterRun` | run-hook[] | no | `[]` | Commands run once **after** the loop in a `finally` — always run (success, block, error, exception), attempt-all (every entry runs even if one fails). Inherit the run's env. |
 
-Each `beforeRun`/`afterRun` entry is either a bare `CommandSpec` or an object `{ command, failureHints? }`. Substitution tokens `{issue}`, `{run}`, `{port}`, `{project}` are expanded in every command segment.
+Each `beforeRun`/`afterRun` entry is either a bare `CommandSpec` or an object `{ command, failureHints? }`. Substitution tokens `{issue}`, `{run}`, `{project}`, `{port}`, and `{port:NAME}` are expanded in every command segment. Referencing a port token with no matching pool fails loudly.
+
+##### Named port pools
+
+To isolate a multi-service docker stack per run, declare one pool per service and reference each with `{port:NAME}`:
+
+```yaml
+environment:
+  ports:
+    postgres: { min: 5460, max: 5499 }
+    redis:    { min: 6460, max: 6499 }
+    rustfs:   { min: 9460, max: 9499 }
+  beforeRun:
+    - command: [docker, compose, -p, "{project}", up, -d, --wait]
+```
+
+Each run gets one free port per pool, so N concurrent runs bind to distinct host ports with no collisions. `{port}` resolves to the first pool (`postgres` above). Ports are released back to the pool when the run ends.
 
 ##### run-hook `failureHints[]`
 
@@ -1140,7 +1156,7 @@ The object form adds per-command service lifecycle:
 | `after` | `CommandSpec[]` | Hooks run after the command in a `finally` — always run, attempt-all. |
 | `env` | record | Env shared by `before`, the command, and `after`. **Bypasses the secret blacklist** (see below). Token-substituted. |
 
-Tokens `{issue}`, `{run}`, `{port}`, `{project}` are expanded in `command`, `before`, `after`, and `env` values. `{project}` defaults to `{repoSlug}-{issue}-{run}` (a docker-host-global-safe name). If a command references `{port}` but no `environment.ports` pool is configured, validation/execution fails loudly.
+Tokens `{issue}`, `{run}`, `{project}`, `{port}`, and `{port:NAME}` are expanded in `command`, `before`, `after`, and `env` values. `{project}` defaults to `{repoSlug}-{issue}-{run}` (a docker-host-global-safe name). `{port}` resolves to the first `environment.ports` pool; `{port:NAME}` resolves to the named pool. If a command references a port token with no matching pool, execution fails loudly.
 
 **`env` and security:** the whitelist base for verify commands strips all secrets (forge tokens, API keys). Keys you list in a command's `env` are layered on top and bypass that blacklist — an explicit operator opt-in. These commands run inside the AI-coder-authored worktree, so a planted `Rakefile`/`Makefile`/`postinstall` can read this env: **only put local, non-secret values here** (a local docker DB URL/password), never real host secrets. Run-level `beforeRun`/`afterRun` have no `env` field; they inherit the run's whitelist env (which already includes `DOCKER_*`/`COMPOSE_*`).
 

@@ -18,8 +18,10 @@ import { compilePrompt } from '../workers/prompt/compiler.js'
 import { getDefaultTemplate, buildPlanningOnlyCoderTemplate } from '../workers/prompt/templates.js'
 import { buildWorkerEnv, buildVerifierEnv } from '../workers/env.js'
 import {
+  findUnresolvedPortToken,
   substituteCommandTokens,
   substituteEnvTokens,
+  unresolvedPortMessage,
   type RunTokens,
 } from '../environment/tokens.js'
 import type { ResolvedVerifyCommand } from './verification-profile.js'
@@ -329,22 +331,23 @@ export async function executeVerifyStep(
 type VerifyCommandSpec = ResolvedVerifyCommand['command']
 
 /**
- * Expand `{issue}`/`{run}`/`{port}`/`{project}` tokens in a resolved verify
- * command — its `command`, `before`/`after` hooks, and `env`. Throws if a
- * `{port}` token survives (no port was allocated) so a misconfig fails loudly
- * instead of producing a broken connection string.
+ * Expand `{issue}`/`{run}`/`{project}` and `{port}`/`{port:NAME}` tokens in a
+ * resolved verify command — its `command`, `before`/`after` hooks, and `env`.
+ * Throws if a port token survives (no pool was allocated, or `{port:NAME}`
+ * named an unknown pool) so a misconfig fails loudly instead of producing a
+ * broken connection string.
  */
 export function substituteVerifyCommandTokens(
   command: VerifyCommandSpec,
   tokens: RunTokens | undefined,
 ): VerifyCommandSpec {
   if (!tokens) {
-    assertPortResolved(command)
+    assertPortResolved(command, tokens)
     return command
   }
   if (typeof command === 'string' || Array.isArray(command)) {
     const out = substituteCommandTokens(command, tokens)
-    assertPortResolved(out)
+    assertPortResolved(out, tokens)
     return out
   }
   const out: VerifyCommandSpec = {
@@ -354,11 +357,11 @@ export function substituteVerifyCommandTokens(
     ...(command.after ? { after: command.after.map((hook) => substituteCommandTokens(hook, tokens)) } : {}),
     ...(command.env ? { env: substituteEnvTokens(command.env, tokens) } : {}),
   }
-  assertPortResolved(out)
+  assertPortResolved(out, tokens)
   return out
 }
 
-function assertPortResolved(command: VerifyCommandSpec): void {
+function assertPortResolved(command: VerifyCommandSpec, tokens: RunTokens | undefined): void {
   const segments: string[] = []
   const collect = (spec: string | string[]): void => {
     if (Array.isArray(spec)) segments.push(...spec)
@@ -372,10 +375,9 @@ function assertPortResolved(command: VerifyCommandSpec): void {
     command.after?.forEach(collect)
     if (command.env) segments.push(...Object.values(command.env))
   }
-  if (segments.some((s) => s.includes('{port}'))) {
-    throw new Error(
-      'Verify command references the {port} token but no port was allocated — set `environment.ports: { min, max }` for this repo.',
-    )
+  const unresolved = findUnresolvedPortToken(segments)
+  if (unresolved) {
+    throw new Error(unresolvedPortMessage(unresolved, tokens, 'Verify command'))
   }
 }
 

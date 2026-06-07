@@ -715,14 +715,45 @@ describe('ConfigSchema', () => {
     expect(result.success).toBe(false)
   })
 
-  it('accepts environment.ports for {port} allocation', () => {
+  it('normalizes the legacy single-range environment.ports into a default pool', () => {
     const raw = loadExampleConfig()
     raw.repos[0].environment = { ports: { min: 5400, max: 5499 }, beforeRun: [], afterRun: [] }
 
     const result = ConfigSchema.safeParse(raw)
     expect(result.success).toBe(true)
     if (result.success) {
-      expect(result.data.repos[0]?.environment?.ports).toEqual({ min: 5400, max: 5499 })
+      expect(result.data.repos[0]?.environment?.ports).toEqual({ default: { min: 5400, max: 5499 } })
     }
+  })
+
+  it('accepts named environment.ports pools, preserving key order', () => {
+    const raw = loadExampleConfig()
+    raw.repos[0].environment = {
+      ports: {
+        postgres: { min: 5460, max: 5499 },
+        redis: { min: 6460, max: 6499 },
+        rustfs: { min: 9460, max: 9499 },
+      },
+      beforeRun: [],
+      afterRun: [],
+    }
+
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      const ports = result.data.repos[0]?.environment?.ports
+      expect(ports).toEqual({
+        postgres: { min: 5460, max: 5499 },
+        redis: { min: 6460, max: 6499 },
+        rustfs: { min: 9460, max: 9499 },
+      })
+      expect(Object.keys(ports ?? {})).toEqual(['postgres', 'redis', 'rustfs'])
+    }
+  })
+
+  it('rejects a port pool missing min/max', () => {
+    const raw = loadExampleConfig()
+    raw.repos[0].environment = { ports: { postgres: { min: 5460 } }, beforeRun: [], afterRun: [] }
+    expect(ConfigSchema.safeParse(raw).success).toBe(false)
   })
 })

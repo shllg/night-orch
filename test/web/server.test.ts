@@ -938,7 +938,7 @@ describe('startWebServer', () => {
         plannerSystem: 'planner custom prompt',
       },
       environment: {
-        ports: { min: 5400, max: 5499 },
+        ports: { postgres: { min: 5400, max: 5499 }, redis: { min: 6400, max: 6499 } },
         beforeRun: [{
           command: ['pnpm', 'install'],
           failureHints: [{
@@ -977,7 +977,7 @@ describe('startWebServer', () => {
         labels: { blocked: string }
         prompts: { plannerSystem: boolean; coderSystem: boolean; reviewerSystem: boolean }
         environment?: {
-          ports?: { min: number; max: number }
+          ports?: Record<string, { min: number; max: number }>
           beforeRun?: Array<string | string[] | {
             command: string | string[]
             failureHints?: Array<{
@@ -1017,7 +1017,10 @@ describe('startWebServer', () => {
       message: 'Install dependencies first.',
       output: 'stderr',
     })
-    expect(payload.repos[0]?.environment?.ports).toEqual({ min: 5400, max: 5499 })
+    expect(payload.repos[0]?.environment?.ports).toEqual({
+      postgres: { min: 5400, max: 5499 },
+      redis: { min: 6400, max: 6499 },
+    })
 
     // Verify command env is redacted to KEYS ONLY — values (DB passwords) must
     // never appear in the projects API response.

@@ -350,9 +350,17 @@ repos:
       prMentions:
         - claude
     environment:
-      # Port pool for the {port} token (per-run unique host port). Required
-      # only if a verify command's env/hooks reference {port}.
+      # Port pool(s) for the {port}/{port:NAME} tokens (per-run unique host
+      # port per pool). Required only if a verify command's env/hooks reference
+      # a port token. Single-range shorthand for one pool:
       # ports: { min: 5400, max: 5499 }
+      #
+      # Or named pools to isolate a multi-service docker stack per run. The bare
+      # {port} token resolves to the first pool; {port:NAME} to each named pool.
+      # ports:
+      #   postgres: { min: 5460, max: 5499 }
+      #   redis:    { min: 6460, max: 6499 }
+      #   rustfs:   { min: 9460, max: 9499 }
       #
       # beforeRun runs once before the loop (fail-fast). afterRun runs once
       # after the loop in a finally — always, even on block/error.

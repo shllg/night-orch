@@ -273,7 +273,9 @@ function formatCommand(command: CommandSpec): string {
 function formatPorts(repo: RepoConfig): string {
   const ports = repo.environment?.ports
   if (!ports) return '(none)'
-  return `${ports.min}-${ports.max}`
+  const entries = Object.entries(ports)
+  if (entries.length === 0) return '(none)'
+  return entries.map(([name, range]) => `${name} ${range.min}-${range.max}`).join(', ')
 }
 
 type RunHookList = NonNullable<RepoConfig['environment']>['beforeRun']

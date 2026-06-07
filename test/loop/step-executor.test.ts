@@ -965,4 +965,36 @@ describe('substituteVerifyCommandTokens', () => {
   it('passes through plain commands unchanged when no tokens are present', () => {
     expect(substituteVerifyCommandTokens('pnpm test', undefined)).toBe('pnpm test')
   })
+
+  it('substitutes named-pool {port:NAME} tokens and {port} as the first pool', () => {
+    const named = {
+      issue: 1, run: 'r', port: 5460,
+      ports: { postgres: 5460, redis: 6460 }, project: 'p-1-r',
+    }
+    const out = substituteVerifyCommandTokens(
+      {
+        command: 'rails test',
+        env: {
+          PG: 'pg://localhost:{port:postgres}/db',
+          REDIS: 'redis://localhost:{port:redis}',
+          DEFAULT: 'x:{port}',
+        },
+      },
+      named,
+    )
+    expect(out).toMatchObject({
+      env: {
+        PG: 'pg://localhost:5460/db',
+        REDIS: 'redis://localhost:6460',
+        DEFAULT: 'x:5460',
+      },
+    })
+  })
+
+  it('throws when {port:NAME} names an unknown pool, listing configured pools', () => {
+    const named = { issue: 1, run: 'r', port: 5460, ports: { postgres: 5460 }, project: 'p-1-r' }
+    expect(() =>
+      substituteVerifyCommandTokens({ command: 'rails test', env: { URL: 'x:{port:rustfs}' } }, named),
+    ).toThrow(/\{port:rustfs\}.*postgres/s)
+  })
 })

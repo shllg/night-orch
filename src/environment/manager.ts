@@ -9,12 +9,15 @@ export interface EnvSetupResult {
 }
 
 /**
- * Allocate the per-run environment tokens (`{issue}`/`{run}`/`{port}`/
- * `{project}`) without running any subprocess.
+ * Allocate the per-run environment tokens (`{issue}`/`{run}`/`{project}` plus
+ * one host port per configured pool: `{port}` and `{port:NAME}`) without
+ * running any subprocess.
  *
  * Pure resource allocation so the caller can record the result (and reach
  * teardown in its `finally`) BEFORE the `beforeRun` hooks run — if a hook then
- * throws, `afterRun` still runs.
+ * throws, `afterRun` still runs. Allocated ports are appended to `usedPorts` so
+ * concurrent runs in the same poll pass never collide; release them on run end
+ * with {@link releaseEnvironmentPorts}.
  */
 export function prepareEnvironment(params: {
   repo: string
@@ -27,19 +30,43 @@ export function prepareEnvironment(params: {
   const env = repoConfig.environment
 
   let port: number | undefined
-  if (env?.ports) {
-    port = allocatePort(env.ports, usedPorts)
-    usedPorts.push(port)
+  let ports: Record<string, number> | undefined
+  // Pool order follows config key order — the first key is the `{port}` default.
+  const poolEntries = env?.ports ? Object.entries(env.ports) : []
+  if (poolEntries.length > 0) {
+    ports = {}
+    for (const [name, range] of poolEntries) {
+      const allocated = allocatePort(range, usedPorts)
+      usedPorts.push(allocated)
+      ports[name] = allocated
+    }
+    port = ports[poolEntries[0]![0]]
   }
 
   const tokens: RunTokens = {
     issue: issueNumber,
     run: runId.replace(/^run-/i, '').toLowerCase(),
     port,
+    ...(ports ? { ports } : {}),
     project: defaultProjectName(repo, issueNumber, runId),
   }
 
   return { tokens }
+}
+
+/**
+ * Release a run's allocated host ports back into the poll-pass pool so a later
+ * run in the same pass can reuse them. Called from the dispatcher's `finally`.
+ * Idempotent — removing a port not present is a no-op.
+ */
+export function releaseEnvironmentPorts(usedPorts: number[], tokens: RunTokens): void {
+  const allocated = new Set<number>()
+  if (tokens.ports) for (const value of Object.values(tokens.ports)) allocated.add(value)
+  if (tokens.port !== undefined) allocated.add(tokens.port)
+  if (allocated.size === 0) return
+  for (let i = usedPorts.length - 1; i >= 0; i--) {
+    if (allocated.has(usedPorts[i]!)) usedPorts.splice(i, 1)
+  }
 }
 
 /** Run the repo's `beforeRun` hooks (fail-fast) with token substitution. */
