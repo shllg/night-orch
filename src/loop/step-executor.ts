@@ -17,6 +17,12 @@ import { resolveVerifyCommands } from './verification-profile.js'
 import { compilePrompt } from '../workers/prompt/compiler.js'
 import { getDefaultTemplate, buildPlanningOnlyCoderTemplate } from '../workers/prompt/templates.js'
 import { buildWorkerEnv, buildVerifierEnv } from '../workers/env.js'
+import {
+  substituteCommandTokens,
+  substituteEnvTokens,
+  type RunTokens,
+} from '../environment/tokens.js'
+import type { ResolvedVerifyCommand } from './verification-profile.js'
 import { getDiffAgainstBranch } from '../git/repo.js'
 import { superviseWorker } from './supervisor.js'
 import {
@@ -45,7 +51,8 @@ import type { z } from 'zod'
 export interface StepDependencies {
   adapters: Record<string, WorkerAdapter>
   config: Config
-  envOverrides?: Record<string, string>
+  /** Per-run substitution tokens for verify command hooks/env. */
+  runTokens?: RunTokens
   metrics?: MetricsService
   onAgentEvent?: (event: AgentEvent) => void
   /**
@@ -122,7 +129,7 @@ export async function executeWorkerStep(
 
   recordPromptCompilationIfEnabled(deps, ctx, step, systemPrompt, userPrompt)
 
-  const env = buildWorkerEnv(profile, deps.envOverrides)
+  const env = buildWorkerEnv(profile)
   const continueSessionId = resolveContinueSession(ctx, step, profile.type)
 
   const supervisor = superviseWorker(step.role, ctx.adjustedLimits.workerTimeoutSeconds * 1000, () => {
@@ -291,8 +298,8 @@ export async function executeVerifyStep(
   const plannedCommands = resolveVerifyCommands(deps.config, ctx.repoConfig, step)
   const verifyResults = await runVerifyCommands(
     ctx.worktreePath,
-    plannedCommands.map((entry) => entry.command),
-    buildVerifierEnv(deps.envOverrides),
+    plannedCommands.map((entry) => substituteVerifyCommandTokens(entry.command, deps.runTokens)),
+    buildVerifierEnv(),
   )
   const stagedResults = verifyResults.map((result, index) => {
     const plan = plannedCommands[index]
@@ -316,6 +323,59 @@ export async function executeVerifyStep(
       diff: diffResult.diff,
       diffError: diffResult.error,
     }),
+  }
+}
+
+type VerifyCommandSpec = ResolvedVerifyCommand['command']
+
+/**
+ * Expand `{issue}`/`{run}`/`{port}`/`{project}` tokens in a resolved verify
+ * command — its `command`, `before`/`after` hooks, and `env`. Throws if a
+ * `{port}` token survives (no port was allocated) so a misconfig fails loudly
+ * instead of producing a broken connection string.
+ */
+export function substituteVerifyCommandTokens(
+  command: VerifyCommandSpec,
+  tokens: RunTokens | undefined,
+): VerifyCommandSpec {
+  if (!tokens) {
+    assertPortResolved(command)
+    return command
+  }
+  if (typeof command === 'string' || Array.isArray(command)) {
+    const out = substituteCommandTokens(command, tokens)
+    assertPortResolved(out)
+    return out
+  }
+  const out: VerifyCommandSpec = {
+    ...command,
+    command: substituteCommandTokens(command.command, tokens),
+    ...(command.before ? { before: command.before.map((hook) => substituteCommandTokens(hook, tokens)) } : {}),
+    ...(command.after ? { after: command.after.map((hook) => substituteCommandTokens(hook, tokens)) } : {}),
+    ...(command.env ? { env: substituteEnvTokens(command.env, tokens) } : {}),
+  }
+  assertPortResolved(out)
+  return out
+}
+
+function assertPortResolved(command: VerifyCommandSpec): void {
+  const segments: string[] = []
+  const collect = (spec: string | string[]): void => {
+    if (Array.isArray(spec)) segments.push(...spec)
+    else segments.push(spec)
+  }
+  if (typeof command === 'string' || Array.isArray(command)) {
+    collect(command)
+  } else {
+    collect(command.command)
+    command.before?.forEach(collect)
+    command.after?.forEach(collect)
+    if (command.env) segments.push(...Object.values(command.env))
+  }
+  if (segments.some((s) => s.includes('{port}'))) {
+    throw new Error(
+      'Verify command references the {port} token but no port was allocated — set `environment.ports: { min, max }` for this repo.',
+    )
   }
 }
 

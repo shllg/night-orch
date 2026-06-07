@@ -1,5 +1,6 @@
 import type { RunContext, ReviewerOutput } from './types.js'
 import type { Config } from '../config/schema.js'
+import type { RunTokens } from '../environment/tokens.js'
 import type { WorkerAdapter } from '../workers/types.js'
 import type { MetricsService } from '../metrics/service.js'
 import { getPostPublishSteps, reviewerKeyForStep, runWhenForStep, type ResolvedWorkflow, type WorkerStep, type WorkflowStep } from './workflow.js'
@@ -53,7 +54,7 @@ export interface LoopDependencies {
   config: Config
   adapters: Record<string, WorkerAdapter>
   workflow: ResolvedWorkflow
-  envOverrides?: Record<string, string>
+  runTokens?: RunTokens
   metrics?: MetricsService
   onAgentEvent?: (event: AgentEvent) => void
   onPlanReady?: (ctx: RunContext) => Promise<void>
@@ -140,7 +141,7 @@ export async function executeLoop(
   const stepDeps: StepDependencies = {
     adapters: deps.adapters,
     config: deps.config,
-    envOverrides: deps.envOverrides,
+    runTokens: deps.runTokens,
     metrics: deps.metrics,
     onAgentEvent: deps.onAgentEvent,
     db: deps.db,
@@ -435,7 +436,7 @@ export async function executePostPublishSteps(
   const stepDeps: StepDependencies = {
     adapters: input.adapters,
     config: input.config,
-    envOverrides: input.envOverrides,
+    runTokens: input.runTokens,
     metrics: input.metrics,
     onAgentEvent: input.onAgentEvent,
     db,

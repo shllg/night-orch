@@ -296,6 +296,33 @@ describe('runtime settings', () => {
     })
   })
 
+  it('redacts verification profile command env values in runtime settings snapshots', () => {
+    baseConfig.verificationProfiles = {
+      rails: {
+        stages: [
+          {
+            id: 'test',
+            commands: [
+              {
+                command: ['bundle', 'exec', 'rails', 'test'],
+                env: { RAILS_ENV: 'test', DB_PASSWORD: 'super-secret-local-pw' },
+              },
+            ],
+            required: true,
+            onFailure: 'block',
+          },
+        ],
+      },
+    }
+
+    const settings = listRuntimeSettings(baseConfig, db)
+    const profiles = settings.find((setting) => setting.key === 'verificationProfiles')
+    expect(profiles).toBeDefined()
+    const serialized = JSON.stringify(profiles)
+    expect(serialized).not.toContain('super-secret-local-pw')
+    expect(serialized).toContain('[redacted]')
+  })
+
   it('rejects malformed JSON structure for json runtime settings', () => {
     expect(() => {
       setRuntimeSettingOverride(

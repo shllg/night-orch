@@ -1,8 +1,31 @@
 import type { RepoConfig, WorkerProfile } from './schema.js'
 
 export type CommandSpec = string | string[]
-export type VerifyCommandSpec = CommandSpec | { command: CommandSpec; timeoutSeconds: number }
-export type CommandWhen = 'always' | 'dedicated' | 'shared'
+export type VerifyCommandSpec = RepoConfig['verify'][number]
+/**
+ * Redacted verify command for the projects API. Carries env **keys only** —
+ * never values — because a command's `env` can hold local DB passwords and
+ * this is served over `/api/projects`.
+ */
+export type VerifyCommandSummary =
+  | CommandSpec
+  | {
+      command: CommandSpec
+      timeoutSeconds?: number
+      before?: CommandSpec[]
+      after?: CommandSpec[]
+      envKeys?: string[]
+    }
+export type RunHookSummary =
+  | CommandSpec
+  | {
+      command: CommandSpec
+      failureHints?: Array<{
+        contains: string
+        message: string
+        output: 'combined' | 'stdout' | 'stderr'
+      }>
+    }
 
 export interface ProjectWorkerProfileSummary {
   type: string
@@ -54,45 +77,11 @@ export interface ProjectRepoSummary {
     prMentions: string[]
   }
   environment?: {
-    defaultMode: 'shared' | 'dedicated'
-    dedicated?: {
-      compose: {
-        file: string
-        services: string[]
-        projectName: string
-      }
-      env: {
-        copyFrom: string
-        overrideKeys: string[]
-        overrideFiles: string[]
-      }
-      healthcheck?: CommandSpec
-      teardownOnComplete: boolean
-    }
-    shared?: {
-      requireRunning: boolean
-      healthcheck?: CommandSpec
-    }
-    bootstrap: Array<{
-      command: CommandSpec
-      when: CommandWhen
-      failureHints?: Array<{
-        contains: string
-        message: string
-        output: 'combined' | 'stdout' | 'stderr'
-      }>
-    }>
-    cleanup: Array<{
-      command: CommandSpec
-      when: CommandWhen
-      failureHints?: Array<{
-        contains: string
-        message: string
-        output: 'combined' | 'stdout' | 'stderr'
-      }>
-    }>
+    ports?: { min: number; max: number }
+    beforeRun: RunHookSummary[]
+    afterRun: RunHookSummary[]
   }
-  verify: VerifyCommandSpec[]
+  verify: VerifyCommandSummary[]
   prompts: {
     plannerSystem: boolean
     coderSystem: boolean
@@ -212,63 +201,27 @@ export function sanitizeProjectRepo(repo: RepoConfig): ProjectRepoSummary {
 
 function sanitizeEnvironment(environment: NonNullable<RepoConfig['environment']>): NonNullable<ProjectRepoSummary['environment']> {
   return {
-    defaultMode: environment.defaultMode,
-    ...(environment.dedicated
+    ...(environment.ports ? { ports: { ...environment.ports } } : {}),
+    beforeRun: environment.beforeRun.map(copyRunHook),
+    afterRun: environment.afterRun.map(copyRunHook),
+  }
+}
+
+function copyRunHook(hook: NonNullable<RepoConfig['environment']>['beforeRun'][number]): RunHookSummary {
+  if (Array.isArray(hook) || typeof hook === 'string') {
+    return copyCommandSpec(hook)
+  }
+  return {
+    command: copyCommandSpec(hook.command),
+    ...(hook.failureHints && hook.failureHints.length > 0
       ? {
-          dedicated: {
-            compose: {
-              file: environment.dedicated.compose.file,
-              services: [...environment.dedicated.compose.services],
-              projectName: environment.dedicated.compose.projectName,
-            },
-            env: {
-              copyFrom: environment.dedicated.env.copyFrom,
-              overrideKeys: Object.keys(environment.dedicated.env.overrides),
-              overrideFiles: [...environment.dedicated.env.overrideFiles],
-            },
-            ...(environment.dedicated.healthcheck
-              ? { healthcheck: copyCommandSpec(environment.dedicated.healthcheck) }
-              : {}),
-            teardownOnComplete: environment.dedicated.teardownOnComplete,
-          },
+          failureHints: hook.failureHints.map((hint) => ({
+            contains: hint.contains,
+            message: hint.message,
+            output: hint.output,
+          })),
         }
       : {}),
-    ...(environment.shared
-      ? {
-          shared: {
-            requireRunning: environment.shared.requireRunning,
-            ...(environment.shared.healthcheck
-              ? { healthcheck: copyCommandSpec(environment.shared.healthcheck) }
-              : {}),
-          },
-        }
-      : {}),
-    bootstrap: environment.bootstrap.map((step) => ({
-      when: step.when,
-      command: copyCommandSpec(step.command),
-      ...(step.failureHints && step.failureHints.length > 0
-        ? {
-            failureHints: step.failureHints.map((hint) => ({
-              contains: hint.contains,
-              message: hint.message,
-              output: hint.output,
-            })),
-          }
-        : {}),
-    })),
-    cleanup: environment.cleanup.map((step) => ({
-      when: step.when,
-      command: copyCommandSpec(step.command),
-      ...(step.failureHints && step.failureHints.length > 0
-        ? {
-            failureHints: step.failureHints.map((hint) => ({
-              contains: hint.contains,
-              message: hint.message,
-              output: hint.output,
-            })),
-          }
-        : {}),
-    })),
   }
 }
 
@@ -304,13 +257,17 @@ function copyCommandSpec(command: CommandSpec): CommandSpec {
   return command
 }
 
-function copyVerifyCommandSpec(command: VerifyCommandSpec): VerifyCommandSpec {
+function copyVerifyCommandSpec(command: VerifyCommandSpec): VerifyCommandSummary {
   if (Array.isArray(command) || typeof command === 'string') {
     return copyCommandSpec(command)
   }
 
   return {
     command: copyCommandSpec(command.command),
-    timeoutSeconds: command.timeoutSeconds,
+    ...(command.timeoutSeconds !== undefined ? { timeoutSeconds: command.timeoutSeconds } : {}),
+    ...(command.before ? { before: command.before.map(copyCommandSpec) } : {}),
+    ...(command.after ? { after: command.after.map(copyCommandSpec) } : {}),
+    // Keys only — never expose env VALUES (may hold local DB passwords) over the API.
+    ...(command.env ? { envKeys: Object.keys(command.env) } : {}),
   }
 }

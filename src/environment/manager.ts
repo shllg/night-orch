@@ -1,154 +1,70 @@
 import type { RepoConfig } from '../config/schema.js'
-import { validateSharedEnvironment } from './shared.js'
-import { startDedicatedStack, stopDedicatedStack } from './dedicated.js'
-import { setupEnvFile } from './env-file.js'
-import { runBootstrapCommands } from './bootstrap.js'
 import { logger } from '../utils/logger.js'
-import type { CommandSpec } from '../utils/command.js'
-
-export type EnvironmentMode = 'shared' | 'dedicated'
+import { allocatePort } from './port.js'
+import { runRunHooks, type RunHookCommand } from './hooks.js'
+import { defaultProjectName, type RunTokens } from './tokens.js'
 
 export interface EnvSetupResult {
-  mode: EnvironmentMode
-  allocatedPort: number | null
-  composeProjectName: string | null
-  envOverrides: Record<string, string>
+  tokens: RunTokens
 }
 
 /**
- * Resolve the environment mode for an issue from labels and repo config.
+ * Allocate the per-run environment tokens (`{issue}`/`{run}`/`{port}`/
+ * `{project}`) without running any subprocess.
+ *
+ * Pure resource allocation so the caller can record the result (and reach
+ * teardown in its `finally`) BEFORE the `beforeRun` hooks run — if a hook then
+ * throws, `afterRun` still runs.
  */
-export function resolveEnvironmentMode(
-  issueLabels: string[],
-  repoConfig: RepoConfig,
-): EnvironmentMode {
-  if (issueLabels.includes('env:dedicated')) return 'dedicated'
-  if (issueLabels.includes('env:shared')) return 'shared'
-  return repoConfig.environment?.defaultMode ?? 'shared'
-}
-
-/**
- * Set up the environment for a worktree.
- */
-export async function setupEnvironment(params: {
-  worktreePath: string
+export function prepareEnvironment(params: {
+  repo: string
   issueNumber: number
+  runId: string
   repoConfig: RepoConfig
-  mode: EnvironmentMode
   usedPorts: number[]
-}): Promise<EnvSetupResult> {
-  const { worktreePath, issueNumber, repoConfig, mode, usedPorts } = params
-  const envConfig = repoConfig.environment
+}): EnvSetupResult {
+  const { repo, issueNumber, runId, repoConfig, usedPorts } = params
+  const env = repoConfig.environment
 
-  if (mode === 'shared') {
-    // Validate shared environment
-    const shared = envConfig?.shared
-    await validateSharedEnvironment(shared?.healthcheck, shared?.requireRunning ?? true)
-
-    // Run bootstrap commands
-    if (envConfig?.bootstrap) {
-      await runBootstrapCommands(worktreePath, envConfig.bootstrap, 'shared')
-    }
-
-    return { mode: 'shared', allocatedPort: null, composeProjectName: null, envOverrides: {} }
+  let port: number | undefined
+  if (env?.ports) {
+    port = allocatePort(env.ports, usedPorts)
+    usedPorts.push(port)
   }
 
-  // Dedicated mode
-  const dedicated = envConfig?.dedicated
-  if (!dedicated) {
-    throw new Error(`Dedicated mode requested but no dedicated config in repo ${repoConfig.repo}`)
+  const tokens: RunTokens = {
+    issue: issueNumber,
+    run: runId.replace(/^run-/i, '').toLowerCase(),
+    port,
+    project: defaultProjectName(repo, issueNumber, runId),
   }
 
-  // Set up .env file with overrides
-  const projectName = dedicated.compose.projectName.replace('{issue}', String(issueNumber))
-  const { envOverrides, allocatedPort } = setupEnvFile({
-    worktreePath,
-    repoLocalPath: repoConfig.localPath,
-    copyFrom: dedicated.env.copyFrom,
-    overrides: substituteIssue(dedicated.env.overrides, issueNumber),
-    overrideFiles: dedicated.env.overrideFiles,
-    usedPorts,
-  })
+  return { tokens }
+}
 
-  // Resolve healthcheck port
-  const healthcheck = substituteCommandToken(
-    dedicated.healthcheck,
-    '{port}',
-    String(allocatedPort ?? ''),
-  )
-
-  // Start Docker Compose
-  let stackStarted = false
-  try {
-    await startDedicatedStack({
-      worktreePath,
-      composeFile: dedicated.compose.file,
-      services: dedicated.compose.services,
-      projectName,
-      healthcheck,
-    })
-    stackStarted = true
-
-    // Run bootstrap commands
-    if (envConfig?.bootstrap) {
-      await runBootstrapCommands(worktreePath, envConfig.bootstrap, 'dedicated')
-    }
-  } catch (err) {
-    if (stackStarted) {
-      try {
-        await stopDedicatedStack(worktreePath, dedicated.compose.file, projectName)
-      } catch (teardownErr) {
-        logger.warn({ projectName, err: teardownErr }, 'Failed to roll back dedicated environment after setup error')
-      }
-    }
-    throw err
-  }
-
-  return { mode: 'dedicated', allocatedPort, composeProjectName: projectName, envOverrides }
+/** Run the repo's `beforeRun` hooks (fail-fast) with token substitution. */
+export async function runBeforeRunHooks(params: {
+  worktreePath: string
+  repoConfig: RepoConfig
+  tokens: RunTokens
+}): Promise<void> {
+  const hooks = (params.repoConfig.environment?.beforeRun ?? []) as RunHookCommand[]
+  if (hooks.length === 0) return
+  await runRunHooks(params.worktreePath, hooks, params.tokens, 'fail-fast')
 }
 
 /**
- * Tear down the environment. No-op for shared mode.
+ * Run the repo's `afterRun` hooks (attempt-all, never throws). Called from the
+ * caller's `finally` so teardown happens on success, block, error, or
+ * exception — and even when `beforeRun` failed.
  */
 export async function teardownEnvironment(params: {
   worktreePath: string
-  issueNumber: number
   repoConfig: RepoConfig
-  mode: EnvironmentMode
-  composeProjectName: string | null
+  tokens: RunTokens
 }): Promise<void> {
-  const { worktreePath, repoConfig, mode, composeProjectName } = params
-
-  if (mode === 'shared') return
-
-  const dedicated = repoConfig.environment?.dedicated
-  if (!dedicated || !composeProjectName) return
-
-  if (dedicated.teardownOnComplete) {
-    await stopDedicatedStack(worktreePath, dedicated.compose.file, composeProjectName)
-  }
-
-  // Run cleanup commands
-  const cleanupCmds = repoConfig.environment?.cleanup ?? []
-  if (cleanupCmds.length > 0) {
-    await runBootstrapCommands(worktreePath, cleanupCmds, 'dedicated')
-  }
-
-  logger.info({ composeProjectName }, 'Dedicated environment torn down')
-}
-
-function substituteIssue(overrides: Record<string, string>, issueNumber: number): Record<string, string> {
-  const result: Record<string, string> = {}
-  for (const [key, value] of Object.entries(overrides)) {
-    result[key] = value.replace('{issue}', String(issueNumber))
-  }
-  return result
-}
-
-function substituteCommandToken(command: CommandSpec | undefined, token: string, value: string): CommandSpec | undefined {
-  if (!command) return undefined
-  if (Array.isArray(command)) {
-    return command.map((part) => part.replaceAll(token, value))
-  }
-  return command.replaceAll(token, value)
+  const hooks = (params.repoConfig.environment?.afterRun ?? []) as RunHookCommand[]
+  if (hooks.length === 0) return
+  await runRunHooks(params.worktreePath, hooks, params.tokens, 'attempt-all')
+  logger.info({ project: params.tokens.project }, 'Environment torn down')
 }

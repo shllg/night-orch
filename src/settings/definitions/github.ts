@@ -5,7 +5,7 @@ import {
   VerificationProfileSchema,
   WorkflowSchema,
 } from '../../config/schema.js'
-import type { SettingDefinition } from '../registry.js'
+import type { JsonValue, SettingDefinition, SettingValue } from '../registry.js'
 import {
   booleanSetting,
   jsonSetting,
@@ -289,7 +289,37 @@ export function githubDefinitions(): SettingDefinition[] {
       details: 'Record of staged verify definitions used by repos/workflows to run smoke/full/nightly command sets.',
       defaultValue: {},
       yamlPath: ['verificationProfiles'],
+      sensitive: true,
       normalize: (value) => validateJsonSettingShape(value, VerificationProfilesOverrideSchema, 'verificationProfiles'),
+      sanitizeForDisplay: (value) => redactVerificationProfileEnv(value),
     }),
   ]
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Redact verify-command `env` VALUES (which may hold local DB passwords) from
+ * verification profiles before they are served over `/api/settings` or MCP
+ * `night-orch-list-settings`. Keys are preserved as `[redacted]`.
+ */
+function redactVerificationProfileEnv(value: JsonValue): SettingValue {
+  if (!isRecord(value)) return value
+  return Object.fromEntries(
+    Object.entries(value).map(([profileName, profile]) => {
+      if (!isRecord(profile) || !Array.isArray(profile['stages'])) return [profileName, profile]
+      const stages = profile['stages'].map((stage) => {
+        if (!isRecord(stage) || !Array.isArray(stage['commands'])) return stage
+        const commands = stage['commands'].map((command) => {
+          if (!isRecord(command) || !isRecord(command['env'])) return command
+          const env = Object.fromEntries(Object.keys(command['env']).map((k) => [k, '[redacted]']))
+          return { ...command, env }
+        })
+        return { ...stage, commands }
+      })
+      return [profileName, { ...profile, stages }]
+    }),
+  ) as SettingValue
 }

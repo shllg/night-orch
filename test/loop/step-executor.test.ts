@@ -9,6 +9,7 @@ import {
   getWorkerProfile,
   resolveContinueSession,
   detectReadOnlySandboxRejection,
+  substituteVerifyCommandTokens,
   type StepDependencies,
 } from '../../src/loop/step-executor.js'
 import type { RunContext } from '../../src/loop/types.js'
@@ -920,5 +921,48 @@ describe('detectReadOnlySandboxRejection', () => {
     const label = detectReadOnlySandboxRejection(raw)
     expect(label).toBe('patch rejected: read-only sandbox')
     expect(label).not.toContain('secret-prompt-content')
+  })
+})
+
+describe('substituteVerifyCommandTokens', () => {
+  const tokens: { issue: number; run: string; port?: number; project: string } = {
+    issue: 341, run: 'abc', port: 5460, project: 'dailywerk-341-abc',
+  }
+
+  it('substitutes tokens in command, before/after hooks, and env', () => {
+    const out = substituteVerifyCommandTokens(
+      {
+        command: ['bundle', 'exec', 'rails', 'test'],
+        env: { DATABASE_URL: 'pg://localhost:{port}/db_{run}' },
+        before: [['docker', 'compose', '-p', '{project}', 'up']],
+        after: [['docker', 'compose', '-p', '{project}', 'down']],
+      },
+      tokens,
+    )
+    expect(out).toEqual({
+      command: ['bundle', 'exec', 'rails', 'test'],
+      env: { DATABASE_URL: 'pg://localhost:5460/db_abc' },
+      before: [['docker', 'compose', '-p', 'dailywerk-341-abc', 'up']],
+      after: [['docker', 'compose', '-p', 'dailywerk-341-abc', 'down']],
+    })
+  })
+
+  it('keeps explicit env keys verbatim so blacklisted names (DB_PASSWORD) survive', () => {
+    const out = substituteVerifyCommandTokens(
+      { command: 'rails test', env: { DB_PASSWORD: 'local_pw' } },
+      tokens,
+    )
+    expect(out).toMatchObject({ env: { DB_PASSWORD: 'local_pw' } })
+  })
+
+  it('throws when {port} is referenced but no port was allocated', () => {
+    const noPort = { issue: 1, run: 'r', project: 'p-1-r' }
+    expect(() =>
+      substituteVerifyCommandTokens({ command: 'rails test', env: { URL: 'x:{port}' } }, noPort),
+    ).toThrow(/\{port\}/)
+  })
+
+  it('passes through plain commands unchanged when no tokens are present', () => {
+    expect(substituteVerifyCommandTokens('pnpm test', undefined)).toBe('pnpm test')
   })
 })

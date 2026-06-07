@@ -21,8 +21,8 @@ import { resolveRoles } from '../discovery/roles.js'
 import { adjustLimitsForTriage } from '../discovery/triage.js'
 import { getOrPinSlug, buildWorktreePath } from '../git/slug.js'
 import {
-  resolveEnvironmentMode,
-  setupEnvironment,
+  prepareEnvironment,
+  runBeforeRunHooks,
   teardownEnvironment,
 } from '../environment/manager.js'
 import { createWorkerAdapter } from '../workers/factory.js'
@@ -388,14 +388,23 @@ export async function dispatchAttempt(
       logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, operationIntent }, 'Branch refresh completed but verify failed — entering code loop to fix')
     }
 
+    // Always allocate per-run tokens (cheap, no subprocess) so verify command
+    // hooks/env get correct {issue}/{run}/{project} substitution even for repos
+    // without an `environment` block. `{port}` is allocated only when
+    // environment.ports is configured. Recorded BEFORE running beforeRun so the
+    // finally below always reaches teardown — even if a beforeRun hook throws.
+    envSetup = prepareEnvironment({
+      repo: repoConfig.repo,
+      issueNumber: discoveredIssue.issue.number,
+      runId: run.id,
+      repoConfig: repoConfigForRun,
+      usedPorts: usedPortsInPass,
+    })
     if (repoConfigForRun.environment) {
-      const mode = resolveEnvironmentMode(discoveredIssue.issue.labels, repoConfigForRun)
-      envSetup = await setupEnvironment({
+      await runBeforeRunHooks({
         worktreePath,
-        issueNumber: discoveredIssue.issue.number,
         repoConfig: repoConfigForRun,
-        mode,
-        usedPorts: usedPortsInPass,
+        tokens: envSetup.tokens,
       })
     }
 
@@ -463,7 +472,7 @@ export async function dispatchAttempt(
         discoveredIssue.issue,
         createWorkerAdapter(plannerProfile),
         plannerProfile,
-        buildWorkerEnv(plannerProfile, envSetup?.envOverrides ?? {}),
+        buildWorkerEnv(plannerProfile),
         worktreePath,
         config.loop.maxSubtasks,
       )
@@ -482,7 +491,7 @@ export async function dispatchAttempt(
             reviewer: createWorkerAdapter(reviewerProfile),
           },
           workflow,
-          envOverrides: envSetup?.envOverrides ?? {},
+          runTokens: envSetup?.tokens,
           metrics,
           onAgentEvent: (event: AgentEvent) => observability.record(event),
         }
@@ -538,7 +547,7 @@ export async function dispatchAttempt(
       config,
       adapters,
       workflow,
-      envOverrides: envSetup?.envOverrides ?? {},
+      runTokens: envSetup?.tokens,
       metrics,
       onAgentEvent: (event) => observability.record(event),
       onPlanReady: async (ctx) => {
@@ -568,7 +577,7 @@ export async function dispatchAttempt(
         config,
         workflow,
         adapters,
-        envOverrides: envSetup?.envOverrides ?? {},
+        runTokens: envSetup?.tokens,
         metrics,
         onAgentEvent: (event) => observability.record(event),
         leaseHeartbeat,
@@ -620,10 +629,8 @@ export async function dispatchAttempt(
       try {
         await teardownEnvironment({
           worktreePath: activeWorktreePath,
-          issueNumber: discoveredIssue.issue.number,
           repoConfig,
-          mode: envSetup.mode,
-          composeProjectName: envSetup.composeProjectName,
+          tokens: envSetup.tokens,
         })
       } catch (envErr) {
         logger.warn({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, err: envErr }, 'Failed to tear down environment')

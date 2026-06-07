@@ -15,6 +15,20 @@ describe('formatStatusComment', () => {
     expect(result).toContain('**Cost:** $5.1234')
   })
 
+  it('separates fields with blank lines so GitHub renders distinct lines, not one paragraph', () => {
+    const result = formatStatusComment({
+      blockReason: 'Reviewer blocked: tests failing',
+      iteration: 1,
+      maxIterations: 3,
+      cost: 1,
+    })
+    // Adjacent fields must be separated by a blank line (\n\n), otherwise
+    // GitHub-flavored markdown collapses them into a single paragraph.
+    expect(result).toContain('**Status:** Blocked\n\n**Reason:** Reviewer blocked: tests failing')
+    expect(result).toContain('**Reason:** Reviewer blocked: tests failing\n\n**Iteration:** 1/3')
+    expect(result).not.toMatch(/\*\*Status:\*\* Blocked\n\*\*Reason/) // no single-newline join
+  })
+
   it('renders real and metered cost when theoreticalCost is provided', () => {
     const result = formatStatusComment({
       phase: 'code',

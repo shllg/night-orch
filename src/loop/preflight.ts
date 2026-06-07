@@ -2,7 +2,7 @@ import type { Config, RepoConfig } from '../config/schema.js'
 import type { WorktreeManager } from '../git/worktree.js'
 import type { CommandSpec } from '../utils/command.js'
 import { resolveVerifyCommands } from './verification-profile.js'
-import { runVerifyCommands } from './verifier.js'
+import { runVerifyCommands, stripVerifyHooks } from './verifier.js'
 import { logger } from '../utils/logger.js'
 
 type VerifyCommandSpec = RepoConfig['verify'][number]
@@ -70,7 +70,7 @@ export async function runPreflightDriftCheck(
   })
 
   try {
-    const results = await runVerifyCommands(worktree.path, commands, env)
+    const results = await runVerifyCommands(worktree.path, commands.map(stripVerifyHooks), env)
     const firstFailure = results.find((r) => !r.passed)
     if (firstFailure) {
       const tail = (firstFailure.stderr || firstFailure.stdout || '').slice(-400).trim()

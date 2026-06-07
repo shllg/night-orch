@@ -18,7 +18,7 @@ This walkthrough follows a single issue from discovery to PR. Read this first to
 
 5. **Worktree Setup** — A git worktree is created (or reused) for the issue's branch (`src/git/worktree.ts`). The base branch is merged in to prevent stale code.
 
-6. **Environment Setup** — Shared or dedicated environment is configured (`src/environment/`). Dedicated mode spins up a Docker Compose stack. Port allocation and `.env` file generation happen here.
+6. **Environment Setup** — Per-run tokens are allocated and `beforeRun` hooks run (`src/environment/`). Services for stateful verify commands are brought up by each command's `before` hook and torn down by its `after` hook; run-level `afterRun` always runs in a `finally`.
 
 7. **Loop Engine** — The core cycle begins (`src/loop/engine.ts`):
    - **Plan** — A planner agent decomposes the issue into steps.
@@ -62,7 +62,7 @@ Lease Manager (SQLite) ◄──────────────────
 Git (worktree create/reuse, branch, merge base)       ││
     │                                                 ││
     ▼                                                 ││
-Environment (shared validate / dedicated Docker)      ││
+Environment (tokens + beforeRun hooks; afterRun=finally)││
     │                                                 ││
     ▼                                                 ││
 Loop Engine ◄──────────────── Checkpoints (SQLite)    ││
@@ -116,7 +116,7 @@ All git operations use `execa` (not `simple-git`). `worktree.ts` provides `ensur
 > **Watch out:** automatic base updates and explicit `/orch rebase` are separate flows. Normal retries rebuild from the latest base branch, merge-conflict reactions queue a dedicated branch refresh using the repo's `updateStrategy`, continues preserve the existing branch state, and explicit rebase captures conflict context for a later continue/retry decision. Any refresh/rebase conflict now blocks immediately with a durable conflict snapshot instead of relying on a lossy summary.
 
 ### Environment (`src/environment/`)
-Two modes: **shared** (validate existing services are running) and **dedicated** (spin up a Docker Compose stack per issue). `port.ts` allocates ports from configured ranges. `env-file.ts` generates `.env` files with marked override sections. `bootstrap.ts` runs setup commands.
+One isolation model: a per-run worktree plus **lifecycle hooks**. `manager.ts` allocates per-run substitution tokens (`{issue}`/`{run}`/`{port}`/`{project}`) via `prepareEnvironment` (no subprocess), then `runBeforeRunHooks` runs the repo's `beforeRun` commands (fail-fast). `teardownEnvironment` runs `afterRun` in the dispatcher's `finally` — always, attempt-all (success, block, error, exception). `hooks.ts` executes run-level hooks with `buildBootstrapEnv` (whitelist incl. `DOCKER_*`/`COMPOSE_*`); `tokens.ts` does substitution; `port.ts` allocates from `environment.ports`. Per-command service lifecycle (bring a stack up/down for one stateful verify command) lives on each `verify` command's `before`/`after`/`env` and runs in `src/loop/verifier.ts`. There is no shared/dedicated mode.
 
 ### Workers (`src/workers/`)
 AI agents invoked as CLI subprocesses. `claude.ts` and `codex.ts` implement the `WorkerAdapter` interface. Prompt compilation (`prompt/compiler.ts`) assembles templates with runtime context and sanitizes untrusted issue content. Output parsing (`parsers/`) validates JSON responses with Zod.
@@ -369,6 +369,6 @@ Start with the core loop to understand what night-orch does, then expand outward
 ### Supporting Systems (as needed)
 - `src/publishing/` — PR creation
 - `src/labels/transitions.ts` — Label state machine
-- `src/environment/manager.ts` — Shared vs dedicated environments
+- `src/environment/manager.ts` — Per-run token allocation + beforeRun/afterRun lifecycle hooks
 - `src/ops/sync.ts` — State reconciliation
 - `src/notify/dispatcher.ts` — Notification routing

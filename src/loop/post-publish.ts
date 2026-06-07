@@ -11,12 +11,13 @@ import type { ResolvedWorkflow, WorkerStep } from './workflow.js'
 import { nowUtcIso } from '../utils/time.js'
 import { logger } from '../utils/logger.js'
 import type { AgentEvent } from '../events/types.js'
+import type { RunTokens } from '../environment/tokens.js'
 
 export interface PostPublishReviewDeps {
   config: Config
   workflow: ResolvedWorkflow
   adapters: Record<string, WorkerAdapter>
-  envOverrides?: Record<string, string>
+  runTokens?: RunTokens
   metrics?: MetricsService
   onAgentEvent?: (event: AgentEvent) => void
   leaseHeartbeat?: () => boolean

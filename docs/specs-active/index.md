@@ -22,3 +22,4 @@ All 11 phases are implemented. Remaining gaps are consolidated in [remaining-wor
 - Remaining work: [remaining-work.md](remaining-work.md)
 - File-loop maintenance mode: [file-loop-prd.md](file-loop-prd.md)
 - Agent session observability: [agent-observability-prd.md](agent-observability-prd.md)
+- Environment lifecycle hooks: [env-lifecycle-hooks-prd.md](env-lifecycle-hooks-prd.md)

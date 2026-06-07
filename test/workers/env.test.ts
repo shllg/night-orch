@@ -104,4 +104,14 @@ describe('buildWorkerEnv', () => {
     expect(env['NPM_TOKEN']).toBeUndefined()
     expect(env['DOCKER_AUTH_CONFIG']).toBeUndefined()
   })
+
+  it('buildVerifierEnv forwards docker/compose engine vars so compose hooks reach the engine', () => {
+    process.env['DOCKER_HOST'] = 'tcp://localhost:2375'
+    process.env['COMPOSE_PROJECT_NAME'] = 'proj'
+    const env = buildVerifierEnv()
+    expect(env['DOCKER_HOST']).toBe('tcp://localhost:2375')
+    expect(env['COMPOSE_PROJECT_NAME']).toBe('proj')
+    // but the docker registry credential blob is still a secret and excluded
+    expect(env['DOCKER_AUTH_CONFIG']).toBeUndefined()
+  })
 })

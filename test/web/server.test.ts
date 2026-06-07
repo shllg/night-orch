@@ -925,14 +925,21 @@ describe('startWebServer', () => {
       agents: {
         codex: 'codexCli',
       },
-      verify: ['pnpm lint', ['pnpm', 'test']],
+      verify: [
+        'pnpm lint',
+        ['pnpm', 'test'],
+        {
+          command: ['bundle', 'exec', 'rails', 'test'],
+          env: { RAILS_ENV: 'test', DB_PASSWORD: 'super-secret-local-pw' },
+          before: [['docker', 'compose', 'up']],
+        },
+      ],
       prompts: {
         plannerSystem: 'planner custom prompt',
       },
       environment: {
-        defaultMode: 'dedicated',
-        bootstrap: [{
-          when: 'always',
+        ports: { min: 5400, max: 5499 },
+        beforeRun: [{
           command: ['pnpm', 'install'],
           failureHints: [{
             contains: 'not found',
@@ -940,27 +947,7 @@ describe('startWebServer', () => {
             output: 'stderr' as const,
           }],
         }],
-        cleanup: [{ when: 'always', command: 'pnpm clean' }],
-        shared: {
-          requireRunning: true,
-          healthcheck: ['pnpm', 'health'],
-        },
-        dedicated: {
-          compose: {
-            file: 'docker-compose.yml',
-            services: ['api', 'db'],
-            projectName: 'orch-{issue}',
-          },
-          env: {
-            copyFrom: '.env',
-            overrides: {
-              API_KEY: 'sensitive',
-            },
-            overrideFiles: ['.env.local'],
-          },
-          healthcheck: 'pnpm health',
-          teardownOnComplete: true,
-        },
+        afterRun: [{ command: 'pnpm clean' }],
       },
     }
 
@@ -990,17 +977,18 @@ describe('startWebServer', () => {
         labels: { blocked: string }
         prompts: { plannerSystem: boolean; coderSystem: boolean; reviewerSystem: boolean }
         environment?: {
-          bootstrap?: Array<{
+          ports?: { min: number; max: number }
+          beforeRun?: Array<string | string[] | {
+            command: string | string[]
             failureHints?: Array<{
               contains: string
               message: string
               output: string
             }>
           }>
-          dedicated?: {
-            env: { copyFrom: string; overrideKeys: string[]; overrideFiles: string[]; overrides?: unknown }
-          }
+          afterRun?: Array<string | string[] | { command: string | string[] }>
         }
+        verify?: Array<string | string[] | { command: unknown; envKeys?: string[]; env?: unknown }>
       }>
     }
 
@@ -1020,17 +1008,27 @@ describe('startWebServer', () => {
       coderSystem: false,
       reviewerSystem: false,
     })
-    expect(payload.repos[0]?.environment?.bootstrap?.[0]?.failureHints?.[0]).toMatchObject({
+    const beforeHook = payload.repos[0]?.environment?.beforeRun?.[0]
+    const hints = beforeHook && typeof beforeHook === 'object' && 'failureHints' in beforeHook
+      ? beforeHook.failureHints
+      : undefined
+    expect(hints?.[0]).toMatchObject({
       contains: 'not found',
       message: 'Install dependencies first.',
       output: 'stderr',
     })
-    expect(payload.repos[0]?.environment?.dedicated?.env).toMatchObject({
-      copyFrom: '.env',
-      overrideKeys: ['API_KEY'],
-      overrideFiles: ['.env.local'],
-    })
-    expect(payload.repos[0]?.environment?.dedicated?.env).not.toHaveProperty('overrides')
+    expect(payload.repos[0]?.environment?.ports).toEqual({ min: 5400, max: 5499 })
+
+    // Verify command env is redacted to KEYS ONLY — values (DB passwords) must
+    // never appear in the projects API response.
+    const rawBody = JSON.stringify(payload)
+    expect(rawBody).not.toContain('super-secret-local-pw')
+    const railsCmd = payload.repos[0]?.verify?.find(
+      (c): c is { command: unknown; envKeys?: string[]; env?: unknown } =>
+        typeof c === 'object' && !Array.isArray(c) && 'envKeys' in c,
+    )
+    expect(railsCmd?.envKeys).toEqual(['RAILS_ENV', 'DB_PASSWORD'])
+    expect(railsCmd).not.toHaveProperty('env')
   })
 
   it('rejects mutating API requests without explicit mutation intent header', async () => {

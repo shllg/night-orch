@@ -350,35 +350,39 @@ repos:
       prMentions:
         - claude
     environment:
-      defaultMode: shared
-      # dedicated:
-      #   compose:
-      #     file: docker-compose.dev.yml
-      #     services: [db, redis]
-      #     projectName: "orch-{issue}"
-      #   env:
-      #     copyFrom: .env
-      #     overrides:
-      #       PORT: "{auto:5101-5199}"
-      #       DATABASE_URL: "postgres://localhost:5432/myapp_orch_{issue}"
-      #   healthcheck: "curl -f http://localhost:{port}/health"
-      #   teardownOnComplete: true
-      shared:
-        requireRunning: true
-        healthcheck: "curl -f http://localhost:3000/health"
-      bootstrap:
+      # Port pool for the {port} token (per-run unique host port). Required
+      # only if a verify command's env/hooks reference {port}.
+      # ports: { min: 5400, max: 5499 }
+      #
+      # beforeRun runs once before the loop (fail-fast). afterRun runs once
+      # after the loop in a finally — always, even on block/error.
+      beforeRun:
         - command: pnpm install --frozen-lockfile
-          when: always
         # - command: bundle exec rails db:prepare
-        #   when: always
         #   failureHints:
         #     - contains: 'role "app_user" does not exist'
-        #       message: 'Create PostgreSQL role "app_user" locally before rerunning bootstrap.'
+        #       message: 'Create PostgreSQL role "app_user" locally before rerunning beforeRun.'
         #       output: combined
+      afterRun: []
     verify:
       - pnpm lint
       - pnpm typecheck
       - pnpm test
+      # Per-command service lifecycle: bring a stack up only for a stateful
+      # command and always tear it down (after = finally, attempt-all). The
+      # command's env is shared by before/command/after and bypasses the secret
+      # blacklist (operator opt-in; local non-secret creds only). Tokens:
+      # {issue}/{run}/{port}/{project}.
+      # - command: [bundle, exec, rails, test]
+      #   timeoutSeconds: 1800
+      #   env:
+      #     RAILS_ENV: test
+      #     DATABASE_URL: "postgres://app_user:app_pw@localhost:{port}/myapp_test_{run}"
+      #   before:
+      #     - [docker, compose, -p, "{project}", up, -d, --wait]
+      #     - [bundle, exec, rails, db:prepare]
+      #   after:
+      #     - [docker, compose, -p, "{project}", down, -v]
     # Optional: preflight drift gate. Verify the base branch is green
     # before dispatching fresh work; if base is already red, skip the
     # whole batch this cycle instead of failing every issue in series.

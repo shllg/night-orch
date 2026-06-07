@@ -14,7 +14,7 @@ interface ProjectsViewProps {
 }
 
 type CommandSpec = string | string[]
-type VerifyCommandSpec = CommandSpec | { command: CommandSpec; timeoutSeconds: number }
+type VerifyCommandSpec = RepoConfig['verify'][number]
 type RoleKey = 'planner' | 'coder' | 'reviewer'
 type RepoAuthDefaults = {
   githubTokenEnv: string
@@ -179,11 +179,9 @@ function FocusedProjectView({
           </Text>
 
           <Text bold>Environment</Text>
-          <Text>mode {selectedRepo.environment?.defaultMode ?? 'shared (implicit default)'}</Text>
-          <Text>bootstrap {formatBootstrap(selectedRepo)}</Text>
-          <Text>cleanup {formatCleanup(selectedRepo)}</Text>
-          <Text>shared {formatSharedEnv(selectedRepo)}</Text>
-          <Text>dedicated {formatDedicatedEnv(selectedRepo)}</Text>
+          <Text>ports {formatPorts(selectedRepo)}</Text>
+          <Text>beforeRun {formatRunHooks(selectedRepo.environment?.beforeRun)}</Text>
+          <Text>afterRun {formatRunHooks(selectedRepo.environment?.afterRun)}</Text>
 
           <Text bold>Merge Queue & Labels</Text>
           <Text>
@@ -256,7 +254,13 @@ function formatCommands(commands: VerifyCommandSpec[]): string {
       if (Array.isArray(command) || typeof command === 'string') {
         return `${index + 1}:${formatCommand(command)}`
       }
-      return `${index + 1}:${formatCommand(command.command)} (timeout=${command.timeoutSeconds}s)`
+      const parts: string[] = [formatCommand(command.command)]
+      if (command.timeoutSeconds !== undefined) parts.push(`timeout=${command.timeoutSeconds}s`)
+      if (command.before && command.before.length > 0) parts.push(`before×${command.before.length}`)
+      if (command.after && command.after.length > 0) parts.push(`after×${command.after.length}`)
+      if (command.env && Object.keys(command.env).length > 0) parts.push(`env×${Object.keys(command.env).length}`)
+      const suffix = parts.length > 1 ? ` (${parts.slice(1).join(', ')})` : ''
+      return `${index + 1}:${parts[0]}${suffix}`
     })
     .join(' | ')
 }
@@ -266,34 +270,19 @@ function formatCommand(command: CommandSpec): string {
   return command.map(formatShellArg).join(' ')
 }
 
-function formatBootstrap(repo: RepoConfig): string {
-  const bootstrap = repo.environment?.bootstrap ?? []
-  if (bootstrap.length === 0) return '(none)'
-  return bootstrap.map((step) => `${step.when}:${formatCommand(step.command)}`).join(' | ')
+function formatPorts(repo: RepoConfig): string {
+  const ports = repo.environment?.ports
+  if (!ports) return '(none)'
+  return `${ports.min}-${ports.max}`
 }
 
-function formatCleanup(repo: RepoConfig): string {
-  const cleanup = repo.environment?.cleanup ?? []
-  if (cleanup.length === 0) return '(none)'
-  return cleanup.map((step) => `${step.when}:${formatCommand(step.command)}`).join(' | ')
-}
+type RunHookList = NonNullable<RepoConfig['environment']>['beforeRun']
 
-function formatSharedEnv(repo: RepoConfig): string {
-  const shared = repo.environment?.shared
-  if (!shared) return '(not configured)'
-  const healthcheck = shared.healthcheck ? formatCommand(shared.healthcheck) : '(none)'
-  return `requireRunning=${shared.requireRunning ? 'yes' : 'no'} healthcheck=${healthcheck}`
-}
-
-function formatDedicatedEnv(repo: RepoConfig): string {
-  const dedicated = repo.environment?.dedicated
-  if (!dedicated) return '(not configured)'
-
-  const services = dedicated.compose.services.length > 0
-    ? dedicated.compose.services.join(',')
-    : '(all)'
-  const healthcheck = dedicated.healthcheck ? formatCommand(dedicated.healthcheck) : '(none)'
-  return `compose=${dedicated.compose.file} services=${services} project=${dedicated.compose.projectName} copyFrom=${dedicated.env.copyFrom} overrides=${Object.keys(dedicated.env.overrides).length} overrideFiles=${dedicated.env.overrideFiles.length} healthcheck=${healthcheck} teardown=${dedicated.teardownOnComplete ? 'yes' : 'no'}`
+function formatRunHooks(hooks: RunHookList | undefined): string {
+  if (!hooks || hooks.length === 0) return '(none)'
+  return hooks
+    .map((hook) => (Array.isArray(hook) || typeof hook === 'string' ? formatCommand(hook) : formatCommand(hook.command)))
+    .join(' | ')
 }
 
 function formatLabelPresentation(repo: RepoConfig): string {

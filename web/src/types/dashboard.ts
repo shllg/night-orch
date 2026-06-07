@@ -358,6 +358,16 @@ export interface UpdateStatus {
 }
 
 export type CommandSpec = string | string[]
+export type VerifyCommandSummary =
+  | CommandSpec
+  | {
+      command: CommandSpec
+      timeoutSeconds?: number
+      before?: CommandSpec[]
+      after?: CommandSpec[]
+      // Keys only — the API never exposes verify env values (may hold secrets).
+      envKeys?: string[]
+    }
 
 export interface ProjectWorkerProfileSummary {
   type: string
@@ -408,35 +418,23 @@ export interface ProjectRepoSummary {
     prMentions: string[]
   }
   environment?: {
-    defaultMode: 'shared' | 'dedicated'
-    dedicated?: {
-      compose: {
-        file: string
-        services: string[]
-        projectName: string
-      }
-      env: {
-        copyFrom: string
-        overrideKeys: string[]
-        overrideFiles: string[]
-      }
-      healthcheck?: CommandSpec
-      teardownOnComplete: boolean
-    }
-    shared?: {
-      requireRunning: boolean
-      healthcheck?: CommandSpec
-    }
-    bootstrap: Array<{
-      command: CommandSpec
-      when: 'always' | 'dedicated' | 'shared'
-    }>
-    cleanup: Array<{
-      command: CommandSpec
-      when: 'always' | 'dedicated' | 'shared'
-    }>
+    ports?: { min: number; max: number }
+    beforeRun: Array<
+      | CommandSpec
+      | {
+          command: CommandSpec
+          failureHints?: Array<{ contains: string; message: string; output: 'combined' | 'stdout' | 'stderr' }>
+        }
+    >
+    afterRun: Array<
+      | CommandSpec
+      | {
+          command: CommandSpec
+          failureHints?: Array<{ contains: string; message: string; output: 'combined' | 'stdout' | 'stderr' }>
+        }
+    >
   }
-  verify: CommandSpec[]
+  verify: VerifyCommandSummary[]
   prompts: {
     plannerSystem: boolean
     coderSystem: boolean

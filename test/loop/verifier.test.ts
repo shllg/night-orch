@@ -158,6 +158,89 @@ describe('runVerifyCommands', () => {
 
     expect(results[0]!.durationMs).toBeGreaterThanOrEqual(0)
   })
+
+  it('runs before hooks, then the command, then after hooks in order', async () => {
+    mockExeca.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' } as never)
+
+    await runVerifyCommands('/tmp/wt', [
+      {
+        command: ['bundle', 'exec', 'rails', 'test'],
+        before: [['docker', 'up']],
+        after: [['docker', 'down']],
+      },
+    ])
+
+    expect(mockExeca).toHaveBeenNthCalledWith(1, 'docker', ['up'], expect.any(Object))
+    expect(mockExeca).toHaveBeenNthCalledWith(2, 'bundle', ['exec', 'rails', 'test'], expect.any(Object))
+    expect(mockExeca).toHaveBeenNthCalledWith(3, 'docker', ['down'], expect.any(Object))
+  })
+
+  it('runs after hooks even when the command fails (finally)', async () => {
+    mockExeca
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' } as never) // before
+      .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'tests failed' } as never) // command
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' } as never) // after
+
+    const results = await runVerifyCommands('/tmp/wt', [
+      { command: 'rails test', before: [['docker', 'up']], after: [['docker', 'down']] },
+    ])
+
+    expect(results[0]!.passed).toBe(false)
+    expect(mockExeca).toHaveBeenNthCalledWith(3, 'docker', ['down'], expect.any(Object))
+  })
+
+  it('skips the command but still runs after hooks when a before hook fails', async () => {
+    mockExeca
+      .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'compose up failed' } as never) // before fails
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' } as never) // after
+
+    const results = await runVerifyCommands('/tmp/wt', [
+      { command: 'rails test', before: [['docker', 'up']], after: [['docker', 'down']] },
+    ])
+
+    expect(results).toHaveLength(1)
+    expect(results[0]!.passed).toBe(false)
+    // command itself must not have run
+    expect(mockExeca).not.toHaveBeenCalledWith('rails', ['test'], expect.any(Object))
+    // after still ran
+    expect(mockExeca).toHaveBeenCalledWith('docker', ['down'], expect.any(Object))
+  })
+
+  it('runs all after hooks even when an earlier after hook fails (attempt-all)', async () => {
+    mockExeca
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' } as never) // command
+      .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'down1 failed' } as never) // after 1
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' } as never) // after 2
+
+    const results = await runVerifyCommands('/tmp/wt', [
+      { command: 'rails test', after: [['docker', 'down'], ['rm', 'tmpdb']] },
+    ])
+
+    expect(results[0]!.passed).toBe(true)
+    expect(mockExeca).toHaveBeenCalledWith('docker', ['down'], expect.any(Object))
+    expect(mockExeca).toHaveBeenCalledWith('rm', ['tmpdb'], expect.any(Object))
+  })
+
+  it('merges command env over the base env for the command and its hooks', async () => {
+    mockExeca.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' } as never)
+
+    await runVerifyCommands(
+      '/tmp/wt',
+      [
+        {
+          command: 'rails test',
+          before: [['docker', 'up']],
+          env: { RAILS_ENV: 'test' },
+        },
+      ],
+      { PATH: '/usr/bin' },
+    )
+
+    expect(mockExeca).toHaveBeenNthCalledWith(1, 'docker', ['up'],
+      expect.objectContaining({ env: { PATH: '/usr/bin', RAILS_ENV: 'test' } }))
+    expect(mockExeca).toHaveBeenNthCalledWith(2, 'rails', ['test'],
+      expect.objectContaining({ env: { PATH: '/usr/bin', RAILS_ENV: 'test' } }))
+  })
 })
 
 describe('allVerifyPassed', () => {

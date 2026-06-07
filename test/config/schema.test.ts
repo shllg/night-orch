@@ -241,6 +241,31 @@ describe('ConfigSchema', () => {
     }
   })
 
+  it('accepts verify commands with before/after/env lifecycle hooks', () => {
+    const raw = loadExampleConfig()
+    raw.repos[0].verify = [
+      {
+        command: ['bundle', 'exec', 'rails', 'test'],
+        timeoutSeconds: 1800,
+        env: { RAILS_ENV: 'test', DATABASE_URL: 'postgres://app_user:pw@localhost:{port}/db_{run}' },
+        before: [['docker', 'compose', '-p', '{project}', 'up', '-d', '--wait']],
+        after: [['docker', 'compose', '-p', '{project}', 'down', '-v']],
+      },
+    ]
+
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      const cmd = result.data.repos[0]?.verify[0]
+      expect(cmd).toMatchObject({
+        command: ['bundle', 'exec', 'rails', 'test'],
+        env: { RAILS_ENV: 'test' },
+        before: [['docker', 'compose', '-p', '{project}', 'up', '-d', '--wait']],
+        after: [['docker', 'compose', '-p', '{project}', 'down', '-v']],
+      })
+    }
+  })
+
   it('accepts workflow DAG definitions', () => {
     const raw = loadExampleConfig()
     raw.workflows = {
@@ -657,26 +682,47 @@ describe('ConfigSchema', () => {
     expect(result.success).toBe(false)
   })
 
-  it('accepts bootstrap failureHints and applies default output mode', () => {
+  it('accepts beforeRun failureHints and applies default output mode', () => {
     const raw = loadExampleConfig()
-    raw.repos[0].environment.bootstrap = [
-      {
-        command: 'bundle exec rails db:prepare',
-        when: 'always',
-        failureHints: [
-          {
-            contains: 'role "app_user" does not exist',
-            message: 'Create PostgreSQL role "app_user".',
-          },
-        ],
-      },
-    ]
+    raw.repos[0].environment = {
+      beforeRun: [
+        {
+          command: 'bundle exec rails db:prepare',
+          failureHints: [
+            {
+              contains: 'role "app_user" does not exist',
+              message: 'Create PostgreSQL role "app_user".',
+            },
+          ],
+        },
+      ],
+    }
 
     const result = ConfigSchema.safeParse(raw)
     expect(result.success).toBe(true)
     if (result.success) {
-      const hint = result.data.repos[0]?.environment?.bootstrap[0]?.failureHints[0]
+      const hook = result.data.repos[0]?.environment?.beforeRun[0]
+      const hint = hook && typeof hook === 'object' && 'failureHints' in hook ? hook.failureHints[0] : undefined
       expect(hint?.output).toBe('combined')
+    }
+  })
+
+  it('rejects removed environment modes (defaultMode/shared/dedicated)', () => {
+    const raw = loadExampleConfig()
+    raw.repos[0].environment = { defaultMode: 'dedicated', beforeRun: [], afterRun: [] }
+
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(false)
+  })
+
+  it('accepts environment.ports for {port} allocation', () => {
+    const raw = loadExampleConfig()
+    raw.repos[0].environment = { ports: { min: 5400, max: 5499 }, beforeRun: [], afterRun: [] }
+
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.repos[0]?.environment?.ports).toEqual({ min: 5400, max: 5499 })
     }
   })
 })

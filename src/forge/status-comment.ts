@@ -56,13 +56,15 @@ export function formatStatusComment(sections: StatusCommentSections): string {
   }
 
   if (sections.plan) {
-    parts.push('')
+    // Blank lines inside <details> are required for GitHub to render the
+    // markdown body; the `\n\n` join below provides them between these pieces.
     parts.push('<details><summary>Plan summary</summary>')
-    parts.push('')
     parts.push(sections.plan)
-    parts.push('')
     parts.push('</details>')
   }
 
-  return parts.join('\n')
+  // Join with a blank line between every field. A single `\n` makes
+  // GitHub-flavored markdown collapse adjacent lines into one paragraph —
+  // the "solid block of text" a human reviewer can't read.
+  return parts.join('\n\n')
 }

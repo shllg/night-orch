@@ -3,6 +3,7 @@ import {
   type ProjectRepoSummary,
   type ProjectsSnapshot,
   type ProjectWorkerProfileSummary,
+  type VerifyCommandSummary,
 } from '../types/dashboard.js'
 
 type RoleKey = 'planner' | 'coder' | 'reviewer'
@@ -74,9 +75,22 @@ export function collectTags(repo: ProjectRepoSummary): string[] {
   return [...tags]
 }
 
-export function formatCommands(commands: CommandSpec[]): string {
+export function formatCommands(commands: VerifyCommandSummary[]): string {
   if (commands.length === 0) return '(none)'
-  return commands.map((command, index) => `${index + 1}:${formatCommand(command)}`).join(' | ')
+  return commands
+    .map((command, index) => {
+      if (Array.isArray(command) || typeof command === 'string') {
+        return `${index + 1}:${formatCommand(command)}`
+      }
+      const extras: string[] = []
+      if (command.timeoutSeconds !== undefined) extras.push(`timeout=${command.timeoutSeconds}s`)
+      if (command.before && command.before.length > 0) extras.push(`before×${command.before.length}`)
+      if (command.after && command.after.length > 0) extras.push(`after×${command.after.length}`)
+      if (command.envKeys && command.envKeys.length > 0) extras.push(`env×${command.envKeys.length}`)
+      const suffix = extras.length > 0 ? ` (${extras.join(', ')})` : ''
+      return `${index + 1}:${formatCommand(command.command)}${suffix}`
+    })
+    .join(' | ')
 }
 
 function formatCommand(command: CommandSpec): string {
@@ -84,35 +98,25 @@ function formatCommand(command: CommandSpec): string {
   return command.map(formatShellArg).join(' ')
 }
 
-export function formatBootstrap(repo: ProjectRepoSummary): string {
-  const bootstrap = repo.environment?.bootstrap ?? []
-  if (bootstrap.length === 0) return '(none)'
-  return bootstrap.map((step) => `${step.when}:${formatCommand(step.command)}`).join(' | ')
+function formatRunHook(hook: NonNullable<ProjectRepoSummary['environment']>['beforeRun'][number]): string {
+  return Array.isArray(hook) || typeof hook === 'string' ? formatCommand(hook) : formatCommand(hook.command)
 }
 
-export function formatCleanup(repo: ProjectRepoSummary): string {
-  const cleanup = repo.environment?.cleanup ?? []
-  if (cleanup.length === 0) return '(none)'
-  return cleanup.map((step) => `${step.when}:${formatCommand(step.command)}`).join(' | ')
+export function formatPorts(repo: ProjectRepoSummary): string {
+  const ports = repo.environment?.ports
+  return ports ? `${ports.min}-${ports.max}` : '(none)'
 }
 
-export function formatSharedEnv(repo: ProjectRepoSummary): string {
-  const shared = repo.environment?.shared
-  if (!shared) return '(not configured)'
-  const healthcheck = shared.healthcheck ? formatCommand(shared.healthcheck) : '(none)'
-  return `requireRunning=${shared.requireRunning ? 'yes' : 'no'} healthcheck=${healthcheck}`
+export function formatBeforeRun(repo: ProjectRepoSummary): string {
+  const hooks = repo.environment?.beforeRun ?? []
+  if (hooks.length === 0) return '(none)'
+  return hooks.map(formatRunHook).join(' | ')
 }
 
-export function formatDedicatedEnv(repo: ProjectRepoSummary): string {
-  const dedicated = repo.environment?.dedicated
-  if (!dedicated) return '(not configured)'
-
-  const services = dedicated.compose.services.length > 0
-    ? dedicated.compose.services.join(',')
-    : '(all)'
-  const healthcheck = dedicated.healthcheck ? formatCommand(dedicated.healthcheck) : '(none)'
-
-  return `compose=${dedicated.compose.file} services=${services} project=${dedicated.compose.projectName} copyFrom=${dedicated.env.copyFrom} overrideKeys=${dedicated.env.overrideKeys.length} overrideFiles=${dedicated.env.overrideFiles.length} healthcheck=${healthcheck} teardown=${dedicated.teardownOnComplete ? 'yes' : 'no'}`
+export function formatAfterRun(repo: ProjectRepoSummary): string {
+  const hooks = repo.environment?.afterRun ?? []
+  if (hooks.length === 0) return '(none)'
+  return hooks.map(formatRunHook).join(' | ')
 }
 
 export function formatLabelPresentation(repo: ProjectRepoSummary): string {

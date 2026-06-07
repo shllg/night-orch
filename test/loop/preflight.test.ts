@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('../../src/loop/verifier.js', () => ({
   runVerifyCommands: vi.fn(),
+  stripVerifyHooks: (spec: unknown) => spec,
 }))
 
 import { runVerifyCommands } from '../../src/loop/verifier.js'

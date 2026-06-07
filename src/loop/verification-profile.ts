@@ -62,6 +62,8 @@ function applyStageTimeoutDefault(
   if (typeof command === 'string' || Array.isArray(command)) {
     return { command, timeoutSeconds }
   }
-  return command
+  // Object form: apply the stage default only when the command does not set
+  // its own timeout. Preserve before/after/env hooks.
+  return command.timeoutSeconds !== undefined ? command : { ...command, timeoutSeconds }
 }
 

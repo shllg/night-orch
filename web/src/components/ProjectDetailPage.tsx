@@ -13,13 +13,12 @@ import {
   collectTags,
   describeRoleSelection,
   flag,
-  formatBootstrap,
-  formatCleanup,
+  formatAfterRun,
+  formatBeforeRun,
   formatCommands,
-  formatDedicatedEnv,
   formatLabelPresentation,
   formatList,
-  formatSharedEnv,
+  formatPorts,
   resolveRepoAuthDisplay,
 } from './project-detail-helpers.js'
 
@@ -238,11 +237,9 @@ function ProjectDetailBody({
             Environment
           </h3>
           <div className="mt-2 space-y-1 text-xs text-base-content/85">
-            <p>mode {selectedProject.environment?.defaultMode ?? 'shared (implicit default)'}</p>
-            <p>bootstrap {formatBootstrap(selectedProject)}</p>
-            <p>cleanup {formatCleanup(selectedProject)}</p>
-            <p>shared {formatSharedEnv(selectedProject)}</p>
-            <p>dedicated {formatDedicatedEnv(selectedProject)}</p>
+            <p>ports {formatPorts(selectedProject)}</p>
+            <p>beforeRun {formatBeforeRun(selectedProject)}</p>
+            <p>afterRun {formatAfterRun(selectedProject)}</p>
           </div>
         </div>
 

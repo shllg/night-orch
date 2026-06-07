@@ -887,8 +887,8 @@ Stage keys:
 | `defaults` | object | no | object with defaults | Default roles + mention settings. |
 | `planning` | object | no | object with defaults | Planning-only mode settings (PRD path). |
 | `fileLoop` | object | no | `{}` | Per-repo overrides merged onto top-level `fileLoop`. |
-| `environment` | object | no | none | Shared/dedicated env setup. |
-| `verify` | `CommandSpec[]` | no | `[]` | Verify commands run in worktree. |
+| `environment` | object | no | none | Per-run env lifecycle: `ports`, `beforeRun`, `afterRun`. |
+| `verify` | verify-command[] | no | `[]` | Verify commands (with optional per-command `before`/`after`/`env`). |
 | `verificationProfile` | string | no | none | Default named verification profile for verify steps in this repo. |
 | `preflight` | object | no | `{ enabled: false }` | Preflight drift gate — verify the base branch is green before dispatching fresh work. See below. |
 | `prompts` | object | no | none | Optional custom system prompt template paths. |
@@ -935,9 +935,8 @@ verificationProfile: strict
 defaults:
   coder: codex
 environment:
-  bootstrap:
+  beforeRun:
     - command: pnpm install
-      when: always
 
 workflows:
   project-fast:
@@ -1102,48 +1101,19 @@ Repo overrides support the same keys as top-level `fileLoop`, but every field is
 
 ### `repos[].environment`
 
-| Key | Type | Required | Default | Notes |
-| --- | --- | --- | --- | --- |
-| `defaultMode` | `shared` or `dedicated` | no | `shared` | Base env mode. |
-| `dedicated` | object | no | none | Required if dedicated mode is used. |
-| `shared` | object | no | none | Shared mode behavior. |
-| `bootstrap` | command object[] | no | `[]` | Runs during setup (`always`/`shared`/`dedicated`). |
-| `cleanup` | command object[] | no | `[]` | Runs during dedicated teardown. |
+There is **one** isolation model: each run gets its own worktree plus lifecycle hooks. Services (a docker stack, a test DB) are brought up and torn down by hooks — either once per run (`beforeRun`/`afterRun`) or once per verify command (`before`/`after` on that command). There is no `shared`/`dedicated` mode and no `env:shared`/`env:dedicated` labels.
 
-Issue labels can force mode per run:
-
-- `env:shared`
-- `env:dedicated`
-
-#### `repos[].environment.dedicated`
+> **Migration from older configs:** `defaultMode`, `shared`, `dedicated`, `bootstrap`, `cleanup`, and the bootstrap `when:` field were removed. `bootstrap` → `beforeRun`; `cleanup` → `afterRun`; per-issue compose stacks move to a verify command's `before`/`after` (see [`repos[].verify`](#reposverify)). Configs still using the old keys fail validation.
 
 | Key | Type | Required | Default | Notes |
 | --- | --- | --- | --- | --- |
-| `compose.file` | string | yes | none | Compose file path used in worktree. |
-| `compose.services` | string[] | no | `[]` | Optional service subset. |
-| `compose.projectName` | string | no | `orch-{issue}` | `{issue}` placeholder supported. |
-| `env.copyFrom` | string | no | `.env` | Base env file copied from repo root. |
-| `env.overrides` | record | no | `{}` | Values support `{issue}` and `{auto:min-max}` port token. |
-| `env.overrideFiles` | string[] | no | `[]` | Additional env files appended in order. |
-| `healthcheck` | `CommandSpec` | no | none | Supports `{port}` placeholder after auto-port allocation. |
-| `teardownOnComplete` | boolean | no | `true` | If true, compose stack is stopped after run. |
+| `ports` | `{ min, max }` | no | none | Host-port pool the `{port}` token allocates from (one unique port per run). Required only if a hook/command references `{port}`. |
+| `beforeRun` | run-hook[] | no | `[]` | Commands run once **before** the loop (fail-fast). Inherit the run's env. |
+| `afterRun` | run-hook[] | no | `[]` | Commands run once **after** the loop in a `finally` — always run (success, block, error, exception), attempt-all (every entry runs even if one fails). Inherit the run's env. |
 
-#### `repos[].environment.shared`
+Each `beforeRun`/`afterRun` entry is either a bare `CommandSpec` or an object `{ command, failureHints? }`. Substitution tokens `{issue}`, `{run}`, `{port}`, `{project}` are expanded in every command segment.
 
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `requireRunning` | boolean | `true` | If true, failed healthcheck aborts run. |
-| `healthcheck` | `CommandSpec` | none | Command to verify shared stack is up. |
-
-#### `repos[].environment.bootstrap[]` and `cleanup[]`
-
-| Key | Type | Required | Default | Notes |
-| --- | --- | --- | --- | --- |
-| `command` | `CommandSpec` | yes | none | Executed in worktree directory. |
-| `when` | `always` \| `shared` \| `dedicated` | no | `always` | Mode filter. |
-| `failureHints` | object[] | no | `[]` | Optional pattern-based hints appended to bootstrap error output. |
-
-##### `failureHints[]`
+##### run-hook `failureHints[]`
 
 | Key | Type | Required | Default | Notes |
 | --- | --- | --- | --- | --- |
@@ -1153,7 +1123,47 @@ Issue labels can force mode per run:
 
 ### `repos[].verify`
 
-Array of commands executed sequentially in worktree. Failures are collected per command; verification result is evaluated after all commands run.
+Array of commands executed sequentially in the worktree. Failures are collected per command; the verification result is evaluated after all commands run. Each entry is one of:
+
+- a bare `CommandSpec` (`pnpm test` or `[pnpm, test]`), or
+- an object `{ command, timeoutSeconds?, before?, after?, env? }`.
+
+The object form adds per-command service lifecycle:
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| `command` | `CommandSpec` | The verify command itself. |
+| `timeoutSeconds` | positive int | Per-command timeout. |
+| `before` | `CommandSpec[]` | Hooks run before the command (fail-fast: a failure records the command as failed and skips it). |
+| `after` | `CommandSpec[]` | Hooks run after the command in a `finally` — always run, attempt-all. |
+| `env` | record | Env shared by `before`, the command, and `after`. **Bypasses the secret blacklist** (see below). Token-substituted. |
+
+Tokens `{issue}`, `{run}`, `{port}`, `{project}` are expanded in `command`, `before`, `after`, and `env` values. `{project}` defaults to `{repoSlug}-{issue}-{run}` (a docker-host-global-safe name). If a command references `{port}` but no `environment.ports` pool is configured, validation/execution fails loudly.
+
+**`env` and security:** the whitelist base for verify commands strips all secrets (forge tokens, API keys). Keys you list in a command's `env` are layered on top and bypass that blacklist — an explicit operator opt-in. These commands run inside the AI-coder-authored worktree, so a planted `Rakefile`/`Makefile`/`postinstall` can read this env: **only put local, non-secret values here** (a local docker DB URL/password), never real host secrets. Run-level `beforeRun`/`afterRun` have no `env` field; they inherit the run's whitelist env (which already includes `DOCKER_*`/`COMPOSE_*`).
+
+> Base-branch gates (`preflight`) and post-rebase checks run verify commands **without** their `before`/`after`/`env` (no per-run tokens exist there). Service-dependent verification therefore only runs in the main loop.
+
+Example — bring an isolated postgres stack up only for the backend suite, always tear it down:
+
+```yaml
+environment:
+  ports: { min: 5400, max: 5499 }
+  beforeRun:
+    - command: [bundle, install]
+verify:
+  - command: [pnpm, -C, frontend, test]      # no services
+  - command: [bundle, exec, rails, test]
+    timeoutSeconds: 1800
+    env:
+      RAILS_ENV: test
+      DATABASE_URL: "postgres://app_user:app_pw@localhost:{port}/myapp_test_{run}"
+    before:
+      - [docker, compose, -p, "{project}", up, -d, --wait]
+      - [bundle, exec, rails, db:prepare]
+    after:
+      - [docker, compose, -p, "{project}", down, -v]
+```
 
 ### `repos[].prompts`
 

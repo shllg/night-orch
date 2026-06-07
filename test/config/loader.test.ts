@@ -156,10 +156,8 @@ repos:
       coder: claude
       reviewer: claude
     environment:
-      defaultMode: shared
-      bootstrap:
+      beforeRun:
         - command: pnpm typecheck
-          when: shared
     workflow: standard
 workflows:
   standard:
@@ -184,9 +182,8 @@ workflows:
 defaults:
   coder: codex
 environment:
-  bootstrap:
+  beforeRun:
     - command: pnpm install
-      when: always
 workflow: project-fast
 `)
 
@@ -197,8 +194,9 @@ workflow: project-fast
     expect(repo?.defaults.coder).toBe('codex')
     expect(repo?.defaults.reviewer).toBe('claude')
     expect(repo?.workflow).toBe('project-fast')
-    expect(repo?.environment?.bootstrap).toHaveLength(1)
-    expect(repo?.environment?.bootstrap[0]?.command).toBe('pnpm install')
+    expect(repo?.environment?.beforeRun).toHaveLength(1)
+    const beforeHook = repo?.environment?.beforeRun[0]
+    expect(beforeHook && typeof beforeHook === 'object' && 'command' in beforeHook ? beforeHook.command : beforeHook).toBe('pnpm install')
     expect(loaded.workflows['project-fast']?.steps).toHaveLength(2)
   })
 

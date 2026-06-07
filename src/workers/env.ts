@@ -143,6 +143,21 @@ export function buildWorkerEnv(
   return result
 }
 
+// Docker/Compose engine-configuration vars (NOT secrets — they point at the
+// engine, they don't authenticate to a registry). `DOCKER_AUTH_CONFIG` is a
+// registry credential blob and is deliberately excluded (it also matches the
+// `*AUTH*` blacklist). Verify commands carry `docker compose up/down` hooks, so
+// these must be on the verifier whitelist for the hooks to reach the engine.
+const DOCKER_COMPOSE_ENV = [
+  'DOCKER_HOST',
+  'DOCKER_CONFIG',
+  'DOCKER_CONTEXT',
+  'DOCKER_CERT_PATH',
+  'DOCKER_TLS_VERIFY',
+  'COMPOSE_PROJECT_NAME',
+  'COMPOSE_FILE',
+] as const
+
 const VERIFIER_ENV_WHITELIST = [
   ...ENV_WHITELIST,
   'CI',
@@ -150,6 +165,7 @@ const VERIFIER_ENV_WHITELIST = [
   'PNPM_HOME',
   'npm_config_cache',
   'npm_config_userconfig',
+  ...DOCKER_COMPOSE_ENV,
 ] as const
 
 /**
@@ -187,13 +203,6 @@ export function buildVerifierEnv(overrides: Record<string, string> = {}): Record
  */
 const BOOTSTRAP_ENV_WHITELIST = [
   ...VERIFIER_ENV_WHITELIST,
-  'DOCKER_HOST',
-  'DOCKER_CONFIG',
-  'DOCKER_CONTEXT',
-  'DOCKER_CERT_PATH',
-  'DOCKER_TLS_VERIFY',
-  'COMPOSE_PROJECT_NAME',
-  'COMPOSE_FILE',
 ] as const
 
 export function buildBootstrapEnv(overrides: Record<string, string> = {}): Record<string, string> {

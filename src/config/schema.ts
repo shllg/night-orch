@@ -109,7 +109,22 @@ const VerifyCommandSchema = z.union([
   CommandSpecSchema,
   z.object({
     command: CommandSpecSchema,
-    timeoutSeconds: z.number().int().positive(),
+    timeoutSeconds: z.number().int().positive().optional(),
+    /**
+     * Lifecycle hooks run around this command. `before` is fail-fast (a failed
+     * setup skips the command); `after` always runs (teardown, attempt-all).
+     * Both share the command's resolved `env`. Used e.g. to bring a docker
+     * stack up/down only for a stateful integration command.
+     */
+    before: z.array(CommandSpecSchema).optional(),
+    after: z.array(CommandSpecSchema).optional(),
+    /**
+     * Explicit env for this command + its hooks. Layered on top of the
+     * whitelist base and bypasses the secret blacklist — operator opt-in for
+     * local, non-secret creds (a local docker DB URL/password). Reaches
+     * worktree-resident code, so never put real host secrets here.
+     */
+    env: z.record(z.string()).optional(),
   }).strict(),
 ])
 
@@ -151,39 +166,34 @@ const BootstrapFailureHintSchema = z.object({
   output: z.enum(['combined', 'stdout', 'stderr']).default('combined'),
 })
 
-const BootstrapCommandSchema = z.object({
-  command: CommandSpecSchema,
-  when: z.enum(['always', 'dedicated', 'shared']).default('always'),
-  failureHints: z.array(BootstrapFailureHintSchema).default([]),
-})
+/**
+ * A run-level lifecycle command (`beforeRun` / `afterRun`). Either a bare
+ * command or an object carrying `failureHints` for friendlier error messages
+ * (e.g. "Docker daemon not running").
+ */
+const RunHookCommandSchema = z.union([
+  CommandSpecSchema,
+  z.object({
+    command: CommandSpecSchema,
+    failureHints: z.array(BootstrapFailureHintSchema).default([]),
+  }).strict(),
+])
 
-const DedicatedEnvSchema = z.object({
-  compose: z.object({
-    file: z.string(),
-    services: z.array(z.string()).default([]),
-    projectName: z.string().default('orch-{issue}'),
-  }),
-  env: z.object({
-    copyFrom: z.string().default('.env'),
-    overrides: z.record(z.string()).default({}),
-    overrideFiles: z.array(z.string()).default([]),
-  }).default({}),
-  healthcheck: CommandSpecSchema.optional(),
-  teardownOnComplete: z.boolean().default(true),
-})
-
-const SharedEnvSchema = z.object({
-  requireRunning: z.boolean().default(true),
-  healthcheck: CommandSpecSchema.optional(),
-})
-
+/**
+ * Per-run environment lifecycle. There is one isolation model: a per-run
+ * worktree plus hooks. `beforeRun` runs once before the loop (fail-fast);
+ * `afterRun` runs once after the loop in a `finally` (attempt-all, always).
+ * `ports` is the pool the `{port}` token allocates from. Per-command service
+ * lifecycle lives on each `verify` command's `before`/`after`/`env`.
+ */
 const EnvironmentConfigSchema = z.object({
-  defaultMode: z.enum(['shared', 'dedicated']).default('shared'),
-  dedicated: DedicatedEnvSchema.optional(),
-  shared: SharedEnvSchema.optional(),
-  bootstrap: z.array(BootstrapCommandSchema).default([]),
-  cleanup: z.array(BootstrapCommandSchema).default([]),
-})
+  ports: z.object({
+    min: z.number().int().positive(),
+    max: z.number().int().positive(),
+  }).strict().optional(),
+  beforeRun: z.array(RunHookCommandSchema).default([]),
+  afterRun: z.array(RunHookCommandSchema).default([]),
+}).strict()
 
 // --- Repo label schemas ---
 

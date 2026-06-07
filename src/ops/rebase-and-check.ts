@@ -3,7 +3,7 @@ import type { ForgeAdapter } from '../forge/types.js'
 import type { Config, RepoConfig } from '../config/schema.js'
 import { autoRebase, type RebaseConflictAnalysis, type RebaseTarget } from './rebase.js'
 import type { UpdateStrategy } from '../git/worktree.js'
-import { runVerifyCommands, allVerifyPassed } from '../loop/verifier.js'
+import { runVerifyCommands, allVerifyPassed, stripVerifyHooks } from '../loop/verifier.js'
 import { buildVerifierEnv } from '../workers/env.js'
 import type { VerifyResult } from '../workers/types.js'
 import { RunManager } from '../state/runs.js'
@@ -191,7 +191,7 @@ export async function executeRebase(
   baseBranch: string,
   repo: string,
   issueNumber: number,
-  verifyCommands: Array<string | string[] | { command: string | string[]; timeoutSeconds: number }>,
+  verifyCommands: RepoConfig['verify'],
   checkAfter = true,
   strategy: UpdateStrategy = 'rebase',
   options: {
@@ -278,7 +278,7 @@ export async function executeRebase(
     return { rebased: true, verifyPassed: true, verifyResults: [], conflict: false, resolution: rebaseResult.resolution }
   }
 
-  const verifyResults = await runVerifyCommands(worktreePath, verifyCommands, buildVerifierEnv())
+  const verifyResults = await runVerifyCommands(worktreePath, verifyCommands.map(stripVerifyHooks), buildVerifierEnv())
   return {
     rebased: true,
     verifyPassed: allVerifyPassed(verifyResults),
