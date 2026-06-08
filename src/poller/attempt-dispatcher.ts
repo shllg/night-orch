@@ -24,6 +24,7 @@ import { getOrPinSlug, buildWorktreePath } from '../git/slug.js'
 import {
   prepareEnvironment,
   releaseEnvironmentPorts,
+  runCheckHooks,
   runBeforeRunHooks,
   teardownEnvironment,
 } from '../environment/manager.js'
@@ -400,7 +401,7 @@ export async function dispatchAttempt(
     // without an `environment` block. `{port}` is allocated only when
     // environment.ports is configured. Recorded BEFORE running beforeRun so the
     // finally below always reaches teardown — even if a beforeRun hook throws.
-    envSetup = prepareEnvironment({
+    envSetup = await prepareEnvironment({
       repo: repoConfig.repo,
       issueNumber: discoveredIssue.issue.number,
       runId: run.id,
@@ -408,6 +409,14 @@ export async function dispatchAttempt(
       usedPorts: usedPortsInPass,
     })
     if (repoConfigForRun.environment) {
+      // `check` validates the environment (fail-fast) after allocation, before
+      // services come up; `beforeRun` then brings them up. A throw from either
+      // is caught below and `afterRun` still runs in the finally.
+      await runCheckHooks({
+        worktreePath,
+        repoConfig: repoConfigForRun,
+        tokens: envSetup.tokens,
+      })
       await runBeforeRunHooks({
         worktreePath,
         repoConfig: repoConfigForRun,

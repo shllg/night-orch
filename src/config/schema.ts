@@ -167,15 +167,23 @@ const BootstrapFailureHintSchema = z.object({
 })
 
 /**
- * A run-level lifecycle command (`beforeRun` / `afterRun`). Either a bare
- * command or an object carrying `failureHints` for friendlier error messages
- * (e.g. "Docker daemon not running").
+ * A run-level lifecycle command (`check` / `beforeRun` / `afterRun`). Either a
+ * bare command or an object carrying `failureHints` for friendlier error
+ * messages (e.g. "Docker daemon not running") and/or an explicit `env`.
+ *
+ * `env` is token-substituted (`{issue}`/`{run}`/`{project}`/`{port}`/
+ * `{port:NAME}`) and layered on top of the bootstrap whitelist base. Like a
+ * verify command's `env` it **bypasses the secret blacklist** — an operator
+ * opt-in for local, non-secret values the service stack needs (a local docker DB
+ * URL/password, or a pool's allocated host port). These hooks run beside
+ * worktree-resident code, so never put real host secrets here.
  */
 const RunHookCommandSchema = z.union([
   CommandSpecSchema,
   z.object({
     command: CommandSpecSchema,
     failureHints: z.array(BootstrapFailureHintSchema).default([]),
+    env: z.record(z.string()).optional(),
   }).strict(),
 ])
 
@@ -202,14 +210,29 @@ const PortRangeSchema = z.object({
  *   pool yields a `{port:NAME}` token; `{port}` aliases the first pool.
  *
  * Pool order follows config key order — the first key is the `{port}` default.
+ * Pool names are restricted to `[A-Za-z0-9_]+` so `{port:NAME}` is unambiguous
+ * and key order is preserved (integer-like keys would be reordered by the JS
+ * engine, silently changing which pool `{port}` aliases).
  */
+const PoolNameSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_]+$/, 'Port pool names must match [A-Za-z0-9_]+')
 const PortsConfigSchema = z.union([
   PortRangeSchema.transform((range) => ({ default: range })),
-  z.record(z.string().min(1), PortRangeSchema),
+  z.record(PoolNameSchema, PortRangeSchema),
 ])
 
+/**
+ * Per-run environment lifecycle. One isolation model: a per-run worktree plus
+ * hooks. `check` runs first (fail-fast) after port allocation to validate the
+ * environment (e.g. `docker info`, a port reachability probe); `beforeRun` runs
+ * next (fail-fast) to bring services up; `afterRun` runs in a `finally`
+ * (attempt-all, always). All three accept token-substituted `env` so allocated
+ * pool ports reach the service stack under whatever names the repo expects.
+ */
 const EnvironmentConfigSchema = z.object({
   ports: PortsConfigSchema.optional(),
+  check: z.array(RunHookCommandSchema).default([]),
   beforeRun: z.array(RunHookCommandSchema).default([]),
   afterRun: z.array(RunHookCommandSchema).default([]),
 }).strict()

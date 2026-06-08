@@ -357,20 +357,35 @@ repos:
       #
       # Or named pools to isolate a multi-service docker stack per run. The bare
       # {port} token resolves to the first pool; {port:NAME} to each named pool.
+      # Pool names must match [A-Za-z0-9_]+. Each allocated port is probed for
+      # host availability before use (ports are probed, not promised).
       # ports:
       #   postgres: { min: 5460, max: 5499 }
       #   redis:    { min: 6460, max: 6499 }
       #   rustfs:   { min: 9460, max: 9499 }
       #
+      # check runs after allocation, before beforeRun (fail-fast) — validate the
+      # environment early so the run fails loudly instead of services dying later.
+      # check:
+      #   - command: docker info
+      #     failureHints:
+      #       - contains: 'Cannot connect to the Docker daemon'
+      #         message: 'Start the docker daemon before running this repo.'
+      #
       # beforeRun runs once before the loop (fail-fast). afterRun runs once
-      # after the loop in a finally — always, even on block/error.
+      # after the loop in a finally — always, even on block/error. All run hooks
+      # (check/beforeRun/afterRun) accept a token-substituted `env` that carries
+      # allocated ports to the service stack under whatever names the repo needs
+      # (env bypasses the secret blacklist — local non-secret values only).
       beforeRun:
         - command: pnpm install --frozen-lockfile
-        # - command: bundle exec rails db:prepare
-        #   failureHints:
-        #     - contains: 'role "app_user" does not exist'
-        #       message: 'Create PostgreSQL role "app_user" locally before rerunning beforeRun.'
-        #       output: combined
+        # - command: [docker, compose, -p, "{project}", up, -d, --wait]
+        #   env:
+        #     DAILYWERK_PG_PORT:    "{port:postgres}"
+        #     DAILYWERK_REDIS_PORT: "{port:redis}"
+        #     DAILYWERK_PG_PASSWORD: "localdev"   # local throwaway cred
+      # afterRun:
+      #   - command: [docker, compose, -p, "{project}", down, -v]
       afterRun: []
     verify:
       - pnpm lint

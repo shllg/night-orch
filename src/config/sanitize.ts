@@ -25,6 +25,8 @@ export type RunHookSummary =
         message: string
         output: 'combined' | 'stdout' | 'stderr'
       }>
+      /** Env keys only — values are never exposed via the projects API. */
+      envKeys?: string[]
     }
 
 export interface ProjectWorkerProfileSummary {
@@ -78,6 +80,7 @@ export interface ProjectRepoSummary {
   }
   environment?: {
     ports?: Record<string, { min: number; max: number }>
+    check: RunHookSummary[]
     beforeRun: RunHookSummary[]
     afterRun: RunHookSummary[]
   }
@@ -202,6 +205,7 @@ export function sanitizeProjectRepo(repo: RepoConfig): ProjectRepoSummary {
 function sanitizeEnvironment(environment: NonNullable<RepoConfig['environment']>): NonNullable<ProjectRepoSummary['environment']> {
   return {
     ...(environment.ports ? { ports: copyPortPools(environment.ports) } : {}),
+    check: environment.check.map(copyRunHook),
     beforeRun: environment.beforeRun.map(copyRunHook),
     afterRun: environment.afterRun.map(copyRunHook),
   }
@@ -230,6 +234,8 @@ function copyRunHook(hook: NonNullable<RepoConfig['environment']>['beforeRun'][n
           })),
         }
       : {}),
+    // Keys only — env values (local creds) must never leave the daemon.
+    ...(hook.env ? { envKeys: Object.keys(hook.env) } : {}),
   }
 }
 

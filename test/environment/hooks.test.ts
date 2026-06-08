@@ -6,11 +6,17 @@ vi.mock('../../src/utils/logger.js', () => ({
 }))
 
 import { execa } from 'execa'
+import { logger } from '../../src/utils/logger.js'
 import { runRunHooks } from '../../src/environment/hooks.js'
 import type { RunTokens } from '../../src/environment/tokens.js'
 
 const mockExeca = vi.mocked(execa)
+const mockLoggerWarn = vi.mocked(logger.warn)
 const tokens: RunTokens = { issue: 1, run: 'r1', port: 5400, project: 'proj-1-r1' }
+const namedTokens: RunTokens = {
+  issue: 1, run: 'r1', port: 5460,
+  ports: { postgres: 5460, redis: 6460 }, project: 'proj-1-r1',
+}
 
 describe('runRunHooks', () => {
   beforeEach(() => vi.clearAllMocks())
@@ -53,5 +59,52 @@ describe('runRunHooks', () => {
         'fail-fast',
       ),
     ).rejects.toThrow('Create the role.')
+  })
+
+  it('token-substitutes hook env (incl {port:NAME}) and passes it to execa', async () => {
+    mockExeca.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' } as never)
+
+    await runRunHooks(
+      '/wt',
+      [{ command: ['docker', 'compose', 'up'], env: { DAILYWERK_PG_PORT: '{port:postgres}', REDIS_URL: 'redis://localhost:{port:redis}' } }],
+      namedTokens,
+      'fail-fast',
+    )
+
+    const opts = mockExeca.mock.calls[0]![2] as { env: Record<string, string> }
+    expect(opts.env['DAILYWERK_PG_PORT']).toBe('5460')
+    expect(opts.env['REDIS_URL']).toBe('redis://localhost:6460')
+  })
+
+  it('bypasses the secret blacklist: a *PASSWORD* env key reaches the child verbatim', async () => {
+    mockExeca.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' } as never)
+
+    await runRunHooks(
+      '/wt',
+      [{ command: ['docker', 'up'], env: { DAILYWERK_PG_PASSWORD: 'localdev' } }],
+      tokens,
+      'fail-fast',
+    )
+
+    const opts = mockExeca.mock.calls[0]![2] as { env: Record<string, string> }
+    expect(opts.env['DAILYWERK_PG_PASSWORD']).toBe('localdev')
+  })
+
+  it('fail-fast: throws on an unresolved {port:NAME} in a hook env value', async () => {
+    mockExeca.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' } as never)
+
+    await expect(
+      runRunHooks('/wt', [{ command: ['x'], env: { URL: 'x:{port:rustfs}' } }], namedTokens, 'fail-fast'),
+    ).rejects.toThrow(/\{port:rustfs\}/)
+    expect(mockExeca).not.toHaveBeenCalled()
+  })
+
+  it('never logs hook env values', async () => {
+    mockExeca.mockResolvedValue({ exitCode: 1, stdout: '', stderr: 'fail' } as never)
+
+    await runRunHooks('/wt', [{ command: ['x'], env: { SECRETish: 'do-not-log-me' } }], tokens, 'attempt-all')
+
+    const logged = JSON.stringify(mockLoggerWarn.mock.calls)
+    expect(logged).not.toContain('do-not-log-me')
   })
 })

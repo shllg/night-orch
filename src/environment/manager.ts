@@ -10,22 +10,22 @@ export interface EnvSetupResult {
 
 /**
  * Allocate the per-run environment tokens (`{issue}`/`{run}`/`{project}` plus
- * one host port per configured pool: `{port}` and `{port:NAME}`) without
- * running any subprocess.
+ * one host port per configured pool: `{port}` and `{port:NAME}`).
  *
- * Pure resource allocation so the caller can record the result (and reach
- * teardown in its `finally`) BEFORE the `beforeRun` hooks run — if a hook then
- * throws, `afterRun` still runs. Allocated ports are appended to `usedPorts` so
- * concurrent runs in the same poll pass never collide; release them on run end
- * with {@link releaseEnvironmentPorts}.
+ * Each pool port is probed for host bindability before being handed out, so this
+ * does light network I/O (no subprocess). The caller records the result (and
+ * reaches teardown in its `finally`) BEFORE the `check`/`beforeRun` hooks run —
+ * if a hook then throws, `afterRun` still runs. Allocated ports are appended to
+ * `usedPorts` so concurrent runs in the same poll pass never collide; release
+ * them on run end with {@link releaseEnvironmentPorts}.
  */
-export function prepareEnvironment(params: {
+export async function prepareEnvironment(params: {
   repo: string
   issueNumber: number
   runId: string
   repoConfig: RepoConfig
   usedPorts: number[]
-}): EnvSetupResult {
+}): Promise<EnvSetupResult> {
   const { repo, issueNumber, runId, repoConfig, usedPorts } = params
   const env = repoConfig.environment
 
@@ -36,9 +36,9 @@ export function prepareEnvironment(params: {
   if (poolEntries.length > 0) {
     ports = {}
     for (const [name, range] of poolEntries) {
-      const allocated = allocatePort(range, usedPorts)
-      usedPorts.push(allocated)
-      ports[name] = allocated
+      // allocatePort probes host availability and pushes the chosen port into
+      // usedPorts itself — do not push again here.
+      ports[name] = await allocatePort(range, usedPorts)
     }
     port = ports[poolEntries[0]![0]]
   }
@@ -67,6 +67,21 @@ export function releaseEnvironmentPorts(usedPorts: number[], tokens: RunTokens):
   for (let i = usedPorts.length - 1; i >= 0; i--) {
     if (allocated.has(usedPorts[i]!)) usedPorts.splice(i, 1)
   }
+}
+
+/**
+ * Run the repo's `check` hooks (fail-fast) after port allocation and before
+ * `beforeRun`. Use to validate the environment (docker up, a port reachable)
+ * and fail the run loudly+early rather than letting services fall over later.
+ */
+export async function runCheckHooks(params: {
+  worktreePath: string
+  repoConfig: RepoConfig
+  tokens: RunTokens
+}): Promise<void> {
+  const hooks = (params.repoConfig.environment?.check ?? []) as RunHookCommand[]
+  if (hooks.length === 0) return
+  await runRunHooks(params.worktreePath, hooks, params.tokens, 'fail-fast')
 }
 
 /** Run the repo's `beforeRun` hooks (fail-fast) with token substitution. */

@@ -756,4 +756,61 @@ describe('ConfigSchema', () => {
     raw.repos[0].environment = { ports: { postgres: { min: 5460 } }, beforeRun: [], afterRun: [] }
     expect(ConfigSchema.safeParse(raw).success).toBe(false)
   })
+
+  it('rejects pool names outside [A-Za-z0-9_]', () => {
+    const raw = loadExampleConfig()
+    raw.repos[0].environment = { ports: { 'pg-main': { min: 5460, max: 5499 } }, beforeRun: [], afterRun: [] }
+    expect(ConfigSchema.safeParse(raw).success).toBe(false)
+  })
+
+  it('accepts token-substituted env on run hooks, preserving secret-shaped keys', () => {
+    const raw = loadExampleConfig()
+    raw.repos[0].environment = {
+      ports: { postgres: { min: 5460, max: 5499 } },
+      beforeRun: [{
+        command: ['docker', 'compose', 'up'],
+        env: { DAILYWERK_PG_PORT: '{port:postgres}', DAILYWERK_PG_PASSWORD: 'localdev' },
+      }],
+      afterRun: [],
+    }
+
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      const hook = result.data.repos[0]?.environment?.beforeRun[0]
+      expect(hook && typeof hook === 'object' && !Array.isArray(hook) ? hook.env : undefined)
+        .toEqual({ DAILYWERK_PG_PORT: '{port:postgres}', DAILYWERK_PG_PASSWORD: 'localdev' })
+    }
+  })
+
+  it('accepts environment.check and defaults it to []', () => {
+    const raw = loadExampleConfig()
+    raw.repos[0].environment = {
+      check: [{ command: 'docker info' }],
+      beforeRun: [],
+      afterRun: [],
+    }
+    const result = ConfigSchema.safeParse(raw)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.repos[0]?.environment?.check).toHaveLength(1)
+    }
+
+    const raw2 = loadExampleConfig()
+    raw2.repos[0].environment = { beforeRun: [], afterRun: [] }
+    const result2 = ConfigSchema.safeParse(raw2)
+    expect(result2.success).toBe(true)
+    if (result2.success) {
+      expect(result2.data.repos[0]?.environment?.check).toEqual([])
+    }
+  })
+
+  it('rejects unknown keys on a run hook (strict)', () => {
+    const raw = loadExampleConfig()
+    raw.repos[0].environment = {
+      beforeRun: [{ command: 'x', bogus: true }],
+      afterRun: [],
+    }
+    expect(ConfigSchema.safeParse(raw).success).toBe(false)
+  })
 })

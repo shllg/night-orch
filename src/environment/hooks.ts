@@ -6,6 +6,7 @@ import { sanitizeErrorMessage } from '../utils/sanitize-error.js'
 import {
   findUnresolvedPortToken,
   substituteCommandTokens,
+  substituteEnvTokens,
   unresolvedPortMessage,
   type RunTokens,
 } from './tokens.js'
@@ -16,8 +17,13 @@ export interface RunHookFailureHint {
   output?: 'combined' | 'stdout' | 'stderr'
 }
 
-/** A run-level hook: a bare command or an object carrying failure hints. */
-export type RunHookCommand = CommandSpec | { command: CommandSpec; failureHints?: RunHookFailureHint[] }
+/**
+ * A run-level hook: a bare command or an object carrying failure hints and/or
+ * an explicit, token-substituted `env`.
+ */
+export type RunHookCommand =
+  | CommandSpec
+  | { command: CommandSpec; failureHints?: RunHookFailureHint[]; env?: Record<string, string> }
 
 const HOOK_TIMEOUT_MS = 300_000 // 5 min
 
@@ -32,10 +38,15 @@ const HOOK_TIMEOUT_MS = 300_000 // 5 min
  * real outcome.
  *
  * Tokens (`{issue}`/`{run}`/`{project}` plus `{port}`/`{port:NAME}`) are
- * substituted into each command; an unresolved port token fails loudly
- * (fail-fast) or is skipped with a warning (attempt-all). Env is the
- * bootstrap-class whitelist (includes `DOCKER_*` /
- * `COMPOSE_*`); the daemon's secrets are never inherited.
+ * substituted into each command AND into the hook's `env` values; an unresolved
+ * port token (in command or env) fails loudly (fail-fast) or is skipped with a
+ * warning (attempt-all).
+ *
+ * Env base is the bootstrap whitelist (includes `DOCKER_*`/`COMPOSE_*`; the
+ * daemon's secrets are never inherited). A hook's explicit `env` is layered raw
+ * on top and **bypasses the secret blacklist** — parity with verify-command
+ * `env`, so allocated ports reach the service stack under repo-specific names
+ * (and local non-secret creds work). Env values are never logged.
  */
 export async function runRunHooks(
   worktreePath: string,
@@ -44,14 +55,16 @@ export async function runRunHooks(
   mode: 'fail-fast' | 'attempt-all',
 ): Promise<void> {
   if (hooks.length === 0) return
-  const env = buildBootstrapEnv()
+  const baseEnv = buildBootstrapEnv()
 
   for (const hook of hooks) {
-    const { command, failureHints } = normalizeHook(hook)
+    const { command, failureHints, env: hookEnvRaw } = normalizeHook(hook)
     const resolved = substituteCommandTokens(command, tokens)
+    const hookEnv = substituteEnvTokens(hookEnvRaw, tokens)
     const label = Array.isArray(resolved) ? resolved.join(' ') : resolved
     const segments = Array.isArray(resolved) ? resolved : [resolved]
-    const unresolved = findUnresolvedPortToken(segments)
+    // Scan both command segments and env values for unresolved port tokens.
+    const unresolved = findUnresolvedPortToken([...segments, ...Object.values(hookEnv)])
     if (unresolved) {
       const msg = `${unresolvedPortMessage(unresolved, tokens, 'Run hook')}: ${label}`
       if (mode === 'fail-fast') throw new Error(msg)
@@ -59,6 +72,10 @@ export async function runRunHooks(
       continue
     }
     logger.info({ command: label, worktreePath }, 'Running run hook')
+
+    // Raw merge AFTER the whitelist base = blacklist bypass (operator opt-in),
+    // mirroring verify-command env. NEVER add `env` to a log record below.
+    const env = { ...baseEnv, ...hookEnv }
 
     let result: { exitCode?: number; stdout?: string; stderr?: string }
     try {
@@ -97,11 +114,11 @@ export async function runRunHooks(
   }
 }
 
-function normalizeHook(hook: RunHookCommand): { command: CommandSpec; failureHints: RunHookFailureHint[] } {
+function normalizeHook(hook: RunHookCommand): { command: CommandSpec; failureHints: RunHookFailureHint[]; env: Record<string, string> } {
   if (Array.isArray(hook) || typeof hook === 'string') {
-    return { command: hook, failureHints: [] }
+    return { command: hook, failureHints: [], env: {} }
   }
-  return { command: hook.command, failureHints: hook.failureHints ?? [] }
+  return { command: hook.command, failureHints: hook.failureHints ?? [], env: hook.env ?? {} }
 }
 
 const OUTPUT_TAIL_LIMIT = 4000

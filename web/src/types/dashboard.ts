@@ -393,6 +393,15 @@ export interface ProjectLabels {
   mergeFailed: string
 }
 
+export type RunHookSummary =
+  | CommandSpec
+  | {
+      command: CommandSpec
+      failureHints?: Array<{ contains: string; message: string; output: 'combined' | 'stdout' | 'stderr' }>
+      /** Env keys only — values are never exposed by the projects API. */
+      envKeys?: string[]
+    }
+
 export interface ProjectRepoSummary {
   repo: string
   forge: 'github' | 'forgejo'
@@ -419,20 +428,9 @@ export interface ProjectRepoSummary {
   }
   environment?: {
     ports?: Record<string, { min: number; max: number }>
-    beforeRun: Array<
-      | CommandSpec
-      | {
-          command: CommandSpec
-          failureHints?: Array<{ contains: string; message: string; output: 'combined' | 'stdout' | 'stderr' }>
-        }
-    >
-    afterRun: Array<
-      | CommandSpec
-      | {
-          command: CommandSpec
-          failureHints?: Array<{ contains: string; message: string; output: 'combined' | 'stdout' | 'stderr' }>
-        }
-    >
+    check: RunHookSummary[]
+    beforeRun: RunHookSummary[]
+    afterRun: RunHookSummary[]
   }
   verify: VerifyCommandSummary[]
   prompts: {

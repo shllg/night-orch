@@ -180,6 +180,7 @@ function FocusedProjectView({
 
           <Text bold>Environment</Text>
           <Text>ports {formatPorts(selectedRepo)}</Text>
+          <Text>check {formatRunHooks(selectedRepo.environment?.check)}</Text>
           <Text>beforeRun {formatRunHooks(selectedRepo.environment?.beforeRun)}</Text>
           <Text>afterRun {formatRunHooks(selectedRepo.environment?.afterRun)}</Text>
 
@@ -283,7 +284,11 @@ type RunHookList = NonNullable<RepoConfig['environment']>['beforeRun']
 function formatRunHooks(hooks: RunHookList | undefined): string {
   if (!hooks || hooks.length === 0) return '(none)'
   return hooks
-    .map((hook) => (Array.isArray(hook) || typeof hook === 'string' ? formatCommand(hook) : formatCommand(hook.command)))
+    .map((hook) => {
+      if (Array.isArray(hook) || typeof hook === 'string') return formatCommand(hook)
+      const envCount = hook.env ? Object.keys(hook.env).length : 0
+      return envCount > 0 ? `${formatCommand(hook.command)} env×${envCount}` : formatCommand(hook.command)
+    })
     .join(' | ')
 }
 

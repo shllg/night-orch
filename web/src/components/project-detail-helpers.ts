@@ -99,7 +99,9 @@ function formatCommand(command: CommandSpec): string {
 }
 
 function formatRunHook(hook: NonNullable<ProjectRepoSummary['environment']>['beforeRun'][number]): string {
-  return Array.isArray(hook) || typeof hook === 'string' ? formatCommand(hook) : formatCommand(hook.command)
+  if (Array.isArray(hook) || typeof hook === 'string') return formatCommand(hook)
+  const envCount = hook.envKeys?.length ?? 0
+  return envCount > 0 ? `${formatCommand(hook.command)} env×${envCount}` : formatCommand(hook.command)
 }
 
 export function formatPorts(repo: ProjectRepoSummary): string {
@@ -107,6 +109,12 @@ export function formatPorts(repo: ProjectRepoSummary): string {
   const entries = ports ? Object.entries(ports) : []
   if (entries.length === 0) return '(none)'
   return entries.map(([name, range]) => `${name} ${range.min}-${range.max}`).join(', ')
+}
+
+export function formatCheck(repo: ProjectRepoSummary): string {
+  const hooks = repo.environment?.check ?? []
+  if (hooks.length === 0) return '(none)'
+  return hooks.map(formatRunHook).join(' | ')
 }
 
 export function formatBeforeRun(repo: ProjectRepoSummary): string {

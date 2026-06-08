@@ -15,6 +15,7 @@ import {
   flag,
   formatAfterRun,
   formatBeforeRun,
+  formatCheck,
   formatCommands,
   formatLabelPresentation,
   formatList,
@@ -238,6 +239,7 @@ function ProjectDetailBody({
           </h3>
           <div className="mt-2 space-y-1 text-xs text-base-content/85">
             <p>ports {formatPorts(selectedProject)}</p>
+            <p>check {formatCheck(selectedProject)}</p>
             <p>beforeRun {formatBeforeRun(selectedProject)}</p>
             <p>afterRun {formatAfterRun(selectedProject)}</p>
           </div>

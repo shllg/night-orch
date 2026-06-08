@@ -889,7 +889,7 @@ Stage keys:
 | `defaults` | object | no | object with defaults | Default roles + mention settings. |
 | `planning` | object | no | object with defaults | Planning-only mode settings (PRD path). |
 | `fileLoop` | object | no | `{}` | Per-repo overrides merged onto top-level `fileLoop`. |
-| `environment` | object | no | none | Per-run env lifecycle: `ports`, `beforeRun`, `afterRun`. |
+| `environment` | object | no | none | Per-run env lifecycle: `ports`, `check`, `beforeRun`, `afterRun`. |
 | `verify` | verify-command[] | no | `[]` | Verify commands (with optional per-command `before`/`after`/`env`). |
 | `verificationProfile` | string | no | none | Default named verification profile for verify steps in this repo. |
 | `preflight` | object | no | `{ enabled: false }` | Preflight drift gate — verify the base branch is green before dispatching fresh work. See below. |
@@ -1109,11 +1109,27 @@ There is **one** isolation model: each run gets its own worktree plus lifecycle 
 
 | Key | Type | Required | Default | Notes |
 | --- | --- | --- | --- | --- |
-| `ports` | `{ min, max }` **or** `{ NAME: { min, max }, … }` | no | none | Host-port pool(s) the `{port}`/`{port:NAME}` tokens allocate from (one unique port per pool per run). The single-range form is shorthand for one pool; the named form isolates a multi-service stack (e.g. `postgres`/`redis`/`rustfs`). The bare `{port}` token always resolves to the **first** pool. Required only if a hook/command references a port token. |
-| `beforeRun` | run-hook[] | no | `[]` | Commands run once **before** the loop (fail-fast). Inherit the run's env. |
-| `afterRun` | run-hook[] | no | `[]` | Commands run once **after** the loop in a `finally` — always run (success, block, error, exception), attempt-all (every entry runs even if one fails). Inherit the run's env. |
+| `ports` | `{ min, max }` **or** `{ NAME: { min, max }, … }` | no | none | Host-port pool(s) the `{port}`/`{port:NAME}` tokens allocate from (one unique port per pool per run). The single-range form is shorthand for one pool; the named form isolates a multi-service stack (e.g. `postgres`/`redis`/`rustfs`). Pool names must match `[A-Za-z0-9_]+`. The bare `{port}` token always resolves to the **first** pool. Each allocated port is probed for host availability (see below). Required only if a hook/command references a port token. |
+| `check` | run-hook[] | no | `[]` | Commands run once **after port allocation, before `beforeRun`** (fail-fast). Validate the environment early (e.g. `docker info`, probe a port is reachable) so the run fails loudly instead of services falling over mid-loop. Receive the same tokens/`env` as `beforeRun`. |
+| `beforeRun` | run-hook[] | no | `[]` | Commands run once **before** the loop (fail-fast). Bring services up. |
+| `afterRun` | run-hook[] | no | `[]` | Commands run once **after** the loop in a `finally` — always run (success, block, error, exception), attempt-all (every entry runs even if one fails). |
 
-Each `beforeRun`/`afterRun` entry is either a bare `CommandSpec` or an object `{ command, failureHints? }`. Substitution tokens `{issue}`, `{run}`, `{project}`, `{port}`, and `{port:NAME}` are expanded in every command segment. Referencing a port token with no matching pool fails loudly.
+Each `check`/`beforeRun`/`afterRun` entry is either a bare `CommandSpec` or an object `{ command, failureHints?, env? }`. Substitution tokens `{issue}`, `{run}`, `{project}`, `{port}`, and `{port:NAME}` are expanded in every command segment **and in every `env` value**. Referencing a port token with no matching pool fails loudly.
+
+**Run-hook `env`.** Like a verify command's `env`, a run-hook `env` is layered on top of the bootstrap whitelist (which already carries `DOCKER_*`/`COMPOSE_*`) and **bypasses the secret blacklist** — an explicit operator opt-in. This is how allocated ports reach the service stack under whatever names the repo expects (night-orch imposes no env-var convention):
+
+```yaml
+beforeRun:
+  - command: [docker, compose, -p, "{project}", up, -d, --wait]
+    env:
+      DAILYWERK_PG_PORT:    "{port:postgres}"   # compose interpolates host ports
+      DAILYWERK_REDIS_PORT: "{port:redis}"
+      DAILYWERK_PG_PASSWORD: "localdev"          # local throwaway cred (bypasses blacklist)
+```
+
+These hooks run beside worktree-resident code, so **only put local, non-secret values here**, never real host secrets. The projects API exposes env **keys only**, never values.
+
+**Port availability.** Allocated host ports are probed (`bind` on `0.0.0.0`/`::`) before being handed out, so a port already taken by another process or a leaked container is skipped — ports are *probed, not promised* (the consuming service's own `bind` remains authoritative; a small TOCTOU window remains). If a pool's whole range is in use/host-bound, the run fails and is retried on a later poll. Use a `check` hook for stronger, app-specific reachability assertions.
 
 ##### Named port pools
 
@@ -1158,7 +1174,7 @@ The object form adds per-command service lifecycle:
 
 Tokens `{issue}`, `{run}`, `{project}`, `{port}`, and `{port:NAME}` are expanded in `command`, `before`, `after`, and `env` values. `{project}` defaults to `{repoSlug}-{issue}-{run}` (a docker-host-global-safe name). `{port}` resolves to the first `environment.ports` pool; `{port:NAME}` resolves to the named pool. If a command references a port token with no matching pool, execution fails loudly.
 
-**`env` and security:** the whitelist base for verify commands strips all secrets (forge tokens, API keys). Keys you list in a command's `env` are layered on top and bypass that blacklist — an explicit operator opt-in. These commands run inside the AI-coder-authored worktree, so a planted `Rakefile`/`Makefile`/`postinstall` can read this env: **only put local, non-secret values here** (a local docker DB URL/password), never real host secrets. Run-level `beforeRun`/`afterRun` have no `env` field; they inherit the run's whitelist env (which already includes `DOCKER_*`/`COMPOSE_*`).
+**`env` and security:** the whitelist base for verify commands strips all secrets (forge tokens, API keys). Keys you list in a command's `env` are layered on top and bypass that blacklist — an explicit operator opt-in. These commands run inside the AI-coder-authored worktree, so a planted `Rakefile`/`Makefile`/`postinstall` can read this env: **only put local, non-secret values here** (a local docker DB URL/password), never real host secrets. Run-level `check`/`beforeRun`/`afterRun` hooks support the **same** `env` field with identical semantics (whitelist base + blacklist bypass, token-substituted) — see [`repos[].environment`](#reposenvironment).
 
 > Base-branch gates (`preflight`) and post-rebase checks run verify commands **without** their `before`/`after`/`env` (no per-run tokens exist there). Service-dependent verification therefore only runs in the main loop.
 

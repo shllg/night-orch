@@ -939,6 +939,7 @@ describe('startWebServer', () => {
       },
       environment: {
         ports: { postgres: { min: 5400, max: 5499 }, redis: { min: 6400, max: 6499 } },
+        check: [{ command: ['docker', 'info'] }],
         beforeRun: [{
           command: ['pnpm', 'install'],
           failureHints: [{
@@ -946,6 +947,7 @@ describe('startWebServer', () => {
             message: 'Install dependencies first.',
             output: 'stderr' as const,
           }],
+          env: { DAILYWERK_PG_PORT: '5400', DAILYWERK_PG_PASSWORD: 'super-secret-local-pw' },
         }],
         afterRun: [{ command: 'pnpm clean' }],
       },
@@ -978,6 +980,7 @@ describe('startWebServer', () => {
         prompts: { plannerSystem: boolean; coderSystem: boolean; reviewerSystem: boolean }
         environment?: {
           ports?: Record<string, { min: number; max: number }>
+          check?: Array<string | string[] | { command: string | string[]; envKeys?: string[] }>
           beforeRun?: Array<string | string[] | {
             command: string | string[]
             failureHints?: Array<{
@@ -985,6 +988,7 @@ describe('startWebServer', () => {
               message: string
               output: string
             }>
+            envKeys?: string[]
           }>
           afterRun?: Array<string | string[] | { command: string | string[] }>
         }
@@ -1032,6 +1036,15 @@ describe('startWebServer', () => {
     )
     expect(railsCmd?.envKeys).toEqual(['RAILS_ENV', 'DB_PASSWORD'])
     expect(railsCmd).not.toHaveProperty('env')
+
+    // Run-hook env is also redacted to KEYS ONLY — the beforeRun password value
+    // must not leak, only its key. And the `check` phase round-trips.
+    expect(beforeHook && typeof beforeHook === 'object' ? beforeHook.envKeys : undefined)
+      .toEqual(['DAILYWERK_PG_PORT', 'DAILYWERK_PG_PASSWORD'])
+    expect(beforeHook).not.toHaveProperty('env')
+    const checkHook = payload.repos[0]?.environment?.check?.[0]
+    expect(checkHook && typeof checkHook === 'object' ? checkHook.command : checkHook)
+      .toEqual(['docker', 'info'])
   })
 
   it('rejects mutating API requests without explicit mutation intent header', async () => {
