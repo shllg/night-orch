@@ -10,6 +10,7 @@ import type { AgentObservability } from '../events/observability.js'
 import type { RunContext } from '../loop/types.js'
 import type { EnvSetupResult } from '../environment/manager.js'
 import type { UpdateStrategy, WorktreeManager } from '../git/worktree.js'
+import { getWorktreeStatus } from '../git/worktree.js'
 import type { VerifyResult } from '../workers/types.js'
 
 import { blocked } from '../loop/state.js'
@@ -328,7 +329,12 @@ export async function dispatchAttempt(
     }
 
     if (!ensuredWorktree.isClean) {
+      // ensure() already tried to self-heal (forceful reset, then recreate from
+      // branch). Reaching here means the residual dirt resisted even directory
+      // removal — surface the actual git status so the operator can act.
+      const dirtyStatus = await getWorktreeStatus(worktreePath)
       const summary = `Cannot start run because worktree is dirty before loop start: ${worktreePath}`
+        + (dirtyStatus ? `\nUnresolved changes (auto-heal failed):\n${dirtyStatus}` : '')
       await runStateController.markBlocked(run.id, {
         from: 'running',
         fields: {

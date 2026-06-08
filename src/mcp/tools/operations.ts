@@ -10,6 +10,9 @@ import { createForgeAdapter } from '../../forge/factory.js'
 import { pollOnce } from '../../runner/poller.js'
 import { assertMcpMutationAuth } from './auth.js'
 
+/** Surface that initiated a user action, recorded in run_log_events telemetry. */
+export type UserActionActor = 'mcp' | 'web' | 'cli' | 'tui'
+
 export async function handleRetry(
   args: {
     repo: string
@@ -17,6 +20,7 @@ export async function handleRetry(
     resetPlan?: boolean
     fresh?: boolean
     strategy?: UpdateStrategy
+    actor?: UserActionActor
     authToken?: string
   },
   deps: MCPDependencies,
@@ -29,7 +33,7 @@ export async function handleRetry(
     dryRun: false,
     immediate: false,
     strategyOverride: args.strategy,
-    actor: 'mcp',
+    actor: args.actor ?? 'mcp',
   })
   const trigger = triggerPoller(deps)
   return {
@@ -121,7 +125,7 @@ export async function handleRebase(
 }
 
 export async function handleContinue(
-  args: { repo: string; issueNumber: number; strategy?: UpdateStrategy; authToken?: string },
+  args: { repo: string; issueNumber: number; strategy?: UpdateStrategy; actor?: UserActionActor; authToken?: string },
   deps: MCPDependencies,
 ): Promise<unknown> {
   assertMcpMutationAuth(args.authToken, deps)
@@ -138,7 +142,7 @@ export async function handleContinue(
 
   const result = await queueContinue(deps.db, forge, repoConfig, args.issueNumber, botUser, {
     strategyOverride: args.strategy,
-    actor: 'mcp',
+    actor: args.actor ?? 'mcp',
     maxAttemptChainLength: deps.config.loop.maxAttemptChainLength,
   })
   const trigger = result.queued ? triggerPoller(deps) : null

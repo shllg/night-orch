@@ -34,6 +34,10 @@ const RUN_STATUS_VALUES = ['queued', 'running', 'blocked', 'review_ready', 'erro
 const RUN_VIEW_VALUES = ['active', 'completed', 'failed', 'all'] as const
 const INBOX_TRIAGE_VALUES = ['needs_human', 'review_ready', 'blocked', 'error', 'all'] as const
 const UPDATE_STRATEGY_VALUES = ['merge', 'rebase'] as const
+// Surface that initiated a user action, recorded in run_log_events telemetry.
+// Defaults to 'mcp' when omitted; the web UI passes 'web' so its actions are not
+// mislabeled as raw MCP calls (both share the same tool handler).
+const USER_ACTION_ACTOR_VALUES = ['mcp', 'web', 'cli', 'tui'] as const
 const LIST_ISSUES_FILTER_VALUES = ['eligible', 'running', 'blocked', 'all'] as const
 const FILE_LOOP_ACTION_VALUES = ['start', 'stop', 'status'] as const
 
@@ -106,6 +110,7 @@ const RetryArgsSchema = z.object({
   resetPlan: z.boolean().optional(),
   fresh: z.boolean().optional(),
   strategy: z.enum(UPDATE_STRATEGY_VALUES).optional(),
+  actor: z.enum(USER_ACTION_ACTOR_VALUES).optional(),
   authToken: z.string().optional(),
 }).passthrough()
 const CostOverrideArgsSchema = z.object({
@@ -163,6 +168,7 @@ const ContinueArgsSchema = z.object({
   repo: z.string(),
   issueNumber: z.number(),
   strategy: z.enum(UPDATE_STRATEGY_VALUES).optional(),
+  actor: z.enum(USER_ACTION_ACTOR_VALUES).optional(),
   authToken: z.string().optional(),
 }).passthrough()
 const FileLoopArgsSchema = z.object({

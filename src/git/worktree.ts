@@ -77,30 +77,33 @@ export function createWorktreeManager(): WorktreeManager {
       if (existsSync(worktreePath)) {
         const valid = await validateWorktree(worktreePath, branchName)
         if (valid) {
-          // Clean any leftover uncommitted state from prior runs
-          await resetWorktree(worktreePath)
+          const reused = await refreshExistingWorktree({
+            worktreePath,
+            branchName,
+            baseBranch,
+            resetToBase: resetToBase ?? false,
+            preserveBranchState: preserveBranchState ?? false,
+            updateStrategy,
+          })
 
-          if (resetToBase) {
-            // Prior run produced tainted work — discard all commits and start fresh
-            logger.info({ worktreePath, branchName, baseBranch }, 'Resetting branch to base — prior run was tainted')
-            await hardResetToBase(worktreePath, baseBranch)
-            const isClean = await isWorktreeClean(worktreePath)
-            return { path: worktreePath, branchName, exists: true, isClean, rebaseConflict: false }
-          }
+          // A rebase/merge conflict is handled by the caller (not a dirty-state
+          // failure); return it as-is. A clean worktree is good to go.
+          if (reused.isClean || reused.rebaseConflict) return reused
 
-          if (preserveBranchState) {
-            logger.info({ worktreePath, branchName }, 'Reusing existing worktree without updating from base')
-            const isClean = await isWorktreeClean(worktreePath)
-            return { path: worktreePath, branchName, exists: true, isClean, rebaseConflict: false }
-          }
-
-          logger.info({ worktreePath, branchName, updateStrategy }, 'Reusing existing worktree')
-          const updateResult = await updateFromBase(worktreePath, baseBranch, updateStrategy)
-          if (!updateResult.success) {
-            logger.warn({ worktreePath, baseBranch, updateStrategy }, 'Update from base failed — preserving existing work, coder will handle divergence')
-          }
-          const isClean = await isWorktreeClean(worktreePath)
-          return { path: worktreePath, branchName, exists: true, isClean, rebaseConflict: !updateResult.success }
+          // Auto-heal: the worktree is still dirty after a forceful reset —
+          // typically untracked files git cannot remove (e.g. root-owned files a
+          // docker run dropped in the tree). Discard the scratch worktree
+          // entirely and recreate it from the branch. Committed work lives on the
+          // branch and survives; only uncommitted cruft is lost.
+          logger.warn(
+            { worktreePath, branchName },
+            'Worktree still dirty after reset — recreating from branch to self-heal',
+          )
+          await removeWorktree(repoLocalPath, worktreePath)
+          return await createFreshWorktree(repoLocalPath, baseBranch, branchName, worktreePath, updateStrategy, {
+            resetToBase: resetToBase ?? false,
+            preserveBranchState: preserveBranchState ?? false,
+          })
         }
 
         // Corrupt — remove and recreate
@@ -217,6 +220,48 @@ async function createFreshWorktree(
   return { path: worktreePath, branchName, exists: true, isClean, rebaseConflict: !updateResult.success }
 }
 
+/**
+ * Refresh an existing, valid worktree for reuse: discard uncommitted cruft, then
+ * bring it to the desired state per policy (`resetToBase` / `preserveBranchState`
+ * / update-from-base). Returns the resulting state; the caller decides whether to
+ * self-heal a still-dirty result by recreating the worktree.
+ */
+async function refreshExistingWorktree(params: {
+  worktreePath: string
+  branchName: string
+  baseBranch: string
+  resetToBase: boolean
+  preserveBranchState: boolean
+  updateStrategy: UpdateStrategy
+}): Promise<WorktreeInfo> {
+  const { worktreePath, branchName, baseBranch, resetToBase, preserveBranchState, updateStrategy } = params
+
+  // Clean any leftover uncommitted state from prior runs.
+  await resetWorktree(worktreePath)
+
+  if (resetToBase) {
+    // Prior run produced tainted work — discard all commits and start fresh.
+    logger.info({ worktreePath, branchName, baseBranch }, 'Resetting branch to base — prior run was tainted')
+    await hardResetToBase(worktreePath, baseBranch)
+    const isClean = await isWorktreeClean(worktreePath)
+    return { path: worktreePath, branchName, exists: true, isClean, rebaseConflict: false }
+  }
+
+  if (preserveBranchState) {
+    logger.info({ worktreePath, branchName }, 'Reusing existing worktree without updating from base')
+    const isClean = await isWorktreeClean(worktreePath)
+    return { path: worktreePath, branchName, exists: true, isClean, rebaseConflict: false }
+  }
+
+  logger.info({ worktreePath, branchName, updateStrategy }, 'Reusing existing worktree')
+  const updateResult = await updateFromBase(worktreePath, baseBranch, updateStrategy)
+  if (!updateResult.success) {
+    logger.warn({ worktreePath, baseBranch, updateStrategy }, 'Update from base failed — preserving existing work, coder will handle divergence')
+  }
+  const isClean = await isWorktreeClean(worktreePath)
+  return { path: worktreePath, branchName, exists: true, isClean, rebaseConflict: !updateResult.success }
+}
+
 async function validateWorktree(worktreePath: string, expectedBranch: string): Promise<boolean> {
   try {
     const currentBranch = await getCurrentBranch(worktreePath)
@@ -245,16 +290,37 @@ async function isWorktreeClean(worktreePath: string): Promise<boolean> {
 }
 
 /**
+ * Return the `git status --porcelain` listing for a worktree (empty string when
+ * clean). Used to make a dirty-worktree block actionable instead of opaque.
+ * Best-effort: returns an explanatory string if git itself fails.
+ */
+export async function getWorktreeStatus(worktreePath: string): Promise<string> {
+  try {
+    const { stdout } = await runGit(['status', '--porcelain'], { cwd: worktreePath })
+    return stdout.trim()
+  } catch (err) {
+    return `<failed to read git status: ${String(err)}>`
+  }
+}
+
+/**
  * Discard all uncommitted changes (tracked and untracked) so the worktree
  * starts each run in a pristine state.
+ *
+ * `reset --hard` restores tracked content and file modes; `clean -ffd` removes
+ * untracked files AND nested git repos (the second `-f`) that a single `-f`
+ * would skip. Files git still cannot remove (e.g. root-owned files a container
+ * dropped in the tree) are left behind — the caller detects the residual dirty
+ * state and self-heals by recreating the worktree. Errors are logged, not
+ * thrown, for the same reason.
  */
 async function resetWorktree(worktreePath: string): Promise<void> {
   try {
-    await runGit(['checkout', '.'], { cwd: worktreePath })
-    await runGit(['clean', '-fd'], { cwd: worktreePath })
+    await runGit(['reset', '--hard', 'HEAD'], { cwd: worktreePath })
+    await runGit(['clean', '-ffd'], { cwd: worktreePath })
     logger.debug({ worktreePath }, 'Reset worktree to clean state')
   } catch (err) {
-    logger.warn({ worktreePath, err }, 'Failed to reset worktree — continuing anyway')
+    logger.warn({ worktreePath, err }, 'Failed to reset worktree — caller will recreate if still dirty')
   }
 }
 
@@ -264,7 +330,7 @@ async function resetWorktree(worktreePath: string): Promise<void> {
  */
 async function hardResetToBase(worktreePath: string, baseBranch: string): Promise<void> {
   await runGit(['reset', '--hard', `origin/${baseBranch}`], { cwd: worktreePath })
-  await runGit(['clean', '-fd'], { cwd: worktreePath })
+  await runGit(['clean', '-ffd'], { cwd: worktreePath })
 }
 
 /**

@@ -95,7 +95,7 @@ describe('WorktreeManager corrupt worktree detection', () => {
     expect(result.isClean).toBe(true)
   })
 
-  it('reports dirty status when worktree has uncommitted changes', async () => {
+  it('auto-cleans leftover untracked files on re-ensure (self-heal)', async () => {
     const worktreePath = join(worktreeRoot, 'test-wt')
 
     await manager.ensure({
@@ -105,10 +105,10 @@ describe('WorktreeManager corrupt worktree detection', () => {
       worktreePath,
     })
 
-    // Add an uncommitted file
+    // Simulate cruft a prior run left behind.
     writeFileSync(join(worktreePath, 'dirty.txt'), 'uncommitted')
 
-    // Re-ensure — should detect dirty state
+    // Re-ensure — reset discards the cruft, leaving a clean worktree.
     const result = await manager.ensure({
       repoLocalPath: repoPath,
       baseBranch: 'main',
@@ -116,7 +116,65 @@ describe('WorktreeManager corrupt worktree detection', () => {
       worktreePath,
     })
 
-    expect(result.isClean).toBe(false)
+    expect(result.isClean).toBe(true)
+    expect(existsSync(join(worktreePath, 'dirty.txt'))).toBe(false)
+  })
+
+  it('removes an untracked nested git repo that a single `clean -f` would skip', async () => {
+    const worktreePath = join(worktreeRoot, 'test-wt')
+
+    await manager.ensure({
+      repoLocalPath: repoPath,
+      baseBranch: 'main',
+      branchName: 'orch/1-nested',
+      worktreePath,
+    })
+
+    // A docker/build step can drop a directory with its own .git; `git clean -fd`
+    // skips it, `git clean -ffd` removes it.
+    const nested = join(worktreePath, 'nested-repo')
+    await execa('git', ['init', nested])
+    writeFileSync(join(nested, 'file.txt'), 'data')
+
+    const result = await manager.ensure({
+      repoLocalPath: repoPath,
+      baseBranch: 'main',
+      branchName: 'orch/1-nested',
+      worktreePath,
+    })
+
+    expect(result.isClean).toBe(true)
+    expect(existsSync(nested)).toBe(false)
+  })
+
+  it('preserves committed branch work while self-healing untracked cruft', async () => {
+    const worktreePath = join(worktreeRoot, 'test-wt')
+
+    await manager.ensure({
+      repoLocalPath: repoPath,
+      baseBranch: 'main',
+      branchName: 'orch/1-preserve',
+      worktreePath,
+    })
+
+    // Commit real work on the branch, then leave untracked cruft behind.
+    writeFileSync(join(worktreePath, 'feature.txt'), 'real work')
+    await execa('git', ['-C', worktreePath, 'add', 'feature.txt'])
+    await execa('git', ['-C', worktreePath, 'commit', '-m', 'feature work'])
+    writeFileSync(join(worktreePath, 'cruft.txt'), 'junk')
+
+    const result = await manager.ensure({
+      repoLocalPath: repoPath,
+      baseBranch: 'main',
+      branchName: 'orch/1-preserve',
+      worktreePath,
+      preserveBranchState: true,
+    })
+
+    expect(result.isClean).toBe(true)
+    expect(existsSync(join(worktreePath, 'cruft.txt'))).toBe(false)
+    // Committed work survives the self-heal.
+    expect(existsSync(join(worktreePath, 'feature.txt'))).toBe(true)
   })
 
   it('remove cleans up completely', async () => {
