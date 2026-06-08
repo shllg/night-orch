@@ -64,25 +64,42 @@ export async function runVerifyCommands(
           reject: false,
         })
 
-        const passed = result.exitCode === 0
         const durationMs = Date.now() - start
+
+        // execa with `reject: false` returns `exitCode: undefined` when the
+        // process is killed (timeout or signal) — never a clean 0. Surfacing it
+        // as exit 0 (`?? 0`) would make a killed run look like a clean exit that
+        // somehow "failed", which is exactly the kind of misleading telemetry
+        // that hides a too-low `timeoutSeconds`. Record a real non-zero code
+        // (124 = timeout, matching coreutils) and annotate stderr.
+        const rawExit = result.exitCode
+        const timedOut = result.timedOut === true
+        const exitCode: number = rawExit == null ? (timedOut ? 124 : 1) : rawExit
+        const passed = exitCode === 0
+        let stderr = result.stderr
+        if (timedOut) {
+          const seconds = Math.round(cmd.timeoutMs / 1000)
+          const note = `Verify command timed out after ${seconds}s and was killed${result.signal ? ` (${result.signal})` : ''}. Raise this command's \`timeoutSeconds\` if it needs longer.`
+          stderr = stderr ? `${stderr}\n${note}` : note
+        }
 
         if (passed) {
           logger.info({ command: commandLabel, durationMs }, 'Verify command passed')
         } else {
           logger.warn({
             command: commandLabel,
-            exitCode: result.exitCode,
+            exitCode,
+            timedOut,
             durationMs,
-            stderrTail: sanitizeErrorMessage(result.stderr.slice(-500)),
-          }, 'Verify command failed')
+            stderrTail: sanitizeErrorMessage(stderr.slice(-500)),
+          }, timedOut ? 'Verify command timed out' : 'Verify command failed')
         }
 
         results.push({
           command: commandLabel,
-          exitCode: result.exitCode ?? 0,
+          exitCode,
           stdout: result.stdout,
-          stderr: result.stderr,
+          stderr,
           durationMs,
           passed,
         })

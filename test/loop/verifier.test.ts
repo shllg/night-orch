@@ -74,6 +74,39 @@ describe('runVerifyCommands', () => {
     expect(results[0]!.stderr).toContain('Command timed out')
   })
 
+  it('records a timed-out command as failed with exit 124, not a masked exit 0', async () => {
+    // execa with `reject: false` returns exitCode undefined + timedOut on kill.
+    mockExeca.mockResolvedValue({
+      exitCode: undefined,
+      timedOut: true,
+      signal: 'SIGTERM',
+      stdout: 'partial output',
+      stderr: '',
+    } as never)
+
+    const results = await runVerifyCommands('/tmp/wt', [{ command: 'pnpm test', timeoutSeconds: 60 }])
+
+    expect(results[0]!.passed).toBe(false)
+    expect(results[0]!.exitCode).toBe(124) // never 0
+    expect(results[0]!.stderr).toContain('timed out after 60s')
+    expect(results[0]!.stderr).toContain('SIGTERM')
+  })
+
+  it('records a signal-killed command as failed exit 1 instead of exit 0', async () => {
+    mockExeca.mockResolvedValue({
+      exitCode: undefined,
+      timedOut: false,
+      signal: 'SIGKILL',
+      stdout: '',
+      stderr: 'oom',
+    } as never)
+
+    const results = await runVerifyCommands('/tmp/wt', ['pnpm test'])
+
+    expect(results[0]!.passed).toBe(false)
+    expect(results[0]!.exitCode).toBe(1)
+  })
+
   it('returns empty array for empty command list', async () => {
     const results = await runVerifyCommands('/tmp/wt', [])
     expect(results).toEqual([])
