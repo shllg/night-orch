@@ -19,6 +19,8 @@ import { getBuildInfo } from '../utils/build-info.js'
 export interface MCPDependencies {
   db: Database.Database
   config: Config
+  /** Absolute path the daemon loaded `config` from. Used by hot-reload tooling. */
+  configPath?: string
   forgeAdapters: Map<string, ForgeAdapter>
   poller: PollerControl | null
   metrics: MetricsService | null

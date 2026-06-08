@@ -846,6 +846,43 @@ Options:
 
 Remove stale worktrees, delete merged branches, archive old logs. Respects `storage.retention` settings.
 
+### `night-orch reload`
+
+Hot-reload the on-disk config without restarting the daemon. The running
+poller drains the request between cycles and re-validates the file; the
+next poll cycle then runs against the new config. If validation fails
+the running config stays live and the error is logged.
+
+```bash
+# CLI
+night-orch reload                 # validate locally, then signal daemon
+night-orch reload --dry-run       # validate without signalling
+
+# Equivalent signal — useful from systemd or shell scripts
+kill -HUP $(pidof night-orch)
+
+# MCP / web
+# Invoke the `night-orch-reload` tool (auth token required when configured).
+
+# TUI
+# Press `R` from any non-focused view.
+```
+
+Three trigger mechanisms are equivalent and coalesce to a single reload
+between cycles: the `reload` CLI command (writes
+`~/.config/night-orch/reload-request-<dbhash>`), the `SIGHUP` signal, and
+the `night-orch-reload` MCP tool. Use whichever fits your deployment.
+
+Notes:
+- The trigger fires _between_ poll cycles, not mid-cycle. An in-flight
+  run finishes against the old config; the next cycle picks up the new
+  one.
+- Settings that are read at startup only — MCP HTTP port, metrics
+  endpoint host/port, web server bind host/port — still require a full
+  restart to take effect. Repo lists, worker profiles, workflows, poll
+  interval, budgets, retention, and forge tokens are all picked up
+  hot.
+
 ### `night-orch labels-init [repo]`
 
 Create or update orchestration labels on GitHub/Forgejo. Run this after initial setup or after adding new repos. Pass a repo slug to update a single repo, or omit for all configured repos.
@@ -856,7 +893,7 @@ Send a test notification through all configured channels. Verifies webhook/Disco
 
 ### `night-orch mcp`
 
-Start the MCP server on stdio transport (for Claude Code integration). Exposes 24 tools and 3 resources for querying and controlling night-orch.
+Start the MCP server on stdio transport (for Claude Code integration). Exposes 25 tools and 3 resources for querying and controlling night-orch.
 
 ### `night-orch monitoring`
 
@@ -1005,7 +1042,7 @@ the Phase 4 gate without Prometheus access.
 
 Night-orch exposes an MCP server for integration with Claude Code and other MCP clients.
 
-### Tools (24)
+### Tools (25)
 
 | Tool | Description |
 |------|-------------|
@@ -1032,6 +1069,7 @@ Night-orch exposes an MCP server for integration with Claude Code and other MCP 
 | `night-orch-stream-events` | Stream recent agent events |
 | `night-orch-rebase` | Queue rebase + re-evaluate |
 | `night-orch-update` | Trigger self-update |
+| `night-orch-reload` | Hot-reload config from disk on the next poll cycle (no process restart) |
 | `night-orch-file-loop` | Start, stop, or inspect repo-scoped file-loop sessions |
 
 ### Usage

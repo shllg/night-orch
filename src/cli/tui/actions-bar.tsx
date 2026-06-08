@@ -67,7 +67,7 @@ function globalHints(options: {
   }
 
   const autoRefreshHint = activeTab === 'stats' ? ' [a]toggle auto-refresh' : ''
-  const actionHints = controlsEnabled && !busy ? ' [p]poll [s]sync [L]labels-init [D]cleanup(confirm) [%]daily-cap-override' : ''
+  const actionHints = controlsEnabled && !busy ? ' [p]poll [s]sync [R]reload-config [L]labels-init [D]cleanup(confirm) [%]daily-cap-override' : ''
   return `[q]quit [r]refresh${autoRefreshHint}${actionHints}`
 }
 

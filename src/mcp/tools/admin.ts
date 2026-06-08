@@ -6,6 +6,8 @@ import { resetDailyCostsAndResume } from '../../ops/daily-cost-reset.js'
 import { LabelsInitEngine, formatLabelsInitSummary } from '../../ops/labels-init.js'
 import { DeleteIssueEntryEngine } from '../../ops/delete-entry.js'
 import { requestUpdateViaTriggerFile } from '../../supervisor/update-control.js'
+import { requestExternalReload } from '../../poller/reload-control.js'
+import { tryReloadConfig } from '../../config/reload.js'
 import { assertMcpMutationAuth } from './auth.js'
 
 export async function handleCostOverride(
@@ -149,4 +151,28 @@ export async function handleUpdate(
   }
 
   return requestUpdateViaTriggerFile()
+}
+
+export async function handleReload(
+  args: { authToken?: string },
+  deps: MCPDependencies,
+): Promise<unknown> {
+  assertMcpMutationAuth(args.authToken, deps)
+
+  // Pre-flight the on-disk file so the operator sees validation errors
+  // immediately instead of only in the daemon log.
+  if (deps.configPath) {
+    const outcome = tryReloadConfig(deps.configPath, deps.config)
+    if (!outcome.reloaded) {
+      throw new Error(`Config validation failed: ${outcome.error?.message ?? 'unknown error'}`)
+    }
+  }
+
+  const result = requestExternalReload(deps.config.storage.dbPath)
+  return {
+    accepted: true,
+    mechanism: result.mechanism,
+    triggerPath: result.triggerPath,
+    message: 'Reload requested — daemon will apply on next poll cycle.',
+  }
 }

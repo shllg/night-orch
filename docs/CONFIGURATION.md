@@ -23,6 +23,41 @@ Recommended deployment uses a dedicated non-root user (for example `orch`) with:
 - code in `/home/orch/apps/night-orch`
 - target repos in `/home/orch/repos/*`
 
+## Hot-Reloading Config
+
+Edits to the resolved YAML take effect on the next poll cycle once you
+ask the daemon to reload. No process restart required.
+
+Three equivalent triggers (the daemon drains them between poll cycles
+and coalesces multiple requests into one reload):
+
+- `night-orch reload` — validates the file locally first, then writes
+  `~/.config/night-orch/reload-request-<dbhash>` for the daemon to drain.
+- `SIGHUP` to the daemon process — e.g. `kill -HUP $(pidof night-orch)`
+  or `ExecReload=` in systemd.
+- The `night-orch-reload` MCP tool (and the TUI `R` keybind, which
+  writes the same trigger file).
+
+If validation fails the running config stays live and the parse error
+is logged at `error` level.
+
+What hot-reloads:
+
+- `repos[]`, `workerProfiles`, `verificationProfiles`, `workflows`
+- `github.pollIntervalSeconds`, mention/comment settings
+- `loop`, `security`, `cost`, `storage.retention`, `storage.autoCleanup`
+- `notifications`, `mentions`, `commentCommands`
+
+What requires a full restart (read once at process start):
+
+- `mcp.httpHost` / `mcp.httpPort`
+- `metrics.host` / `metrics.port`
+- Web server bind host/port
+- `storage.dbPath`
+
+Per-repo project config (`.night-orch.yml` files inside each repo) is
+re-resolved alongside the central config on reload.
+
 ## Per-Repo Project Config (`.night-orch.yml`)
 
 After the central config is loaded, night-orch checks each configured `repos[].localPath` for:

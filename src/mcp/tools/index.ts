@@ -3,7 +3,7 @@ import { resolveConfigWithRuntimeSettings } from '../../settings/runtime.js'
 import { handleListSettings, handleSetSetting, handleClearSetting } from './settings.js'
 import { handleStatus, handleRunDetail, handleListRuns, handleListInbox, handleCostReport, handleListIssues, handleStreamEvents } from './status.js'
 import { handleRetry, handleSync, handleCleanup, handlePoll, handleRebase, handleContinue } from './operations.js'
-import { handleCostOverride, handleCostReset, handleDailyCostOverride, handleDailyCostReset, handleLabelsInit, handleDeleteEntry, handleUpdate } from './admin.js'
+import { handleCostOverride, handleCostReset, handleDailyCostOverride, handleDailyCostReset, handleLabelsInit, handleDeleteEntry, handleUpdate, handleReload } from './admin.js'
 import { handleFileLoop } from './file-loop.js'
 import { handleHandoffs } from './handoffs.js'
 import { handleTimeline } from './timeline.js'
@@ -571,6 +571,18 @@ export function registerTools(): ToolDefinition[] {
       },
     },
     {
+      name: 'night-orch-reload',
+      description:
+        'Hot-reload config from disk on the next poll cycle (no process restart). ' +
+        'Validates the on-disk file first; invalid config is rejected and the running config stays live.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          authToken: { type: 'string', description: 'Required when mcp.authTokenEnv is configured' },
+        },
+      },
+    },
+    {
       name: 'night-orch-file-loop',
       description: 'Start, stop, or inspect repo-scoped file-loop sessions.',
       inputSchema: {
@@ -667,6 +679,8 @@ export async function handleToolCall(
       return handleContinue(parseToolArgs(name, ContinueArgsSchema, args), runtimeDeps)
     case 'night-orch-update':
       return handleUpdate(parseToolArgs(name, AuthTokenArgsSchema, args), runtimeDeps)
+    case 'night-orch-reload':
+      return handleReload(parseToolArgs(name, AuthTokenArgsSchema, args), runtimeDeps)
     case 'night-orch-file-loop':
       return handleFileLoop(parseToolArgs(name, FileLoopArgsSchema, args), runtimeDeps)
     default:

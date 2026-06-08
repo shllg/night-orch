@@ -31,6 +31,7 @@ import type { ProjectsViewMode, RunsViewMode, TabId, TuiLogLine } from './types.
 import { formatUtcClock, nowUtcIso } from '../../utils/time.js'
 import { getBuildInfo } from '../../utils/build-info.js'
 import { FileLoopEngine } from '../../fileloop/engine.js'
+import { requestExternalReload } from '../../poller/reload-control.js'
 import {
   clearRuntimeSettingOverride,
   listRuntimeSettings,
@@ -194,6 +195,7 @@ export type TuiActionCommand =
   | 'toggleStrategy'
   | 'cleanupArm'
   | 'cleanupConfirm'
+  | 'reload'
   | 'standaloneMessage'
 
 interface ResolveActionCommandInput {
@@ -216,6 +218,7 @@ export function resolveActionCommand(args: ResolveActionCommandInput): TuiAction
     || args.input === 's'
     || args.input === 'D'
     || args.input === 'L'
+    || args.input === 'R'
 
   if (args.actionBusy) return 'none'
 
@@ -224,13 +227,14 @@ export function resolveActionCommand(args: ResolveActionCommandInput): TuiAction
   }
 
   // Keep focused detail screens isolated to match their legend.
-  if (isFocusedDetail && (args.input === 'p' || args.input === 's' || args.input === 'D' || args.input === 'L')) {
+  if (isFocusedDetail && (args.input === 'p' || args.input === 's' || args.input === 'D' || args.input === 'L' || args.input === 'R')) {
     return 'none'
   }
 
   if (args.input === 'p') return 'poll'
   if (args.input === 's') return 'sync'
   if (args.input === 'L') return 'labelsInit'
+  if (args.input === 'R') return 'reload'
   if (args.input === '%') return 'dailyCostOverride'
   if (args.activeTab === 'fileloop' && args.input === 'f') return 'fileLoopStart'
   if (args.activeTab === 'fileloop' && args.input === 'x') return 'fileLoopStop'
@@ -805,6 +809,13 @@ export function App({
     await runAction('poll', async () => runPollCycle('manual', selectedIssue))
   }, [runAction, runPollCycle, selectedIssue])
 
+  const runReload = useCallback(async () => {
+    await runAction('reload', async () => {
+      const result = requestExternalReload(config.storage.dbPath)
+      return `reload requested → ${result.triggerPath}`
+    })
+  }, [config, runAction])
+
   const runRebase = useCallback(async () => {
     await runAction('rebase', async () => {
       const target = selectedIssue ?? issues.find((issue) => issue.status === 'review_ready')
@@ -1297,6 +1308,10 @@ export function App({
     }
     if (actionCommand === 'labelsInit') {
       void runLabelsInit()
+      return
+    }
+    if (actionCommand === 'reload') {
+      void runReload()
       return
     }
     if (actionCommand === 'cleanupArm') {

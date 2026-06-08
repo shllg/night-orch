@@ -6,6 +6,8 @@ import { createOrchestrationCache } from '../../runner/orchestration-cache.js'
 import { SyncEngine } from '../../ops/sync.js'
 import { ShutdownHandler } from '../../poller/shutdown.js'
 import { PollCycleController, resolveExternalPollTriggerPath } from '../../poller/control.js'
+import { ReloadController, resolveExternalReloadTriggerPath } from '../../poller/reload-control.js'
+import { tryReloadConfig } from '../../config/reload.js'
 import { createMetricsService, type MetricsService } from '../../metrics/service.js'
 import { createForgeAdapter } from '../../forge/factory.js'
 import type { ForgeAdapter } from '../../forge/types.js'
@@ -42,8 +44,9 @@ export async function webCommand(
 
   let baseConfig
   let rawConfig: unknown
+  let configPath: string
   try {
-    const configPath = resolveConfigPath(globalOpts?.config, {
+    configPath = resolveConfigPath(globalOpts?.config, {
       trustWorkspace: globalOpts?.trustWorkspace ?? false,
     })
     const loadedConfig = loadConfigWithRaw(configPath)
@@ -121,11 +124,24 @@ export async function webCommand(
   const pollerControl = standalone
     ? new PollCycleController(resolveExternalPollTriggerPath(baseConfig.storage.dbPath))
     : null
+  const reloadController = standalone
+    ? new ReloadController(resolveExternalReloadTriggerPath(baseConfig.storage.dbPath))
+    : null
+  const unregisterReload = reloadController?.register() ?? (() => undefined)
+  let mcpDeps: {
+    db: typeof db
+    config: typeof baseConfig
+    configPath: string
+    forgeAdapters: Map<string, ForgeAdapter>
+    poller: typeof pollerControl
+    metrics: MetricsService | null
+  } | undefined
   let mcpServer: Server | undefined
   if (standalone && runtimeConfig.mcp.enabled) {
+    mcpDeps = { db, config: baseConfig, configPath, forgeAdapters, poller: pollerControl, metrics: metrics ?? null }
     try {
       mcpServer = await startMCPHttpServer(
-        { db, config: baseConfig, forgeAdapters, poller: pollerControl, metrics: metrics ?? null },
+        mcpDeps,
         runtimeConfig.mcp.httpHost,
         runtimeConfig.mcp.httpPort,
       )
@@ -165,6 +181,7 @@ export async function webCommand(
   // Graceful shutdown
   const shutdown = new ShutdownHandler(db)
   shutdown.register(async () => {
+    unregisterReload()
     if (webServer) {
       const serverToClose = webServer
       await new Promise<void>((resolve) => serverToClose.close(() => resolve()))
@@ -205,6 +222,32 @@ export async function webCommand(
   // Poll loop
   const orchestrationCache = createOrchestrationCache()
   while (!shutdown.isShuttingDown) {
+    if (reloadController?.consume()) {
+      const outcome = tryReloadConfig(configPath, baseConfig)
+      if (outcome.reloaded) {
+        baseConfig = outcome.config
+        const reloaded = resolveConfigWithRuntimeSettings(baseConfig, db)
+        if (mcpDeps) {
+          const newAdapters = new Map<string, ForgeAdapter>()
+          for (const repo of reloaded.repos) {
+            try {
+              newAdapters.set(repo.repo, createForgeAdapter(repo, reloaded))
+            } catch (err) {
+              logger.warn({ repo: repo.repo, err }, 'Failed to rebuild forge adapter after reload')
+            }
+          }
+          // Swap atomically so concurrent MCP handlers never observe an empty map.
+          mcpDeps.config = baseConfig
+          mcpDeps.forgeAdapters = newAdapters
+        }
+        logger.info({ configPath }, 'Config hot-reloaded — applied on next poll cycle')
+      } else {
+        const errMsg = outcome.error instanceof ConfigError
+          ? [outcome.error.message, ...(outcome.error.details ?? [])].join('; ')
+          : outcome.error?.message
+        logger.error({ configPath, err: errMsg }, 'Config reload failed — keeping previous config live')
+      }
+    }
     try {
       runtimeConfig = resolveConfigWithRuntimeSettings(baseConfig, db)
       const runPromise = pollOnce(runtimeConfig, db, dryRun, metrics, undefined, orchestrationCache)

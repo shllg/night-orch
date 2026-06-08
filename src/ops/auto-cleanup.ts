@@ -16,6 +16,11 @@ export class AutoCleanupScheduler {
     private db: Database.Database,
   ) {}
 
+  /** Swap in a reloaded config without resetting the time-gate. */
+  setConfig(config: Config): void {
+    this.config = config
+  }
+
   async maybeRun(): Promise<void> {
     if (!this.config.storage.autoCleanup.enabled) return
 

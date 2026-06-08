@@ -96,7 +96,7 @@ Metrics (best-effort Prometheus) ◄──────────────�
 Core commands built with `commander`: `run` (long-running poller), `run-once` (single cycle), `doctor` (validate setup), `sync` (reconcile state with forge), `retry` (fresh restart from latest base), `continue` (resume existing branch with fresh PR context), `rebase` (explicit rebase and re-evaluate), `handoffs` (inspect persisted agent handoffs for one run), `cleanup` (remove stale artifacts), `notify-test` (test channels), and `mcp` (start MCP server). Global flags: `--config`, `--trust-workspace`, `--dry-run`, `--log-level`.
 
 ### Config (`src/config/`)
-YAML config validated by Zod schemas (`schema.ts`). The loader (`loader.ts`) reads central config, merges optional per-repo `.night-orch.yml/.yaml` overrides from each `repos[].localPath` (project wins), validates the merged result, and expands paths (`~` → home dir). Key files: `schema.ts` (types + validation), `loader.ts` (load + merge + expand).
+YAML config validated by Zod schemas (`schema.ts`). The loader (`loader.ts`) reads central config, merges optional per-repo `.night-orch.yml/.yaml` overrides from each `repos[].localPath` (project wins), validates the merged result, and expands paths (`~` → home dir). `reload.ts` re-runs the loader between poll cycles for hot-reload — invalid files are rejected and the previous config stays live. Key files: `schema.ts` (types + validation), `loader.ts` (load + merge + expand), `reload.ts` (safe in-place reload).
 
 > **Watch out:** Zod's `noUncheckedIndexedAccess` means every field accessed via bracket notation might be `undefined`. You'll see a lot of `if (!item) throw ...` guard patterns — these aren't paranoia, they're required by the compiler.
 
@@ -153,6 +153,8 @@ Model Context Protocol interface for external agents. Twenty-four tools — see 
 
 ### Poller (`src/poller/`)
 The R6 decomposition of the old `src/runner/poller.ts` god object. `discovery-scheduler.ts` picks eligible issues each cycle. `reaction-processor.ts` turns forge events (comment commands, label changes, PR reactions) into typed control commands. `attempt-dispatcher.ts` holds the lease, inserts a new `attempts` row, runs the loop engine, and finalizes. `error-recovery.ts` classifies typed worker errors and decides retry vs. block. `notify-dispatcher.ts` maps attempt events to notification payloads.
+
+`control.ts` and `reload-control.ts` host the between-cycle control surface: `PollCycleController` coalesces manual poll requests (CLI / TUI / MCP / trigger file) into a single early wakeup, and `ReloadController` drains hot-reload requests (`SIGHUP` + a hashed trigger file) so the next cycle re-reads `config.yaml`. Both are drained between cycles, never mid-run.
 
 ### AI (`src/ai/`)
 Phase 3 direct-LLM client layer for night-orch's **own** internal AI tasks — triage refinement, reviewer parse salvage, PR body generation, and the bounded rebase-conflict resolver. `anthropic.ts` (Messages API) and `openrouter.ts` (OpenAI-compat) are thin fetch wrappers with Zod-validated structured output. Most consumers gate on `ai.internal.enable.*`; the conflict resolver is additionally gated by `autoResolveConflicts.enabled` and `ai.internal.features.conflictResolver`. Token usage feeds the same cost ledger as CLI workers, tagged `token_source='measured_api'`. Code-editing roles (planner/coder/reviewer) **stay on the CLI path** — they rely on the agentic tool-use loop that direct APIs don't provide.

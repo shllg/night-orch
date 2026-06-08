@@ -17,7 +17,7 @@ describe('buildActionHints', () => {
     }))
 
     expect(sections.navigation).toContain('[1-7]tabs [h/l]tabs [j/k]select issue [o/enter]open')
-    expect(sections.global).toContain('[q]quit [r]refresh [p]poll [s]sync [L]labels-init [D]cleanup(confirm)')
+    expect(sections.global).toContain('[q]quit [r]refresh [p]poll [s]sync [R]reload-config [L]labels-init [D]cleanup(confirm)')
     expect(sections.issue).toContain('[t/T]retry [c]continue [_]rebase [m]strategy:default [X]delete entry [$]cost-override')
   })
 

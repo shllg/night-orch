@@ -45,6 +45,7 @@ import { webCommand } from './commands/web.js'
 import { demoCommand } from './commands/demo.js'
 import { serveCommand } from './commands/serve.js'
 import { updateCommand } from './commands/update.js'
+import { reloadCommand } from './commands/reload.js'
 import { continueCommand } from './commands/continue.js'
 import { costOverrideCommand } from './commands/cost-override.js'
 import { dailyCostOverrideCommand } from './commands/daily-cost-override.js'
@@ -317,6 +318,11 @@ program
   .command('update')
   .description('Trigger self-update — pulls latest code, rebuilds, and restarts services')
   .action((_opts, cmd) => updateCommand(cmd.parent?.opts()))
+
+program
+  .command('reload')
+  .description('Hot-reload config from disk on the next poll cycle (no process restart)')
+  .action((_opts, cmd) => reloadCommand(cmd.parent?.opts()))
 
 const settingsCommand = program
   .command('settings')

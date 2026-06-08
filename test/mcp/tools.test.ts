@@ -40,6 +40,7 @@ const EXPECTED_TOOL_NAMES = [
   'night-orch-rebase',
   'night-orch-continue',
   'night-orch-update',
+  'night-orch-reload',
   'night-orch-file-loop',
 ]
 
