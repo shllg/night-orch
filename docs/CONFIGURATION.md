@@ -1114,7 +1114,17 @@ There is **one** isolation model: each run gets its own worktree plus lifecycle 
 | `beforeRun` | run-hook[] | no | `[]` | Commands run once **before** the loop (fail-fast). Bring services up. |
 | `afterRun` | run-hook[] | no | `[]` | Commands run once **after** the loop in a `finally` — always run (success, block, error, exception), attempt-all (every entry runs even if one fails). |
 
-Each `check`/`beforeRun`/`afterRun` entry is either a bare `CommandSpec` or an object `{ command, failureHints?, env? }`. Substitution tokens `{issue}`, `{run}`, `{project}`, `{port}`, and `{port:NAME}` are expanded in every command segment **and in every `env` value**. Referencing a port token with no matching pool fails loudly.
+Each `check`/`beforeRun`/`afterRun` entry is either a bare `CommandSpec` or an object `{ command, failureHints?, env?, timeoutSeconds? }`. Substitution tokens `{issue}`, `{run}`, `{project}`, `{port}`, and `{port:NAME}` are expanded in every command segment **and in every `env` value**. Referencing a port token with no matching pool fails loudly.
+
+**Per-hook timeout.** Each hook has a default timeout of **300 seconds (5 min)**. Raise it on heavy bootstrap steps (image pulls, `structure.sql` load, large seed scripts) with `timeoutSeconds`:
+
+```yaml
+beforeRun:
+  - command: [bin/ci-test-setup]
+    timeoutSeconds: 900   # 15 min — large structure.sql + image pulls
+```
+
+A hook that exceeds its timeout is killed; the run fails with **exit code `124`** and a `Run hook timed out after Ns and was killed. Raise this hook's \`timeoutSeconds\` if it needs longer.` diagnostic — the same shape as a verify-command timeout. In `afterRun` (attempt-all), a timeout is logged and the next hook still runs.
 
 **Run-hook `env`.** Like a verify command's `env`, a run-hook `env` is layered on top of the bootstrap whitelist (which already carries `DOCKER_*`/`COMPOSE_*`) and **bypasses the secret blacklist** — an explicit operator opt-in. This is how allocated ports reach the service stack under whatever names the repo expects (night-orch imposes no env-var convention):
 

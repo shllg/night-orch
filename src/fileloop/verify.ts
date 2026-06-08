@@ -1,5 +1,5 @@
 import { execa } from 'execa'
-import { parseCommandSpec } from '../utils/command.js'
+import { parseCommandSpec, describeSpawnFailure } from '../utils/command.js'
 import { buildVerifierEnv } from '../workers/env.js'
 import type { FileLoopConfig } from '../config/schema.js'
 import type { FileLoopVerifyResult } from './types.js'
@@ -47,13 +47,19 @@ async function runCommands(
         timeout: timeoutSeconds * 1000,
         reject: false,
       })
+      // A missing/non-executable command resolves here (reject:false) with
+      // exitCode undefined + a `code` errno; name the file + reason (127/126)
+      // instead of masking it as a passed-looking exit 0 with empty stderr.
+      const spawnFailure = describeSpawnFailure(result, parsed.binary, worktreePath)
       results.push({
         command,
-        exitCode: result.exitCode ?? 0,
+        exitCode: spawnFailure ? spawnFailure.exitCode : result.exitCode ?? 0,
         stdout: result.stdout,
-        stderr: result.stderr,
+        stderr: spawnFailure
+          ? (result.stderr ? `${result.stderr}\n${spawnFailure.message}` : spawnFailure.message)
+          : result.stderr,
         durationMs: Date.now() - start,
-        passed: result.exitCode === 0,
+        passed: spawnFailure ? false : result.exitCode === 0,
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)

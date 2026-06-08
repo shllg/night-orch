@@ -47,4 +47,17 @@ describe('file-loop verify', () => {
     expect(result.passed).toBe(false)
     expect(result.results[0]?.exitCode).toBe(1)
   })
+
+  it('reports a missing verify command by name + ENOENT, never a masked exit 0', async () => {
+    const missing: FileLoopConfig = {
+      ...config,
+      perEditVerify: { enabled: true, commands: ['bin/definitely-missing-xyz'], timeoutSeconds: 5 },
+    }
+    const result = await verifyFile(tmpDir, 'src/app.ts', missing)
+    expect(result.passed).toBe(false)
+    expect(result.results[0]?.exitCode).toBe(127) // not the masked 0
+    expect(result.results[0]?.stderr).toContain('command not found')
+    expect(result.results[0]?.stderr).toContain('bin/definitely-missing-xyz')
+    expect(result.results[0]?.stderr).toContain('[ENOENT]')
+  })
 })

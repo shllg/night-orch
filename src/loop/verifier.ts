@@ -1,7 +1,7 @@
 import { execa } from 'execa'
 import type { VerifyResult } from './types.js'
 import { logger } from '../utils/logger.js'
-import { parseCommandSpec, type CommandSpec } from '../utils/command.js'
+import { parseCommandSpec, describeSpawnFailure, type CommandSpec } from '../utils/command.js'
 import { sanitizeErrorMessage } from '../utils/sanitize-error.js'
 
 const VERIFY_TIMEOUT_MS = 60_000
@@ -48,8 +48,8 @@ export async function runVerifyCommands(
       const beforeError = await runHookCommands(worktreePath, cmd.before, unitEnv, cmd.timeoutMs, 'before')
       if (beforeError) {
         const durationMs = Date.now() - start
-        logger.warn({ command: commandLabel, durationMs, stderrTail: sanitizeErrorMessage(beforeError.slice(-500)) }, 'Verify command before-hook failed')
-        results.push({ command: commandLabel, exitCode: 1, stdout: '', stderr: beforeError, durationMs, passed: false })
+        logger.warn({ command: commandLabel, durationMs, stderrTail: sanitizeErrorMessage(beforeError.message.slice(-500)) }, 'Verify command before-hook failed')
+        results.push({ command: commandLabel, exitCode: beforeError.exitCode, stdout: '', stderr: beforeError.message, durationMs, passed: false })
         continue
       }
 
@@ -71,13 +71,22 @@ export async function runVerifyCommands(
         // as exit 0 (`?? 0`) would make a killed run look like a clean exit that
         // somehow "failed", which is exactly the kind of misleading telemetry
         // that hides a too-low `timeoutSeconds`. Record a real non-zero code
-        // (124 = timeout, matching coreutils) and annotate stderr.
+        // (124 = timeout, matching coreutils) and annotate stderr. A command
+        // that could not be spawned (missing/non-executable) resolves here too,
+        // with exitCode undefined + a `code` errno — name the file instead of 1.
         const rawExit = result.exitCode
         const timedOut = result.timedOut === true
-        const exitCode: number = rawExit == null ? (timedOut ? 124 : 1) : rawExit
+        const spawnFailure = describeSpawnFailure(result, binary, worktreePath)
+        const exitCode: number = spawnFailure
+          ? spawnFailure.exitCode
+          : rawExit == null
+            ? (timedOut ? 124 : 1)
+            : rawExit
         const passed = exitCode === 0
         let stderr = result.stderr
-        if (timedOut) {
+        if (spawnFailure) {
+          stderr = stderr ? `${stderr}\n${spawnFailure.message}` : spawnFailure.message
+        } else if (timedOut) {
           const seconds = Math.round(cmd.timeoutMs / 1000)
           const note = `Verify command timed out after ${seconds}s and was killed${result.signal ? ` (${result.signal})` : ''}. Raise this command's \`timeoutSeconds\` if it needs longer.`
           stderr = stderr ? `${stderr}\n${note}` : note
@@ -92,7 +101,7 @@ export async function runVerifyCommands(
             timedOut,
             durationMs,
             stderrTail: sanitizeErrorMessage(stderr.slice(-500)),
-          }, timedOut ? 'Verify command timed out' : 'Verify command failed')
+          }, spawnFailure ? 'Verify command could not be executed' : timedOut ? 'Verify command timed out' : 'Verify command failed')
         }
 
         results.push({
@@ -133,10 +142,13 @@ export async function runVerifyCommands(
 /**
  * Run a list of hook commands (before/after a verify command) in the worktree.
  *
- * `before` (phase `'before'`) is fail-fast: returns the failure text of the
- * first non-zero/crashing hook so the caller can skip the command. `after`
- * (phase `'after'`) is attempt-all: every hook runs even if an earlier one
- * fails, failures are logged and swallowed, and it always returns null.
+ * `before` (phase `'before'`) is fail-fast: returns the failure text + exit
+ * code of the first non-zero/crashing hook so the caller can skip the command.
+ * `after` (phase `'after'`) is attempt-all: every hook runs even if an earlier
+ * one fails, failures are logged and swallowed, and it always returns null.
+ *
+ * A missing/non-executable hook is reported by name + reason (ENOENT vs EACCES)
+ * with a 127/126 exit code, never a bare `exit undefined`.
  */
 async function runHookCommands(
   worktreePath: string,
@@ -144,7 +156,7 @@ async function runHookCommands(
   env: Record<string, string> | undefined,
   timeoutMs: number,
   phase: 'before' | 'after',
-): Promise<string | null> {
+): Promise<{ message: string; exitCode: number } | null> {
   for (const hook of hooks) {
     const label = Array.isArray(hook) ? hook.join(' ') : hook
     try {
@@ -157,12 +169,25 @@ async function runHookCommands(
         reject: false,
       })
       if (result.exitCode !== 0) {
-        const failure = `${phase} hook failed: ${label} (exit ${result.exitCode})\n${result.stderr ?? ''}`
-        logger.warn({ hook: label, phase, exitCode: result.exitCode, stderrTail: sanitizeErrorMessage(String(result.stderr ?? '').slice(-500)) }, 'Verify hook failed')
+        const spawnFailure = describeSpawnFailure(result, binary, worktreePath)
+        // For a killed (timeout/signal) hook, exitCode is undefined — describe
+        // the cause instead of printing a bare "(exit undefined)".
+        const exitDesc = result.exitCode != null
+          ? `exit ${result.exitCode}`
+          : result.timedOut ? 'timed out' : result.signal ? `killed by ${result.signal}` : 'no exit code'
+        const failure = spawnFailure
+          ? { message: `${phase} hook failed: ${label}\n${spawnFailure.message}`, exitCode: spawnFailure.exitCode }
+          : { message: `${phase} hook failed: ${label} (${exitDesc})\n${result.stderr ?? ''}`, exitCode: result.exitCode ?? 1 }
+        logger.warn(
+          spawnFailure
+            ? { hook: label, phase, spawnFailure: spawnFailure.message }
+            : { hook: label, phase, exitCode: result.exitCode, stderrTail: sanitizeErrorMessage(String(result.stderr ?? '').slice(-500)) },
+          spawnFailure ? 'Verify hook could not be executed' : 'Verify hook failed',
+        )
         if (phase === 'before') return failure
       }
     } catch (err) {
-      const failure = `${phase} hook crashed: ${label}\n${String(err)}`
+      const failure = { message: `${phase} hook crashed: ${label}\n${sanitizeErrorMessage(String(err))}`, exitCode: 1 }
       logger.warn({ hook: label, phase, stderrTail: sanitizeErrorMessage(String(err).slice(-500)) }, 'Verify hook crashed')
       if (phase === 'before') return failure
     }

@@ -184,6 +184,7 @@ const RunHookCommandSchema = z.union([
     command: CommandSpecSchema,
     failureHints: z.array(BootstrapFailureHintSchema).default([]),
     env: z.record(z.string()).optional(),
+    timeoutSeconds: z.number().int().positive().optional(),
   }).strict(),
 ])
 

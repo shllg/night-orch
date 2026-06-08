@@ -107,4 +107,118 @@ describe('runRunHooks', () => {
     const logged = JSON.stringify(mockLoggerWarn.mock.calls)
     expect(logged).not.toContain('do-not-log-me')
   })
+
+  // execa with reject:false RESOLVES spawn errors (missing/non-executable
+  // binary) with exitCode undefined + a `code` errno — never a clean throw.
+  it('fail-fast: a missing hook names the file + ENOENT, never bare "Exit code: undefined"', async () => {
+    mockExeca.mockResolvedValue({ exitCode: undefined, code: 'ENOENT', stdout: '', stderr: '' } as never)
+
+    await expect(
+      runRunHooks('/wt', [['bin/ci-test-setup']], tokens, 'fail-fast'),
+    ).rejects.toThrow(/command not found in worktree: bin\/ci-test-setup .*\/wt\/bin\/ci-test-setup.* \[ENOENT\]/)
+
+    await expect(
+      runRunHooks('/wt', [['bin/ci-test-setup']], tokens, 'fail-fast'),
+    ).rejects.not.toThrow(/Exit code: undefined/)
+  })
+
+  it('fail-fast: a non-executable hook names the file + EACCES', async () => {
+    mockExeca.mockResolvedValue({ exitCode: undefined, code: 'EACCES', stdout: '', stderr: '' } as never)
+
+    await expect(
+      runRunHooks('/wt', [['./scripts/up.sh']], tokens, 'fail-fast'),
+    ).rejects.toThrow(/command not executable in worktree: \.\/scripts\/up\.sh .*\[EACCES\]/)
+  })
+
+  it('threads explicit timeoutSeconds into execa as milliseconds', async () => {
+    mockExeca.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' } as never)
+
+    await runRunHooks(
+      '/wt',
+      [{ command: ['bin/heavy-bootstrap'], timeoutSeconds: 600 }],
+      tokens,
+      'fail-fast',
+    )
+
+    const opts = mockExeca.mock.calls[0]![2] as { timeout: number }
+    expect(opts.timeout).toBe(600_000)
+  })
+
+  it('defaults to the 5-minute timeout when timeoutSeconds is omitted', async () => {
+    mockExeca.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' } as never)
+
+    await runRunHooks('/wt', [['docker', 'compose', 'up']], tokens, 'fail-fast')
+
+    const opts = mockExeca.mock.calls[0]![2] as { timeout: number }
+    expect(opts.timeout).toBe(300_000)
+  })
+
+  it('fail-fast: a hook that times out throws with exit 124 + raise-timeoutSeconds hint', async () => {
+    mockExeca.mockResolvedValue({
+      exitCode: undefined,
+      timedOut: true,
+      signal: 'SIGTERM',
+      stdout: '',
+      stderr: '',
+    } as never)
+
+    await expect(
+      runRunHooks(
+        '/wt',
+        [{ command: ['bin/heavy-bootstrap'], timeoutSeconds: 600 }],
+        tokens,
+        'fail-fast',
+      ),
+    ).rejects.toThrow(/Run hook timed out after 600s.*Raise this hook's `timeoutSeconds`/)
+
+    await expect(
+      runRunHooks(
+        '/wt',
+        [{ command: ['bin/heavy-bootstrap'], timeoutSeconds: 600 }],
+        tokens,
+        'fail-fast',
+      ),
+    ).rejects.toThrow(/Exit code: 124/)
+  })
+
+  it('attempt-all: a hook timeout is logged as 124 and does not throw', async () => {
+    mockExeca
+      .mockResolvedValueOnce({
+        exitCode: undefined,
+        timedOut: true,
+        signal: 'SIGTERM',
+        stdout: '',
+        stderr: '',
+      } as never)
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' } as never)
+
+    await expect(
+      runRunHooks(
+        '/wt',
+        [{ command: ['bin/teardown-slow'], timeoutSeconds: 60 }, ['docker', 'down']],
+        tokens,
+        'attempt-all',
+      ),
+    ).resolves.toBeUndefined()
+
+    const logged = JSON.stringify(mockLoggerWarn.mock.calls)
+    expect(logged).toContain('124')
+    expect(logged).toContain('timed out')
+    expect(mockExeca).toHaveBeenCalledWith('docker', ['down'], expect.any(Object))
+  })
+
+  it('attempt-all: a missing hook logs the spawn diagnostic and continues', async () => {
+    mockExeca
+      .mockResolvedValueOnce({ exitCode: undefined, code: 'ENOENT', stdout: '', stderr: '' } as never)
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' } as never)
+
+    await expect(
+      runRunHooks('/wt', [['bin/missing'], ['docker', 'down']], tokens, 'attempt-all'),
+    ).resolves.toBeUndefined()
+
+    const logged = JSON.stringify(mockLoggerWarn.mock.calls)
+    expect(logged).toContain('command not found')
+    expect(logged).not.toContain('Exit code: undefined')
+    expect(mockExeca).toHaveBeenCalledWith('docker', ['down'], expect.any(Object))
+  })
 })

@@ -107,6 +107,48 @@ describe('runVerifyCommands', () => {
     expect(results[0]!.exitCode).toBe(1)
   })
 
+  it('records a missing verify command as exit 127 with a named diagnostic, not bare undefined', async () => {
+    // execa reject:false resolves spawn errors with exitCode undefined + code.
+    mockExeca.mockResolvedValue({ exitCode: undefined, code: 'ENOENT', timedOut: false, stdout: '', stderr: '' } as never)
+
+    const results = await runVerifyCommands('/tmp/wt', ['bin/ci-test-setup'])
+
+    expect(results[0]!.passed).toBe(false)
+    expect(results[0]!.exitCode).toBe(127) // never undefined / masked 0
+    expect(results[0]!.stderr).toContain('command not found in worktree: bin/ci-test-setup')
+    expect(results[0]!.stderr).toContain('/tmp/wt/bin/ci-test-setup')
+    expect(results[0]!.stderr).toContain('[ENOENT]')
+  })
+
+  it('records a non-executable verify command as exit 126 with EACCES', async () => {
+    mockExeca.mockResolvedValue({ exitCode: undefined, code: 'EACCES', timedOut: false, stdout: '', stderr: '' } as never)
+
+    const results = await runVerifyCommands('/tmp/wt', ['./run.sh'])
+
+    expect(results[0]!.passed).toBe(false)
+    expect(results[0]!.exitCode).toBe(126)
+    expect(results[0]!.stderr).toContain('command not executable')
+    expect(results[0]!.stderr).toContain('[EACCES]')
+  })
+
+  it('records a missing before-hook as a named diagnostic with exit 127 and skips the command', async () => {
+    mockExeca
+      .mockResolvedValueOnce({ exitCode: undefined, code: 'ENOENT', timedOut: false, stdout: '', stderr: '' } as never) // before hook missing
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' } as never) // after hook
+
+    const results = await runVerifyCommands('/tmp/wt', [
+      { command: 'rails test', before: [['bin/db-setup']], after: [['docker', 'down']] },
+    ])
+
+    expect(results[0]!.passed).toBe(false)
+    expect(results[0]!.exitCode).toBe(127)
+    expect(results[0]!.stderr).toContain('command not found in worktree: bin/db-setup')
+    expect(results[0]!.stderr).not.toContain('Exit code: undefined')
+    // command itself must not have run; after still cleaned up
+    expect(mockExeca).not.toHaveBeenCalledWith('rails', ['test'], expect.any(Object))
+    expect(mockExeca).toHaveBeenCalledWith('docker', ['down'], expect.any(Object))
+  })
+
   it('returns empty array for empty command list', async () => {
     const results = await runVerifyCommands('/tmp/wt', [])
     expect(results).toEqual([])
