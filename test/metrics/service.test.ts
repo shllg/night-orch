@@ -31,8 +31,8 @@ describe('MetricsService', () => {
   let port: number
 
   beforeEach(() => {
-    // Use a random high port to avoid conflicts
-    port = 19000 + Math.floor(Math.random() * 1000)
+    // Bind an OS-assigned ephemeral port (0) to avoid cross-test collisions.
+    port = 0
   })
 
   afterEach(async () => {
@@ -82,12 +82,16 @@ describe('MetricsService', () => {
   })
 
   describe('enabled', () => {
-    it('server starts on configured port', async () => {
+    it('server starts and reports the bound port via endpoint', async () => {
       service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
       expect(service.ready).toBe(false)
-      expect(service.endpoint).toEqual({ host: '127.0.0.1', port })
+      // Before listening, endpoint reflects the configured port (0 = ephemeral).
+      expect(service.endpoint).toEqual({ host: '127.0.0.1', port: 0 })
       await service.start()
+      port = service.endpoint!.port
       expect(service.ready).toBe(true)
+      // After listening, endpoint exposes the actual OS-assigned port.
+      expect(port).toBeGreaterThan(0)
 
       // Small delay for server to be ready
 
@@ -98,6 +102,7 @@ describe('MetricsService', () => {
     it('/metrics returns valid Prometheus exposition format', async () => {
       service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
       await service.start()
+      port = service.endpoint!.port
 
       const body = await getMetrics(port)
       // Prometheus format has HELP and TYPE lines
@@ -108,6 +113,7 @@ describe('MetricsService', () => {
     it('non-/metrics path returns 404', async () => {
       service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
       await service.start()
+      port = service.endpoint!.port
 
       const { status } = await httpGet(port, '/nonexistent')
       expect(status).toBe(404)
@@ -116,6 +122,7 @@ describe('MetricsService', () => {
     it('/healthz returns readiness payload', async () => {
       service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
       await service.start()
+      port = service.endpoint!.port
 
       const { status, body } = await httpGet(port, '/healthz')
       expect(status).toBe(200)
@@ -134,6 +141,7 @@ describe('MetricsService', () => {
     it('counter increment reflected in output', async () => {
       service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
       await service.start()
+      port = service.endpoint!.port
 
       service.incRunsTotal('completed')
       service.incRunsTotal('completed')
@@ -145,6 +153,7 @@ describe('MetricsService', () => {
     it('rebase auto-resolve counters are reflected in output', async () => {
       service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
       await service.start()
+      port = service.endpoint!.port
 
       service.incRebaseConflict()
       service.incRebaseAutoResolved()
@@ -159,6 +168,7 @@ describe('MetricsService', () => {
     it('rebase fan-out counters are reflected in output', async () => {
       service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
       await service.start()
+      port = service.endpoint!.port
 
       service.incRebaseFanout('org/repo', 'main')
       service.incRebaseFanoutSibling('org/repo')
@@ -172,6 +182,7 @@ describe('MetricsService', () => {
     it('handoff counters are reflected in output', async () => {
       service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
       await service.start()
+      port = service.endpoint!.port
 
       service.incHandoffs('plan')
       service.incHandoffs('plan')
@@ -185,6 +196,7 @@ describe('MetricsService', () => {
     it('histogram observation reflected in output', async () => {
       service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
       await service.start()
+      port = service.endpoint!.port
 
       service.observeRunDuration(120)
 
@@ -195,6 +207,7 @@ describe('MetricsService', () => {
     it('gauge set reflected in output', async () => {
       service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
       await service.start()
+      port = service.endpoint!.port
 
       service.setActiveRuns(3)
 
@@ -205,6 +218,7 @@ describe('MetricsService', () => {
     it('graceful stop closes server', async () => {
       service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
       await service.start()
+      port = service.endpoint!.port
       expect(service.ready).toBe(true)
 
       await service.stop()
@@ -217,6 +231,7 @@ describe('MetricsService', () => {
     it('addEstimatedCost(0) is a no-op', async () => {
       service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
       await service.start()
+      port = service.endpoint!.port
 
       service.addEstimatedCost('org/repo', 'claude', 0)
 
@@ -229,12 +244,17 @@ describe('MetricsService', () => {
         res.writeHead(200)
         res.end('ok')
       })
-      await new Promise<void>((resolve) => {
-        occupiedServer.listen(port, '127.0.0.1', resolve)
+      // Bind an ephemeral port, then point the service at that exact port to
+      // force a real EADDRINUSE collision.
+      const occupiedPort = await new Promise<number>((resolve) => {
+        occupiedServer.listen(0, '127.0.0.1', () => {
+          const addr = occupiedServer.address()
+          resolve(addr && typeof addr === 'object' ? addr.port : 0)
+        })
       })
 
       try {
-        service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
+        service = createMetricsService({ enabled: true, host: '127.0.0.1', port: occupiedPort })
         // Retries up to 5 times with exponential backoff before rejecting
         await expect(service.start()).rejects.toMatchObject({ code: 'EADDRINUSE' })
       } finally {

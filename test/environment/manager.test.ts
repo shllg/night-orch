@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { prepareEnvironment, releaseEnvironmentPorts } from '../../src/environment/manager.js'
+import { prepareEnvironment, releaseEnvironmentPorts, runCheckHooks } from '../../src/environment/manager.js'
 import type { RepoConfig } from '../../src/config/schema.js'
 
 function repoWith(environment: unknown): RepoConfig {
@@ -97,6 +97,36 @@ describe('prepareEnvironment', () => {
         usedPorts,
       }),
     ).rejects.toThrow(/exhausted/)
+  })
+})
+
+describe('runCheckHooks', () => {
+  const tokens = { issue: 1, run: 'r', project: 'p-1-r' }
+
+  it('is a no-op when no check hooks are configured', async () => {
+    await expect(
+      runCheckHooks({ worktreePath: '/tmp', repoConfig: repoWith({ check: [], beforeRun: [], afterRun: [] }), tokens }),
+    ).resolves.toBeUndefined()
+  })
+
+  it('fail-fast: throws when a check hook exits non-zero', async () => {
+    await expect(
+      runCheckHooks({
+        worktreePath: process.cwd(),
+        repoConfig: repoWith({ check: [['false']], beforeRun: [], afterRun: [] }),
+        tokens,
+      }),
+    ).rejects.toThrow()
+  })
+
+  it('passes when the check hook succeeds', async () => {
+    await expect(
+      runCheckHooks({
+        worktreePath: process.cwd(),
+        repoConfig: repoWith({ check: [['true']], beforeRun: [], afterRun: [] }),
+        tokens,
+      }),
+    ).resolves.toBeUndefined()
   })
 })
 

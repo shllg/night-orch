@@ -36,19 +36,31 @@ let warnedCannotProbe = false
  */
 export async function isPortFree(port: number): Promise<boolean> {
   const v4 = await tryBind(port, '0.0.0.0')
-  if (!v4.ok) {
-    if (v4.code === 'EADDRINUSE') return false
-    if (v4.code === 'EACCES' || v4.code === 'EPERM') {
-      if (!warnedCannotProbe) {
-        warnedCannotProbe = true
-        logger.warn({ code: v4.code }, 'Cannot probe host port availability (permission denied) — falling back to in-memory tracking only')
-      }
-      return true
-    }
-    return false
-  }
+  if (!v4.ok && !isFreeIndicating(v4.code, port)) return false
   const v6 = await tryBind(port, '::')
-  if (!v6.ok && v6.code === 'EADDRINUSE') return false
+  if (!v6.ok && !isFreeIndicating(v6.code, port)) return false
+  return true
+}
+
+/**
+ * Decide, for a failed bind, whether the error means the port is NOT a conflict
+ * (so we can still hand it out). Only `EADDRINUSE` is a hard conflict. A
+ * permission error means we cannot probe at all — fail open with a one-time
+ * warning. Any other unexpected code is also treated as non-conflicting
+ * (best-effort; the consuming service's own `bind` stays authoritative), logged
+ * at debug for visibility. Applied identically to IPv4 and IPv6 so a stack quirk
+ * on one family never silently burns a candidate port.
+ */
+function isFreeIndicating(code: string | undefined, port: number): boolean {
+  if (code === 'EADDRINUSE') return false
+  if (code === 'EACCES' || code === 'EPERM') {
+    if (!warnedCannotProbe) {
+      warnedCannotProbe = true
+      logger.warn({ code }, 'Cannot probe host port availability (permission denied) — falling back to in-memory tracking only')
+    }
+    return true
+  }
+  logger.debug({ code, port }, 'Unexpected port-probe error — treating port as available (best-effort)')
   return true
 }
 

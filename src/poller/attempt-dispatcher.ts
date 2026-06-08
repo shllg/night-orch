@@ -173,6 +173,9 @@ export async function dispatchAttempt(
   let runId: string | null = null
   let envSetup: EnvSetupResult | null = null
   let activeWorktreePath: string | null = null
+  // The workflow-resolved repo config (overlays applied). Captured for the
+  // `finally` so afterRun teardown runs the SAME hooks beforeRun/check used.
+  let teardownConfig: typeof repoConfig | null = null
   let outcome: 'processed' | 'errored' | 'skipped' = 'skipped'
 
   try {
@@ -183,6 +186,7 @@ export async function dispatchAttempt(
       discoveredIssue.triage.level,
     )
     const repoConfigForRun = applyWorkflowAgentOverrides(repoConfig, workflow)
+    teardownConfig = repoConfigForRun
     const roleDefaults = applyWorkflowRoleDefaults(
       repoConfigForRun.defaults,
       workflow,
@@ -645,7 +649,7 @@ export async function dispatchAttempt(
       try {
         await teardownEnvironment({
           worktreePath: activeWorktreePath,
-          repoConfig,
+          repoConfig: teardownConfig ?? repoConfig,
           tokens: envSetup.tokens,
         })
       } catch (envErr) {

@@ -79,6 +79,13 @@ describe('allocatePort', () => {
     }
   })
 
+  it('releases the allocation lock after a throw so the next allocation proceeds', async () => {
+    await expect(allocatePort({ min: 49260, max: 49261 }, [49260, 49261])).rejects.toThrow(/exhausted/)
+    // If the mutex were not released on throw, this would hang/never resolve.
+    const port = await allocatePort({ min: 49270, max: 49279 }, [])
+    expect(port).toBeGreaterThanOrEqual(49270)
+  })
+
   it('hands out distinct ports under concurrent allocation on a shared set (no duplicates)', async () => {
     const used: number[] = []
     const range = { min: 49300, max: 49399 }

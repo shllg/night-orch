@@ -27,9 +27,9 @@ describe('Metrics integration', () => {
   })
 
   it('start → record metrics → scrape → verify values', async () => {
-    port = 19500 + Math.floor(Math.random() * 500)
-    service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
+    service = createMetricsService({ enabled: true, host: '127.0.0.1', port: 0 })
     await service.start()
+    port = service.endpoint!.port
 
     // Record various metrics
     service.incRunsTotal('completed')
@@ -78,9 +78,9 @@ describe('Metrics integration', () => {
   })
 
   it('concurrent metric recording is safe', async () => {
-    port = 19500 + Math.floor(Math.random() * 500)
-    service = createMetricsService({ enabled: true, host: '127.0.0.1', port })
+    service = createMetricsService({ enabled: true, host: '127.0.0.1', port: 0 })
     await service.start()
+    port = service.endpoint!.port
 
     // Fire many concurrent increments
     const promises: Promise<void>[] = []

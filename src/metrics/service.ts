@@ -115,6 +115,8 @@ class LiveMetricsService implements MetricsService {
   private metrics: Metrics
   private server: Server | undefined
   private config: MetricsServiceConfig
+  /** OS-assigned port after listening — set when `config.port` is 0. */
+  private boundPort: number | undefined
 
   constructor(config: MetricsServiceConfig) {
     this.config = config
@@ -149,6 +151,8 @@ class LiveMetricsService implements MetricsService {
     this.server = server
     await new Promise<void>((resolve, reject) => {
       const onListening = () => {
+        const addr = server.address()
+        if (addr && typeof addr === 'object') this.boundPort = addr.port
         cleanup()
         resolve()
       }
@@ -173,6 +177,7 @@ class LiveMetricsService implements MetricsService {
     const server = this.server
     if (!server) return
     this.server = undefined
+    this.boundPort = undefined
     return new Promise<void>((resolve, reject) => {
       server.close((err) => {
         if (err) reject(err)
@@ -190,7 +195,7 @@ class LiveMetricsService implements MetricsService {
   }
 
   get endpoint(): { host: string; port: number } | null {
-    return { host: this.config.host, port: this.config.port }
+    return { host: this.config.host, port: this.boundPort ?? this.config.port }
   }
 
   incRunsTotal(status: 'completed' | 'blocked' | 'error'): void {
