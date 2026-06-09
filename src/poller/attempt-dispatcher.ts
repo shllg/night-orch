@@ -38,6 +38,7 @@ import { nowUtcIso } from '../utils/time.js'
 import { markerTag, upsertBotComment } from '../forge/bot-comment.js'
 import { formatStatusComment } from '../forge/status-comment.js'
 import { executeRebase } from '../ops/rebase-and-check.js'
+import { decideBranchRefreshTransition } from './branch-refresh-decision.js'
 import { buildConflictSnapshot } from '../ops/conflict-snapshot.js'
 import { postPlanSummaryComment } from '../loop/plan-summary-comment.js'
 import { isPlanningIssue } from '../planning/mode.js'
@@ -397,7 +398,7 @@ export async function dispatchAttempt(
         }
       }
       preLoopVerifyResults = refreshOutcome.verifyResults
-      logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, operationIntent }, 'Branch refresh completed but verify failed — entering code loop to fix')
+      logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, operationIntent }, 'Branch refresh did not reach review_ready — entering code loop')
     }
 
     // Always allocate per-run tokens (cheap, no subprocess) so verify command
@@ -979,21 +980,38 @@ async function handleBranchRefreshRun(params: HandleBranchRefreshRunParams): Pro
     return { outcome: 'errored', verifyResults: [] }
   }
 
-  if (rebaseResult.rebased && rebaseResult.verifyPassed) {
-    logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number, operationIntent }, 'Branch refresh succeeded, verify passed — returning to review_ready')
+  // Gate review_ready on an actual published PR. A rebase no-op reports
+  // verifyPassed=true without running verify, so on an unpublished branch
+  // (prNumber === null) that would be a phantom "ready for review". Fall
+  // through to the code loop in that case to do (or finish) the real work.
+  const hasPublishedPr = (runManager.getById(runId)?.prNumber ?? null) !== null
+  const transition = decideBranchRefreshTransition({
+    rebased: rebaseResult.rebased,
+    verifyPassed: rebaseResult.verifyPassed,
+    hasPublishedPr,
+  })
+
+  if (transition.kind === 'review_ready') {
+    logger.info(
+      { repo: repoConfig.repo, issue: discoveredIssue.issue.number, operationIntent, reason: transition.reason },
+      transition.reason === 'rebased_verify_passed'
+        ? 'Branch refresh succeeded, verify passed — returning to review_ready'
+        : 'Branch already up to date — returning to review_ready',
+    )
     await runStateController.markReviewReady(runId, {
       from: 'running',
-      notification: {
-        summary: `${isExplicitRebase ? 'Rebased' : 'Refreshed'} successfully, verify passed`,
-      },
+      ...(transition.reason === 'rebased_verify_passed'
+        ? { notification: { summary: `${isExplicitRebase ? 'Rebased' : 'Refreshed'} successfully, verify passed` } }
+        : {}),
     })
     return { outcome: 'processed', verifyResults: rebaseResult.verifyResults ?? [] }
   }
 
-  if (!rebaseResult.rebased && rebaseResult.verifyPassed) {
-    logger.info({ repo: repoConfig.repo, issue: discoveredIssue.issue.number }, 'Branch already up to date — returning to review_ready')
-    await runStateController.markReviewReady(runId, { from: 'running' })
-    return { outcome: 'processed', verifyResults: rebaseResult.verifyResults ?? [] }
+  if (transition.reason === 'no_published_pr') {
+    logger.info(
+      { repo: repoConfig.repo, issue: discoveredIssue.issue.number, operationIntent },
+      'Branch refresh found no work but the branch has no PR — entering code loop instead of marking review_ready',
+    )
   }
 
   return {

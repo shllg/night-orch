@@ -1023,6 +1023,10 @@ describe('pollOnce', () => {
     })
     runManager.update(existing.id, {
       status: 'queued',
+      // A merge-conflict follow-up is a re-evaluation of an already-published
+      // PR, so prNumber is set — required for a rebase no-op to reach
+      // review_ready rather than falling through to the code loop.
+      prNumber: 13,
       phaseData: {
         reactionType: 'merge_conflict',
       },

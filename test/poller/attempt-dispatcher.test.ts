@@ -16,6 +16,11 @@ import { RunManager } from '../../src/state/runs.js'
 const mockExecuteLoop = vi.fn()
 const mockFinalizeRunOutcome = vi.fn()
 const mockCreateWorkerAdapter = vi.fn()
+const mockExecuteRebase = vi.fn()
+
+vi.mock('../../src/ops/rebase-and-check.js', () => ({
+  executeRebase: (...args: unknown[]) => mockExecuteRebase(...args),
+}))
 
 vi.mock('../../src/loop/engine.js', () => ({
   executeLoop: (...args: unknown[]) => mockExecuteLoop(...args),
@@ -168,6 +173,7 @@ describe('dispatchAttempt', () => {
     mockCreateWorkerAdapter.mockReturnValue({})
     mockExecuteLoop.mockResolvedValue({})
     mockFinalizeRunOutcome.mockResolvedValue('processed')
+    mockExecuteRebase.mockResolvedValue({ rebased: false, verifyPassed: true, verifyResults: [], conflict: false })
   })
 
   afterEach(() => {
@@ -371,5 +377,103 @@ describe('dispatchAttempt', () => {
       branchName: 'orch/1-fix-replay',
       baseBranch: 'main',
     })
+  })
+
+  it('does NOT mark review_ready on a rebase no-op when no PR exists', async () => {
+    // Acceptance: an issue with no PR and no passing verify must never land in
+    // review_ready via a rebase no-op ("Branch already up to date").
+    const issue = makeIssue(['no:review-ready'])
+    const forge = makeForge(issue)
+    const run = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 1,
+      issueNodeId: issue.nodeId,
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    // Queued rebase run with no published PR.
+    runManager.update(run.id, { operationIntent: 'rebase' })
+
+    const result = await dispatchAttempt({
+      config,
+      db,
+      forge,
+      repoConfig: config.repos[0]!,
+      discoveredIssue: {
+        issue,
+        issueRepo: 'org/repo',
+        triage: { level: 'standard', reason: '' },
+        repoConfig: config.repos[0]!,
+      },
+      runManager,
+      leaseManager,
+      worktreeManager: {
+        ensure: vi.fn().mockResolvedValue(makeWorktreeInfo()),
+        remove: vi.fn(),
+        list: vi.fn(),
+      },
+      notifier,
+      observability: {
+        record: vi.fn(),
+        closeRun: vi.fn().mockResolvedValue(undefined),
+      },
+      botUser: '',
+      usedPortsInPass: [],
+      cache,
+    })
+
+    // No-op falls through to the code loop instead of phantom review_ready.
+    expect(mockExecuteLoop).toHaveBeenCalledTimes(1)
+    const updated = runManager.getById(run.id)
+    expect(updated?.status).not.toBe('review_ready')
+    expect(result.outcome).toBe('processed')
+  })
+
+  it('marks review_ready on a rebase no-op when a PR already exists', async () => {
+    const issue = makeIssue(['no:review-ready'])
+    const forge = makeForge(issue)
+    const run = runManager.create({
+      repo: 'org/repo',
+      issueNumber: 1,
+      issueNodeId: issue.nodeId,
+      planner: 'claude',
+      coder: 'claude',
+      reviewer: 'claude',
+    })
+    runManager.update(run.id, { operationIntent: 'rebase', prNumber: 42 })
+
+    await dispatchAttempt({
+      config,
+      db,
+      forge,
+      repoConfig: config.repos[0]!,
+      discoveredIssue: {
+        issue,
+        issueRepo: 'org/repo',
+        triage: { level: 'standard', reason: '' },
+        repoConfig: config.repos[0]!,
+      },
+      runManager,
+      leaseManager,
+      worktreeManager: {
+        ensure: vi.fn().mockResolvedValue(makeWorktreeInfo()),
+        remove: vi.fn(),
+        list: vi.fn(),
+      },
+      notifier,
+      observability: {
+        record: vi.fn(),
+        closeRun: vi.fn().mockResolvedValue(undefined),
+      },
+      botUser: '',
+      usedPortsInPass: [],
+      cache,
+    })
+
+    // With a published PR the no-op is genuinely review-ready — no code loop.
+    expect(mockExecuteLoop).not.toHaveBeenCalled()
+    const updated = runManager.getById(run.id)
+    expect(updated?.status).toBe('review_ready')
   })
 })
