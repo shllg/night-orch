@@ -1,13 +1,15 @@
 import type { Config } from '../config/schema.js'
-import type { ForgeAdapter } from '../forge/types.js'
+import type { ForgeAdapter, ForgeIssue } from '../forge/types.js'
 import type { LeaseManager } from '../state/leases.js'
-import type { RunManager } from '../state/runs.js'
+import type { RunManager, RunRecord } from '../state/runs.js'
 import type { IssueManager } from '../state/issues.js'
 import type { MetricsService } from '../metrics/service.js'
 import { discoverEligibleIssues, type DiscoveredIssue } from '../discovery/discover.js'
 import { prioritizeDiscoveredIssues } from '../discovery/queue.js'
+import { triageIssue } from '../discovery/triage.js'
 import { buildLabelConfig } from '../labels/config.js'
 import { computeLabelMutation } from '../labels/transitions.js'
+import { resolveIssueRepo } from '../utils/issue-repo.js'
 import { logger } from '../utils/logger.js'
 
 /**
@@ -42,7 +44,14 @@ export async function discoverIssuesForRepo(
 ): Promise<DiscoveredIssue[]> {
   const { repoConfig, forge, leaseManager, runManager, issueManager, metrics, targetIssue } = params
 
-  const discoveredAll = await discoverEligibleIssues(repoConfig, forge, leaseManager)
+  const discoveredAll = await includeQueuedDbRuns({
+    discovered: await discoverEligibleIssues(repoConfig, forge, leaseManager),
+    repoConfig,
+    forge,
+    runManager,
+    leaseManager,
+    targetIssue,
+  })
 
   const discovered = targetIssue
     ? discoveredAll.filter((d) => {
@@ -73,6 +82,83 @@ export async function discoverIssuesForRepo(
   }
 
   return dispatchable
+}
+
+interface IncludeQueuedDbRunsParams {
+  discovered: DiscoveredIssue[]
+  repoConfig: Config['repos'][number]
+  forge: ForgeAdapter
+  runManager: RunManager
+  leaseManager: LeaseManager
+  targetIssue?: { repo: string; issueNumber: number }
+}
+
+/**
+ * Augment forge-discovered issues with queued DB runs that label-based
+ * discovery may have missed.
+ *
+ * `retry --immediate` / `queue+signal` write a queued run row and transition
+ * the forge label, then trigger a poll — but GitHub frequently hasn't
+ * propagated the label yet, so `listEligibleIssues` returns nothing and the
+ * queued run strands until a later cycle. Here we read the queued run(s)
+ * straight from the DB and fetch each issue directly (`forge.getIssue`,
+ * bypassing label filtering) so the run dispatches on the triggered cycle.
+ *
+ * Deliberately bypasses the include/exclude **label** selectors: those status
+ * labels (ready/blocked/…) are exactly what lags propagation, so re-checking
+ * them would reintroduce the race. A queued DB run is explicit operator/system
+ * dispatch intent and wins over forge label state. The issue must still be
+ * **open**, however — a closed issue is never resurrected just because a queued
+ * row lingers.
+ *
+ * Issues already present from label discovery are not duplicated.
+ */
+async function includeQueuedDbRuns(params: IncludeQueuedDbRunsParams): Promise<DiscoveredIssue[]> {
+  const { discovered, repoConfig, forge, runManager, leaseManager, targetIssue } = params
+
+  // Both paths read the same live-top-level-queued predicate
+  // (`listQueuedByRepo` excludes terminated rows + sub-runs); the targeted
+  // path just narrows to the one issue. Using a single source avoids
+  // resurrecting an abnormal terminated `queued` row on the immediate path.
+  const queuedRuns: RunRecord[] = runManager
+    .listQueuedByRepo(repoConfig.repo)
+    .filter((run) => !targetIssue || run.issueNumber === targetIssue.issueNumber)
+
+  if (queuedRuns.length === 0) return discovered
+
+  const seen = new Set(discovered.map((d) => `${d.issueRepo}#${d.issue.number}`))
+  const augmented = [...discovered]
+
+  for (const run of queuedRuns) {
+    const issueRepo = resolveIssueRepo(run.phaseData, run.repo)
+    if (seen.has(`${issueRepo}#${run.issueNumber}`)) continue
+    // A leased issue is already being processed by another worker — mirror
+    // `discoverEligibleIssues`'s lease exclusion so we never double-dispatch.
+    if (leaseManager.isLeased(issueRepo, run.issueNumber)) continue
+    let issue: ForgeIssue
+    try {
+      issue = await forge.getIssue(issueRepo, run.issueNumber)
+    } catch (err) {
+      // A transient forge error must not strand the rest of the queue or
+      // crash the poll cycle — skip this run; the next cycle retries it.
+      logger.warn(
+        { repo: issueRepo, issue: run.issueNumber, runId: run.id, err },
+        'Failed to fetch queued issue for label-independent dispatch — skipping this cycle',
+      )
+      continue
+    }
+    if (issue.state !== 'open') {
+      logger.info(
+        { repo: issueRepo, issue: run.issueNumber, runId: run.id, state: issue.state },
+        'Queued run targets a non-open issue — skipping label-independent dispatch',
+      )
+      continue
+    }
+    seen.add(`${issueRepo}#${run.issueNumber}`)
+    augmented.push({ issue, issueRepo, triage: triageIssue(issue), repoConfig })
+  }
+
+  return augmented
 }
 
 interface FilterDispatchableIssuesParams {

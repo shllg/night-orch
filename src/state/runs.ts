@@ -360,6 +360,22 @@ export class RunManager {
   }
 
   /**
+   * List queued top-level runs for a repo, most recent first. Lets the poller
+   * dispatch DB-queued work that forge label discovery missed (label
+   * propagation lag after retry/queue), independent of label state. Sub-runs
+   * (non-null `parent_run_id`) are excluded — they dispatch as part of their
+   * parent's flow, not via repo-level discovery.
+   */
+  listQueuedByRepo(repo: string): RunRecord[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM runs WHERE repo = ? AND status = 'queued' AND parent_run_id IS NULL AND terminated_at IS NULL ORDER BY created_at DESC",
+      )
+      .all(repo) as RawRunRow[]
+    return rows.map((row) => this.mapRow(row))
+  }
+
+  /**
    * Count auto-retries performed for an issue. Prefers the active run's
    * `retry_count` column (accurate across replay retries on the same row),
    * and falls back to counting historical `error` rows in a time window

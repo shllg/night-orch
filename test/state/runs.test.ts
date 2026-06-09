@@ -62,6 +62,30 @@ describe('RunManager', () => {
     expect(ids).not.toContain(subRun.id)
   })
 
+  it('listQueuedByRepo returns only live, queued, top-level rows for the repo', () => {
+    const queued = makeRun({ issueNumber: 401 })
+    const completed = makeRun({ issueNumber: 402 })
+    const otherRepo = makeRun({ repo: 'org/other', issueNumber: 403 })
+    const subRun = makeRun({ issueNumber: 404, parentRunId: queued.id })
+    const running = makeRun({ issueNumber: 405 })
+    const terminatedQueued = makeRun({ issueNumber: 406 })
+
+    runManager.updateLifecycle(completed.id, { status: 'completed', endedAt: new Date().toISOString() })
+    runManager.update(running.id, { status: 'running' })
+    // Abnormal-but-defended: a queued row that was terminated must not resurface
+    // for dispatch (the live invariant is `terminated_at IS NULL`, not status).
+    db.prepare('UPDATE runs SET terminated_at = ? WHERE id = ?').run(new Date().toISOString(), terminatedQueued.id)
+
+    const ids = runManager.listQueuedByRepo('org/repo').map((run) => run.id)
+
+    expect(ids).toContain(queued.id)
+    expect(ids).not.toContain(completed.id)
+    expect(ids).not.toContain(otherRepo.id)
+    expect(ids).not.toContain(subRun.id)
+    expect(ids).not.toContain(running.id)
+    expect(ids).not.toContain(terminatedQueued.id)
+  })
+
   it('updates specific fields', () => {
     const run = makeRun()
 
