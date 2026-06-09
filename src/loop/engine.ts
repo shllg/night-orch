@@ -579,6 +579,36 @@ async function executeGuardedWorkerStep(
   try {
     result = await executeStep(ctx, step, stepDeps)
   } catch (err) {
+    // Record any tokens the worker consumed before failing so a failed
+    // attempt isn't recorded at $0 — expensive failures (codex timeouts,
+    // rate-limits after burning tokens) were looking free in status and
+    // dashboards (issue #341). This runs for both blocking and transient
+    // failures; a retried attempt is a separate run row, so no
+    // double-counting. No usage → applyEstimatedWorkerCost is a no-op.
+    if (err instanceof WorkerError && err.cost) {
+      try {
+        const failureCost = applyEstimatedWorkerCost(
+          ctx,
+          costTracker,
+          config.cost,
+          config.security,
+          step.id,
+          step.role,
+          err.cost.pricingIdentity,
+          err.cost.durationMs,
+          err.cost.tokenUsage,
+          metrics,
+        )
+        ctx = failureCost.ctx
+      } catch (costErr) {
+        // Cost recording is a side benefit here — never let a DB/pricing
+        // failure mask the original worker error the caller must handle.
+        logger.warn(
+          { runId: ctx.runId, phase: step.id, err: costErr },
+          'Failed to record cost for a failed worker attempt — continuing with the worker error',
+        )
+      }
+    }
     // Transient worker failures bubble to the poller's infra-retry
     // path; everything else (auth, timeout, parse, token-capture,
     // rate-limit) becomes a typed blocked state so the attempt

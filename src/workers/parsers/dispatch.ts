@@ -155,23 +155,43 @@ function extractUsageFromCodexEvent(event: Record<string, unknown>): {
 } {
   const directUsage = event['usage']
   if (isRecord(directUsage)) {
-    return {
-      promptTokens: parseTokenCount(directUsage['input_tokens']),
-      completionTokens: parseTokenCount(directUsage['output_tokens']),
-      cacheReadTokens: parseTokenCount(directUsage['cache_read_input_tokens']),
-    }
+    return normalizeCodexUsage(directUsage)
   }
 
   const response = event['response']
   if (isRecord(response) && isRecord(response['usage'])) {
-    return {
-      promptTokens: parseTokenCount(response['usage']['input_tokens']),
-      completionTokens: parseTokenCount(response['usage']['output_tokens']),
-      cacheReadTokens: parseTokenCount(response['usage']['cache_read_input_tokens']),
-    }
+    return normalizeCodexUsage(response['usage'])
   }
 
   return { promptTokens: 0, completionTokens: 0, cacheReadTokens: 0 }
+}
+
+/**
+ * Normalize a Codex `usage` record to the project's token model.
+ *
+ * Codex (`codex exec --json`) reports `input_tokens` as the *total*
+ * prompt size with `cached_input_tokens` as the cached subset, and
+ * bills reasoning under `reasoning_output_tokens`. To price correctly
+ * (cache reads are cheaper than fresh input, reasoning is billed as
+ * output) we split the cached portion out of the prompt count and fold
+ * reasoning into completion. The legacy `cache_read_input_tokens` field
+ * (a separate bucket, not part of `input_tokens`) is still summed in for
+ * back-compat with older fixtures.
+ */
+function normalizeCodexUsage(usage: Record<string, unknown>): {
+  promptTokens: number
+  completionTokens: number
+  cacheReadTokens: number
+} {
+  const inputTokens = parseTokenCount(usage['input_tokens'])
+  const cachedInputTokens = parseTokenCount(usage['cached_input_tokens'])
+  const legacyCacheRead = parseTokenCount(usage['cache_read_input_tokens'])
+  return {
+    promptTokens: Math.max(0, inputTokens - cachedInputTokens),
+    completionTokens:
+      parseTokenCount(usage['output_tokens']) + parseTokenCount(usage['reasoning_output_tokens']),
+    cacheReadTokens: cachedInputTokens + legacyCacheRead,
+  }
 }
 
 export function extractClaudeTokenUsage(raw: string): WorkerTaskResult['tokenUsage'] {

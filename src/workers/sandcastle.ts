@@ -133,6 +133,11 @@ export class SandcastleWorkerAdapter implements WorkerAdapter {
       timedOut = controller.signal.aborted
       exitCode = timedOut ? 124 : 1
       rawOutput = formatSandcastleError(err)
+      // Recover any token usage the worker reported before failing.
+      // Sandcastle rejects on non-zero exit; its error message carries
+      // the tail of stdout (including the final `turn.completed`/`result`
+      // usage event), so a failed-but-billable attempt is not lost to $0.
+      tokenUsage = resolveFailureTokenUsage(this.workerType, rawOutput)
       authFailure = classifyAuthFailure(rawOutput, exitCode, this.workerType).isAuthFailure
       if (!timedOut) {
         logger.warn(
@@ -498,6 +503,22 @@ function resolveTokenUsage(
   }
 
   return extractClaudeTokenUsage(rawOutput)
+}
+
+/**
+ * Best-effort token recovery for a failed worker invocation, parsing
+ * whatever output survived in the error string. Returns undefined when
+ * no usage can be extracted (e.g. an auth/rate-limit failure that
+ * occurred before any turn completed) so the engine records no phantom
+ * cost for genuinely token-free failures.
+ */
+function resolveFailureTokenUsage(
+  workerType: 'claude' | 'codex',
+  rawOutput: string,
+): WorkerTaskResult['tokenUsage'] {
+  return workerType === 'codex'
+    ? extractCodexTokenUsage(rawOutput)
+    : extractClaudeTokenUsage(rawOutput)
 }
 
 function parseClaudeEffort(args: string[]): ClaudeCodeOptions['effort'] | undefined {

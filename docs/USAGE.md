@@ -973,6 +973,8 @@ cost:
 - **Token-based** (preferred) — when the agent adapter reports token counts, cost is calculated from per-model input/output/cache-read token rates
 - **Time-based** (fallback) — when token counts aren't available, cost is estimated from each model's `minuteUsd`
 
+Cost is recorded **even when a worker attempt fails** (timeout, non-zero exit, parse error). Any token usage the agent reported before failing is recovered from its output and billed to the attempt, so an expensive failure — e.g. a Codex run that burned millions of tokens then hit a rate limit — no longer shows up as `$0`. Failures that produced no usage at all are still recorded at `$0` (nothing to bill).
+
 #### Real vs. theoretical (metered) cost
 
 Every cost figure is tracked as two numbers:

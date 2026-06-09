@@ -134,6 +134,40 @@ describe('extractCodexTokenUsage (R4c fixtures)', () => {
     expect(extractCodexTokenUsage(raw)).toBeUndefined()
   })
 
+  it('parses the real codex exec --json turn.completed shape (cached_input_tokens + reasoning_output_tokens)', () => {
+    // Ground-truth event captured from `codex exec --json` (CLI v0.136):
+    // codex reports the cached portion under `cached_input_tokens`
+    // (a subset of `input_tokens`) and reasoning tokens under
+    // `reasoning_output_tokens` (billed as output). The extractor must
+    // split the cached portion out of the prompt count and fold
+    // reasoning tokens into completion so cost accounting matches the bill.
+    const raw = JSON.stringify({
+      type: 'turn.completed',
+      usage: {
+        input_tokens: 14766,
+        cached_input_tokens: 3456,
+        output_tokens: 22,
+        reasoning_output_tokens: 15,
+      },
+    })
+    expect(extractCodexTokenUsage(raw)).toEqual({
+      promptTokens: 14766 - 3456,
+      completionTokens: 22 + 15,
+      cacheReadTokens: 3456,
+    })
+  })
+
+  it('folds reasoning_output_tokens into completion when no cache is reported', () => {
+    const raw = JSON.stringify({
+      type: 'turn.completed',
+      usage: { input_tokens: 800, output_tokens: 100, reasoning_output_tokens: 40 },
+    })
+    expect(extractCodexTokenUsage(raw)).toEqual({
+      promptTokens: 800,
+      completionTokens: 140,
+    })
+  })
+
   it('skips malformed NDJSON lines and parses the rest', () => {
     const raw = [
       '{garbage broken line',

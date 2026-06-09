@@ -29,10 +29,12 @@ import { getDiffAgainstBranch } from '../git/repo.js'
 import { superviseWorker } from './supervisor.js'
 import {
   WorkerAuthError,
+  WorkerError,
   WorkerParseError,
   WorkerTimeoutError,
   WorkerTokenCaptureError,
   WorkerTransientError,
+  type WorkerErrorCost,
 } from '../workers/errors.js'
 import {
   CoderOutputContractSchema,
@@ -167,13 +169,28 @@ export async function executeWorkerStep(
   } catch { /* best-effort */ }
 
   const adapterType = profile.type === 'codex' ? 'codex' : 'claude'
+
+  // Cost context for a failed worker call: lets the engine bill any
+  // tokens the worker reported before failing, instead of recording $0
+  // for an attempt that may have burned millions of tokens (issue #341).
+  const failureCost = (): WorkerErrorCost => ({
+    tokenUsage: result.tokenUsage,
+    pricingIdentity: {
+      role: step.role,
+      workerType: profile.type,
+      pricingModel: profile.pricingModel ?? null,
+      fallbackMinuteUsd: profile.minuteUsd ?? null,
+    },
+    durationMs: Date.now() - start,
+  })
+
   if (result.timedOut) {
     const timeoutMs = ctx.adjustedLimits.workerTimeoutSeconds * 1000
     logger.error(
       { role: step.role, adapterType, timeoutMs },
       `${step.role} worker timed out`,
     )
-    throw new WorkerTimeoutError(adapterType, step.id, timeoutMs)
+    throw new WorkerTimeoutError(adapterType, step.id, timeoutMs).withCost(failureCost())
   }
   if (result.exitCode !== 0) {
     if (result.authFailure) {
@@ -186,7 +203,7 @@ export async function executeWorkerStep(
         getRemediation(adapterType),
         `${step.role} worker exited with code ${result.exitCode} (authentication failure)`,
         step.id,
-      )
+      ).withCost(failureCost())
     }
     logger.error(
       {
@@ -201,7 +218,7 @@ export async function executeWorkerStep(
       adapterType,
       step.id,
       `worker exited with code ${result.exitCode}`,
-    )
+    ).withCost(failureCost())
   }
   // Detect an unwritable environment before the parse-error/token-capture
   // throws below, so a coder that hit a read-only sandbox is reported as an
@@ -246,7 +263,7 @@ export async function executeWorkerStep(
     )
     if (step.role === 'coder') {
       const rawOutputHash = `sha256:${createHash('sha256').update(result.rawOutput).digest('hex').slice(0, 16)}`
-      throw new WorkerParseError(profile.type, step.id, rawOutputHash, result.parseError)
+      throw new WorkerParseError(profile.type, step.id, rawOutputHash, result.parseError).withCost(failureCost())
     }
   }
 
@@ -273,8 +290,18 @@ export async function executeWorkerStep(
     throw new WorkerTokenCaptureError(adapterType, step.id, rawOutputHash)
   }
 
-  // Map result to the appropriate RunContext field based on role
-  const ctxPatch = buildWorkerCtxPatch(ctx, step, result, profile.type)
+  // Map result to the appropriate RunContext field based on role.
+  // Contract-validation failures throw WorkerParseError from inside
+  // buildWorkerCtxPatch — attach the failure cost so an exit-0 worker
+  // that reported tokens but produced an invalid shape is still billed
+  // (issue #341) instead of blocking at $0.
+  let ctxPatch: Partial<RunContext>
+  try {
+    ctxPatch = buildWorkerCtxPatch(ctx, step, result, profile.type)
+  } catch (err) {
+    if (err instanceof WorkerError && err.cost === undefined) err.withCost(failureCost())
+    throw err
+  }
   const updatedCtx = updateContext(ctx, ctxPatch)
 
   return {

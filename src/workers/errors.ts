@@ -13,8 +13,34 @@
  * state. Use `isWorkerError(err)` for the catch-side check rather than
  * `instanceof` chains.
  */
+import type { TokenUsage } from './types.js'
+
+/**
+ * Token-usage + pricing context captured at the moment a worker call
+ * failed. Carried on the thrown `WorkerError` so the loop engine can
+ * record the spend for the failed attempt before blocking or retrying —
+ * without this, a worker that burned tokens and then failed was recorded
+ * at $0, making expensive failures look free (issue #341).
+ */
+export interface WorkerErrorCost {
+  tokenUsage?: TokenUsage
+  pricingIdentity: {
+    role: string
+    workerType: string
+    pricingModel: string | null
+    fallbackMinuteUsd?: number | null
+  }
+  durationMs: number
+}
+
 export abstract class WorkerError extends Error {
   abstract readonly code: string
+
+  /**
+   * Set by the step executor when the failing worker call reported token
+   * usage. The engine reads it to record cost on the failure path.
+   */
+  cost?: WorkerErrorCost
 
   constructor(
     public readonly adapter: string,
@@ -23,6 +49,12 @@ export abstract class WorkerError extends Error {
   ) {
     super(message)
     this.name = this.constructor.name
+  }
+
+  /** Attach failure-time cost context; returns `this` for fluent throws. */
+  withCost(cost: WorkerErrorCost): this {
+    this.cost = cost
+    return this
   }
 }
 

@@ -828,6 +828,43 @@ describe('executeLoop', () => {
     expect((result.stepOutputs?.['blockMessage'] ?? '') as string).toMatch(/timed out/)
   })
 
+  it('records non-zero cost for a worker attempt that fails after reporting token usage (issue #341)', async () => {
+    // A codex attempt that consumes tokens then times out (or otherwise
+    // fails) must still record its spend — failed runs were showing $0,
+    // making expensive failures look free in status/dashboards.
+    const timedOutWithUsage: WorkerTaskResult = {
+      rawOutput: '',
+      exitCode: 0,
+      timedOut: true,
+      durationMs: 1000,
+      parsed: null,
+      parseError: 'timeout',
+      tokenUsage: { promptTokens: 1_000_000, completionTokens: 5000 },
+    }
+
+    const deps: LoopDependencies = {
+      db,
+      config: makeConfig(),
+      adapters: {
+        planner: makeMockAdapter([timedOutWithUsage]),
+        coder: makeMockAdapter([makeCoderResult()]),
+        reviewer: makeMockAdapter([makeReviewerResult()]),
+      },
+      workflow: DEFAULT_WORKFLOW,
+    }
+
+    const result = await executeLoop(makeCtx(), deps)
+
+    expect(result.terminalStatus).toBe('blocked')
+    expect(result.estimatedCostUsd).toBeGreaterThan(0)
+
+    const runCost = db
+      .prepare('SELECT estimated_cost_usd AS cost, prompt_tokens AS tokens FROM runs WHERE id = ?')
+      .get('run-test-1') as { cost: number; tokens: number }
+    expect(runCost.cost).toBeGreaterThan(0)
+    expect(runCost.tokens).toBe(1_000_000)
+  })
+
   it('reports the actual adapter on auth failures from custom worker profiles', async () => {
     const customAuthAdapter: WorkerAdapter = {
       runTask: vi.fn().mockRejectedValue(

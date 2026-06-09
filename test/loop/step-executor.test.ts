@@ -459,6 +459,32 @@ describe('executeWorkerStep', () => {
     })
   })
 
+  it('attaches reported token usage to the worker error on a non-zero exit (issue #341 cost)', async () => {
+    // A worker that burns tokens then exits non-zero must carry its
+    // usage on the thrown error so the engine can record the spend
+    // before blocking/retrying — otherwise the failed attempt looks free.
+    const failedResult: WorkerTaskResult = {
+      rawOutput: 'error output',
+      exitCode: 1,
+      timedOut: false,
+      durationMs: 500,
+      parsed: null,
+      parseError: null,
+      sessionId: null,
+      tokenUsage: { promptTokens: 5000, completionTokens: 200 },
+    }
+    const step: WorkerStep = { type: 'worker', id: 'code', role: 'coder' }
+    const deps = makeDeps({ coder: makeMockAdapter(failedResult) })
+
+    await expect(executeWorkerStep(makeCtx(), step, deps)).rejects.toMatchObject({
+      code: 'WORKER_TRANSIENT_FAILURE',
+      cost: {
+        tokenUsage: { promptTokens: 5000, completionTokens: 200 },
+        durationMs: expect.any(Number),
+      },
+    })
+  })
+
   it('throws when no adapter found for role', async () => {
     const step: WorkerStep = { type: 'worker', id: 'plan', role: 'planner' }
     const deps = makeDeps({}) // no adapters
@@ -528,6 +554,29 @@ describe('executeWorkerStep', () => {
     // is still undefined; pricing.ts will use minuteUsd to estimate cost.
     expect(result.tokenUsage).toBeUndefined()
     expect(result.ctx.plan).not.toBeNull()
+  })
+
+  it('attaches token usage to a contract-validation parse error so the failed attempt is billed (issue #341 cost)', async () => {
+    // exit 0, tokenUsage present, but the parsed shape fails the role
+    // schema → WorkerParseError thrown from inside buildWorkerCtxPatch.
+    // It must still carry the cost context so the engine bills the spend.
+    const invalidShapeResult: WorkerTaskResult = {
+      rawOutput: '{"not":"a valid planner shape"}',
+      exitCode: 0,
+      timedOut: false,
+      durationMs: 2000,
+      parsed: { not: 'a valid planner shape' } as unknown as WorkerTaskResult['parsed'],
+      parseError: null,
+      sessionId: null,
+      tokenUsage: { promptTokens: 4000, completionTokens: 100 },
+    }
+    const step: WorkerStep = { type: 'worker', id: 'plan', role: 'planner' }
+    const deps = makeDeps({ planner: makeMockAdapter(invalidShapeResult) })
+
+    await expect(executeWorkerStep(makeCtx(), step, deps)).rejects.toMatchObject({
+      code: 'WORKER_PARSE_FAILURE',
+      cost: { tokenUsage: { promptTokens: 4000, completionTokens: 100 } },
+    })
   })
 
   it('coder parse failure with exit 0 does not fabricate a code result', async () => {

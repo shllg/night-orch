@@ -165,6 +165,32 @@ describe('SandcastleWorkerAdapter', () => {
     expect((result.parsed as { objective: string }).objective).toBe('Codex plan')
   })
 
+  it('preserves codex token usage when the run fails with a non-zero exit (issue #341 cost)', async () => {
+    // Sandcastle rejects on non-zero codex exit; its AgentError message
+    // carries the tail of stdout, which includes the final
+    // `turn.completed` usage event. The adapter must still surface that
+    // usage so a failed-but-billable codex attempt is not recorded at $0.
+    const turnCompleted = JSON.stringify({
+      type: 'turn.completed',
+      usage: { input_tokens: 5000, output_tokens: 200 },
+    })
+    const run = vi.fn<NonNullable<SandcastleBindings['run']>>()
+      .mockRejectedValue(new Error(`codex exited with code 1:\n${turnCompleted}`))
+
+    const adapter = new SandcastleWorkerAdapter({
+      workerType: 'codex',
+      bindings: makeBindings({ run: run as SandcastleBindings['run'] }),
+      sandboxProviderFactory: createStrictHostSandboxProvider,
+    })
+
+    const result = await adapter.runTask(makeTaskInput({
+      profile: { ...baseProfile, type: 'codex', command: 'codex', args: ['exec', '--json'] },
+    }))
+
+    expect(result.exitCode).not.toBe(0)
+    expect(result.tokenUsage).toEqual({ promptTokens: 5000, completionTokens: 200 })
+  })
+
   it('passes worker env via sandbox provider and keeps agent env empty', async () => {
     const run = vi.fn<NonNullable<SandcastleBindings['run']>>()
       .mockResolvedValue({
