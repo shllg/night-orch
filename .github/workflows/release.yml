@@ -109,7 +109,23 @@ jobs:
 
       - name: Publish to npm
         if: steps.bump.outputs.type != 'none'
-        run: npm publish --provenance
+        run: |
+          # Provenance uploads an attestation to the sigstore Rekor
+          # transparency log (rekor.sigstore.dev). That service is
+          # intermittently unavailable and returns TLOG_CREATE_ENTRY_ERROR,
+          # which hard-fails the whole publish. Retry a few times, then fall
+          # back to a plain publish so a sigstore outage can never block a
+          # release. A plain publish loses the attestation but ships the package.
+          for attempt in 1 2 3; do
+            if npm publish --provenance; then
+              echo "Published with provenance (attempt ${attempt})."
+              exit 0
+            fi
+            echo "::warning::Provenance publish failed (attempt ${attempt}/3). Retrying in 15s..."
+            sleep 15
+          done
+          echo "::warning::Provenance unavailable after 3 attempts — publishing without provenance."
+          npm publish
 
       - name: Skip — no releasable changes
         if: steps.bump.outputs.type == 'none'
