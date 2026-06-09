@@ -79,10 +79,21 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Guard against re-tagging an already-published version. If the
+          # tag exists on origin a prior run already released it; bumping
+          # again would only collide, so fail loudly with a clear cause.
+          if git ls-remote --exit-code --tags origin "refs/tags/v${VERSION}" >/dev/null 2>&1; then
+            echo "::error::Tag v${VERSION} already exists on origin — version is already released. Bump package.json on master past it and re-run."
+            exit 1
+          fi
           git add package.json pnpm-lock.yaml
           git commit -m "[INTERNAL] Release v${VERSION}"
           git tag "v${VERSION}"
-          git push origin master --tags
+          # Atomic push: master and the tag land together or not at all.
+          # Prevents the orphaned-tag failure mode where the tag pushed
+          # but the bump commit was rejected (non-fast-forward), leaving
+          # master stuck a version behind and every later run colliding.
+          git push --atomic origin master "refs/tags/v${VERSION}"
 
       - name: Create GitHub Release
         if: steps.bump.outputs.type != 'none'
